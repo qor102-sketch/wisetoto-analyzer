@@ -3,7 +3,7 @@ import {useMemo,useState} from "react";
 type Sport="전체"|"축구"|"야구"|"농구"|"배구";
 type M={id:number;sport:Exclude<Sport,"전체">;league:string;home:string;away:string;time:string;venue:string};
 const I={축구:"⚽",야구:"⚾",농구:"🏀",배구:"🏐"};
-const DEMO:M[]=[{id:5276,sport:"야구",league:"NPB",home:"요미우리",away:"히로시마",time:"18:00",venue:"도쿄돔"},{id:1001,sport:"축구",league:"축구",home:"서울 FC",away:"부산 FC",time:"18:30",venue:"서울월드컵경기장"},{id:6101,sport:"농구",league:"농구",home:"서울",away:"부산",time:"19:00",venue:"잠실"},{id:7201,sport:"배구",league:"배구",home:"현대",away:"대한",time:"19:00",venue:"인천"}];
+const DEMO:M[]=[{id:9999,sport:"야구",league:"MLB",home:"콜로라도",away:"클리블랜드",time:"04:10",venue:"Coors Field"},{id:1001,sport:"축구",league:"축구",home:"서울 FC",away:"부산 FC",time:"18:30",venue:"서울월드컵경기장"},{id:6101,sport:"농구",league:"농구",home:"서울",away:"부산",time:"19:00",venue:"잠실"},{id:7201,sport:"배구",league:"배구",home:"현대",away:"대한",time:"19:00",venue:"인천"}];
 function picks(m:M){return m.sport==="야구"?[["일반 승패","홈 승",61.8],["핸디캡 -2.5","원정 +2.5",70.1],["U/O","UNDER",56.1]]:m.sport==="축구"?[["승무패","홈 승",64.2],["핸디캡","원정 +1",67.1],["U/O 2.5","UNDER",55.8]]:m.sport==="농구"?[["승패","홈 승",67.4],["핸디캡","홈 -3.5",58.2],["U/O","UNDER",55.4]]:[["승패","홈 승",68.7],["세트 핸디","홈 -1.5",57.8],["U/O","UNDER",54.9]]}
 export default function Home(){
  const[sport,setSport]=useState<Sport>("전체"),[active,setActive]=useState(5276),[selected,setSelected]=useState<number[]>([5276]),[status,setStatus]=useState("준비"),[matched,setMatched]=useState<any>(null);
