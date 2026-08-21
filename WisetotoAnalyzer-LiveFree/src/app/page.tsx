@@ -1,0 +1,20 @@
+ "use client";
+import {useMemo,useState} from "react";
+type Sport="전체"|"축구"|"야구"|"농구"|"배구";
+type M={id:number;sport:Exclude<Sport,"전체">;league:string;home:string;away:string;time:string;venue:string};
+const I={축구:"⚽",야구:"⚾",농구:"🏀",배구:"🏐"};
+const DEMO:M[]=[{id:5276,sport:"야구",league:"NPB",home:"요미우리",away:"히로시마",time:"18:00",venue:"도쿄돔"},{id:1001,sport:"축구",league:"축구",home:"서울 FC",away:"부산 FC",time:"18:30",venue:"서울월드컵경기장"},{id:6101,sport:"농구",league:"농구",home:"서울",away:"부산",time:"19:00",venue:"잠실"},{id:7201,sport:"배구",league:"배구",home:"현대",away:"대한",time:"19:00",venue:"인천"}];
+const picks=(m:M)=>m.sport==="야구"?[["일반 승패","홈 승",61.8],["핸디캡 -2.5","원정 +2.5",70.1],["U/O","UNDER",56.1]]:m.sport==="축구"?[["승무패","홈 승",64.2],["핸디캡","원정 +1",67.1],["U/O 2.5","UNDER",55.8]]:m.sport==="농구"?[["승패","홈 승",67.4],["핸디캡","홈 -3.5",58.2],["U/O","UNDER",55.4]]:[["승패","홈 승",68.7],["세트 핸디","홈 -1.5",57.8],["U/O","UNDER",54.9]];
+export default function Home(){
+ const[sport,setSport]=useState<Sport>("전체"),[active,setActive]=useState(5276),[selected,setSelected]=useState<number[]>([5276]),[status,setStatus]=useState("준비"),[live,setLive]=useState<any>(null);
+ const list=useMemo(()=>DEMO.filter(x=>sport==="전체"||x.sport===sport),[sport]),m=DEMO.find(x=>x.id===active)!; const ps=picks(m),best=Math.max(...ps.map(x=>x[2] as number));
+ async function collect(){setStatus("실시간 데이터 요청 중…");setLive(null);try{const map:{[k:string]:string}={축구:"football",야구:"baseball",농구:"basketball",배구:"volleyball"};const r=await fetch(`/api/sports?sport=${map[m.sport]}`);const j=await r.json();if(!r.ok)throw new Error(j.error||"API 오류");setLive(j);setStatus(`실시간 ${m.sport} 데이터 수신 · ${new Date().toLocaleString("ko-KR")}`)}catch(e:any){setStatus(e.message||"수집 실패")}}
+ return <main className="app"><div className="top"><div><div className="title">Wisetoto Analyzer · Live Free</div><div className="sub">무료 실시간 데이터 연결형 · 수동 수집</div></div><div className="bar"><b>99회차</b><button className="btn primary" onClick={collect}>🔄 데이터 수집</button><button className="btn light" onClick={()=>alert(selected.length+"개 경기 분석")}>📊 선택 경기 분석</button><span className="small">{status}</span></div></div>
+ <div className="tabs">{(["전체","축구","야구","농구","배구"] as Sport[]).map(s=><button key={s} className={"tab "+(sport===s?"active":"")} onClick={()=>setSport(s)}>{s!=="전체"&&I[s]+" "}{s}</button>)}</div>
+ <div className="layout"><section className="panel"><h3>경기</h3>{list.map(x=><div key={x.id} className={"match "+(x.id===active?"sel":"")} onClick={()=>setActive(x.id)}><input type="checkbox" checked={selected.includes(x.id)} onChange={e=>setSelected(v=>e.target.checked?[...v,x.id]:v.filter(y=>y!==x.id))} onClick={e=>e.stopPropagation()}/><div className="sport">{I[x.sport]}</div><div className="grow"><b>{x.id} · {x.home} vs {x.away}</b><div className="small">{x.league} · {x.time} · {x.venue}</div></div></div>)}</section>
+ <section className="panel"><div className="hero"><div><div className="small">{I[m.sport]} {m.league} · {m.id}</div><h2>{m.home} vs {m.away}</h2><div className="big">{m.time}</div></div><div className="right"><div className="small">테스트 최고 픽</div><div className="big">{ps.find(x=>x[2]===best)?.[1]}</div><div className="pct">{best}%</div></div></div>
+ <div className="cards"><div className="card">데이터 공급원<b>sportsapi</b></div><div className="card">실시간 상태<b>{live?"수신 완료":"수집 전"}</b></div><div className="card">날씨<b>Open-Meteo 연결 준비</b></div></div>
+ <div className="section"><h3>게임유형별 최적 픽</h3>{ps.map(x=><div className={"pick "+(x[2]===best?"best":"")} key={x[0] as string}><div><b>{x[0]}</b><div className="small">{x[1]}</div></div><div className="pct">{Number(x[2]).toFixed(1)}%</div></div>)}</div>
+ {live&&<div className="section"><h3>실시간 원천 데이터</h3><pre style={{whiteSpace:"pre-wrap",fontSize:12,background:"#f6f8fa",padding:12,borderRadius:10,maxHeight:260,overflow:"auto"}}>{JSON.stringify(live,null,2)}</pre></div>}
+ <div className="notice">실제 확률은 아직 데모 모델입니다. 무료 공급원은 경기/라인업/통계의 범위가 종목·리그별로 다를 수 있으며, 배당은 별도 허용 데이터 공급원을 연결해야 합니다.</div>
+ </section></div></main>}
