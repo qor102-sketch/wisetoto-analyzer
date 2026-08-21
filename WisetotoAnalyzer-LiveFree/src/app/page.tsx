@@ -8,7 +8,46 @@ function picks(m:M){return m.sport==="야구"?[["일반 승패","홈 승",61.8],
 export default function Home(){
  const[sport,setSport]=useState<Sport>("전체"),[active,setActive]=useState(9999),[selected,setSelected]=useState<number[]>([9999]),[status,setStatus]=useState("준비"),[matched,setMatched]=useState<any>(null);
  const list=useMemo(()=>DEMO.filter(x=>sport==="전체"||x.sport===sport),[sport]),m=DEMO.find(x=>x.id===active)!; const ps=picks(m),best=Math.max(...ps.map(x=>x[2] as number));
- async function collect(){setStatus("실제 경기 매칭 중…");setMatched(null);try{const map:any={축구:"football",야구:"baseball",농구:"basketball",배구:"volleyball"};const r=await fetch(`/api/match?home=${encodeURIComponent(m.home)}&away=${encodeURIComponent(m.away)}&sport=${map[m.sport]}`);const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||"경기 매칭 실패");setMatched(j);setStatus(`실제 경기 매칭 완료 · Fixture #${j.fixtureId} · ${new Date().toLocaleString("ko-KR")}`)}catch(e:any){setStatus(e.message||"수집 실패")}}
+ async function collect(){
+  setStatus("실제 경기 매칭 중…");
+  setMatched(null);
+
+  try{
+    const map:any={
+      축구:"football",
+      야구:"baseball",
+      농구:"basketball",
+      배구:"volleyball"
+    };
+
+    const r=await fetch(
+      `/api/match?home=${encodeURIComponent(m.home)}&away=${encodeURIComponent(m.away)}&sport=${map[m.sport]}`
+    );
+
+    const j=await r.json();
+
+    if(!r.ok || !j.ok){
+      setMatched(j);
+
+      const detail = j.debug
+        ? "\n\n[DEBUG]\n" + JSON.stringify(j.debug,null,2)
+        : "";
+
+      throw new Error(
+        (j.error || "경기 매칭 실패") + detail
+      );
+    }
+
+    setMatched(j);
+
+    setStatus(
+      `실제 경기 매칭 완료 · Fixture #${j.fixtureId} · ${new Date().toLocaleString("ko-KR")}`
+    );
+
+  }catch(e:any){
+    setStatus(e.message || "수집 실패");
+  }
+}
  const lineups=matched?.lineups;
  return <main className="app"><div className="top"><div><div className="title">Wisetoto Analyzer · Live Free v2</div><div className="sub">실제 경기 매칭 · 수동 수집 · 테스트 분석</div></div><div className="bar"><b>99회차</b><button className="btn primary" onClick={collect}>🔄 데이터 수집</button><button className="btn light" onClick={()=>alert(selected.length+"개 경기 분석")}>📊 선택 경기 분석</button><span className="small">{status}</span></div></div>
  <div className="tabs">{(["전체","축구","야구","농구","배구"] as Sport[]).map(s=><button key={s} className={"tab "+(sport===s?"active":"")} onClick={()=>setSport(s)}>{s!=="전체"&&I[s]+" "}{s}</button>)}</div>
