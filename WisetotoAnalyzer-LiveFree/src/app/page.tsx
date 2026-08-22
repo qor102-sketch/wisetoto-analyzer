@@ -1,4 +1,5 @@
 "use client";
+
 import { useMemo, useState } from "react";
 
 type Sport =
@@ -8,7 +9,7 @@ type Sport =
   | "농구"
   | "배구";
 
-type M = {
+type Match = {
   id: number;
   sport: Exclude<Sport, "전체">;
   league: string;
@@ -18,6 +19,12 @@ type M = {
   venue: string;
 };
 
+type Pick = [
+  string,
+  string,
+  number
+];
+
 const I = {
   축구: "⚽",
   야구: "⚾",
@@ -25,7 +32,7 @@ const I = {
   배구: "🏐",
 };
 
-const DEMO: M[] = [
+const DEMO: Match[] = [
   {
     id: 1001,
     sport: "축구",
@@ -55,60 +62,138 @@ const DEMO: M[] = [
   },
 ];
 
-function picks(m: M) {
-  if (m.sport === "야구") {
+function picks(
+  match: Match
+): Pick[] {
+  if (
+    match.sport ===
+    "야구"
+  ) {
     return [
-      ["일반 승패", "홈 승", 61.8],
-      ["핸디캡 -2.5", "원정 +2.5", 70.1],
-      ["U/O", "UNDER", 56.1],
+      [
+        "일반 승패",
+        "홈 승",
+        61.8,
+      ],
+      [
+        "핸디캡 -2.5",
+        "원정 +2.5",
+        70.1,
+      ],
+      [
+        "U/O",
+        "UNDER",
+        56.1,
+      ],
     ];
   }
 
-  if (m.sport === "축구") {
+  if (
+    match.sport ===
+    "축구"
+  ) {
     return [
-      ["승무패", "홈 승", 64.2],
-      ["핸디캡", "원정 +1", 67.1],
-      ["U/O 2.5", "UNDER", 55.8],
+      [
+        "승무패",
+        "홈 승",
+        64.2,
+      ],
+      [
+        "핸디캡",
+        "원정 +1",
+        67.1,
+      ],
+      [
+        "U/O 2.5",
+        "UNDER",
+        55.8,
+      ],
     ];
   }
 
-  if (m.sport === "농구") {
+  if (
+    match.sport ===
+    "농구"
+  ) {
     return [
-      ["승패", "홈 승", 67.4],
-      ["핸디캡", "홈 -3.5", 58.2],
-      ["U/O", "UNDER", 55.4],
+      [
+        "승패",
+        "홈 승",
+        67.4,
+      ],
+      [
+        "핸디캡",
+        "홈 -3.5",
+        58.2,
+      ],
+      [
+        "U/O",
+        "UNDER",
+        55.4,
+      ],
     ];
   }
 
   return [
-    ["승패", "홈 승", 68.7],
-    ["세트 핸디", "홈 -1.5", 57.8],
-    ["U/O", "UNDER", 54.9],
+    [
+      "승패",
+      "홈 승",
+      68.7,
+    ],
+    [
+      "세트 핸디",
+      "홈 -1.5",
+      57.8,
+    ],
+    [
+      "U/O",
+      "UNDER",
+      54.9,
+    ],
   ];
 }
 
 function koreanSport(
-  sport: string | null | undefined
-): Exclude<Sport, "전체"> {
+  sport:
+    | string
+    | null
+    | undefined
+): Exclude<
+  Sport,
+  "전체"
+> {
   const value =
-    String(sport || "").toLowerCase();
+    String(
+      sport || ""
+    ).toLowerCase();
 
   if (
-    value === "football" ||
-    value === "soccer"
+    value ===
+      "football" ||
+    value ===
+      "soccer"
   ) {
     return "축구";
   }
 
-  if (value === "baseball") {
+  if (
+    value ===
+    "baseball"
+  ) {
     return "야구";
   }
 
-  if (value === "basketball") {
+  if (
+    value ===
+    "basketball"
+  ) {
     return "농구";
   }
 
-  if (value === "volleyball") {
+  if (
+    value ===
+    "volleyball"
+  ) {
     return "배구";
   }
 
@@ -116,7 +201,10 @@ function koreanSport(
 }
 
 function formatKST(
-  value: string | null | undefined
+  value:
+    | string
+    | null
+    | undefined
 ) {
   if (!value) {
     return "-";
@@ -136,12 +224,18 @@ function formatKST(
   return date.toLocaleString(
     "ko-KR",
     {
-      timeZone: "Asia/Seoul",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
+      timeZone:
+        "Asia/Seoul",
+      year:
+        "numeric",
+      month:
+        "2-digit",
+      day:
+        "2-digit",
+      hour:
+        "2-digit",
+      minute:
+        "2-digit",
     }
   );
 }
@@ -173,9 +267,7 @@ export default function Home() {
     status,
     setStatus,
   ] =
-    useState(
-      "준비"
-    );
+    useState("준비");
 
   const [
     matched,
@@ -213,7 +305,8 @@ export default function Home() {
     DEMO[0];
 
   const selectedFixture =
-    matched?.selectedFixture ??
+    matched
+      ?.selectedFixture ??
     null;
 
   const detail =
@@ -223,15 +316,17 @@ export default function Home() {
   const currentSport =
     selectedFixture
       ? koreanSport(
-          selectedFixture.sport
+          selectedFixture
+            .sport
         )
       : demoMatch.sport;
 
-  const currentMatch: M =
+  const currentMatch: Match =
     selectedFixture
       ? {
           id:
-            matched?.fixtureId ??
+            matched
+              ?.fixtureId ??
             0,
 
           sport:
@@ -279,7 +374,7 @@ export default function Home() {
     Math.max(
       ...ps.map(
         (x) =>
-          x[2] as number
+          x[2]
       )
     );
 
@@ -290,16 +385,19 @@ export default function Home() {
 
     setLoading(true);
 
+    setMatched(null);
+
     setStatus(
       "SportsAPI에서 미래 경기 찾는 중…"
     );
 
-    setMatched(
-      null
-    );
-
     try {
-      const r =
+      /*
+       * --------------------------------
+       * 1. 랜덤 미래 경기 선택
+       * --------------------------------
+       */
+      const randomResponse =
         await fetch(
           "/api/match?mode=random",
           {
@@ -308,38 +406,169 @@ export default function Home() {
           }
         );
 
-      const j =
-        await r.json();
+      const randomData =
+        await randomResponse.json();
 
       if (
-        !r.ok ||
-        !j.ok
+        !randomResponse.ok ||
+        !randomData?.ok
       ) {
-        const detail =
-          j?.debug
-            ? "\n\n[DEBUG]\n" +
-              JSON.stringify(
-                j.debug,
-                null,
-                2
-              )
-            : "";
-
         throw new Error(
-          (j?.error ||
-            "랜덤 경기 수집 실패") +
-            detail
+          randomData?.error ||
+            "랜덤 경기 수집 실패"
         );
       }
 
-      setMatched(j);
+      const fixtureId =
+        Number(
+          randomData
+            ?.fixtureId
+        );
 
-      const fixture =
-        j.selectedFixture;
+      /*
+       * 일단 랜덤 경기 자체는
+       * 바로 화면에 표시할 수 있도록 저장
+       */
+      setMatched(
+        randomData
+      );
+
+      if (
+        !Number.isFinite(
+          fixtureId
+        )
+      ) {
+        setStatus(
+          "경기 수집 완료 · 상세 Fixture ID 없음"
+        );
+
+        return;
+      }
 
       setStatus(
-        `수집 완료 · Fixture #${j.fixtureId} · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"}`
+        `Fixture #${fixtureId} 선택 완료 · H2H 불러오는 중…`
       );
+
+      /*
+       * --------------------------------
+       * 2. 선택된 fixture의
+       * Detail + H2H 조회
+       * --------------------------------
+       *
+       * 이 API에서 실제 H2H가 들어옴.
+       */
+      try {
+        const detailResponse =
+          await fetch(
+            `/api/match/${fixtureId}`,
+            {
+              cache:
+                "no-store",
+            }
+          );
+
+        const detailData =
+          await detailResponse.json();
+
+        /*
+         * 상세 API가 성공하면
+         * 랜덤 API 결과에 합친다.
+         */
+        if (
+          detailResponse.ok &&
+          detailData?.ok
+        ) {
+          const combined =
+            {
+              ...randomData,
+
+              fixture:
+                detailData
+                  ?.fixture ??
+                randomData
+                  ?.fixture,
+
+              detail:
+                detailData
+                  ?.fixture ??
+                randomData
+                  ?.detail,
+
+              selectedFixture:
+                detailData
+                  ?.selectedFixture ??
+                randomData
+                  ?.selectedFixture,
+
+              h2h:
+                detailData
+                  ?.h2h ??
+                null,
+
+              statistics:
+                detailData
+                  ?.statistics ??
+                null,
+
+              lineups:
+                detailData
+                  ?.lineups ??
+                null,
+
+              detailDebug:
+                detailData
+                  ?.debug ??
+                null,
+            };
+
+          setMatched(
+            combined
+          );
+
+          const fixture =
+            combined
+              .selectedFixture;
+
+          setStatus(
+            `수집 완료 · Fixture #${fixtureId} · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"}`
+          );
+
+          return;
+        }
+
+        /*
+         * 상세 API 실패 시에도
+         * 랜덤 경기 결과는 유지
+         */
+        const fixture =
+          randomData
+            ?.selectedFixture;
+
+        setStatus(
+          `경기 수집 완료 · Fixture #${fixtureId} · H2H 조회 실패 · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"}`
+        );
+      } catch (
+        detailError: any
+      ) {
+        /*
+         * H2H/detail API가
+         * 429 등으로 실패해도
+         * 랜덤 경기 자체는 버리지 않음.
+         */
+        const fixture =
+          randomData
+            ?.selectedFixture;
+
+        setStatus(
+          `경기 수집 완료 · Fixture #${fixtureId} · 상세 데이터 일부 미수신 · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"}`
+        );
+
+        console.error(
+          "Fixture 상세 조회 실패:",
+          detailError
+            ?.message
+        );
+      }
     } catch (
       e: any
     ) {
@@ -348,12 +577,14 @@ export default function Home() {
           "수집 실패"
       );
     } finally {
-      setLoading(
-        false
-      );
+      setLoading(false);
     }
   }
 
+  /*
+   * 중복 선언 없이
+   * 각각 한 번만 선언
+   */
   const lineups =
     matched?.lineups;
 
@@ -366,6 +597,26 @@ export default function Home() {
   const venue =
     detail?.venue;
 
+  const hasH2H =
+    h2h &&
+    (
+      Number.isFinite(
+        Number(
+          h2h?.homeWins
+        )
+      ) ||
+      Number.isFinite(
+        Number(
+          h2h?.awayWins
+        )
+      ) ||
+      Number.isFinite(
+        Number(
+          h2h?.draws
+        )
+      )
+    );
+
   return (
     <main className="app">
       <div className="top">
@@ -375,7 +626,7 @@ export default function Home() {
           </div>
 
           <div className="sub">
-            SportsAPI 미래 경기 자동 탐색 · 랜덤 테스트 분석
+            SportsAPI 미래 경기 자동 탐색 · 실제 H2H · 랜덤 테스트 분석
           </div>
         </div>
 
@@ -446,6 +697,7 @@ export default function Home() {
                 "전체" &&
                 I[s] +
                   " "}
+
               {s}
             </button>
           )
@@ -479,9 +731,11 @@ export default function Home() {
               >
                 <input
                   type="checkbox"
-                  checked={selected.includes(
-                    x.id
-                  )}
+                  checked={
+                    selected.includes(
+                      x.id
+                    )
+                  }
                   onChange={(
                     e
                   ) =>
@@ -523,31 +777,15 @@ export default function Home() {
 
                 <div className="grow">
                   <b>
-                    {
-                      x.id
-                    }{" "}
-                    ·{" "}
-                    {
-                      x.home
-                    }{" "}
-                    vs{" "}
-                    {
-                      x.away
-                    }
+                    {x.id} ·{" "}
+                    {x.home} vs{" "}
+                    {x.away}
                   </b>
 
                   <div className="small">
-                    {
-                      x.league
-                    }{" "}
-                    ·{" "}
-                    {
-                      x.time
-                    }{" "}
-                    ·{" "}
-                    {
-                      x.venue
-                    }
+                    {x.league} ·{" "}
+                    {x.time} ·{" "}
+                    {x.venue}
                   </div>
                 </div>
               </div>
@@ -684,20 +922,16 @@ export default function Home() {
                       : "")
                   }
                   key={
-                    x[0] as string
+                    x[0]
                   }
                 >
                   <div>
                     <b>
-                      {
-                        x[0]
-                      }
+                      {x[0]}
                     </b>
 
                     <div className="small">
-                      {
-                        x[1]
-                      }
+                      {x[1]}
                     </div>
                   </div>
 
@@ -736,7 +970,7 @@ export default function Home() {
                   <b>
                     {lineups
                       ? "수신"
-                      : "아직 미수집"}
+                      : "현재 미제공"}
                   </b>
                 </div>
 
@@ -745,21 +979,73 @@ export default function Home() {
                   <b>
                     {statistics
                       ? "수신"
-                      : "아직 미수집"}
+                      : "현재 미제공"}
                   </b>
                 </div>
 
                 <div className="card">
                   H2H
                   <b>
-                    {h2h
+                    {hasH2H
                       ? "수신"
-                      : "아직 미수집"}
+                      : "없음"}
                   </b>
                 </div>
               </div>
             </div>
           )}
+
+          {matched &&
+            hasH2H && (
+              <div className="section">
+                <h3>
+                  실제 상대전적 H2H
+                </h3>
+
+                <div className="cards">
+                  <div className="card">
+                    {
+                      currentMatch
+                        .home
+                    }
+                    <b>
+                      {Number(
+                        h2h
+                          ?.homeWins ??
+                          0
+                      )}
+                      승
+                    </b>
+                  </div>
+
+                  <div className="card">
+                    무승부
+                    <b>
+                      {Number(
+                        h2h
+                          ?.draws ??
+                          0
+                      )}
+                    </b>
+                  </div>
+
+                  <div className="card">
+                    {
+                      currentMatch
+                        .away
+                    }
+                    <b>
+                      {Number(
+                        h2h
+                          ?.awayWins ??
+                          0
+                      )}
+                      승
+                    </b>
+                  </div>
+                </div>
+              </div>
+            )}
 
           {matched && (
             <div className="section">
@@ -788,29 +1074,41 @@ export default function Home() {
                 {JSON.stringify(
                   {
                     fixtureId:
-                      matched.fixtureId,
+                      matched
+                        .fixtureId,
 
                     selectedFixture:
-                      matched.selectedFixture,
+                      matched
+                        .selectedFixture,
 
                     fixture:
-                      matched.fixture,
+                      matched
+                        .fixture,
 
                     detail:
-                      matched.detail,
+                      matched
+                        .detail,
 
                     lineups:
-                      matched.lineups,
+                      matched
+                        .lineups,
 
                     statistics:
-                      matched.statistics,
+                      matched
+                        .statistics,
 
                     h2h:
-                      matched.h2h,
+                      matched
+                        .h2h,
 
-                    endpointStatus:
+                    randomEndpointStatus:
                       matched
                         ?.debug
+                        ?.endpointStatus,
+
+                    fixtureEndpointStatus:
+                      matched
+                        ?.detailDebug
                         ?.endpointStatus,
                   },
                   null,
@@ -821,10 +1119,11 @@ export default function Home() {
           )}
 
           <div className="notice">
-            현재 테스트 버전은 SportsAPI에서 아직 시작하지 않은 미래 경기들을 찾고,
-            그중 하나를 무작위로 선택합니다. 경기 시작 후의 경기는 분석 후보에서
-            제외됩니다. 현재 확률과 픽은 아직 데모이며, 다음 단계에서 실제 분석
-            데이터를 연결합니다.
+            현재 테스트 버전은 SportsAPI에서 아직 시작하지 않은 미래 경기를 찾고,
+            그중 하나를 무작위로 선택합니다. 선택된 경기의 Fixture 상세정보와 실제
+            H2H 상대전적을 추가로 조회합니다. Statistics와 Lineups는 현재 미래
+            경기에서 제공되지 않는 경우 호출하지 않습니다. 현재 픽과 확률은 아직
+            데모이며 이후 실제 분석 로직으로 교체합니다.
           </div>
         </section>
       </div>
