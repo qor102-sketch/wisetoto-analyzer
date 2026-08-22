@@ -438,33 +438,20 @@ function isNotStarted(
   );
 }
 
-function isUpcomingWithin72Hours(
+function isFutureNotStartedFixture(
   fixture: AnyObj
 ) {
-  if (!isNotStarted(fixture)) {
-    return false;
-  }
+  if (!isNotStarted(fixture)) return false;
 
-  const startTime =
-    fixture?.startTime;
-
-  if (!startTime) {
-    return false;
-  }
+  const startTime = fixture?.startTime;
+  if (!startTime) return false;
 
   const timestamp =
     new Date(startTime).getTime();
 
-  if (!Number.isFinite(timestamp)) {
-    return false;
-  }
-
-  const now = Date.now();
-
   return (
-    timestamp > now &&
-    timestamp <=
-      now + UPCOMING_WINDOW_MS
+    Number.isFinite(timestamp) &&
+    timestamp > Date.now()
   );
 }
 
@@ -1075,7 +1062,7 @@ export async function GET(
 
       const windowFixtures =
         fixtures.filter(
-          isUpcomingWithin72Hours
+          isFutureNotStartedFixture
         );
 
       if (
@@ -1104,10 +1091,10 @@ export async function GET(
         upcomingCount:
           fixtures.length,
 
-        within72HoursCount:
+        futureNotStartedCount:
           windowFixtures.length,
 
-        within72HoursSample:
+        futureNotStartedSample:
           windowFixtures
             .slice(0, 5)
             .map(
@@ -1118,7 +1105,7 @@ export async function GET(
           result.debug,
       });
 
-      // 테스트 모드에서는 72시간 이내 후보 1개만 확보되면 즉시 중단합니다.
+      // 테스트 모드에서는 미시작 미래 경기 후보 1개만 확보되면 즉시 중단합니다.
       if (allFixtures.length > 0) {
         break;
       }
@@ -1156,7 +1143,7 @@ export async function GET(
         ok: false,
 
         error:
-          "빠른 테스트에서 72시간 이내 미시작 경기를 찾지 못했습니다. 버튼을 한 번 더 눌러 다른 스포츠를 테스트해주세요.",
+          "빠른 테스트에서 미시작 미래 경기를 찾지 못했습니다. 버튼을 한 번 더 눌러 다른 스포츠를 테스트해주세요.",
 
         debug: {
           discoveredTeamCount:
@@ -1177,19 +1164,11 @@ export async function GET(
 
     /**
      * ---------------------------------------------
-     * 5. 랜덤 fixture 선택
+     * 5. 빠른 테스트: 가장 가까운 미시작 경기 선택
      * ---------------------------------------------
      */
-    const randomIndex =
-      Math.floor(
-        Math.random() *
-          candidates.length
-      );
-
     const fixture =
-      candidates[
-        randomIndex
-      ];
+      candidates[0];
 
     const fixtureId =
       Number(
@@ -1265,7 +1244,7 @@ export async function GET(
         message:
           detailResult.ok
             ? "빠른 테스트 경기 탐색 성공"
-            : "72시간 이내 미시작 경기 기본정보를 즉시 반환했습니다.",
+            : "가장 가까운 미시작 미래 경기 기본정보를 즉시 반환했습니다.",
 
         discoveredTeamCount:
           teams.length,
