@@ -35,68 +35,6 @@ async function api(path: string, key: string) {
   return j?.data ?? j;
 }
 
-/*
- * WiseToto에서 사용하는 스포츠 이름과
- * SportsAPI 검색 결과의 스포츠 이름을 연결한다.
- */
-function sportMatches(team: any, sport: string) {
-  const wanted = String(sport || "").toLowerCase();
-
-  const values = [
-    team?.sport,
-    team?.sportType,
-    team?.category,
-    team?.league?.sport,
-    team?.league?.name,
-    team?.tournament?.sport,
-  ]
-    .filter(Boolean)
-    .map((x: any) =>
-      String(x).toLowerCase()
-    );
-
-  if (!wanted) return true;
-
-  const aliases: Record<string, string[]> = {
-    baseball: [
-      "baseball",
-      "야구",
-      "mlb",
-      "npb",
-      "kbo",
-      "baseball league",
-    ],
-
-    football: [
-      "football",
-      "soccer",
-      "축구",
-    ],
-
-    basketball: [
-      "basketball",
-      "농구",
-      "nba",
-    ],
-
-    volleyball: [
-      "volleyball",
-      "배구",
-    ],
-  };
-
-  const allowed = aliases[wanted] || [wanted];
-
-  return values.some((value) =>
-    allowed.some((keyword) =>
-      value.includes(keyword)
-    )
-  );
-}
-
-/*
- * 검색 결과의 팀 이름을 비교하기 위한 정규화
- */
 function normalizeName(name: any) {
   return String(name || "")
     .toLowerCase()
@@ -104,29 +42,58 @@ function normalizeName(name: any) {
     .replace(/[^a-z0-9가-힣]/g, "");
 }
 
+function sportMatches(team: any, sport: string) {
+  const wanted = String(sport || "").toLowerCase();
+
+  const value = String(
+    team?.sport ||
+    team?.sportType ||
+    team?.category ||
+    ""
+  ).toLowerCase();
+
+  if (!wanted) return true;
+
+  const aliases: Record<string, string[]> = {
+    baseball: ["baseball"],
+    football: ["football", "soccer"],
+    basketball: ["basketball"],
+    volleyball: ["volleyball"],
+  };
+
+  return (aliases[wanted] || [wanted]).some(
+    x => value.includes(x)
+  );
+}
+
 /*
- * 검색 결과에서 스포츠가 일치하는 팀을 선택한다.
+ * 검색 결과에서 팀 후보를 찾는다.
  *
- * 특정 팀 이름을 코드에 넣지 않는다.
+ * 중요한 점:
+ * 특정 팀명을 코드에 넣지 않는다.
+ *
+ * 먼저:
+ *   "콜로라도 MLB"
+ * 를 검색하고,
+ * 안 나오면:
+ *   "콜로라도"
+ * 를 검색한다.
  */
 async function searchTeam(
   name: string,
   sport: string,
+  league: string,
   key: string
 ) {
   const queries = [
+    `${name} ${league}`,
+    `${name} ${sport}`,
     name,
-    name
-      .replace("FC", "")
-      .replace("FC", "")
-      .trim(),
   ];
 
   const attempts: any[] = [];
 
-  for (const q of [
-    ...new Set(queries),
-  ]) {
+  for (const q of [...new Set(queries)]) {
     try {
       const raw = await api(
         `/search?q=${encodeURIComponent(q)}`,
@@ -136,53 +103,45 @@ async function searchTeam(
       const results = arr(raw);
 
       const teams = results.filter(
-        (x: any) =>
-          x?.type === "team"
+        (x: any) => x?.type === "team"
       );
 
-      const sportTeams =
-        teams.filter((x: any) =>
+      const sportTeams = teams.filter(
+        (x: any) =>
           sportMatches(x, sport)
-        );
+      );
 
       attempts.push({
         query: q,
         totalResults: results.length,
 
-        allTeams: teams
-          .slice(0, 20)
-          .map((x: any) => ({
+        teams: teams.slice(0, 30).map(
+          (x: any) => ({
             id: x?.id,
             name: x?.name,
             sport: x?.sport,
-            sportType: x?.sportType,
-            category: x?.category,
             league:
               x?.league?.name ??
               x?.league ??
               null,
-          })),
+          })
+        ),
 
         sportTeams:
-          sportTeams
-            .slice(0, 20)
-            .map((x: any) => ({
+          sportTeams.slice(0, 30).map(
+            (x: any) => ({
               id: x?.id,
               name: x?.name,
               sport: x?.sport,
-              sportType: x?.sportType,
-              category: x?.category,
               league:
                 x?.league?.name ??
                 x?.league ??
                 null,
-            })),
+            })
+          ),
       });
 
-      if (sportTeams.length) {
-        /*
-         * 검색어와 팀 이름이 가장 비슷한 결과를 우선한다.
-         */
+      if (sportTeams.length > 0) {
         const target =
           normalizeName(name);
 
@@ -225,19 +184,10 @@ async function searchTeam(
   };
 }
 
-/*
- * 경기 상태가 실제로 시작 전인지 확인한다.
- */
 function isNotStarted(f: any) {
   const status = f?.status;
 
-  if (!status) {
-    /*
-     * 상태가 없는 경우에는 안전하게
-     * 분석 대상으로 사용하지 않는다.
-     */
-    return false;
-  }
+  if (!status) return false;
 
   const type =
     String(
@@ -249,22 +199,16 @@ function isNotStarted(f: any) {
       status?.description || ""
     ).toLowerCase();
 
-  const code =
-    Number(status?.code);
-
   return (
     type === "notstarted" ||
     type === "scheduled" ||
     type === "pending" ||
     description.includes("not started") ||
     description.includes("scheduled") ||
-    code === 0
+    Number(status?.code) === 0
   );
 }
 
-/*
- * 두 팀의 ID가 정확히 서로 상대하는 경기인지 확인한다.
- */
 function namesMatch(
   f: any,
   homeTeam: any,
@@ -281,6 +225,32 @@ function namesMatch(
       awayId === awayTeam.id) ||
     (homeId === awayTeam.id &&
       awayId === homeTeam.id)
+  );
+}
+
+function leagueMatches(
+  f: any,
+  league: string
+) {
+  if (!league) return true;
+
+  const target =
+    normalizeName(league);
+
+  const values = [
+    f?.league?.name,
+    f?.league?.slug,
+    f?.tournament?.name,
+    f?.tournament?.slug,
+  ]
+    .filter(Boolean)
+    .map(normalizeName);
+
+  return values.some(
+    x =>
+      x === target ||
+      x.includes(target) ||
+      target.includes(x)
   );
 }
 
@@ -301,9 +271,7 @@ function score(
   );
 }
 
-function summarizeFixture(
-  f: any
-) {
+function summarizeFixture(f: any) {
   return {
     id: f?.id ?? null,
 
@@ -325,6 +293,11 @@ function summarizeFixture(
     awayId:
       f?.away?.id ?? null,
 
+    league:
+      f?.league?.name ??
+      f?.league ??
+      null,
+
     homeScore:
       score(f, "home"),
 
@@ -333,9 +306,7 @@ function summarizeFixture(
   };
 }
 
-export async function GET(
-  req: Request
-) {
+export async function GET(req: Request) {
   const key =
     process.env.SPORTSAPI_KEY;
 
@@ -354,16 +325,16 @@ export async function GET(
     new URL(req.url);
 
   const home =
-    u.searchParams.get("home") ||
-    "";
+    u.searchParams.get("home") || "";
 
   const away =
-    u.searchParams.get("away") ||
-    "";
+    u.searchParams.get("away") || "";
 
   const sport =
-    u.searchParams.get("sport") ||
-    "";
+    u.searchParams.get("sport") || "";
+
+  const league =
+    u.searchParams.get("league") || "";
 
   if (!home || !away) {
     return Response.json(
@@ -389,8 +360,12 @@ export async function GET(
 
   try {
     /*
-     * 1.
-     * 스포츠에 맞는 실제 팀을 자동 검색
+     * 1. 팀 자동 검색
+     *
+     * 검색:
+     *   팀명 + 리그
+     *   팀명 + 스포츠
+     *   팀명
      */
     const [
       homeSearch,
@@ -399,12 +374,14 @@ export async function GET(
       searchTeam(
         home,
         sport,
+        league,
         key
       ),
 
       searchTeam(
         away,
         sport,
+        league,
         key
       ),
     ]);
@@ -427,6 +404,7 @@ export async function GET(
           home,
           away,
           sport,
+          league,
         },
 
         debug: {
@@ -440,8 +418,7 @@ export async function GET(
     }
 
     /*
-     * 2.
-     * 실제 팀 ID를 이용해서 예정 경기 조회
+     * 2. 두 팀의 예정 경기 가져오기
      */
     const [
       homeFixturesRaw,
@@ -465,61 +442,72 @@ export async function GET(
       arr(awayFixturesRaw);
 
     /*
-     * 3.
-     * 두 팀이 맞붙는 경기 중
-     * 아직 시작하지 않은 경기만 선택
+     * 3. 두 팀이 실제로 맞붙는
+     *    경기만 남긴다.
      */
-    const candidates = [
-      ...homeFixtures,
-      ...awayFixtures,
-    ]
-      .filter(
-        (f: any) =>
-          namesMatch(
-            f,
-            ht,
-            at
-          )
-      )
-      .filter(
-        (f: any) =>
-          isNotStarted(f)
-      )
-      .sort(
-        (a: any, b: any) =>
-          String(
-            a?.startTime || ""
-          ).localeCompare(
-            String(
-              b?.startTime || ""
+    const matching =
+      [
+        ...homeFixtures,
+        ...awayFixtures,
+      ]
+        .filter(
+          (f: any) =>
+            namesMatch(
+              f,
+              ht,
+              at
             )
+        );
+
+    /*
+     * 4. 리그가 전달된 경우
+     *    리그도 확인한다.
+     */
+    const leagueCandidates =
+      matching.filter(
+        (f: any) =>
+          leagueMatches(
+            f,
+            league
           )
       );
 
-    let fixture =
-      candidates[0] ||
-      null;
-
     /*
-     * 4.
-     * 예정 경기 목록에서 못 찾은 경우
-     * live 경기는 분석 대상으로 사용하지 않는다.
-     *
-     * 따라서 여기서는 livescores를
-     * 분석 경기로 사용하지 않는다.
+     * 5. 시작 전 경기만 사용
      */
+    const candidates =
+      leagueCandidates
+        .filter(
+          (f: any) =>
+            isNotStarted(f)
+        )
+        .sort(
+          (a: any, b: any) =>
+            String(
+              a?.startTime || ""
+            ).localeCompare(
+              String(
+                b?.startTime || ""
+              )
+            )
+        );
+
+    const fixture =
+      candidates[0] || null;
+
     if (!fixture) {
       return Response.json({
         ok: false,
         matched: false,
 
         error:
-          "두 팀 사이에 현재 분석 가능한 경기(아직 시작하지 않은 경기)를 SportsAPI에서 찾지 못했습니다.",
+          "두 팀 사이에 현재 분석 가능한 경기(아직 시작하지 않은 경기)를 찾지 못했습니다.",
 
         requested: {
           home,
           away,
           sport,
+          league,
         },
 
         teams: {
@@ -543,39 +531,30 @@ export async function GET(
           awayUpcomingCount:
             awayFixtures.length,
 
-          matchingCandidates:
-            candidates.map(
+          allMatching:
+            matching.map(
               summarizeFixture
             ),
 
-          homeUpcomingSample:
-            homeFixtures
-              .slice(0, 20)
-              .map(
-                summarizeFixture
-              ),
+          leagueCandidates:
+            leagueCandidates.map(
+              summarizeFixture
+            ),
 
-          awayUpcomingSample:
-            awayFixtures
-              .slice(0, 20)
-              .map(
-                summarizeFixture
-              ),
+          finalCandidates:
+            candidates.map(
+              summarizeFixture
+            ),
         },
       });
     }
 
     /*
-     * 5.
-     * 실제 Fixture ID 확보
+     * 6. 실제 경기 상세 데이터
      */
     const id =
       fixture.id;
 
-    /*
-     * 6.
-     * 상세 데이터 수집
-     */
     const [
       detail,
       lineups,
@@ -627,10 +606,6 @@ export async function GET(
       ),
     ]);
 
-    /*
-     * 7.
-     * 최근 경기 요약
-     */
     const homeRecentList =
       arr(homeRecent)
         .slice(0, 20)
@@ -645,10 +620,6 @@ export async function GET(
           summarizeFixture
         );
 
-    /*
-     * 8.
-     * 정상 응답
-     */
     return Response.json({
       ok: true,
 
@@ -657,6 +628,8 @@ export async function GET(
       fixtureId: id,
 
       sport,
+
+      league,
 
       requested: {
         home,
@@ -709,15 +682,18 @@ export async function GET(
           sport: at.sport,
         },
 
+        requestedLeague:
+          league,
+
         candidateCount:
           candidates.length,
       },
     });
+
   } catch (e: any) {
     return Response.json(
       {
         ok: false,
-
         matched: false,
 
         error:
@@ -728,6 +704,7 @@ export async function GET(
           home,
           away,
           sport,
+          league,
         },
       },
       { status: 502 }
