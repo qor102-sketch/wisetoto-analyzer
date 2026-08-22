@@ -1333,15 +1333,43 @@ export default function Home() {
       const payload = await readApiResponse(response, "Betman 경기목록 API");
       if (!response.ok || !payload?.ok) throw new Error(readableError(payload?.error, "Betman 경기목록 수집 실패"));
       const now = Date.now();
-      const max = now + 72 * 60 * 60 * 1000;
+
       const games = getBetmanGames(payload)
         .filter((game) => {
           const start = gameTimeMs(game);
-          const markets = Array.isArray((game as any)?.markets) ? (game as any).markets : [];
-          const hasOdds = markets.some((m: any) => Array.isArray(m?.selections) && m.selections.some((s: any) => Number(s?.odds) > 1));
-          return Number.isFinite(start) && start > now && start <= max && hasOdds;
+
+          const markets =
+            Array.isArray(
+              (game as any)?.markets
+            )
+              ? (game as any).markets
+              : [];
+
+          const hasOdds =
+            markets.some(
+              (market: any) =>
+                Array.isArray(
+                  market?.selections
+                ) &&
+                market.selections.some(
+                  (selection: any) =>
+                    Number(
+                      selection?.odds
+                    ) > 1
+                )
+            );
+
+          return (
+            Number.isFinite(start) &&
+            start > now &&
+            hasOdds
+          );
         })
-        .sort((a,b) => gameTimeMs(a) - gameTimeMs(b));
+        .sort(
+          (a, b) =>
+            gameTimeMs(a) -
+            gameTimeMs(b)
+        );
       setBetmanGames(games);
       setMatched(null);
       if (games.length) {
@@ -1350,8 +1378,8 @@ export default function Home() {
         setStatus(`실전 발매경기 ${games.length}개 · 경기 선택 후 분석`);
       } else {
         setSelectedBetmanKey(null);
-        setBetman({ loading:false, matched:null, score:null, error:"현재부터 72시간 이내 미시작 발매경기가 없습니다." });
-        setStatus("현재부터 72시간 이내 미시작 Betman 발매경기가 없습니다.");
+        setBetman({ loading:false, matched:null, score:null, error:"현재 Betman에서 배당이 있는 미시작 발매경기가 없습니다." });
+        setStatus("현재 Betman에서 배당이 있는 미시작 발매경기가 없습니다.");
       }
     } catch (e:any) {
       const message = readableError(e,"Betman 경기목록 수집 실패");
@@ -1480,7 +1508,7 @@ export default function Home() {
       <div className="top">
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
-          <div className="sub">Betman 실제 발매경기 선택 → SportsAPI H2H/Form 분석 → 실제 핸디/UO 기준 최적 픽</div>
+          <div className="sub">Betman 배당 있는 미시작 발매경기 전체 → 직접 선택 → SportsAPI 분석 → 실제 핸디/UO 기준 최적 픽</div>
         </div>
         <div className="bar">
           <button className="btn light" onClick={loadBetmanList} disabled={loading}>🔄 경기목록 새로고침</button>
@@ -1505,7 +1533,7 @@ export default function Home() {
             <h3 style={{margin:0}}>실전 발매 경기</h3>
             <span className="small">{filteredGames.length}경기</span>
           </div>
-          <div className="small" style={{marginTop:8,marginBottom:12}}>현재 이후 72시간 이내 · 시작 전 · 실제 배당 존재 경기</div>
+          <div className="small" style={{marginTop:8,marginBottom:12}}>Betman 현재 발매 중 · 시작 전 · 실제 배당 존재 경기 전체</div>
           {!filteredGames.length && <div className="notice">표시할 Betman 발매경기가 없습니다.</div>}
           {filteredGames.map((game,index) => {
             const key = gameKey(game,index);
@@ -1582,7 +1610,7 @@ export default function Home() {
             </div></div>}
 
             {betman.error && <div className="notice">{betman.error}</div>}
-            <div className="notice">실전 화면은 Betman의 현재 발매 경기 중 시작 전 72시간 이내 경기를 기준으로 합니다. 왼쪽에서 경기를 직접 선택한 뒤 분석 버튼을 누르면 SportsAPI H2H/Form 계산이 시작됩니다.</div>
+            <div className="notice">실전 화면은 Betman에서 현재 배당이 제공되는 모든 미시작 발매경기를 표시합니다. 왼쪽에서 경기를 직접 선택한 뒤 분석 버튼을 누르면 SportsAPI H2H/Form 계산이 시작됩니다.</div>
           </>}
         </section>
       </div>
