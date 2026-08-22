@@ -2,8 +2,8 @@ const BASE = "https://api.sportsapi.app/v2";
 
 type AnyObj = Record<string, any>;
 
-const MAX_SEARCH_REQUESTS = 4;
-const MAX_TEAM_REQUESTS = 4;
+const MAX_SEARCH_REQUESTS = 1;
+const MAX_TEAM_REQUESTS = 2;
 const UPCOMING_WINDOW_MS = 72 * 60 * 60 * 1000;
 
 /**
@@ -463,7 +463,8 @@ function isUpcomingWithin72Hours(
 
   return (
     timestamp > now &&
-    timestamp <= now + UPCOMING_WINDOW_MS
+    timestamp <=
+      now + UPCOMING_WINDOW_MS
   );
 }
 
@@ -543,13 +544,9 @@ function uniqueTeams(
 }
 
 /**
- * 검색은 최대 4회.
- *
- * 4 search
- * + 최대 4 team fixture
- * + 1 detail
- *
- * = 최대 9 HTTP requests
+ * 빠른 테스트 모드:
+ * 검색 1회 + 팀 upcoming 최대 2회.
+ * 후보 1개를 찾는 즉시 중단하고 detail은 이 route에서 호출하지 않습니다.
  *
  * 각 요청 사이에는 6.5초 이상 간격을 둡니다.
  */
@@ -560,14 +557,20 @@ async function discoverTeams(
     "football",
     "basketball",
     "baseball",
-    "tennis",
+    "volleyball",
   ];
+
+  const shuffledQueries =
+    [...queries].sort(
+      () =>
+        Math.random() - 0.5
+    );
 
   const teams: AnyObj[] = [];
   const debug: AnyObj[] = [];
 
   for (
-    const query of queries.slice(
+    const query of shuffledQueries.slice(
       0,
       MAX_SEARCH_REQUESTS
     )
@@ -1115,6 +1118,11 @@ export async function GET(
           result.debug,
       });
 
+      // 테스트 모드에서는 72시간 이내 후보 1개만 확보되면 즉시 중단합니다.
+      if (allFixtures.length > 0) {
+        break;
+      }
+
       /**
        * 모든 팀을 무조건 검사하지 않고,
        * 충분한 후보가 확보되면
@@ -1148,7 +1156,7 @@ export async function GET(
         ok: false,
 
         error:
-          "현재부터 72시간 이내에 시작하는 미시작 경기를 찾지 못했습니다.",
+          "빠른 테스트에서 72시간 이내 미시작 경기를 찾지 못했습니다. 버튼을 한 번 더 눌러 다른 스포츠를 테스트해주세요.",
 
         debug: {
           discoveredTeamCount:
@@ -1206,25 +1214,18 @@ export async function GET(
     }
 
     /**
-     * ---------------------------------------------
-     * 6. 선택된 fixture의 detail
-     * ---------------------------------------------
-     *
-     * 최대:
-     *
-     * search       4
-     * team fixture 4
-     * detail       1
-     *
-     * = 9 requests
-     *
-     * detail은 절대로 여러 번 재시도하지 않습니다.
+     * 빠른 테스트 모드에서는 여기서 detail을 호출하지 않습니다.
+     * 경기 기본정보를 즉시 반환한 뒤 page.tsx가 /api/match/{fixtureId}로
+     * H2H / 최근 Form을 별도 조회합니다.
      */
-    const detailResult =
-      await getFixtureDetail(
-        fixtureId,
-        key
-      );
+    const detailResult = {
+      ok: false,
+      data: null,
+      error: "빠른 테스트 모드에서는 초기 detail 호출 생략",
+      status: null,
+      retryAfterMs: null,
+      rateLimit: null,
+    };
 
     /**
      * ---------------------------------------------
@@ -1263,8 +1264,8 @@ export async function GET(
       debug: {
         message:
           detailResult.ok
-            ? "72시간 이내 미시작 경기 탐색 및 detail 조회 성공"
-            : "72시간 이내 미시작 경기 탐색 성공. 상세 데이터는 API 상태에 따라 제공되지 않았습니다.",
+            ? "빠른 테스트 경기 탐색 성공"
+            : "72시간 이내 미시작 경기 기본정보를 즉시 반환했습니다.",
 
         discoveredTeamCount:
           teams.length,
