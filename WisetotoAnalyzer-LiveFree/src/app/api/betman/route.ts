@@ -614,6 +614,8 @@ export async function GET(
       },
     });
   } catch (e: any) {
+    const cause = e?.cause;
+
     return Response.json(
       {
         ok: false,
@@ -621,9 +623,56 @@ export async function GET(
         source:
           "Betman",
 
+        stage:
+          "betman-fetch",
+
         error:
           e?.message ||
           "Betman 데이터 수집 실패",
+
+        errorName:
+          e?.name ?? null,
+
+        cause: cause
+          ? {
+              name:
+                cause?.name ?? null,
+
+              message:
+                cause?.message ??
+                String(cause),
+
+              code:
+                cause?.code ?? null,
+
+              errno:
+                cause?.errno ?? null,
+
+              syscall:
+                cause?.syscall ?? null,
+
+              hostname:
+                cause?.hostname ?? null,
+
+              address:
+                cause?.address ?? null,
+
+              port:
+                cause?.port ?? null,
+            }
+          : null,
+
+        url:
+          BETMAN_URL,
+
+        runtime: {
+          node:
+            process.version,
+
+          vercelRegion:
+            process.env.VERCEL_REGION ??
+            null,
+        },
       },
       {
         status: 502,
