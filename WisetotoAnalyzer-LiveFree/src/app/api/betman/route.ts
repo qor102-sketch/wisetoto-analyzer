@@ -1,5 +1,6 @@
 export const runtime = "nodejs";
 export const preferredRegion = "icn1";
+export const dynamic = "force-dynamic";
 
 const BETMAN_URL =
   "https://www.betman.co.kr/matchinfo/inqMainGameInfo.do";
@@ -675,6 +676,9 @@ export async function GET(
           vercelRegion:
             process.env.VERCEL_REGION ??
             null,
+
+          preferredRegion:
+            "icn1",
         },
       },
       {
