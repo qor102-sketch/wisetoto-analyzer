@@ -21,8 +21,8 @@ export default function Home(){
     };
 
     const r=await fetch(
-      `/api/match?home=${encodeURIComponent(m.home)}&away=${encodeURIComponent(m.away)}&sport=${map[m.sport]}`
-    );
+      `/api/match?home=${encodeURIComponent(m.home)}&away=${encodeURIComponent(m.away)}&sport=${map[m.sport]}&league=${encodeURIComponent(m.league)}`
+);
 
     const j=await r.json();
 
