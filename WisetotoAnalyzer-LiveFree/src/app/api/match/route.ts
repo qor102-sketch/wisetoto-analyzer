@@ -1323,6 +1323,56 @@ async function findSportsFixtureForBetman(
   };
 }
 
+async function runSelectedMode(
+  req: Request,
+  key: string
+) {
+  const url = new URL(req.url);
+  const home = String(url.searchParams.get("home") || "");
+  const away = String(url.searchParams.get("away") || "");
+  const sport = String(url.searchParams.get("sport") || "");
+  const gameDateMs = Number(url.searchParams.get("gameDateMs"));
+
+  if (!home || !away) {
+    return Response.json({ ok:false, mode:"selected", matched:false, error:"선택 경기의 홈/원정 팀명이 없습니다." }, { status:400 });
+  }
+
+  const result = await findSportsFixtureForBetman({
+    home,
+    away,
+    sport,
+    gameDateMs: Number.isFinite(gameDateMs) ? gameDateMs : null,
+  }, key);
+
+  if (!result.fixture) {
+    return Response.json({
+      ok:false,
+      mode:"selected",
+      matched:false,
+      error:"선택한 Betman 경기를 SportsAPI에서 자동매칭하지 못했습니다.",
+      selectedBetman:{ home, away, sport, gameDateMs:Number.isFinite(gameDateMs) ? gameDateMs : null },
+      debug:result.debug,
+    });
+  }
+
+  const fixture = result.fixture;
+  const fixtureId = Number(fixture?.id);
+
+  return Response.json({
+    ok:true,
+    mode:"selected",
+    matched:true,
+    fixtureId,
+    selectedFixture:summarizeFixture(fixture),
+    fixture,
+    detail:null,
+    lineups:null,
+    statistics:null,
+    h2h:null,
+    debug:{ message:"사용자가 선택한 Betman 경기를 SportsAPI에서 매칭했습니다.", sportsApi:result.debug },
+  });
+}
+
 async function runRealMode(
   req: Request,
   key: string
@@ -1534,20 +1584,37 @@ export async function GET(
 
   if (
     mode !== "random" &&
-    mode !== "real"
+    mode !== "real" &&
+    mode !== "selected"
   ) {
     return Response.json({
       ok: false,
 
       error:
-        "지원 모드는 mode=random 또는 mode=real 입니다.",
+        "지원 모드는 mode=random, mode=real, mode=selected 입니다.",
 
       usage:
         [
           "/api/match?mode=random",
           "/api/match?mode=real",
+          "/api/match?mode=selected&home=홈팀&away=원정팀&gameDateMs=시간",
         ],
     });
+  }
+
+  if (mode === "selected") {
+    try {
+      return await runSelectedMode(req, key);
+    } catch (e: any) {
+      return Response.json({
+        ok:false,
+        mode:"selected",
+        matched:false,
+        error: typeof e?.message === "string" ? e.message : "선택 경기 자동매칭 실패",
+        status:e?.status ?? null,
+        retryAfterMs:e?.retryAfterMs ?? null,
+      }, { status:e?.status === 429 ? 429 : 502 });
+    }
   }
 
   if (mode === "real") {
