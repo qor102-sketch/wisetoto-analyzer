@@ -489,18 +489,26 @@ export async function GET(
      * 7. 선택된 Fixture 상세
      * --------------------------------
      */
-    const [
-      detail,
-      lineups,
-      statistics,
-      h2h,
-    ] = await Promise.all([
-      api(
-        `/fixtures/${fixtureId}`,
-        key
-      ).catch(
-        () => null
-      ),
+  const detailResult =
+  await api(
+    `/fixtures/${fixtureId}`,
+    key
+  )
+    .then((data) => ({
+      ok: true,
+      data,
+      error: null,
+    }))
+    .catch((e: any) => ({
+      ok: false,
+      data: null,
+      error:
+        e?.message ||
+        "detail 조회 실패",
+    }));
+
+const detail =
+  detailResult.data;
 
       api(
         `/fixtures/${fixtureId}/lineups`,
@@ -515,7 +523,66 @@ export async function GET(
       ).catch(
         () => null
       ),
+const lineupsResult =
+  await api(
+    `/fixtures/${fixtureId}/lineups`,
+    key
+  )
+    .then((data) => ({
+      ok: true,
+      data,
+      error: null,
+    }))
+    .catch((e: any) => ({
+      ok: false,
+      data: null,
+      error:
+        e?.message ||
+        "lineups 조회 실패",
+    }));
 
+const lineups =
+  lineupsResult.data;
+    const statisticsResult =
+  await api(
+    `/fixtures/${fixtureId}/statistics`,
+    key
+  )
+    .then((data) => ({
+      ok: true,
+      data,
+      error: null,
+    }))
+    .catch((e: any) => ({
+      ok: false,
+      data: null,
+      error:
+        e?.message ||
+        "statistics 조회 실패",
+    }));
+
+const statistics =
+  statisticsResult.data;
+    const h2hResult =
+  await api(
+    `/fixtures/${fixtureId}/h2h`,
+    key
+  )
+    .then((data) => ({
+      ok: true,
+      data,
+      error: null,
+    }))
+    .catch((e: any) => ({
+      ok: false,
+      data: null,
+      error:
+        e?.message ||
+        "h2h 조회 실패",
+    }));
+
+const h2h =
+  h2hResult.data;
       api(
         `/fixtures/${fixtureId}/h2h`,
         key
