@@ -1255,7 +1255,8 @@ export async function GET(
         candidateCount:
           candidates.length,
 
-        randomIndex,
+        selectionMode:
+          "nearest-future",
 
         selectedFixture:
           summarizeFixture(
