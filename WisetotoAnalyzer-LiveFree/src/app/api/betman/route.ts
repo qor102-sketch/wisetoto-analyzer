@@ -1,9 +1,5 @@
-export const runtime = "nodejs";
-export const preferredRegion = "icn1";
-export const dynamic = "force-dynamic";
-
-const BETMAN_URL =
-  "https://www.betman.co.kr/matchinfo/inqMainGameInfo.do";
+const BETMAN_PROXY_URL =
+  "https://association-robertson-jefferson-enormous.trycloudflare.com/betman";
 
 type AnyObj = Record<string, any>;
 
@@ -403,34 +399,14 @@ function filterGames(
 async function fetchBetman() {
   const response =
     await fetch(
-      BETMAN_URL,
+      BETMAN_PROXY_URL,
       {
-        method: "POST",
+        method: "GET",
 
         headers: {
           Accept:
             "application/json, text/plain, */*",
-
-          "Content-Type":
-            "application/json;charset=UTF-8",
-
-          Origin:
-            "https://www.betman.co.kr",
-
-          Referer:
-            "https://www.betman.co.kr/",
-
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
         },
-
-        body:
-          JSON.stringify({
-            _sbmInfo: {
-              debugMode:
-                "false",
-            },
-          }),
 
         cache:
           "no-store",
@@ -447,7 +423,7 @@ async function fetchBetman() {
       JSON.parse(raw);
   } catch {
     throw new Error(
-      `Betman 응답을 JSON으로 해석하지 못했습니다. HTTP ${response.status}: ${raw.slice(
+      `Betman 프록시 응답을 JSON으로 해석하지 못했습니다. HTTP ${response.status}: ${raw.slice(
         0,
         300
       )}`
@@ -456,13 +432,29 @@ async function fetchBetman() {
 
   if (!response.ok) {
     throw new Error(
-      json?.message ||
-        json?.error ||
-        `Betman HTTP ${response.status}`
+      json?.error ||
+        json?.message ||
+        `Betman 프록시 HTTP ${response.status}`
     );
   }
 
-  return json;
+  if (!json?.ok) {
+    throw new Error(
+      json?.error ||
+        "Betman 프록시가 실패 응답을 반환했습니다."
+    );
+  }
+
+  const betmanData =
+    json?.data;
+
+  if (!betmanData) {
+    throw new Error(
+      "Betman 프록시 응답에 data가 없습니다."
+    );
+  }
+
+  return betmanData;
 }
 
 export async function GET(
@@ -502,7 +494,7 @@ export async function GET(
         "Betman",
 
       endpoint:
-        BETMAN_URL,
+        BETMAN_PROXY_URL,
 
       fetchedAt:
         new Date().toISOString(),
@@ -618,8 +610,6 @@ export async function GET(
       },
     });
   } catch (e: any) {
-    const cause = e?.cause;
-
     return Response.json(
       {
         ok: false,
@@ -627,59 +617,9 @@ export async function GET(
         source:
           "Betman",
 
-        stage:
-          "betman-fetch",
-
         error:
           e?.message ||
           "Betman 데이터 수집 실패",
-
-        errorName:
-          e?.name ?? null,
-
-        cause: cause
-          ? {
-              name:
-                cause?.name ?? null,
-
-              message:
-                cause?.message ??
-                String(cause),
-
-              code:
-                cause?.code ?? null,
-
-              errno:
-                cause?.errno ?? null,
-
-              syscall:
-                cause?.syscall ?? null,
-
-              hostname:
-                cause?.hostname ?? null,
-
-              address:
-                cause?.address ?? null,
-
-              port:
-                cause?.port ?? null,
-            }
-          : null,
-
-        url:
-          BETMAN_URL,
-
-        runtime: {
-          node:
-            process.version,
-
-          vercelRegion:
-            process.env.VERCEL_REGION ??
-            null,
-
-          preferredRegion:
-            "icn1",
-        },
       },
       {
         status: 502,
