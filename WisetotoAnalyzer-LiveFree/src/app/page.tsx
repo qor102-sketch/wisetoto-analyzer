@@ -1326,6 +1326,250 @@ export default function Home() {
       .join(" / ");
   }
 
+
+  function marketRows(game: BetmanMatch) {
+    const markets =
+      Array.isArray(
+        (game as any)?.markets
+      )
+        ? (game as any).markets
+        : [];
+
+    return markets.filter(
+      (market: any) =>
+        Array.isArray(
+          market?.selections
+        ) &&
+        market.selections.length >
+          0
+    );
+  }
+
+  function marketLabel(
+    market: any
+  ) {
+    const type =
+      String(
+        market?.type ??
+        ""
+      ).toLowerCase();
+
+    const line =
+      marketNumber(
+        market
+      );
+
+    if (
+      type === "moneyline"
+    ) {
+      return "";
+    }
+
+    if (
+      type === "handicap"
+    ) {
+      return `H ${
+        line === null
+          ? ""
+          : `${line >= 0 ? "+" : ""}${line}`
+      }`.trim();
+    }
+
+    if (
+      type === "total"
+    ) {
+      return `U ${line ?? "-"}`;
+    }
+
+    const betName =
+      String(
+        market?.betName ??
+        ""
+      );
+
+    if (
+      /sum|홀짝/i.test(
+        betName
+      )
+    ) {
+      return "SUM";
+    }
+
+    return (
+      String(
+        market?.betTypeName ??
+        market?.betName ??
+        market?.type ??
+        "-"
+      )
+    );
+  }
+
+  function marketLabelColor(
+    market: any
+  ) {
+    const type =
+      String(
+        market?.type ??
+        ""
+      ).toLowerCase();
+
+    if (
+      type === "handicap"
+    ) {
+      return "#ef2b2d";
+    }
+
+    if (
+      type === "total"
+    ) {
+      return "#0b8f37";
+    }
+
+    if (
+      /sum|홀짝/i.test(
+        String(
+          market?.betName ??
+          ""
+        )
+      )
+    ) {
+      return "#005bbb";
+    }
+
+    return "#202830";
+  }
+
+  function selectionOdds(
+    market: any,
+    side:
+      | "win"
+      | "draw"
+      | "lose"
+  ) {
+    const selections =
+      Array.isArray(
+        market?.selections
+      )
+        ? market.selections
+        : [];
+
+    const found =
+      selections.find(
+        (selection: any) =>
+          selection?.side ===
+          side
+      );
+
+    const odds =
+      Number(
+        found?.odds
+      );
+
+    return Number.isFinite(
+      odds
+    ) &&
+      odds >
+        0
+      ? odds.toFixed(2)
+      : "-";
+  }
+
+  function compactGameDate(
+    game: BetmanMatch
+  ) {
+    const raw =
+      String(
+        (game as any)
+          ?.gameDateStr ??
+        ""
+      );
+
+    if (raw) {
+      return raw
+        .replace(/^26\./, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    const time =
+      gameTimeMs(
+        game
+      );
+
+    if (
+      !Number.isFinite(
+        time
+      )
+    ) {
+      return "-";
+    }
+
+    const date =
+      new Date(time);
+
+    const parts =
+      new Intl.DateTimeFormat(
+        "ko-KR",
+        {
+          timeZone:
+            "Asia/Seoul",
+          month:
+            "2-digit",
+          day:
+            "2-digit",
+          hour:
+            "2-digit",
+          minute:
+            "2-digit",
+          hour12:
+            false,
+        }
+      ).formatToParts(
+        date
+      );
+
+    const get =
+      (type: string) =>
+        parts.find(
+          (part) =>
+            part.type ===
+            type
+        )?.value ??
+        "";
+
+    return `${get(
+      "month"
+    )}.${get(
+      "day"
+    )} ${get(
+      "hour"
+    )}:${get(
+      "minute"
+    )}`;
+  }
+
+  function primaryMatchSeq(
+    game: BetmanMatch
+  ) {
+    const markets =
+      marketRows(
+        game
+      );
+
+    const seq =
+      Number(
+        markets?.[0]
+          ?.matchSeq
+      );
+
+    return Number.isFinite(
+      seq
+    )
+      ? seq
+      : null;
+  }
+
   async function loadBetmanList() {
     setStatus("Betman 발매경기 불러오는 중…");
     try {
@@ -1527,29 +1771,412 @@ export default function Home() {
         ))}
       </div>
 
-      <div className="layout">
-        <section className="panel">
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
-            <h3 style={{margin:0}}>실전 발매 경기</h3>
-            <span className="small">{filteredGames.length}경기</span>
-          </div>
-          <div className="small" style={{marginTop:8,marginBottom:12}}>Betman 현재 발매 중 · 시작 전 · 실제 배당 존재 경기 전체</div>
-          {!filteredGames.length && <div className="notice">표시할 Betman 발매경기가 없습니다.</div>}
-          {filteredGames.map((game,index) => {
-            const key = gameKey(game,index);
-            const selected = key === selectedBetmanKey;
-            return (
-              <div key={key} className={"match " + (selected ? "sel" : "")} onClick={() => chooseGame(game,index)}>
-                <div className="sport">{I[koreanSport(String((game as any)?.sport ?? ""))]}</div>
-                <div className="grow">
-                  <b>{game?.home ?? "-"} vs {game?.away ?? "-"}</b>
-                  <div className="small">{(game as any)?.league ?? "-"} · {formatKST(new Date(gameTimeMs(game)).toISOString())}</div>
-                  <div className="small" style={{marginTop:5}}>{moneylineText(game)}</div>
-                  <div className="small" style={{marginTop:3}}>핸디 {handicapText(game)} · U/O {totalText(game)}</div>
-                </div>
+      <div
+        className="layout"
+        style={{
+          gridTemplateColumns:
+            "minmax(720px, 1.25fr) minmax(520px, 1fr)",
+        }}
+      >
+        <section
+          className="panel"
+          style={{
+            padding: 0,
+            overflow:
+              "hidden",
+            minWidth: 0,
+          }}
+        >
+          <div
+            style={{
+              padding:
+                "16px 16px 10px",
+              display:
+                "flex",
+              justifyContent:
+                "space-between",
+              alignItems:
+                "center",
+              gap: 10,
+            }}
+          >
+            <div>
+              <h3
+                style={{
+                  margin: 0,
+                }}
+              >
+                실전 발매 경기
+              </h3>
+
+              <div
+                className="small"
+                style={{
+                  marginTop: 5,
+                }}
+              >
+                경기번호 · 시간 · 리그 · 유형 · 실제 Betman 배당
               </div>
-            );
-          })}
+            </div>
+
+            <span className="small">
+              {filteredGames.length}경기
+            </span>
+          </div>
+
+          {!filteredGames.length && (
+            <div
+              className="notice"
+              style={{
+                margin: 14,
+              }}
+            >
+              표시할 Betman 발매경기가 없습니다.
+            </div>
+          )}
+
+          {!!filteredGames.length && (
+            <div
+              style={{
+                overflowX:
+                  "auto",
+                borderTop:
+                  "1px solid #cfd6dc",
+              }}
+            >
+              <div
+                style={{
+                  minWidth:
+                    760,
+                  fontSize: 12,
+                }}
+              >
+                <div
+                  style={{
+                    display:
+                      "grid",
+                    gridTemplateColumns:
+                      "58px 96px 92px 70px minmax(190px,1fr) 58px 58px 58px 58px",
+                    minHeight:
+                      34,
+                    alignItems:
+                      "center",
+                    background:
+                      "#263e61",
+                    color:
+                      "#fff",
+                    fontWeight:
+                      800,
+                    textAlign:
+                      "center",
+                    borderBottom:
+                      "1px solid #9aa6b2",
+                  }}
+                >
+                  <div>경기번호</div>
+                  <div>일시</div>
+                  <div>리그</div>
+                  <div>유형</div>
+                  <div>대상경기</div>
+                  <div>승/언더</div>
+                  <div>무</div>
+                  <div>패/오버</div>
+                  <div>선택</div>
+                </div>
+
+                {filteredGames.flatMap(
+                  (
+                    game,
+                    gameIndex
+                  ) => {
+                    const key =
+                      gameKey(
+                        game,
+                        gameIndex
+                      );
+
+                    const selected =
+                      key ===
+                      selectedBetmanKey;
+
+                    const rows =
+                      marketRows(
+                        game
+                      );
+
+                    return rows.map(
+                      (
+                        market: any,
+                        marketIndex: number
+                      ) => {
+                        const isFirst =
+                          marketIndex ===
+                          0;
+
+                        const matchSeq =
+                          Number(
+                            market
+                              ?.matchSeq
+                          );
+
+                        const rowKey =
+                          `${key}-${Number.isFinite(
+                            matchSeq
+                          ) ? matchSeq : marketIndex}`;
+
+                        const label =
+                          marketLabel(
+                            market
+                          );
+
+                        return (
+                          <div
+                            key={
+                              rowKey
+                            }
+                            onClick={() =>
+                              chooseGame(
+                                game,
+                                gameIndex
+                              )
+                            }
+                            style={{
+                              display:
+                                "grid",
+                              gridTemplateColumns:
+                                "58px 96px 92px 70px minmax(190px,1fr) 58px 58px 58px 58px",
+                              minHeight:
+                                35,
+                              alignItems:
+                                "center",
+                              borderBottom:
+                                "1px solid #c7cdd2",
+                              background:
+                                selected
+                                  ? "#eef7ff"
+                                  : isFirst
+                                    ? "#f7f7f7"
+                                    : "#fff",
+                              cursor:
+                                "pointer",
+                            }}
+                          >
+                            <div
+                              style={{
+                                padding:
+                                  "0 4px",
+                                textAlign:
+                                  "center",
+                                fontWeight:
+                                  700,
+                              }}
+                            >
+                              {Number.isFinite(
+                                matchSeq
+                              )
+                                ? matchSeq
+                                : "-"}
+                            </div>
+
+                            <div
+                              style={{
+                                padding:
+                                  "0 5px",
+                                whiteSpace:
+                                  "nowrap",
+                                fontWeight:
+                                  isFirst
+                                    ? 700
+                                    : 500,
+                              }}
+                            >
+                              {compactGameDate(
+                                game
+                              )}
+                            </div>
+
+                            <div
+                              style={{
+                                padding:
+                                  "0 5px",
+                                whiteSpace:
+                                  "nowrap",
+                                overflow:
+                                  "hidden",
+                                textOverflow:
+                                  "ellipsis",
+                              }}
+                              title={
+                                String(
+                                  (game as any)
+                                    ?.league ??
+                                  "-"
+                                )
+                              }
+                            >
+                              {
+                                I[
+                                  koreanSport(
+                                    String(
+                                      (game as any)
+                                        ?.sport ??
+                                      ""
+                                    )
+                                  )
+                                ]
+                              }{" "}
+                              {(game as any)
+                                ?.league ??
+                                "-"}
+                            </div>
+
+                            <div
+                              style={{
+                                padding:
+                                  "0 4px",
+                                textAlign:
+                                  "center",
+                                fontWeight:
+                                  900,
+                                color:
+                                  marketLabelColor(
+                                    market
+                                  ),
+                                whiteSpace:
+                                  "nowrap",
+                              }}
+                            >
+                              {label}
+                            </div>
+
+                            <div
+                              style={{
+                                padding:
+                                  "0 7px",
+                                textAlign:
+                                  "center",
+                                fontWeight:
+                                  isFirst
+                                    ? 800
+                                    : 600,
+                                textDecoration:
+                                  "underline",
+                                textUnderlineOffset:
+                                  2,
+                              }}
+                            >
+                              {game?.home ??
+                                "-"}{" "}
+                              :{" "}
+                              {game?.away ??
+                                "-"}
+                            </div>
+
+                            <div
+                              style={{
+                                textAlign:
+                                  "center",
+                                fontWeight:
+                                  800,
+                                textDecoration:
+                                  "underline",
+                              }}
+                            >
+                              {selectionOdds(
+                                market,
+                                "win"
+                              )}
+                            </div>
+
+                            <div
+                              style={{
+                                textAlign:
+                                  "center",
+                                fontWeight:
+                                  800,
+                                textDecoration:
+                                  selectionOdds(
+                                    market,
+                                    "draw"
+                                  ) !==
+                                  "-"
+                                    ? "underline"
+                                    : "none",
+                              }}
+                            >
+                              {selectionOdds(
+                                market,
+                                "draw"
+                              )}
+                            </div>
+
+                            <div
+                              style={{
+                                textAlign:
+                                  "center",
+                                fontWeight:
+                                  800,
+                                textDecoration:
+                                  "underline",
+                              }}
+                            >
+                              {selectionOdds(
+                                market,
+                                "lose"
+                              )}
+                            </div>
+
+                            <div
+                              style={{
+                                textAlign:
+                                  "center",
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={(
+                                  event
+                                ) => {
+                                  event.stopPropagation();
+
+                                  chooseGame(
+                                    game,
+                                    gameIndex
+                                  );
+                                }}
+                                style={{
+                                  padding:
+                                    "4px 7px",
+                                  border:
+                                    selected
+                                      ? "1px solid #0b6cb8"
+                                      : "1px solid #9aa4ad",
+                                  background:
+                                    selected
+                                      ? "#e4f2ff"
+                                      : "#fff",
+                                  cursor:
+                                    "pointer",
+                                  fontSize:
+                                    11,
+                                  fontWeight:
+                                    700,
+                                }}
+                              >
+                                {selected
+                                  ? "선택됨"
+                                  : "경기전"}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      }
+                    );
+                  }
+                )}
+              </div>
+            </div>
+          )}
         </section>
 
         <section className="panel">
@@ -1560,7 +2187,12 @@ export default function Home() {
                 <h2>{currentMatch.home} vs {currentMatch.away}</h2>
                 <div className="big">{currentMatch.time}</div>
                 <div className="small">경기장: {currentMatch.venue}</div>
-                <div className="ok">✓ Betman 실제 발매경기 선택</div>
+                <div className="ok">
+                  ✓ Betman 실제 발매경기 선택
+                  {primaryMatchSeq(selectedBetman) !== null
+                    ? ` · 대표 경기번호 #${primaryMatchSeq(selectedBetman)}`
+                    : ""}
+                </div>
                 {matched?.fixtureId && <div className="ok">✓ SportsAPI 동일경기 매칭 완료</div>}
               </div>
               <div className="right">
