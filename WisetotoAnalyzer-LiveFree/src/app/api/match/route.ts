@@ -1,4 +1,3 @@
-```typescript
 const BASE = "https://api.sportsapi.app/v2";
 
 type AnyObj = Record<string, any>;
@@ -1105,4 +1104,3 @@ export async function GET(
     );
   }
 }
-```
