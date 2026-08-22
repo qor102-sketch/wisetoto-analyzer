@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Sport =
   | "전체"
@@ -1262,1624 +1262,321 @@ function buildAnalysis(
 }
 
 export default function Home() {
-  const [
-    sport,
-    setSport,
-  ] =
-    useState<Sport>(
-      "전체"
-    );
-
-  const [
-    active,
-    setActive,
-  ] =
-    useState(1001);
-
-  const [
-    selected,
-    setSelected,
-  ] =
-    useState<number[]>([
-      1001,
-    ]);
-
-  const [
-    status,
-    setStatus,
-  ] =
-    useState("준비");
-
-  const [
-    matched,
-    setMatched,
-  ] =
-    useState<any>(
-      null
-    );
-
-  const [
-    loading,
-    setLoading,
-  ] =
-    useState(false);
-
+  const [sport, setSport] = useState<Sport>("전체");
+  const [status, setStatus] = useState("Betman 발매경기 불러오는 중…");
+  const [loading, setLoading] = useState(false);
+  const [matched, setMatched] = useState<any>(null);
+  const [betmanGames, setBetmanGames] = useState<BetmanMatch[]>([]);
+  const [selectedBetmanKey, setSelectedBetmanKey] = useState<string | null>(null);
   const [betman, setBetman] = useState<{
     loading: boolean;
     matched: BetmanMatch | null;
     score: number | null;
     error: string | null;
-  }>({ loading:false, matched:null, score:null, error:null });
+  }>({ loading: false, matched: null, score: null, error: null });
 
+  function readableError(value: any, fallback: string) {
+    if (!value) return fallback;
+    if (typeof value === "string") return value;
+    if (typeof value?.message === "string") return value.message;
+    if (typeof value?.error === "string") return value.error;
+    try { return JSON.stringify(value); } catch { return fallback; }
+  }
 
-  const list =
-    useMemo(
-      () =>
-        DEMO.filter(
-          (x) =>
-            sport ===
-              "전체" ||
-            x.sport ===
-              sport
-        ),
-      [sport]
-    );
+  function gameKey(game: BetmanMatch, index = 0) {
+    return String(game?.key ?? `${game?.home ?? ""}|${game?.away ?? ""}|${game?.gameDateMs ?? game?.gameDate ?? ""}|${index}`);
+  }
 
-  const demoMatch =
-    DEMO.find(
-      (x) =>
-        x.id ===
-        active
-    ) ??
-    DEMO[0];
+  function gameTimeMs(game: BetmanMatch) {
+    const raw = game?.gameDateMs ?? game?.gameDate ?? game?.startTime ?? null;
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 10_000_000_000) return n;
+    const parsed = new Date(raw as any).getTime();
+    return Number.isFinite(parsed) ? parsed : NaN;
+  }
 
-  const selectedFixture =
-    matched
-      ?.selectedFixture ??
-    null;
+  function firstMarket(game: BetmanMatch, key: string) {
+    const list = Array.isArray((game as any)?.[key]) ? (game as any)[key] : [];
+    return list?.[0] ?? null;
+  }
 
-  const detail =
-    matched
-      ?.detail ??
-    null;
+  function moneylineText(game: BetmanMatch) {
+    const market = firstMarket(game, "moneyline");
+    const selections = Array.isArray(market?.selections) ? market.selections : [];
+    if (!selections.length) return "승패 -";
+    return selections.map((x: any) => `${x?.label ?? "-"} ${Number(x?.odds).toFixed(2)}`).join(" · ");
+  }
 
-  const lineups =
-    matched
-      ?.lineups ??
-    null;
+  function handicapText(game: BetmanMatch) {
+    const list = Array.isArray(game?.handicaps) ? game.handicaps : [];
+    if (!list.length) return "-";
+    return list.map((m: any) => marketNumber(m)).filter((x: any) => x !== null).map((x: number) => `${x >= 0 ? "+" : ""}${x}`).join(" / ");
+  }
 
-  const statistics =
-    matched
-      ?.statistics ??
-    null;
+  function totalText(game: BetmanMatch) {
+    const list = Array.isArray(game?.totals) ? game.totals : [];
+    if (!list.length) return "-";
+    return list.map((m: any) => marketNumber(m)).filter((x: any) => x !== null).join(" / ");
+  }
 
-  const h2h =
-    matched
-      ?.h2h ??
-    null;
-
-  const recentSummary:
-    | RecentSummary
-    | null =
-    matched
-      ?.recentSummary ??
-    null;
-
-  const venue =
-    detail?.venue ??
-    matched
-      ?.fixture
-      ?.venue ??
-    null;
-
-  const currentSport =
-    selectedFixture
-      ? koreanSport(
-          selectedFixture
-            ?.sport
-        )
-      : demoMatch.sport;
-
-  const currentMatch: Match =
-    selectedFixture
-      ? {
-          id:
-            matched
-              ?.fixtureId ??
-            0,
-
-          sport:
-            currentSport,
-
-          league:
-            selectedFixture
-              ?.league ??
-            detail
-              ?.league
-              ?.name ??
-            "-",
-
-          home:
-            selectedFixture
-              ?.home ??
-            "-",
-
-          away:
-            selectedFixture
-              ?.away ??
-            "-",
-
-          time:
-            formatKST(
-              selectedFixture
-                ?.startTime
-            ),
-
-          venue:
-            venue?.name ??
-            "-",
-        }
-      : demoMatch;
-
-  const analysis =
-    buildAnalysis(
-      currentSport,
-      h2h,
-      recentSummary,
-      betman.matched
-    );
-
-  const analysisPicks =
-    analysis.picks;
-
-  const analysisFactors =
-    analysis.factors;
-
-  const betmanHandicap =
-    chooseBetmanHandicap(
-      betman.matched
-    );
-
-  const betmanTotal =
-    chooseBetmanTotal(
-      betman.matched
-    );
-
-  const displayPicks: Pick[] =
-    analysisPicks.map(
-      (pick) => {
-        if (
-          pick[0].includes("핸디") &&
-          !analysisFactors.scoringUsed &&
-          betmanHandicap
-        ) {
-          return [
-            pick[0],
-            `Betman 기준 ${betmanHandicap.line >= 0 ? "+" : ""}${betmanHandicap.line} · 확률 계산 대기`,
-            50,
-          ];
-        }
-
-        if (
-          pick[0].startsWith("U/O") &&
-          !analysisFactors.scoringUsed &&
-          betmanTotal
-        ) {
-          return [
-            `U/O ${betmanTotal.line}`,
-            "Betman 기준값 확보 · 확률 계산 대기",
-            50,
-          ];
-        }
-
-        return pick;
-      }
-    );
-
-  const best =
-    Math.max(
-      ...displayPicks.map(
-        (x) =>
-          x[2]
-      )
-    );
-
-  const bestPick =
-    displayPicks.find(
-      (x) =>
-        x[2] ===
-        best
-    );
-
-  const hasH2H =
-    h2h &&
-    (
-      Number(
-        h2h?.homeWins ??
-          0
-      ) +
-        Number(
-          h2h?.awayWins ??
-            0
-        ) +
-        Number(
-          h2h?.draws ??
-            0
-        ) >
-      0
-    );
-
-  const homeForm =
-    recentSummary
-      ?.home
-      ?.form ??
-    null;
-
-  const awayForm =
-    recentSummary
-      ?.away
-      ?.form ??
-    null;
-
-  const homeRecent =
-    recentSummary
-      ?.home
-      ?.fixtures ??
-    [];
-
-  const awayRecent =
-    recentSummary
-      ?.away
-      ?.fixtures ??
-    [];
-
-  const hasRecent =
-    homeRecent.length >
-      0 ||
-    awayRecent.length >
-      0;
-
-
-  async function loadBetmanForFixture(fixture:any) {
-    const home=String(fixture?.home??""), away=String(fixture?.away??"");
-    if(!home||!away) return null;
-    setBetman({loading:true,matched:null,score:null,error:null});
+  async function loadBetmanList() {
+    setStatus("Betman 발매경기 불러오는 중…");
     try {
-      const r=await fetch("/api/betman",{cache:"no-store"});
-      const p=await readApiResponse(r, "Betman API");
-      if(!r.ok || !p?.ok) throw new Error(p?.error||"Betman 데이터 수집 실패");
-      const games=getBetmanGames(p);
-      const m=matchBetmanGame(games,home,away);
-      setBetman({loading:false,matched:m.game,score:Number(m.score.toFixed(3)),error:m.game?null:`Betman 자동매칭 실패 (${games.length}경기 확인)`});
-      return m.game;
-    } catch(e:any) {
-      setBetman({loading:false,matched:null,score:null,error:e?.message||"Betman 데이터 수집 실패"});
-      return null;
+      const response = await fetch("/api/betman", { cache: "no-store" });
+      const payload = await readApiResponse(response, "Betman 경기목록 API");
+      if (!response.ok || !payload?.ok) throw new Error(readableError(payload?.error, "Betman 경기목록 수집 실패"));
+      const now = Date.now();
+      const max = now + 72 * 60 * 60 * 1000;
+      const games = getBetmanGames(payload)
+        .filter((game) => {
+          const start = gameTimeMs(game);
+          const markets = Array.isArray((game as any)?.markets) ? (game as any).markets : [];
+          const hasOdds = markets.some((m: any) => Array.isArray(m?.selections) && m.selections.some((s: any) => Number(s?.odds) > 1));
+          return Number.isFinite(start) && start > now && start <= max && hasOdds;
+        })
+        .sort((a,b) => gameTimeMs(a) - gameTimeMs(b));
+      setBetmanGames(games);
+      setMatched(null);
+      if (games.length) {
+        setSelectedBetmanKey(gameKey(games[0],0));
+        setBetman({ loading:false, matched:games[0], score:1, error:null });
+        setStatus(`실전 발매경기 ${games.length}개 · 경기 선택 후 분석`);
+      } else {
+        setSelectedBetmanKey(null);
+        setBetman({ loading:false, matched:null, score:null, error:"현재부터 72시간 이내 미시작 발매경기가 없습니다." });
+        setStatus("현재부터 72시간 이내 미시작 Betman 발매경기가 없습니다.");
+      }
+    } catch (e:any) {
+      const message = readableError(e,"Betman 경기목록 수집 실패");
+      setBetmanGames([]);
+      setSelectedBetmanKey(null);
+      setBetman({ loading:false, matched:null, score:null, error:message });
+      setStatus(message);
     }
   }
 
-  async function analyzeReal() {
-    if (loading) {
-      return;
-    }
+  useEffect(() => { loadBetmanList(); }, []);
 
+  const filteredGames = useMemo(() => betmanGames.filter((game) =>
+    sport === "전체" || koreanSport(String((game as any)?.sport ?? "")) === sport
+  ), [betmanGames, sport]);
+
+  const selectedBetman = useMemo(() => {
+    if (!selectedBetmanKey) return null;
+    return betmanGames.find((game,index) => gameKey(game,index) === selectedBetmanKey) ?? null;
+  }, [betmanGames, selectedBetmanKey]);
+
+  const selectedFixture = matched?.selectedFixture ?? null;
+  const detail = matched?.detail ?? null;
+  const h2h = matched?.h2h ?? null;
+  const recentSummary: RecentSummary | null = matched?.recentSummary ?? null;
+  const venue = detail?.venue ?? matched?.fixture?.venue ?? null;
+
+  const currentSport = selectedFixture
+    ? koreanSport(selectedFixture?.sport)
+    : selectedBetman ? koreanSport(String((selectedBetman as any)?.sport ?? "")) : "축구";
+
+  const currentMatch: Match = selectedFixture ? {
+    id: matched?.fixtureId ?? 0,
+    sport: currentSport,
+    league: selectedFixture?.league ?? detail?.league?.name ?? "-",
+    home: selectedFixture?.home ?? "-",
+    away: selectedFixture?.away ?? "-",
+    time: formatKST(selectedFixture?.startTime),
+    venue: venue?.name ?? "-",
+  } : {
+    id: 0,
+    sport: currentSport,
+    league: String((selectedBetman as any)?.league ?? "-"),
+    home: String(selectedBetman?.home ?? "-"),
+    away: String(selectedBetman?.away ?? "-"),
+    time: selectedBetman ? formatKST(new Date(gameTimeMs(selectedBetman)).toISOString()) : "-",
+    venue: String((selectedBetman as any)?.stadium ?? "-"),
+  };
+
+  const analysis = buildAnalysis(currentSport, h2h, recentSummary, betman.matched);
+  const analysisFactors = analysis.factors;
+  const betmanHandicap = chooseBetmanHandicap(betman.matched);
+  const betmanTotal = chooseBetmanTotal(betman.matched);
+  const displayPicks: Pick[] = analysis.picks.map((pick) => {
+    if (pick[0].includes("핸디") && !analysisFactors.scoringUsed && betmanHandicap) {
+      return [pick[0], `Betman 기준 ${betmanHandicap.line >= 0 ? "+" : ""}${betmanHandicap.line} · 분석 대기`, 50];
+    }
+    if (pick[0].startsWith("U/O") && !analysisFactors.scoringUsed && betmanTotal) {
+      return [`U/O ${betmanTotal.line}`, "Betman 기준값 확보 · 분석 대기", 50];
+    }
+    return pick;
+  });
+  const best = Math.max(...displayPicks.map((x) => x[2]));
+  const bestPick = displayPicks.find((x) => x[2] === best);
+  const homeForm = recentSummary?.home?.form ?? null;
+  const awayForm = recentSummary?.away?.form ?? null;
+  const hasH2H = Boolean(h2h && (Number(h2h?.homeWins ?? 0) + Number(h2h?.awayWins ?? 0) + Number(h2h?.draws ?? 0) > 0));
+  const hasRecent = Boolean((recentSummary?.home?.fixtures?.length ?? 0) || (recentSummary?.away?.fixtures?.length ?? 0));
+
+  function chooseGame(game: BetmanMatch, index: number) {
+    setSelectedBetmanKey(gameKey(game,index));
+    setMatched(null);
+    setBetman({ loading:false, matched:game, score:1, error:null });
+    setStatus(`${game?.home ?? "-"} vs ${game?.away ?? "-"} 선택 · 분석 버튼을 누르세요`);
+  }
+
+  async function analyzeSelected() {
+    if (loading || !selectedBetman) return;
     setLoading(true);
     setMatched(null);
-    setBetman({
-      loading: false,
-      matched: null,
-      score: null,
-      error: null,
-    });
-
-    setStatus(
-      "Betman 72시간 발매경기 → SportsAPI 자동매칭 중…"
-    );
-
+    setBetman({ loading:false, matched:selectedBetman, score:1, error:null });
+    setStatus(`${selectedBetman?.home ?? "-"} vs ${selectedBetman?.away ?? "-"} · SportsAPI 매칭 중…`);
     try {
-      const response =
-        await fetch(
-          "/api/match?mode=real",
-          {
-            cache:
-              "no-store",
-          }
-        );
-
-      const realData =
-        await readApiResponse(
-          response,
-          "실전 경기 API"
-        );
-
-      if (
-        !response.ok ||
-        !realData?.ok
-      ) {
-        throw new Error(
-          realData?.error ||
-            "실전 경기 매칭 실패"
-        );
-      }
-
-      const fixtureId =
-        Number(
-          realData?.fixtureId
-        );
-
-      setMatched(
-        realData
-      );
-
-      setBetman({
-        loading: false,
-        matched:
-          realData?.betmanMatch ??
-          null,
-        score: 1,
-        error: null,
+      const params = new URLSearchParams({
+        mode:"selected",
+        home:String(selectedBetman?.home ?? ""),
+        away:String(selectedBetman?.away ?? ""),
+        gameDateMs:String(gameTimeMs(selectedBetman)),
+        sport:String((selectedBetman as any)?.sport ?? ""),
       });
-
-      if (
-        !Number.isFinite(
-          fixtureId
-        )
-      ) {
-        setStatus(
-          "Betman 매칭 성공 · Fixture ID 없음"
-        );
-
-        return;
+      const response = await fetch(`/api/match?${params.toString()}`, { cache:"no-store" });
+      const data = await readApiResponse(response,"선택 경기 매칭 API");
+      if (!response.ok || !data?.ok) throw new Error(readableError(data?.error,"SportsAPI 동일경기 자동매칭 실패"));
+      const fixtureId = Number(data?.fixtureId);
+      if (!Number.isFinite(fixtureId)) throw new Error("SportsAPI Fixture ID를 받지 못했습니다.");
+      setMatched(data);
+      setStatus(`Fixture #${fixtureId} 매칭 완료 · H2H/최근 Form 조회 중…`);
+      const detailResponse = await fetch(`/api/match/${fixtureId}`, { cache:"no-store" });
+      const detailData = await readApiResponse(detailResponse,"Fixture 상세 API");
+      if (detailResponse.ok && detailData?.ok) {
+        const combined = {
+          ...data,
+          fixture: detailData?.fixture ?? data?.fixture,
+          detail: detailData?.fixture ?? data?.detail,
+          selectedFixture: detailData?.selectedFixture ?? data?.selectedFixture,
+          h2h: detailData?.h2h ?? null,
+          recentSummary: detailData?.recentSummary ?? null,
+          statistics: detailData?.statistics ?? null,
+          lineups: detailData?.lineups ?? null,
+          detailDebug: detailData?.debug ?? null,
+        };
+        setMatched(combined);
+        setStatus(`분석 완료 · ${combined?.selectedFixture?.home ?? selectedBetman?.home ?? "-"} vs ${combined?.selectedFixture?.away ?? selectedBetman?.away ?? "-"}`);
+      } else {
+        setStatus(`경기 매칭 완료 · Fixture #${fixtureId} · 상세 분석 데이터 일부 미수신`);
       }
-
-      const fixture =
-        realData?.selectedFixture;
-
-      setStatus(
-        `실전 경기 확보 · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"} · H2H/최근 Form 조회 중…`
-      );
-
-      try {
-        const extraResponse =
-          await fetch(
-            `/api/match/${fixtureId}`,
-            {
-              cache:
-                "no-store",
-            }
-          );
-
-        const extraData =
-          await readApiResponse(
-            extraResponse,
-            "Fixture 상세 API"
-          );
-
-        if (
-          extraResponse.ok &&
-          extraData?.ok
-        ) {
-          const combined = {
-            ...realData,
-            fixture:
-              extraData?.fixture ??
-              realData?.fixture,
-            detail:
-              extraData?.fixture ??
-              realData?.detail,
-            selectedFixture:
-              extraData?.selectedFixture ??
-              realData?.selectedFixture,
-            h2h:
-              extraData?.h2h ??
-              null,
-            recentSummary:
-              extraData?.recentSummary ??
-              null,
-            statistics:
-              extraData?.statistics ??
-              null,
-            lineups:
-              extraData?.lineups ??
-              null,
-            detailDebug:
-              extraData?.debug ??
-              null,
-          };
-
-          setMatched(
-            combined
-          );
-
-          const selected =
-            combined?.selectedFixture;
-
-          setStatus(
-            `실전 분석 완료 · ${selected?.home ?? "-"} vs ${selected?.away ?? "-"} · Betman 실제 핸디/UO 적용`
-          );
-
-          return;
-        }
-
-        setStatus(
-          `실전 경기 매칭 완료 · Fixture #${fixtureId} · H2H/Form 일부 미수신`
-        );
-      } catch (
-        detailError: any
-      ) {
-        setStatus(
-          `실전 경기 매칭 완료 · Fixture #${fixtureId} · 상세 분석 데이터 일부 미수신`
-        );
-
-        console.error(
-          "실전 상세 조회 실패:",
-          detailError?.message
-        );
-      }
-    } catch (
-      e: any
-    ) {
-      setStatus(
-        e?.message ||
-          "실전 경기 분석 실패"
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function collect() {
-    if (loading) {
-      return;
-    }
-
-    setLoading(true);
-
-    setMatched(null);
-
-    setBetman({
-      loading: false,
-      matched: null,
-      score: null,
-      error: null,
-    });
-
-    setStatus(
-      "가장 가까운 미시작 경기 1건 빠른 테스트 중…"
-    );
-
-    try {
-      /*
-       * 테스트 모드:
-       * /api/match?mode=random 호출은 딱 1번만 합니다.
-       *
-       * 미시작 미래 경기 선택은
-       * 서버 route.ts가 담당합니다.
-       */
-      const randomResponse =
-        await fetch(
-          "/api/match?mode=random",
-          {
-            cache:
-              "no-store",
-          }
-        );
-
-      const randomData =
-        await readApiResponse(
-          randomResponse,
-          "빠른 테스트 API"
-        );
-
-      if (
-        !randomResponse.ok ||
-        !randomData?.ok
-      ) {
-        throw new Error(
-          randomData?.error ||
-            "테스트 경기 수집 실패"
-        );
-      }
-
-      const fixtureId =
-        Number(
-          randomData?.fixtureId
-        );
-
-      setMatched(
-        randomData
-      );
-
-      if (
-        !Number.isFinite(
-          fixtureId
-        )
-      ) {
-        setStatus(
-          "경기 수집 완료 · Fixture ID 없음"
-        );
-
-        return;
-      }
-
-      const baseFixture =
-        randomData?.selectedFixture ??
-        randomData?.fixture ??
-        null;
-
-      setStatus(
-        `Fixture #${fixtureId} 선택 · Betman 핸디/UO 매칭 중…`
-      );
-
-      /*
-       * Betman 매칭도 한 번만 실행합니다.
-       */
-      const earlyBetmanMatch =
-        await loadBetmanForFixture(
-          baseFixture
-        );
-
-      setStatus(
-        `Fixture #${fixtureId} · ${
-          earlyBetmanMatch
-            ? "Betman 기준값 확보"
-            : "Betman 매칭 없음"
-        } · H2H/최근 경기 조회 중…`
-      );
-
-      /*
-       * 상세 분석 데이터도 Fixture ID 기준으로
-       * 딱 한 번 조회합니다.
-       */
-      try {
-        const extraResponse =
-          await fetch(
-            `/api/match/${fixtureId}`,
-            {
-              cache:
-                "no-store",
-            }
-          );
-
-        const extraData =
-          await readApiResponse(
-            extraResponse,
-            "Fixture 상세 API"
-          );
-
-        if (
-          extraResponse.ok &&
-          extraData?.ok
-        ) {
-          const combined = {
-            ...randomData,
-
-            fixture:
-              extraData?.fixture ??
-              randomData?.fixture,
-
-            detail:
-              extraData?.fixture ??
-              randomData?.detail,
-
-            selectedFixture:
-              extraData?.selectedFixture ??
-              randomData?.selectedFixture,
-
-            h2h:
-              extraData?.h2h ??
-              null,
-
-            recentSummary:
-              extraData?.recentSummary ??
-              null,
-
-            statistics:
-              extraData?.statistics ??
-              null,
-
-            lineups:
-              extraData?.lineups ??
-              null,
-
-            detailDebug:
-              extraData?.debug ??
-              null,
-          };
-
-          setMatched(
-            combined
-          );
-
-          const fixture =
-            combined?.selectedFixture;
-
-          setStatus(
-            `테스트 수집 완료 · 미시작 미래 경기 · Fixture #${fixtureId} · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"} · ${
-              earlyBetmanMatch
-                ? "Betman 기준값 적용"
-                : "Betman 매칭 없음"
-            }`
-          );
-
-          return;
-        }
-
-        const fixture =
-          randomData?.selectedFixture;
-
-        setStatus(
-          `테스트 경기 수집 완료 · Fixture #${fixtureId} · 추가 분석 데이터 미수신 · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"}`
-        );
-      } catch (
-        detailError: any
-      ) {
-        const fixture =
-          randomData?.selectedFixture;
-
-        setStatus(
-          `테스트 경기 수집 완료 · Fixture #${fixtureId} · 상세 데이터 일부 미수신 · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"}`
-        );
-
-        console.error(
-          "Fixture 상세 조회 실패:",
-          detailError?.message
-        );
-      }
-    } catch (
-      e: any
-    ) {
-      setStatus(
-        e?.message ||
-          "수집 실패"
-      );
-    } finally {
-      setLoading(
-        false
-      );
-    }
+    } catch (e:any) {
+      const message = readableError(e,"선택 경기 분석 실패");
+      setStatus(message);
+      setBetman((prev) => ({ ...prev, error:message }));
+    } finally { setLoading(false); }
   }
 
   return (
     <main className="app">
       <div className="top">
         <div>
-          <div className="title">
-            Wisetoto Analyzer · Live Free v2
-          </div>
-
-          <div className="sub">
-            빠른 테스트: 가장 가까운 미시작 경기 · 실전 분석: Betman 72시간 발매경기 → SportsAPI 매칭
-          </div>
+          <div className="title">Wisetoto Analyzer · Live</div>
+          <div className="sub">Betman 실제 발매경기 선택 → SportsAPI H2H/Form 분석 → 실제 핸디/UO 기준 최적 픽</div>
         </div>
-
         <div className="bar">
-          <b>
-            빠른 테스트 모드
-          </b>
-
-          <button
-            className="btn primary"
-            onClick={
-              collect
-            }
-            disabled={
-              loading
-            }
-          >
-            {loading
-              ? "⏳ 테스트 중"
-              : "⚡ 빠른 테스트 경기"}
+          <button className="btn light" onClick={loadBetmanList} disabled={loading}>🔄 경기목록 새로고침</button>
+          <button className="btn primary" onClick={analyzeSelected} disabled={loading || !selectedBetman}>
+            {loading ? "⏳ 분석 중" : "📊 선택 경기 분석"}
           </button>
-
-          <button
-            className="btn light"
-            onClick={
-              analyzeReal
-            }
-            disabled={
-              loading
-            }
-          >
-            {loading
-              ? "⏳ 분석 중"
-              : "📊 실전 경기 분석"}
-          </button>
-
-          <span className="small">
-            {status}
-          </span>
+          <span className={betman.error ? "small err" : "small"}>{status}</span>
         </div>
       </div>
 
       <div className="tabs">
-        {(
-          [
-            "전체",
-            "축구",
-            "야구",
-            "농구",
-            "배구",
-          ] as Sport[]
-        ).map(
-          (s) => (
-            <button
-              key={s}
-              className={
-                "tab " +
-                (sport ===
-                s
-                  ? "active"
-                  : "")
-              }
-              onClick={() =>
-                setSport(
-                  s
-                )
-              }
-            >
-              {s !==
-                "전체" &&
-                I[s] +
-                  " "}
-
-              {s}
-            </button>
-          )
-        )}
+        {(["전체","축구","야구","농구","배구"] as Sport[]).map((s) => (
+          <button key={s} className={"tab " + (sport === s ? "active" : "")} onClick={() => setSport(s)}>
+            {s !== "전체" && I[s] + " "}{s}
+          </button>
+        ))}
       </div>
 
       <div className="layout">
         <section className="panel">
-          <h3>
-            테스트
-          </h3>
-
-          {list.map(
-            (x) => (
-              <div
-                key={
-                  x.id
-                }
-                className={
-                  "match " +
-                  (x.id ===
-                  active
-                    ? "sel"
-                    : "")
-                }
-                onClick={() =>
-                  setActive(
-                    x.id
-                  )
-                }
-              >
-                <input
-                  type="checkbox"
-                  checked={
-                    selected.includes(
-                      x.id
-                    )
-                  }
-                  onChange={(
-                    e
-                  ) =>
-                    setSelected(
-                      (
-                        v
-                      ) =>
-                        e
-                          .target
-                          .checked
-                          ? [
-                              ...v,
-                              x.id,
-                            ]
-                          : v.filter(
-                              (
-                                y
-                              ) =>
-                                y !==
-                                x.id
-                            )
-                    )
-                  }
-                  onClick={(
-                    e
-                  ) =>
-                    e.stopPropagation()
-                  }
-                />
-
-                <div className="sport">
-                  {
-                    I[
-                      x
-                        .sport
-                    ]
-                  }
-                </div>
-
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+            <h3 style={{margin:0}}>실전 발매 경기</h3>
+            <span className="small">{filteredGames.length}경기</span>
+          </div>
+          <div className="small" style={{marginTop:8,marginBottom:12}}>현재 이후 72시간 이내 · 시작 전 · 실제 배당 존재 경기</div>
+          {!filteredGames.length && <div className="notice">표시할 Betman 발매경기가 없습니다.</div>}
+          {filteredGames.map((game,index) => {
+            const key = gameKey(game,index);
+            const selected = key === selectedBetmanKey;
+            return (
+              <div key={key} className={"match " + (selected ? "sel" : "")} onClick={() => chooseGame(game,index)}>
+                <div className="sport">{I[koreanSport(String((game as any)?.sport ?? ""))]}</div>
                 <div className="grow">
-                  <b>
-                    {x.id} ·{" "}
-                    {x.home} vs{" "}
-                    {x.away}
-                  </b>
-
-                  <div className="small">
-                    {x.league} ·{" "}
-                    {x.time} ·{" "}
-                    {x.venue}
-                  </div>
+                  <b>{game?.home ?? "-"} vs {game?.away ?? "-"}</b>
+                  <div className="small">{(game as any)?.league ?? "-"} · {formatKST(new Date(gameTimeMs(game)).toISOString())}</div>
+                  <div className="small" style={{marginTop:5}}>{moneylineText(game)}</div>
+                  <div className="small" style={{marginTop:3}}>핸디 {handicapText(game)} · U/O {totalText(game)}</div>
                 </div>
               </div>
-            )
-          )}
+            );
+          })}
         </section>
 
         <section className="panel">
-          <div className="hero">
-            <div>
-              <div className="small">
-                {
-                  I[
-                    currentMatch
-                      .sport
-                  ]
-                }{" "}
-                {
-                  currentMatch
-                    .league
-                }
-
-                {matched &&
-                  ` · Fixture #${matched.fixtureId}`}
+          {!selectedBetman ? <div className="notice">왼쪽 경기목록에서 분석할 경기를 선택하세요.</div> : <>
+            <div className="hero">
+              <div>
+                <div className="small">{I[currentMatch.sport]} {currentMatch.league}{matched?.fixtureId ? ` · Fixture #${matched.fixtureId}` : ""}</div>
+                <h2>{currentMatch.home} vs {currentMatch.away}</h2>
+                <div className="big">{currentMatch.time}</div>
+                <div className="small">경기장: {currentMatch.venue}</div>
+                <div className="ok">✓ Betman 실제 발매경기 선택</div>
+                {matched?.fixtureId && <div className="ok">✓ SportsAPI 동일경기 매칭 완료</div>}
               </div>
-
-              <h2>
-                {
-                  currentMatch
-                    .home
-                }{" "}
-                vs{" "}
-                {
-                  currentMatch
-                    .away
-                }
-              </h2>
-
-              <div className="big">
-                {
-                  currentMatch
-                    .time
-                }
-              </div>
-
-              <div className="small">
-                경기장:{" "}
-                {
-                  currentMatch
-                    .venue
-                }
-              </div>
-
-              {venue?.city && (
-                <div className="small">
-                  도시:{" "}
-                  {
-                    venue.city
-                  }
-                </div>
-              )}
-
-              {matched && (
-                <div className="ok">
-                  ✓ SportsAPI 실제 미래 경기 매칭 완료
-                </div>
-              )}
-            </div>
-
-            <div className="right">
-              <div className="small">
-                현재 최고 픽
-              </div>
-
-              <div className="big">
-                {
-                  bestPick?.[1]
-                }
-              </div>
-
-              <div className="pct">
-                {best.toFixed(
-                  1
-                )}
-                %
+              <div className="right">
+                <div className="small">현재 최고 픽</div>
+                <div className="big">{analysisFactors.hasRealData ? bestPick?.[1] : "분석 대기"}</div>
+                <div className="pct">{analysisFactors.hasRealData ? `${best.toFixed(1)}%` : "-"}</div>
               </div>
             </div>
-          </div>
 
-          <div className="cards">
-            <div className="card">
-              데이터 공급원
-              <b>
-                SportsAPI + Betman
-              </b>
+            <div className="cards">
+              <div className="card">승패 배당<b>{moneylineText(selectedBetman)}</b></div>
+              <div className="card">Betman 핸디<b>{handicapText(selectedBetman)}</b></div>
+              <div className="card">Betman U/O<b>{totalText(selectedBetman)}</b></div>
+              <div className="card">SportsAPI<b>{matched?.fixtureId ? "매칭 완료" : "분석 전"}</b></div>
+              <div className="card">H2H<b>{hasH2H ? "수신" : "없음/대기"}</b></div>
+              <div className="card">최근 Form<b>{hasRecent ? "수신" : "없음/대기"}</b></div>
             </div>
 
-            <div className="card">
-              경기 매칭
-              <b>
-                {matched
-                  ? "완료"
-                  : "대기"}
-              </b>
-            </div>
-
-            <div className="card">
-              분석 데이터
-              <b>
-                {analysisFactors
-                  .hasRealData
-                  ? "SportsAPI 실데이터 반영"
-                  : betman.matched
-                    ? "Betman 기준값 확보"
-                    : "대기"}
-              </b>
-            </div>
-          </div>
-
-          <div className="section">
-            <h3>
-              게임유형별 분석 픽{" "}
-              <span className="small">
-                {betman.matched
-                  ? analysisFactors
-                      .scoringUsed
-                    ? "※ Betman 실제 핸디캡/U/O 기준값 + SportsAPI 득실점 반영"
-                    : "※ Betman 기준값 확보 · SportsAPI 득실점 부족"
-                  : analysisFactors
-                      .scoringUsed
-                    ? "※ Betman 미매칭 · 자체 핸디/UO fallback"
-                    : analysisFactors
-                        .hasRealData
-                      ? "※ 승패에 H2H/Form 반영"
-                      : "※ SportsAPI 분석 데이터 부족"}
-              </span>
-            </h3>
-
-            {displayPicks.map(
-              (x) => (
-                <div
-                  className={
-                    "pick " +
-                    (x[2] ===
-                    best
-                      ? "best"
-                      : "")
-                  }
-                  key={
-                    x[0]
-                  }
-                >
-                  <div>
-                    <b>
-                      {x[0]}
-                    </b>
-
-                    <div className="small">
-                      {x[1]}
-                    </div>
-                  </div>
-
-                  <div className="pct">
-                    {Number(
-                      x[2]
-                    ).toFixed(
-                      1
-                    )}
-                    %
-                  </div>
-                </div>
-              )
-            )}
-          </div>
-
-          {matched && (
             <div className="section">
-              <h3>
-                수집된 분석 재료
-              </h3>
+              <h3>게임유형별 분석 픽 <span className="small">{analysisFactors.scoringUsed ? "※ Betman 실제 기준값 + SportsAPI 최근 득실점 반영" : "※ 분석 전 또는 SportsAPI 데이터 부족"}</span></h3>
+              {displayPicks.map((x) => (
+                <div className={"pick " + (analysisFactors.hasRealData && x[2] === best ? "best" : "")} key={x[0]}>
+                  <div><b>{x[0]}</b><div className="small">{x[1]}</div></div>
+                  <div className="pct">{analysisFactors.hasRealData ? `${Number(x[2]).toFixed(1)}%` : "-"}</div>
+                </div>
+              ))}
+            </div>
 
+            {analysisFactors.scoringUsed && <div className="section">
+              <h3>최근 득실점 기반 예상</h3>
               <div className="cards">
-                <div className="card">
-                  Detail
-                  <b>
-                    {matched
-                      ?.detail
-                      ? "수신"
-                      : "없음"}
-                  </b>
-                </div>
-
-                <div className="card">
-                  H2H
-                  <b>
-                    {hasH2H
-                      ? "수신"
-                      : "없음"}
-                  </b>
-                </div>
-
-                <div className="card">
-                  최근 Form
-                  <b>
-                    {hasRecent
-                      ? "수신"
-                      : "없음"}
-                  </b>
-                </div>
-
-                <div className="card">
-                  득실점 분석
-                  <b>
-                    {analysisFactors
-                      .scoringUsed
-                      ? "적용"
-                      : "데이터 부족"}
-                  </b>
-                </div>
-
-                <div className="card">
-                  Lineups
-                  <b>
-                    {lineups
-                      ? "수신"
-                      : "현재 미제공"}
-                  </b>
-                </div>
-
-                <div className="card">
-                  Statistics
-                  <b>
-                    {statistics
-                      ? "수신"
-                      : "현재 미제공"}
-                  </b>
-                </div>
+                <div className="card">예상 점수<b>{analysisFactors.expectedHomeScore?.toFixed(1) ?? "-"} : {analysisFactors.expectedAwayScore?.toFixed(1) ?? "-"}</b></div>
+                <div className="card">예상 총점<b>{analysisFactors.expectedTotal?.toFixed(1) ?? "-"}</b></div>
+                <div className="card">예상 점수차<b>{analysisFactors.expectedMargin?.toFixed(1) ?? "-"}</b></div>
               </div>
-            </div>
-          )}
+            </div>}
 
-          {analysisFactors
-            .hasRealData && (
-            <div className="section">
-              <h3>
-                승패 분석 점수
-              </h3>
+            {hasH2H && <div className="section"><h3>H2H 상대전적</h3><div className="cards">
+              <div className="card">{currentMatch.home}<b>{Number(h2h?.homeWins ?? 0)}승</b></div>
+              <div className="card">무승부<b>{Number(h2h?.draws ?? 0)}</b></div>
+              <div className="card">{currentMatch.away}<b>{Number(h2h?.awayWins ?? 0)}승</b></div>
+            </div></div>}
 
-              <div className="cards">
-                <div className="card">
-                  {
-                    currentMatch
-                      .home
-                  }
-                  <b>
-                    {analysisFactors
-                      .homeProbability
-                      ?.toFixed(1) ??
-                      "-"}
-                    %
-                  </b>
-                </div>
+            {hasRecent && <div className="section"><h3>최근 Form</h3><div className="cards">
+              <div className="card">{recentSummary?.home?.teamName ?? currentMatch.home}<b>{homeForm?.wins ?? 0}승 {homeForm?.draws ?? 0}무 {homeForm?.losses ?? 0}패</b><div className="small">득점 {homeForm?.scored ?? 0} / 실점 {homeForm?.conceded ?? 0}</div></div>
+              <div className="card">{recentSummary?.away?.teamName ?? currentMatch.away}<b>{awayForm?.wins ?? 0}승 {awayForm?.draws ?? 0}무 {awayForm?.losses ?? 0}패</b><div className="small">득점 {awayForm?.scored ?? 0} / 실점 {awayForm?.conceded ?? 0}</div></div>
+            </div></div>}
 
-                <div className="card">
-                  {
-                    currentMatch
-                      .away
-                  }
-                  <b>
-                    {analysisFactors
-                      .awayProbability
-                      ?.toFixed(1) ??
-                      "-"}
-                    %
-                  </b>
-                </div>
-
-                <div className="card">
-                  Form
-                  <b>
-                    {analysisFactors
-                      .formUsed
-                      ? "50%"
-                      : "미사용"}
-                  </b>
-                </div>
-
-                <div className="card">
-                  H2H
-                  <b>
-                    {analysisFactors
-                      .h2hUsed
-                      ? "30%"
-                      : "미사용"}
-                  </b>
-                </div>
-
-                <div className="card">
-                  홈 이점
-                  <b>
-                    20%
-                  </b>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {analysisFactors
-            .scoringUsed && (
-            <div className="section">
-              <h3>
-                실제 득실점 기반 예상
-              </h3>
-
-              <div className="cards">
-                <div className="card">
-                  {
-                    currentMatch
-                      .home
-                  }{" "}
-                  평균 득점
-                  <b>
-                    {analysisFactors
-                      .homeAvgScored
-                      ?.toFixed(2)}
-                  </b>
-                </div>
-
-                <div className="card">
-                  {
-                    currentMatch
-                      .away
-                  }{" "}
-                  평균 득점
-                  <b>
-                    {analysisFactors
-                      .awayAvgScored
-                      ?.toFixed(2)}
-                  </b>
-                </div>
-
-                <div className="card">
-                  예상 점수
-                  <b>
-                    {analysisFactors
-                      .expectedHomeScore
-                      ?.toFixed(1)}
-                    {" : "}
-                    {analysisFactors
-                      .expectedAwayScore
-                      ?.toFixed(1)}
-                  </b>
-                </div>
-
-                <div className="card">
-                  예상 총점
-                  <b>
-                    {analysisFactors
-                      .expectedTotal
-                      ?.toFixed(1)}
-                  </b>
-                </div>
-
-                <div className="card">
-                  핸디캡 기준
-                  <b>
-                    {analysisFactors
-                      .handicapLabel ??
-                      "-"}
-                  </b>
-                </div>
-
-                <div className="card">
-                  U/O 기준
-                  <b>
-                    {analysisFactors
-                      .totalLine ??
-                      "-"}{" "}
-                    {analysisFactors
-                      .totalLabel ??
-                      ""}
-                  </b>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {matched &&
-            hasH2H && (
-              <div className="section">
-                <h3>
-                  실제 상대전적 H2H
-                </h3>
-
-                <div className="cards">
-                  <div className="card">
-                    {
-                      currentMatch
-                        .home
-                    }
-                    <b>
-                      {Number(
-                        h2h
-                          ?.homeWins ??
-                          0
-                      )}
-                      승
-                    </b>
-                  </div>
-
-                  <div className="card">
-                    무승부
-                    <b>
-                      {Number(
-                        h2h
-                          ?.draws ??
-                          0
-                      )}
-                    </b>
-                  </div>
-
-                  <div className="card">
-                    {
-                      currentMatch
-                        .away
-                    }
-                    <b>
-                      {Number(
-                        h2h
-                          ?.awayWins ??
-                          0
-                      )}
-                      승
-                    </b>
-                  </div>
-                </div>
-              </div>
-            )}
-
-          {matched &&
-            hasRecent && (
-              <div className="section">
-                <h3>
-                  최근 5경기 Form
-                </h3>
-
-                <div className="cards">
-                  <div className="card">
-                    {
-                      recentSummary
-                        ?.home
-                        ?.teamName ??
-                      currentMatch
-                        .home
-                    }
-
-                    <b>
-                      {homeForm
-                        ?.wins ??
-                        0}
-                      승{" "}
-                      {homeForm
-                        ?.draws ??
-                        0}
-                      무{" "}
-                      {homeForm
-                        ?.losses ??
-                        0}
-                      패
-                    </b>
-
-                    <div className="small">
-                      득점{" "}
-                      {homeForm
-                        ?.scored ??
-                        0}
-                      {" / "}
-                      실점{" "}
-                      {homeForm
-                        ?.conceded ??
-                        0}
-                    </div>
-
-                    <div className="pct">
-                      Form{" "}
-                      {homeForm
-                        ?.formPercent ??
-                        "-"}
-                      %
-                    </div>
-                  </div>
-
-                  <div className="card">
-                    {
-                      recentSummary
-                        ?.away
-                        ?.teamName ??
-                      currentMatch
-                        .away
-                    }
-
-                    <b>
-                      {awayForm
-                        ?.wins ??
-                        0}
-                      승{" "}
-                      {awayForm
-                        ?.draws ??
-                        0}
-                      무{" "}
-                      {awayForm
-                        ?.losses ??
-                        0}
-                      패
-                    </b>
-
-                    <div className="small">
-                      득점{" "}
-                      {awayForm
-                        ?.scored ??
-                        0}
-                      {" / "}
-                      실점{" "}
-                      {awayForm
-                        ?.conceded ??
-                        0}
-                    </div>
-
-                    <div className="pct">
-                      Form{" "}
-                      {awayForm
-                        ?.formPercent ??
-                        "-"}
-                      %
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-          {matched &&
-            homeRecent.length >
-              0 && (
-              <div className="section">
-                <h3>
-                  {
-                    currentMatch
-                      .home
-                  }{" "}
-                  최근 경기
-                </h3>
-
-                {homeRecent.map(
-                  (
-                    game: any
-                  ) => (
-                    <div
-                      className="pick"
-                      key={
-                        game?.id
-                      }
-                    >
-                      <div>
-                        <b>
-                          {
-                            game
-                              ?.home
-                          }{" "}
-                          {
-                            game
-                              ?.homeScore
-                          }
-                          {" : "}
-                          {
-                            game
-                              ?.awayScore
-                          }{" "}
-                          {
-                            game
-                              ?.away
-                          }
-                        </b>
-
-                        <div className="small">
-                          {formatShortDate(
-                            game
-                              ?.startTime
-                          )}{" "}
-                          ·{" "}
-                          {
-                            game
-                              ?.league
-                          }
-                        </div>
-                      </div>
-
-                      <div className="pct">
-                        {
-                          game
-                            ?.result ??
-                          "-"
-                        }
-                      </div>
-                    </div>
-                  )
-                )}
-              </div>
-            )}
-
-          {matched &&
-            awayRecent.length >
-              0 && (
-              <div className="section">
-                <h3>
-                  {
-                    currentMatch
-                      .away
-                  }{" "}
-                  최근 경기
-                </h3>
-
-                {awayRecent.map(
-                  (
-                    game: any
-                  ) => (
-                    <div
-                      className="pick"
-                      key={
-                        game?.id
-                      }
-                    >
-                      <div>
-                        <b>
-                          {
-                            game
-                              ?.home
-                          }{" "}
-                          {
-                            game
-                              ?.homeScore
-                          }
-                          {" : "}
-                          {
-                            game
-                              ?.awayScore
-                          }{" "}
-                          {
-                            game
-                              ?.away
-                          }
-                        </b>
-
-                        <div className="small">
-                          {formatShortDate(
-                            game
-                              ?.startTime
-                          )}{" "}
-                          ·{" "}
-                          {
-                            game
-                              ?.league
-                          }
-                        </div>
-                      </div>
-
-                      <div className="pct">
-                        {
-                          game
-                            ?.result ??
-                          "-"
-                        }
-                      </div>
-                    </div>
-                  )
-                )}
-              </div>
-            )}
-
-          {matched && (
-            <div className="section">
-              <h3>
-                실제 매칭 원천 데이터
-              </h3>
-
-              <pre
-                style={{
-                  whiteSpace:
-                    "pre-wrap",
-                  fontSize:
-                    12,
-                  background:
-                    "#f6f8fa",
-                  padding:
-                    12,
-                  borderRadius:
-                    10,
-                  maxHeight:
-                    360,
-                  overflow:
-                    "auto",
-                }}
-              >
-                {JSON.stringify(
-                  {
-                    fixtureId:
-                      matched
-                        .fixtureId,
-
-                    selectedFixture:
-                      matched
-                        .selectedFixture,
-
-                    fixture:
-                      matched
-                        .fixture,
-
-                    detail:
-                      matched
-                        .detail,
-
-                    h2h:
-                      matched
-                        .h2h,
-
-                    recentSummary:
-                      matched
-                        .recentSummary,
-
-                    analysisFactors,
-
-                    betman: {
-                      matched: betman.matched,
-                      matchScore: betman.score,
-                      error: betman.error,
-                      handicap: chooseBetmanHandicap(betman.matched),
-                      total: chooseBetmanTotal(betman.matched),
-                    },
-
-                    lineups:
-                      matched
-                        .lineups,
-
-                    statistics:
-                      matched
-                        .statistics,
-
-                    randomEndpointStatus:
-                      matched
-                        ?.debug
-                        ?.endpointStatus,
-
-                    fixtureEndpointStatus:
-                      matched
-                        ?.detailDebug
-                        ?.endpointStatus,
-                  },
-                  null,
-                  2
-                )}
-              </pre>
-            </div>
-          )}
-
-          <div className="notice">
-            승패 분석은 SportsAPI H2H와 최근 Form을 사용합니다.
-            핸디캡과 U/O는 Betman 경기 자동매칭 성공 시 Betman의 실제 기준값을
-            우선 적용하고 최근 득실점 예상치와 비교해 방향과 확률을 계산합니다.
-            Betman 매칭에 실패한 경우에만 기존 자체 기준값을 사용합니다.
-          </div>
+            {betman.error && <div className="notice">{betman.error}</div>}
+            <div className="notice">실전 화면은 Betman의 현재 발매 경기 중 시작 전 72시간 이내 경기를 기준으로 합니다. 왼쪽에서 경기를 직접 선택한 뒤 분석 버튼을 누르면 SportsAPI H2H/Form 계산이 시작됩니다.</div>
+          </>}
         </section>
       </div>
     </main>
