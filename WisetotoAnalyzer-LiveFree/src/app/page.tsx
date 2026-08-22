@@ -402,6 +402,71 @@ function totalConfidence(
 }
 
 
+
+function isFixtureWithinNext72Hours(fixture: any) {
+  const startTime =
+    fixture?.startTime ??
+    fixture?.time ??
+    null;
+
+  if (!startTime) {
+    return false;
+  }
+
+  const startMs =
+    new Date(startTime).getTime();
+
+  if (!Number.isFinite(startMs)) {
+    return false;
+  }
+
+  const now =
+    Date.now();
+
+  const max =
+    now +
+    72 * 60 * 60 * 1000;
+
+  const status =
+    fixture?.status ??
+    {};
+
+  const statusType =
+    String(
+      status?.type ??
+      ""
+    ).toLowerCase();
+
+  const statusDescription =
+    String(
+      status?.description ??
+      ""
+    ).toLowerCase();
+
+  const statusCode =
+    Number(
+      status?.code
+    );
+
+  const notStarted =
+    statusType === "notstarted" ||
+    statusType === "scheduled" ||
+    statusType === "pending" ||
+    statusDescription.includes(
+      "not started"
+    ) ||
+    statusDescription.includes(
+      "scheduled"
+    ) ||
+    statusCode === 0;
+
+  return (
+    notStarted &&
+    startMs > now &&
+    startMs <= max
+  );
+}
+
 function normalizeTeamName(value: unknown) {
   return String(value ?? "").toLowerCase().normalize("NFKC")
     .replace(/\([^)]*\)/g, "").replace(/\[[^\]]*\]/g, "")
@@ -1515,43 +1580,86 @@ export default function Home() {
     }
 
     setLoading(true);
-
     setMatched(null);
-    setBetman({loading:false,matched:null,score:null,error:null});
+    setBetman({
+      loading: false,
+      matched: null,
+      score: null,
+      error: null,
+    });
 
     setStatus(
-      "SportsAPI에서 미래 경기 찾는 중…"
+      "72시간 이내 미시작 경기 찾는 중…"
     );
 
     try {
-      const randomResponse =
-        await fetch(
-          "/api/match?mode=random",
-          {
-            cache:
-              "no-store",
-          }
-        );
+      let randomData: any =
+        null;
 
-      const randomData =
-        await randomResponse.json();
+      let fixtureId =
+        NaN;
 
-      if (
-        !randomResponse.ok ||
-        !randomData?.ok
+      const maxAttempts =
+        8;
+
+      for (
+        let attempt = 1;
+        attempt <= maxAttempts;
+        attempt++
       ) {
-        throw new Error(
-          randomData
-            ?.error ||
-            "랜덤 경기 수집 실패"
+        setStatus(
+          `72시간 이내 경기 탐색 중… ${attempt}/${maxAttempts}`
         );
+
+        const randomResponse =
+          await fetch(
+            "/api/match?mode=random",
+            {
+              cache:
+                "no-store",
+            }
+          );
+
+        const candidate =
+          await randomResponse.json();
+
+        if (
+          !randomResponse.ok ||
+          !candidate?.ok
+        ) {
+          throw new Error(
+            candidate?.error ||
+              "랜덤 경기 수집 실패"
+          );
+        }
+
+        const fixture =
+          candidate?.selectedFixture ??
+          candidate?.fixture ??
+          null;
+
+        if (
+          isFixtureWithinNext72Hours(
+            fixture
+          )
+        ) {
+          randomData =
+            candidate;
+
+          fixtureId =
+            Number(
+              candidate?.fixtureId
+            );
+
+          break;
+        }
       }
 
-      const fixtureId =
-        Number(
-          randomData
-            ?.fixtureId
+      if (!randomData) {
+        throw new Error(
+          "8회 탐색했지만 현재부터 72시간 이내에 시작하는 미시작 경기를 찾지 못했습니다."
         );
+      }
 
       setMatched(
         randomData
@@ -1612,46 +1720,35 @@ export default function Home() {
             ...randomData,
 
             fixture:
-              extraData
-                ?.fixture ??
-              randomData
-                ?.fixture,
+              extraData?.fixture ??
+              randomData?.fixture,
 
             detail:
-              extraData
-                ?.fixture ??
-              randomData
-                ?.detail,
+              extraData?.fixture ??
+              randomData?.detail,
 
             selectedFixture:
-              extraData
-                ?.selectedFixture ??
-              randomData
-                ?.selectedFixture,
+              extraData?.selectedFixture ??
+              randomData?.selectedFixture,
 
             h2h:
-              extraData
-                ?.h2h ??
+              extraData?.h2h ??
               null,
 
             recentSummary:
-              extraData
-                ?.recentSummary ??
+              extraData?.recentSummary ??
               null,
 
             statistics:
-              extraData
-                ?.statistics ??
+              extraData?.statistics ??
               null,
 
             lineups:
-              extraData
-                ?.lineups ??
+              extraData?.lineups ??
               null,
 
             detailDebug:
-              extraData
-                ?.debug ??
+              extraData?.debug ??
               null,
           };
 
@@ -1660,11 +1757,10 @@ export default function Home() {
           );
 
           const fixture =
-            combined
-              ?.selectedFixture;
+            combined?.selectedFixture;
 
           setStatus(
-            `수집 완료 · Fixture #${fixtureId} · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"} · ${
+            `수집 완료 · 72시간 이내 · Fixture #${fixtureId} · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"} · ${
               earlyBetmanMatch
                 ? "Betman 기준값 적용"
                 : "Betman 매칭 없음"
@@ -1675,27 +1771,24 @@ export default function Home() {
         }
 
         const fixture =
-          randomData
-            ?.selectedFixture;
+          randomData?.selectedFixture;
 
         setStatus(
-          `경기 수집 완료 · Fixture #${fixtureId} · 추가 분석 데이터 미수신 · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"}`
+          `경기 수집 완료 · 72시간 이내 · Fixture #${fixtureId} · 추가 분석 데이터 미수신 · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"}`
         );
       } catch (
         detailError: any
       ) {
         const fixture =
-          randomData
-            ?.selectedFixture;
+          randomData?.selectedFixture;
 
         setStatus(
-          `경기 수집 완료 · Fixture #${fixtureId} · 상세 데이터 일부 미수신 · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"}`
+          `경기 수집 완료 · 72시간 이내 · Fixture #${fixtureId} · 상세 데이터 일부 미수신 · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"}`
         );
 
         console.error(
           "Fixture 상세 조회 실패:",
-          detailError
-            ?.message
+          detailError?.message
         );
       }
     } catch (
@@ -1721,7 +1814,7 @@ export default function Home() {
           </div>
 
           <div className="sub">
-            SportsAPI 미래 경기 자동 탐색 · H2H + 최근 Form + 득실점 분석
+            SportsAPI 72시간 이내 미시작 경기 탐색 · H2H + 최근 Form + Betman 기준값 분석
           </div>
         </div>
 
