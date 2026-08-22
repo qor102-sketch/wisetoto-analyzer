@@ -403,6 +403,54 @@ function totalConfidence(
 
 
 
+
+async function readApiResponse(
+  response: Response,
+  label: string
+) {
+  const contentType =
+    response.headers.get(
+      "content-type"
+    ) || "";
+
+  const text =
+    await response.text();
+
+  let data: any =
+    null;
+
+  if (
+    contentType.includes(
+      "application/json"
+    ) ||
+    text.trim().startsWith("{") ||
+    text.trim().startsWith("[")
+  ) {
+    try {
+      data =
+        JSON.parse(text);
+    } catch {
+      throw new Error(
+        `${label} JSON 해석 실패 · HTTP ${response.status} · ${text.slice(
+          0,
+          180
+        )}`
+      );
+    }
+  } else {
+    const preview =
+      text
+        .replace(/\s+/g, " ")
+        .slice(0, 180);
+
+    throw new Error(
+      `${label}가 JSON 대신 HTML/텍스트를 반환했습니다 · HTTP ${response.status} · ${preview}`
+    );
+  }
+
+  return data;
+}
+
 function normalizeTeamName(value: unknown) {
   return String(value ?? "").toLowerCase().normalize("NFKC")
     .replace(/\([^)]*\)/g, "").replace(/\[[^\]]*\]/g, "")
@@ -1498,7 +1546,7 @@ export default function Home() {
     setBetman({loading:true,matched:null,score:null,error:null});
     try {
       const r=await fetch("/api/betman",{cache:"no-store"});
-      const p=await r.json();
+      const p=await readApiResponse(r, "Betman API");
       if(!r.ok || !p?.ok) throw new Error(p?.error||"Betman 데이터 수집 실패");
       const games=getBetmanGames(p);
       const m=matchBetmanGame(games,home,away);
@@ -1539,7 +1587,10 @@ export default function Home() {
         );
 
       const realData =
-        await response.json();
+        await readApiResponse(
+          response,
+          "실전 경기 API"
+        );
 
       if (
         !response.ok ||
@@ -1599,7 +1650,10 @@ export default function Home() {
           );
 
         const extraData =
-          await extraResponse.json();
+          await readApiResponse(
+            extraResponse,
+            "Fixture 상세 API"
+          );
 
         if (
           extraResponse.ok &&
@@ -1712,7 +1766,10 @@ export default function Home() {
         );
 
       const randomData =
-        await randomResponse.json();
+        await readApiResponse(
+          randomResponse,
+          "빠른 테스트 API"
+        );
 
       if (
         !randomResponse.ok ||
@@ -1785,7 +1842,10 @@ export default function Home() {
           );
 
         const extraData =
-          await extraResponse.json();
+          await readApiResponse(
+            extraResponse,
+            "Fixture 상세 API"
+          );
 
         if (
           extraResponse.ok &&
