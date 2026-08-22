@@ -305,12 +305,14 @@ export async function GET(
      * 전체 API 요청은 실패시키지 않습니다.
      */
 
-    const statisticsResult =
-      await optionalEndpoint(
-        `/fixtures/${id}/statistics`,
-        key,
-        "Statistics"
-      );
+    const statisticsResult = {
+  data: null,
+  status: {
+    ok: false,
+    error: "현재 미래 경기에서는 호출하지 않음",
+    httpStatus: null,
+  },
+};
 
     /*
      * ==========================================
@@ -321,12 +323,14 @@ export async function GET(
      * 데이터가 없거나 404가 날 수 있습니다.
      */
 
-    const lineupsResult =
-      await optionalEndpoint(
-        `/fixtures/${id}/lineups`,
-        key,
-        "Lineups"
-      );
+  const lineupsResult = {
+  data: null,
+  status: {
+    ok: false,
+    error: "현재 미래 경기에서는 호출하지 않음",
+    httpStatus: null,
+  },
+};
 
     /*
      * ==========================================
