@@ -25,6 +25,46 @@ type Pick = [
   number
 ];
 
+type FormData = {
+  played?: number;
+  wins?: number;
+  draws?: number;
+  losses?: number;
+  scored?: number;
+  conceded?: number;
+  goalDifference?: number;
+  points?: number;
+  formPercent?: number | null;
+};
+
+type RecentTeam = {
+  teamId?: number | null;
+  teamName?: string | null;
+  fixtures?: any[];
+  form?: FormData | null;
+};
+
+type RecentSummary = {
+  home?: RecentTeam | null;
+  away?: RecentTeam | null;
+};
+
+type AnalysisFactors = {
+  hasRealData: boolean;
+
+  homeForm: number | null;
+  awayForm: number | null;
+
+  homeH2H: number | null;
+  awayH2H: number | null;
+
+  homeProbability: number | null;
+  awayProbability: number | null;
+
+  formUsed: boolean;
+  h2hUsed: boolean;
+};
+
 const I = {
   축구: "⚽",
   야구: "⚾",
@@ -155,137 +195,423 @@ function formatKST(
   );
 }
 
-/**
- * H2H를 승패 픽에 반영합니다.
- *
- * 아직 라인업/통계가 없는 상태이므로
- * 핸디캡과 U/O는 데모 수치를 유지합니다.
- *
- * 승패 시장은 실제 H2H 결과가 있으면
- * 우세 팀과 확률을 H2H 기반으로 계산합니다.
- */
-function applyH2H(
-  picks: Pick[],
-  h2h: any
-): Pick[] {
-  if (!h2h) {
-    return picks;
+function formatShortDate(
+  value: string | null | undefined
+) {
+  if (!value) {
+    return "-";
   }
+
+  const date = new Date(value);
+
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
+    return "-";
+  }
+
+  return date.toLocaleDateString(
+    "ko-KR",
+    {
+      timeZone: "Asia/Seoul",
+      month: "2-digit",
+      day: "2-digit",
+    }
+  );
+}
+
+function clamp(
+  value: number,
+  min: number,
+  max: number
+) {
+  return Math.min(
+    max,
+    Math.max(
+      min,
+      value
+    )
+  );
+}
+
+/**
+ * 실제 분석:
+ *
+ * 최근 Form 50%
+ * H2H        30%
+ * 홈 이점    20%
+ *
+ * Form/H2H 데이터가 없는 경우에는
+ * 사용 가능한 요소만으로 다시 정규화합니다.
+ *
+ * 핸디캡/UO는 아직 실제 통계 데이터가 없으므로
+ * 기존 데모값을 유지합니다.
+ */
+function buildAnalysis(
+  basePicks: Pick[],
+  h2h: any,
+  recentSummary:
+    | RecentSummary
+    | null
+    | undefined
+) {
+  const homeFormRaw =
+    Number(
+      recentSummary
+        ?.home
+        ?.form
+        ?.formPercent
+    );
+
+  const awayFormRaw =
+    Number(
+      recentSummary
+        ?.away
+        ?.form
+        ?.formPercent
+    );
+
+  const homePlayed =
+    Number(
+      recentSummary
+        ?.home
+        ?.form
+        ?.played ??
+        0
+    );
+
+  const awayPlayed =
+    Number(
+      recentSummary
+        ?.away
+        ?.form
+        ?.played ??
+        0
+    );
+
+  const formUsed =
+    homePlayed > 0 &&
+    awayPlayed > 0 &&
+    Number.isFinite(
+      homeFormRaw
+    ) &&
+    Number.isFinite(
+      awayFormRaw
+    );
 
   const homeWins =
     Number(
-      h2h?.homeWins ?? 0
+      h2h?.homeWins ??
+      0
     );
 
   const awayWins =
     Number(
-      h2h?.awayWins ?? 0
+      h2h?.awayWins ??
+      0
     );
 
   const draws =
     Number(
-      h2h?.draws ?? 0
+      h2h?.draws ??
+      0
     );
 
-  const total =
+  const h2hTotal =
     homeWins +
     awayWins +
     draws;
 
-  if (total <= 0) {
-    return picks;
+  const h2hUsed =
+    h2hTotal > 0;
+
+  const homeForm =
+    formUsed
+      ? clamp(
+          homeFormRaw,
+          0,
+          100
+        )
+      : null;
+
+  const awayForm =
+    formUsed
+      ? clamp(
+          awayFormRaw,
+          0,
+          100
+        )
+      : null;
+
+  let homeH2H:
+    | number
+    | null = null;
+
+  let awayH2H:
+    | number
+    | null = null;
+
+  if (h2hUsed) {
+    const decisionGames =
+      homeWins +
+      awayWins;
+
+    if (
+      decisionGames > 0
+    ) {
+      homeH2H =
+        (
+          homeWins /
+          decisionGames
+        ) *
+        100;
+
+      awayH2H =
+        (
+          awayWins /
+          decisionGames
+        ) *
+        100;
+    } else {
+      homeH2H = 50;
+      awayH2H = 50;
+    }
   }
 
-  return picks.map(
-    ([type, label, probability]) => {
-      if (
-        type !== "승패" &&
-        type !== "승무패" &&
-        type !== "일반 승패"
-      ) {
+  const hasRealData =
+    formUsed ||
+    h2hUsed;
+
+  if (!hasRealData) {
+    return {
+      picks:
+        basePicks,
+
+      factors: {
+        hasRealData:
+          false,
+
+        homeForm:
+          null,
+
+        awayForm:
+          null,
+
+        homeH2H:
+          null,
+
+        awayH2H:
+          null,
+
+        homeProbability:
+          null,
+
+        awayProbability:
+          null,
+
+        formUsed:
+          false,
+
+        h2hUsed:
+          false,
+      } as AnalysisFactors,
+    };
+  }
+
+  let homeScore = 0;
+  let awayScore = 0;
+  let totalWeight = 0;
+
+  /*
+   * 최근 Form 50%
+   */
+  if (formUsed) {
+    homeScore +=
+      (homeForm ?? 50) *
+      0.5;
+
+    awayScore +=
+      (awayForm ?? 50) *
+      0.5;
+
+    totalWeight +=
+      0.5;
+  }
+
+  /*
+   * H2H 30%
+   */
+  if (h2hUsed) {
+    homeScore +=
+      (homeH2H ?? 50) *
+      0.3;
+
+    awayScore +=
+      (awayH2H ?? 50) *
+      0.3;
+
+    totalWeight +=
+      0.3;
+  }
+
+  /*
+   * 홈 경기 이점 20%
+   *
+   * 아직 경기장/리그별 실제 홈 어드밴티지
+   * 통계가 없으므로 55 : 45의 완만한 보정만 적용.
+   */
+  homeScore +=
+    55 *
+    0.2;
+
+  awayScore +=
+    45 *
+    0.2;
+
+  totalWeight +=
+    0.2;
+
+  if (totalWeight > 0) {
+    homeScore /=
+      totalWeight;
+
+    awayScore /=
+      totalWeight;
+  }
+
+  const scoreTotal =
+    homeScore +
+    awayScore;
+
+  let homeProbability =
+    scoreTotal > 0
+      ? (
+          homeScore /
+          scoreTotal
+        ) *
+        100
+      : 50;
+
+  let awayProbability =
+    100 -
+    homeProbability;
+
+  /*
+   * 지나치게 강한 확률 표현 방지.
+   *
+   * 현재는 H2H + 최근 5경기라는
+   * 제한된 정보만 사용하므로
+   * 80% 이상은 표시하지 않음.
+   */
+  homeProbability =
+    clamp(
+      homeProbability,
+      20,
+      80
+    );
+
+  awayProbability =
+    100 -
+    homeProbability;
+
+  const winnerLabel =
+    homeProbability >=
+    awayProbability
+      ? "홈 승"
+      : "원정 승";
+
+  const winnerProbability =
+    Math.max(
+      homeProbability,
+      awayProbability
+    );
+
+  const picks =
+    basePicks.map(
+      (
+        [
+          type,
+          label,
+          probability,
+        ]
+      ): Pick => {
+        if (
+          type === "승패" ||
+          type ===
+            "승무패" ||
+          type ===
+            "일반 승패"
+        ) {
+          return [
+            type,
+            winnerLabel,
+            Number(
+              winnerProbability
+                .toFixed(1)
+            ),
+          ];
+        }
+
         return [
           type,
           label,
           probability,
         ];
       }
+    );
 
-      /*
-       * 홈이 H2H 우세
-       */
-      if (homeWins > awayWins) {
-        const share =
-          homeWins /
-          Math.max(
-            1,
-            homeWins +
-              awayWins
-          );
+  return {
+    picks,
 
-        const adjusted =
-          Math.min(
-            85,
-            Math.max(
-              51,
-              50 +
-                share * 25
-            )
-          );
+    factors: {
+      hasRealData:
+        true,
 
-        return [
-          type,
-          "홈 승",
-          Number(
-            adjusted.toFixed(
-              1
-            )
-          ),
-        ];
-      }
+      homeForm,
 
-      /*
-       * 원정이 H2H 우세
-       */
-      if (awayWins > homeWins) {
-        const share =
-          awayWins /
-          Math.max(
-            1,
-            homeWins +
-              awayWins
-          );
+      awayForm,
 
-        const adjusted =
-          Math.min(
-            85,
-            Math.max(
-              51,
-              50 +
-                share * 25
-            )
-          );
+      homeH2H:
+        homeH2H ===
+        null
+          ? null
+          : Number(
+              homeH2H.toFixed(
+                1
+              )
+            ),
 
-        return [
-          type,
-          "원정 승",
-          Number(
-            adjusted.toFixed(
-              1
-            )
-          ),
-        ];
-      }
+      awayH2H:
+        awayH2H ===
+        null
+          ? null
+          : Number(
+              awayH2H.toFixed(
+                1
+              )
+            ),
 
-      /*
-       * H2H 동률이면 기존 데모값 유지
-       */
-      return [
-        type,
-        label,
-        probability,
-      ];
-    }
-  );
+      homeProbability:
+        Number(
+          homeProbability.toFixed(
+            1
+          )
+        ),
+
+      awayProbability:
+        Number(
+          awayProbability.toFixed(
+            1
+          )
+        ),
+
+      formUsed,
+
+      h2hUsed,
+    } as AnalysisFactors,
+  };
 }
 
 export default function Home() {
@@ -315,7 +641,9 @@ export default function Home() {
     status,
     setStatus,
   ] =
-    useState("준비");
+    useState(
+      "준비"
+    );
 
   const [
     matched,
@@ -358,24 +686,36 @@ export default function Home() {
     null;
 
   const detail =
-    matched?.detail ??
+    matched
+      ?.detail ??
     null;
 
   const lineups =
-    matched?.lineups ??
+    matched
+      ?.lineups ??
     null;
 
   const statistics =
-    matched?.statistics ??
+    matched
+      ?.statistics ??
     null;
 
   const h2h =
-    matched?.h2h ??
+    matched
+      ?.h2h ??
+    null;
+
+  const recentSummary:
+    | RecentSummary
+    | null =
+    matched
+      ?.recentSummary ??
     null;
 
   const venue =
     detail?.venue ??
-    matched?.fixture
+    matched
+      ?.fixture
       ?.venue ??
     null;
 
@@ -401,7 +741,8 @@ export default function Home() {
           league:
             selectedFixture
               ?.league ??
-            detail?.league
+            detail
+              ?.league
               ?.name ??
             "-",
 
@@ -427,23 +768,23 @@ export default function Home() {
         }
       : demoMatch;
 
-  /*
-   * 기본 데모 픽
-   */
   const basePicks =
     demoPicks(
       currentMatch
     );
 
-  /*
-   * H2H 실제 데이터가 있으면
-   * 승패 시장에 반영
-   */
-  const analysisPicks =
-    applyH2H(
+  const analysis =
+    buildAnalysis(
       basePicks,
-      h2h
+      h2h,
+      recentSummary
     );
+
+  const analysisPicks =
+    analysis.picks;
+
+  const analysisFactors =
+    analysis.factors;
 
   const best =
     Math.max(
@@ -456,28 +797,60 @@ export default function Home() {
   const bestPick =
     analysisPicks.find(
       (x) =>
-        x[2] === best
+        x[2] ===
+        best
     );
 
   const hasH2H =
     h2h &&
     (
-      Number.isFinite(
+      Number(
+        h2h
+          ?.homeWins ??
+          0
+      ) +
         Number(
-          h2h?.homeWins
-        )
-      ) ||
-      Number.isFinite(
+          h2h
+            ?.awayWins ??
+            0
+        ) +
         Number(
-          h2h?.awayWins
-        )
-      ) ||
-      Number.isFinite(
-        Number(
-          h2h?.draws
-        )
-      )
+          h2h
+            ?.draws ??
+            0
+        ) >
+      0
     );
+
+  const homeForm =
+    recentSummary
+      ?.home
+      ?.form ??
+    null;
+
+  const awayForm =
+    recentSummary
+      ?.away
+      ?.form ??
+    null;
+
+  const homeRecent =
+    recentSummary
+      ?.home
+      ?.fixtures ??
+    [];
+
+  const awayRecent =
+    recentSummary
+      ?.away
+      ?.fixtures ??
+    [];
+
+  const hasRecent =
+    homeRecent.length >
+      0 ||
+    awayRecent.length >
+      0;
 
   async function collect() {
     if (loading) {
@@ -502,7 +875,8 @@ export default function Home() {
         await fetch(
           "/api/match?mode=random",
           {
-            cache: "no-store",
+            cache:
+              "no-store",
           }
         );
 
@@ -514,7 +888,8 @@ export default function Home() {
         !randomData?.ok
       ) {
         throw new Error(
-          randomData?.error ||
+          randomData
+            ?.error ||
             "랜덤 경기 수집 실패"
         );
       }
@@ -526,8 +901,7 @@ export default function Home() {
         );
 
       /*
-       * 랜덤 경기 자체는
-       * 먼저 화면에 표시
+       * 랜덤 결과를 먼저 표시
        */
       setMatched(
         randomData
@@ -546,12 +920,12 @@ export default function Home() {
       }
 
       setStatus(
-        `Fixture #${fixtureId} 선택 · H2H 조회 중…`
+        `Fixture #${fixtureId} 선택 · H2H/최근 경기 조회 중…`
       );
 
       /*
        * =========================================
-       * 2. Detail + H2H 조회
+       * 2. Detail + H2H + Recent Form
        * =========================================
        */
       try {
@@ -597,6 +971,11 @@ export default function Home() {
                 ?.h2h ??
               null,
 
+            recentSummary:
+              extraData
+                ?.recentSummary ??
+              null,
+
             statistics:
               extraData
                 ?.statistics ??
@@ -633,7 +1012,7 @@ export default function Home() {
             ?.selectedFixture;
 
         setStatus(
-          `경기 수집 완료 · Fixture #${fixtureId} · H2H 미수신 · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"}`
+          `경기 수집 완료 · Fixture #${fixtureId} · 추가 분석 데이터 미수신 · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"}`
         );
       } catch (
         detailError: any
@@ -675,7 +1054,7 @@ export default function Home() {
           </div>
 
           <div className="sub">
-            SportsAPI 미래 경기 자동 탐색 · 실제 H2H 반영 · 랜덤 테스트 분석
+            SportsAPI 미래 경기 자동 탐색 · H2H + 최근 5경기 Form 분석
           </div>
         </div>
 
@@ -942,10 +1321,11 @@ export default function Home() {
             </div>
 
             <div className="card">
-              Detail
+              분석 데이터
               <b>
-                {matched?.detail
-                  ? "수신"
+                {analysisFactors
+                  .hasRealData
+                  ? "실데이터 반영"
                   : "대기"}
               </b>
             </div>
@@ -955,9 +1335,10 @@ export default function Home() {
             <h3>
               게임유형별 분석 픽{" "}
               <span className="small">
-                {hasH2H
-                  ? "※ 승패 시장에 실제 H2H 반영"
-                  : "※ H2H 없을 경우 데모 확률"}
+                {analysisFactors
+                  .hasRealData
+                  ? "※ 승패: H2H + 최근 Form 반영"
+                  : "※ 아직 데모 확률"}
               </span>
             </h3>
 
@@ -1016,6 +1397,24 @@ export default function Home() {
                 </div>
 
                 <div className="card">
+                  H2H
+                  <b>
+                    {hasH2H
+                      ? "수신"
+                      : "없음"}
+                  </b>
+                </div>
+
+                <div className="card">
+                  최근 Form
+                  <b>
+                    {hasRecent
+                      ? "수신"
+                      : "없음"}
+                  </b>
+                </div>
+
+                <div className="card">
                   Lineups
                   <b>
                     {lineups
@@ -1032,13 +1431,70 @@ export default function Home() {
                       : "현재 미제공"}
                   </b>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {analysisFactors
+            .hasRealData && (
+            <div className="section">
+              <h3>
+                실제 분석 점수
+              </h3>
+
+              <div className="cards">
+                <div className="card">
+                  {
+                    currentMatch
+                      .home
+                  }
+                  <b>
+                    {analysisFactors
+                      .homeProbability
+                      ?.toFixed(1) ??
+                      "-"}
+                    %
+                  </b>
+                </div>
 
                 <div className="card">
-                  H2H
+                  {
+                    currentMatch
+                      .away
+                  }
                   <b>
-                    {hasH2H
-                      ? "수신"
-                      : "없음"}
+                    {analysisFactors
+                      .awayProbability
+                      ?.toFixed(1) ??
+                      "-"}
+                    %
+                  </b>
+                </div>
+
+                <div className="card">
+                  Form 반영
+                  <b>
+                    {analysisFactors
+                      .formUsed
+                      ? "50%"
+                      : "미사용"}
+                  </b>
+                </div>
+
+                <div className="card">
+                  H2H 반영
+                  <b>
+                    {analysisFactors
+                      .h2hUsed
+                      ? "30%"
+                      : "미사용"}
+                  </b>
+                </div>
+
+                <div className="card">
+                  홈 이점
+                  <b>
+                    20%
                   </b>
                 </div>
               </div>
@@ -1097,6 +1553,243 @@ export default function Home() {
               </div>
             )}
 
+          {matched &&
+            hasRecent && (
+              <div className="section">
+                <h3>
+                  최근 5경기 Form
+                </h3>
+
+                <div className="cards">
+                  <div className="card">
+                    {
+                      recentSummary
+                        ?.home
+                        ?.teamName ??
+                      currentMatch
+                        .home
+                    }
+                    <b>
+                      {homeForm
+                        ?.wins ??
+                        0}
+                      승{" "}
+                      {homeForm
+                        ?.draws ??
+                        0}
+                      무{" "}
+                      {homeForm
+                        ?.losses ??
+                        0}
+                      패
+                    </b>
+
+                    <div className="small">
+                      득점{" "}
+                      {homeForm
+                        ?.scored ??
+                        0}
+                      {" / "}
+                      실점{" "}
+                      {homeForm
+                        ?.conceded ??
+                        0}
+                    </div>
+
+                    <div className="pct">
+                      Form{" "}
+                      {homeForm
+                        ?.formPercent ??
+                        "-"}
+                      %
+                    </div>
+                  </div>
+
+                  <div className="card">
+                    {
+                      recentSummary
+                        ?.away
+                        ?.teamName ??
+                      currentMatch
+                        .away
+                    }
+                    <b>
+                      {awayForm
+                        ?.wins ??
+                        0}
+                      승{" "}
+                      {awayForm
+                        ?.draws ??
+                        0}
+                      무{" "}
+                      {awayForm
+                        ?.losses ??
+                        0}
+                      패
+                    </b>
+
+                    <div className="small">
+                      득점{" "}
+                      {awayForm
+                        ?.scored ??
+                        0}
+                      {" / "}
+                      실점{" "}
+                      {awayForm
+                        ?.conceded ??
+                        0}
+                    </div>
+
+                    <div className="pct">
+                      Form{" "}
+                      {awayForm
+                        ?.formPercent ??
+                        "-"}
+                      %
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+          {matched &&
+            homeRecent.length >
+              0 && (
+              <div className="section">
+                <h3>
+                  {
+                    currentMatch
+                      .home
+                  }{" "}
+                  최근 경기
+                </h3>
+
+                {homeRecent.map(
+                  (
+                    game: any
+                  ) => (
+                    <div
+                      className="pick"
+                      key={
+                        game?.id
+                      }
+                    >
+                      <div>
+                        <b>
+                          {
+                            game
+                              ?.home
+                          }{" "}
+                          {
+                            game
+                              ?.homeScore
+                          }
+                          {" : "}
+                          {
+                            game
+                              ?.awayScore
+                          }{" "}
+                          {
+                            game
+                              ?.away
+                          }
+                        </b>
+
+                        <div className="small">
+                          {formatShortDate(
+                            game
+                              ?.startTime
+                          )}{" "}
+                          ·{" "}
+                          {
+                            game
+                              ?.league
+                          }
+                        </div>
+                      </div>
+
+                      <div className="pct">
+                        {
+                          game
+                            ?.result ??
+                          "-"
+                        }
+                      </div>
+                    </div>
+                  )
+                )}
+              </div>
+            )}
+
+          {matched &&
+            awayRecent.length >
+              0 && (
+              <div className="section">
+                <h3>
+                  {
+                    currentMatch
+                      .away
+                  }{" "}
+                  최근 경기
+                </h3>
+
+                {awayRecent.map(
+                  (
+                    game: any
+                  ) => (
+                    <div
+                      className="pick"
+                      key={
+                        game?.id
+                      }
+                    >
+                      <div>
+                        <b>
+                          {
+                            game
+                              ?.home
+                          }{" "}
+                          {
+                            game
+                              ?.homeScore
+                          }
+                          {" : "}
+                          {
+                            game
+                              ?.awayScore
+                          }{" "}
+                          {
+                            game
+                              ?.away
+                          }
+                        </b>
+
+                        <div className="small">
+                          {formatShortDate(
+                            game
+                              ?.startTime
+                          )}{" "}
+                          ·{" "}
+                          {
+                            game
+                              ?.league
+                          }
+                        </div>
+                      </div>
+
+                      <div className="pct">
+                        {
+                          game
+                            ?.result ??
+                          "-"
+                        }
+                      </div>
+                    </div>
+                  )
+                )}
+              </div>
+            )}
+
           {matched && (
             <div className="section">
               <h3>
@@ -1139,6 +1832,14 @@ export default function Home() {
                       matched
                         .detail,
 
+                    h2h:
+                      matched
+                        .h2h,
+
+                    recentSummary:
+                      matched
+                        .recentSummary,
+
                     lineups:
                       matched
                         .lineups,
@@ -1146,10 +1847,6 @@ export default function Home() {
                     statistics:
                       matched
                         .statistics,
-
-                    h2h:
-                      matched
-                        .h2h,
 
                     randomEndpointStatus:
                       matched
@@ -1169,11 +1866,11 @@ export default function Home() {
           )}
 
           <div className="notice">
-            현재 버전은 SportsAPI에서 아직 시작하지 않은 미래 경기를 무작위로
-            선택하고, 선택된 경기의 Fixture 상세정보와 실제 H2H 상대전적을
-            조회합니다. 승패 시장에는 H2H 결과를 일부 반영합니다. 핸디캡과
-            U/O는 아직 데모 수치이며, 향후 추가 통계 데이터가 확보되면 실제
-            분석식으로 교체합니다.
+            현재 분석은 실제 SportsAPI 경기 정보, H2H 상대전적,
+            양 팀 최근 5경기 Form을 사용합니다. 승패 방향은 최근
+            Form 50%, H2H 30%, 기본 홈 이점 20%를 조합한 테스트
+            분석입니다. 핸디캡과 U/O는 아직 실제 배당·세부 통계가
+            연결되지 않아 데모 수치입니다.
           </div>
         </section>
       </div>
