@@ -63,6 +63,27 @@ type AnalysisFactors = {
 
   formUsed: boolean;
   h2hUsed: boolean;
+
+  scoringUsed: boolean;
+
+  homeAvgScored: number | null;
+  homeAvgConceded: number | null;
+
+  awayAvgScored: number | null;
+  awayAvgConceded: number | null;
+
+  expectedHomeScore: number | null;
+  expectedAwayScore: number | null;
+  expectedTotal: number | null;
+  expectedMargin: number | null;
+
+  handicapLine: number | null;
+  handicapLabel: string | null;
+  handicapProbability: number | null;
+
+  totalLine: number | null;
+  totalLabel: string | null;
+  totalProbability: number | null;
 };
 
 const I = {
@@ -101,40 +122,6 @@ const DEMO: Match[] = [
     venue: "-",
   },
 ];
-
-function demoPicks(
-  match: Match
-): Pick[] {
-  if (match.sport === "야구") {
-    return [
-      ["일반 승패", "홈 승", 61.8],
-      ["핸디캡 -2.5", "원정 +2.5", 70.1],
-      ["U/O", "UNDER", 56.1],
-    ];
-  }
-
-  if (match.sport === "축구") {
-    return [
-      ["승무패", "홈 승", 64.2],
-      ["핸디캡", "원정 +1", 67.1],
-      ["U/O 2.5", "UNDER", 55.8],
-    ];
-  }
-
-  if (match.sport === "농구") {
-    return [
-      ["승패", "홈 승", 67.4],
-      ["핸디캡", "홈 -3.5", 58.2],
-      ["U/O", "UNDER", 55.4],
-    ];
-  }
-
-  return [
-    ["승패", "홈 승", 68.7],
-    ["세트 핸디", "홈 -1.5", 57.8],
-    ["U/O", "UNDER", 54.9],
-  ];
-}
 
 function koreanSport(
   sport: string | null | undefined
@@ -236,59 +223,225 @@ function clamp(
   );
 }
 
-/**
- * 실제 분석:
- *
- * 최근 Form 50%
- * H2H        30%
- * 홈 이점    20%
- *
- * Form/H2H 데이터가 없는 경우에는
- * 사용 가능한 요소만으로 다시 정규화합니다.
- *
- * 핸디캡/UO는 아직 실제 통계 데이터가 없으므로
- * 기존 데모값을 유지합니다.
- */
+function roundHalf(
+  value: number
+) {
+  return (
+    Math.round(
+      value * 2
+    ) / 2
+  );
+}
+
+function safeAverage(
+  total:
+    | number
+    | null
+    | undefined,
+  played:
+    | number
+    | null
+    | undefined
+) {
+  const t =
+    Number(total);
+
+  const p =
+    Number(played);
+
+  if (
+    !Number.isFinite(t) ||
+    !Number.isFinite(p) ||
+    p <= 0
+  ) {
+    return null;
+  }
+
+  return t / p;
+}
+
+function getDefaultTotalLine(
+  sport: Exclude<
+    Sport,
+    "전체"
+  >,
+  expectedTotal: number
+) {
+  if (sport === "축구") {
+    return 2.5;
+  }
+
+  if (sport === "야구") {
+    return Math.max(
+      5.5,
+      roundHalf(
+        expectedTotal
+      )
+    );
+  }
+
+  if (sport === "농구") {
+    return Math.max(
+      100.5,
+      roundHalf(
+        expectedTotal
+      )
+    );
+  }
+
+  return clamp(
+    roundHalf(
+      expectedTotal
+    ),
+    3.5,
+    5.5
+  );
+}
+
+function getHandicapStep(
+  sport: Exclude<
+    Sport,
+    "전체"
+  >
+) {
+  if (sport === "축구") {
+    return 0.5;
+  }
+
+  if (sport === "야구") {
+    return 1.5;
+  }
+
+  if (sport === "농구") {
+    return 0.5;
+  }
+
+  return 0.5;
+}
+
+function handicapConfidence(
+  sport: Exclude<
+    Sport,
+    "전체"
+  >,
+  margin: number
+) {
+  const abs =
+    Math.abs(margin);
+
+  let scale = 4;
+
+  if (sport === "축구") {
+    scale = 13;
+  }
+
+  if (sport === "야구") {
+    scale = 6;
+  }
+
+  if (sport === "농구") {
+    scale = 1.6;
+  }
+
+  if (sport === "배구") {
+    scale = 10;
+  }
+
+  return clamp(
+    50 +
+      abs *
+        scale,
+    50.1,
+    74
+  );
+}
+
+function totalConfidence(
+  sport: Exclude<
+    Sport,
+    "전체"
+  >,
+  expectedTotal: number,
+  line: number
+) {
+  const diff =
+    Math.abs(
+      expectedTotal -
+        line
+    );
+
+  let scale = 8;
+
+  if (sport === "축구") {
+    scale = 14;
+  }
+
+  if (sport === "야구") {
+    scale = 7;
+  }
+
+  if (sport === "농구") {
+    scale = 1.3;
+  }
+
+  if (sport === "배구") {
+    scale = 12;
+  }
+
+  return clamp(
+    50 +
+      diff *
+        scale,
+    50.1,
+    72
+  );
+}
+
 function buildAnalysis(
-  basePicks: Pick[],
+  sport: Exclude<
+    Sport,
+    "전체"
+  >,
   h2h: any,
   recentSummary:
     | RecentSummary
     | null
     | undefined
 ) {
-  const homeFormRaw =
-    Number(
-      recentSummary
-        ?.home
-        ?.form
-        ?.formPercent
-    );
+  const homeFormData =
+    recentSummary
+      ?.home
+      ?.form;
 
-  const awayFormRaw =
-    Number(
-      recentSummary
-        ?.away
-        ?.form
-        ?.formPercent
-    );
+  const awayFormData =
+    recentSummary
+      ?.away
+      ?.form;
 
   const homePlayed =
     Number(
-      recentSummary
-        ?.home
-        ?.form
+      homeFormData
         ?.played ??
         0
     );
 
   const awayPlayed =
     Number(
-      recentSummary
-        ?.away
-        ?.form
+      awayFormData
         ?.played ??
         0
+    );
+
+  const homeFormRaw =
+    Number(
+      homeFormData
+        ?.formPercent
+    );
+
+  const awayFormRaw =
+    Number(
+      awayFormData
+        ?.formPercent
     );
 
   const formUsed =
@@ -300,32 +453,6 @@ function buildAnalysis(
     Number.isFinite(
       awayFormRaw
     );
-
-  const homeWins =
-    Number(
-      h2h?.homeWins ??
-      0
-    );
-
-  const awayWins =
-    Number(
-      h2h?.awayWins ??
-      0
-    );
-
-  const draws =
-    Number(
-      h2h?.draws ??
-      0
-    );
-
-  const h2hTotal =
-    homeWins +
-    awayWins +
-    draws;
-
-  const h2hUsed =
-    h2hTotal > 0;
 
   const homeForm =
     formUsed
@@ -344,6 +471,32 @@ function buildAnalysis(
           100
         )
       : null;
+
+  const homeWins =
+    Number(
+      h2h?.homeWins ??
+        0
+    );
+
+  const awayWins =
+    Number(
+      h2h?.awayWins ??
+        0
+    );
+
+  const draws =
+    Number(
+      h2h?.draws ??
+        0
+    );
+
+  const h2hTotal =
+    homeWins +
+    awayWins +
+    draws;
+
+  const h2hUsed =
+    h2hTotal > 0;
 
   let homeH2H:
     | number
@@ -380,141 +533,204 @@ function buildAnalysis(
     }
   }
 
-  const hasRealData =
-    formUsed ||
-    h2hUsed;
-
-  if (!hasRealData) {
-    return {
-      picks:
-        basePicks,
-
-      factors: {
-        hasRealData:
-          false,
-
-        homeForm:
-          null,
-
-        awayForm:
-          null,
-
-        homeH2H:
-          null,
-
-        awayH2H:
-          null,
-
-        homeProbability:
-          null,
-
-        awayProbability:
-          null,
-
-        formUsed:
-          false,
-
-        h2hUsed:
-          false,
-      } as AnalysisFactors,
-    };
-  }
-
-  let homeScore = 0;
-  let awayScore = 0;
-  let totalWeight = 0;
-
-  /*
-   * 최근 Form 50%
-   */
-  if (formUsed) {
-    homeScore +=
-      (homeForm ?? 50) *
-      0.5;
-
-    awayScore +=
-      (awayForm ?? 50) *
-      0.5;
-
-    totalWeight +=
-      0.5;
-  }
-
-  /*
-   * H2H 30%
-   */
-  if (h2hUsed) {
-    homeScore +=
-      (homeH2H ?? 50) *
-      0.3;
-
-    awayScore +=
-      (awayH2H ?? 50) *
-      0.3;
-
-    totalWeight +=
-      0.3;
-  }
-
-  /*
-   * 홈 경기 이점 20%
-   *
-   * 아직 경기장/리그별 실제 홈 어드밴티지
-   * 통계가 없으므로 55 : 45의 완만한 보정만 적용.
-   */
-  homeScore +=
-    55 *
-    0.2;
-
-  awayScore +=
-    45 *
-    0.2;
-
-  totalWeight +=
-    0.2;
-
-  if (totalWeight > 0) {
-    homeScore /=
-      totalWeight;
-
-    awayScore /=
-      totalWeight;
-  }
-
-  const scoreTotal =
-    homeScore +
-    awayScore;
-
-  let homeProbability =
-    scoreTotal > 0
-      ? (
-          homeScore /
-          scoreTotal
-        ) *
-        100
-      : 50;
-
-  let awayProbability =
-    100 -
-    homeProbability;
-
-  /*
-   * 지나치게 강한 확률 표현 방지.
-   *
-   * 현재는 H2H + 최근 5경기라는
-   * 제한된 정보만 사용하므로
-   * 80% 이상은 표시하지 않음.
-   */
-  homeProbability =
-    clamp(
-      homeProbability,
-      20,
-      80
+  const homeAvgScored =
+    safeAverage(
+      homeFormData
+        ?.scored,
+      homePlayed
     );
 
-  awayProbability =
-    100 -
-    homeProbability;
+  const homeAvgConceded =
+    safeAverage(
+      homeFormData
+        ?.conceded,
+      homePlayed
+    );
+
+  const awayAvgScored =
+    safeAverage(
+      awayFormData
+        ?.scored,
+      awayPlayed
+    );
+
+  const awayAvgConceded =
+    safeAverage(
+      awayFormData
+        ?.conceded,
+      awayPlayed
+    );
+
+  const scoringUsed =
+    homeAvgScored !== null &&
+    homeAvgConceded !== null &&
+    awayAvgScored !== null &&
+    awayAvgConceded !== null;
+
+  let expectedHomeScore:
+    | number
+    | null = null;
+
+  let expectedAwayScore:
+    | number
+    | null = null;
+
+  let expectedTotal:
+    | number
+    | null = null;
+
+  let expectedMargin:
+    | number
+    | null = null;
+
+  if (scoringUsed) {
+    expectedHomeScore =
+      (
+        homeAvgScored! +
+        awayAvgConceded!
+      ) /
+      2;
+
+    expectedAwayScore =
+      (
+        awayAvgScored! +
+        homeAvgConceded!
+      ) /
+      2;
+
+    /*
+     * 아주 약한 홈 보정.
+     * 승패 분석의 홈 이점과
+     * 동일한 방향이지만
+     * 점수를 과도하게 변경하지 않음.
+     */
+    if (sport === "축구") {
+      expectedHomeScore +=
+        0.1;
+    }
+
+    if (sport === "야구") {
+      expectedHomeScore +=
+        0.15;
+    }
+
+    if (sport === "농구") {
+      expectedHomeScore +=
+        1.5;
+    }
+
+    if (sport === "배구") {
+      expectedHomeScore +=
+        0.05;
+    }
+
+    expectedTotal =
+      expectedHomeScore +
+      expectedAwayScore;
+
+    expectedMargin =
+      expectedHomeScore -
+      expectedAwayScore;
+  }
+
+  /*
+   * ========================================
+   * 승패 분석
+   * Form 50 + H2H 30 + 홈이점 20
+   * ========================================
+   */
+
+  const hasRealData =
+    formUsed ||
+    h2hUsed ||
+    scoringUsed;
+
+  let homeProbability =
+    50;
+
+  let awayProbability =
+    50;
+
+  if (hasRealData) {
+    let homeScore = 0;
+    let awayScore = 0;
+    let weight = 0;
+
+    if (formUsed) {
+      homeScore +=
+        (homeForm ?? 50) *
+        0.5;
+
+      awayScore +=
+        (awayForm ?? 50) *
+        0.5;
+
+      weight += 0.5;
+    }
+
+    if (h2hUsed) {
+      homeScore +=
+        (homeH2H ?? 50) *
+        0.3;
+
+      awayScore +=
+        (awayH2H ?? 50) *
+        0.3;
+
+      weight += 0.3;
+    }
+
+    homeScore +=
+      55 * 0.2;
+
+    awayScore +=
+      45 * 0.2;
+
+    weight +=
+      0.2;
+
+    if (weight > 0) {
+      homeScore /=
+        weight;
+
+      awayScore /=
+        weight;
+    }
+
+    const total =
+      homeScore +
+      awayScore;
+
+    if (total > 0) {
+      homeProbability =
+        (
+          homeScore /
+          total
+        ) *
+        100;
+
+      awayProbability =
+        100 -
+        homeProbability;
+    }
+
+    homeProbability =
+      clamp(
+        homeProbability,
+        20,
+        80
+      );
+
+    awayProbability =
+      100 -
+      homeProbability;
+  }
+
+  /*
+   * ========================================
+   * 승패 Pick
+   * ========================================
+   */
 
   const winnerLabel =
     homeProbability >=
@@ -528,46 +744,209 @@ function buildAnalysis(
       awayProbability
     );
 
-  const picks =
-    basePicks.map(
-      (
-        [
-          type,
-          label,
-          probability,
-        ]
-      ): Pick => {
-        if (
-          type === "승패" ||
-          type ===
-            "승무패" ||
-          type ===
-            "일반 승패"
-        ) {
-          return [
-            type,
-            winnerLabel,
-            Number(
-              winnerProbability
-                .toFixed(1)
-            ),
-          ];
-        }
+  /*
+   * ========================================
+   * Handicap
+   * 최근 평균 득점/실점 기반 예상 점수차
+   * ========================================
+   */
 
-        return [
-          type,
-          label,
-          probability,
-        ];
+  let handicapLine:
+    | number
+    | null = null;
+
+  let handicapLabel:
+    | string
+    | null = null;
+
+  let handicapProbability:
+    | number
+    | null = null;
+
+  if (
+    scoringUsed &&
+    expectedMargin !== null
+  ) {
+    const step =
+      getHandicapStep(
+        sport
+      );
+
+    if (
+      expectedMargin >= 0
+    ) {
+      let raw =
+        Math.max(
+          step,
+          Math.abs(
+            expectedMargin
+          ) *
+            0.55
+        );
+
+      if (sport === "야구") {
+        raw = 1.5;
       }
-    );
+
+      handicapLine =
+        roundHalf(
+          raw
+        );
+
+      if (
+        handicapLine <
+        step
+      ) {
+        handicapLine =
+          step;
+      }
+
+      handicapLabel =
+        `홈 -${handicapLine}`;
+
+      handicapProbability =
+        handicapConfidence(
+          sport,
+          expectedMargin
+        );
+    } else {
+      let raw =
+        Math.max(
+          step,
+          Math.abs(
+            expectedMargin
+          ) *
+            0.55
+        );
+
+      if (sport === "야구") {
+        raw = 1.5;
+      }
+
+      handicapLine =
+        roundHalf(
+          raw
+        );
+
+      if (
+        handicapLine <
+        step
+      ) {
+        handicapLine =
+          step;
+      }
+
+      handicapLabel =
+        `원정 -${handicapLine}`;
+
+      handicapProbability =
+        handicapConfidence(
+          sport,
+          expectedMargin
+        );
+    }
+  }
+
+  /*
+   * ========================================
+   * U/O
+   * 최근 실제 득실점 평균 기반
+   * ========================================
+   */
+
+  let totalLine:
+    | number
+    | null = null;
+
+  let totalLabel:
+    | string
+    | null = null;
+
+  let totalProbability:
+    | number
+    | null = null;
+
+  if (
+    scoringUsed &&
+    expectedTotal !== null
+  ) {
+    totalLine =
+      getDefaultTotalLine(
+        sport,
+        expectedTotal
+      );
+
+    totalLabel =
+      expectedTotal >=
+      totalLine
+        ? "OVER"
+        : "UNDER";
+
+    totalProbability =
+      totalConfidence(
+        sport,
+        expectedTotal,
+        totalLine
+      );
+  }
+
+  const winMarket =
+    sport === "축구"
+      ? "승무패"
+      : sport === "야구"
+        ? "일반 승패"
+        : "승패";
+
+  const handicapMarket =
+    sport === "배구"
+      ? "세트 핸디"
+      : "핸디캡";
+
+  const totalMarket =
+    totalLine !== null
+      ? `U/O ${totalLine}`
+      : "U/O";
+
+  const picks: Pick[] = [
+    [
+      winMarket,
+      winnerLabel,
+      Number(
+        winnerProbability
+          .toFixed(1)
+      ),
+    ],
+
+    [
+      handicapMarket,
+      handicapLabel ??
+        "분석 데이터 부족",
+      Number(
+        (
+          handicapProbability ??
+          50
+        ).toFixed(1)
+      ),
+    ],
+
+    [
+      totalMarket,
+      totalLabel ??
+        "분석 데이터 부족",
+      Number(
+        (
+          totalProbability ??
+          50
+        ).toFixed(1)
+      ),
+    ],
+  ];
 
   return {
     picks,
 
     factors: {
-      hasRealData:
-        true,
+      hasRealData,
 
       homeForm,
 
@@ -610,6 +989,116 @@ function buildAnalysis(
       formUsed,
 
       h2hUsed,
+
+      scoringUsed,
+
+      homeAvgScored:
+        homeAvgScored ===
+        null
+          ? null
+          : Number(
+              homeAvgScored.toFixed(
+                2
+              )
+            ),
+
+      homeAvgConceded:
+        homeAvgConceded ===
+        null
+          ? null
+          : Number(
+              homeAvgConceded.toFixed(
+                2
+              )
+            ),
+
+      awayAvgScored:
+        awayAvgScored ===
+        null
+          ? null
+          : Number(
+              awayAvgScored.toFixed(
+                2
+              )
+            ),
+
+      awayAvgConceded:
+        awayAvgConceded ===
+        null
+          ? null
+          : Number(
+              awayAvgConceded.toFixed(
+                2
+              )
+            ),
+
+      expectedHomeScore:
+        expectedHomeScore ===
+        null
+          ? null
+          : Number(
+              expectedHomeScore.toFixed(
+                2
+              )
+            ),
+
+      expectedAwayScore:
+        expectedAwayScore ===
+        null
+          ? null
+          : Number(
+              expectedAwayScore.toFixed(
+                2
+              )
+            ),
+
+      expectedTotal:
+        expectedTotal ===
+        null
+          ? null
+          : Number(
+              expectedTotal.toFixed(
+                2
+              )
+            ),
+
+      expectedMargin:
+        expectedMargin ===
+        null
+          ? null
+          : Number(
+              expectedMargin.toFixed(
+                2
+              )
+            ),
+
+      handicapLine,
+
+      handicapLabel,
+
+      handicapProbability:
+        handicapProbability ===
+        null
+          ? null
+          : Number(
+              handicapProbability.toFixed(
+                1
+              )
+            ),
+
+      totalLine,
+
+      totalLabel,
+
+      totalProbability:
+        totalProbability ===
+        null
+          ? null
+          : Number(
+              totalProbability.toFixed(
+                1
+              )
+            ),
     } as AnalysisFactors,
   };
 }
@@ -641,9 +1130,7 @@ export default function Home() {
     status,
     setStatus,
   ] =
-    useState(
-      "준비"
-    );
+    useState("준비");
 
   const [
     matched,
@@ -768,14 +1255,9 @@ export default function Home() {
         }
       : demoMatch;
 
-  const basePicks =
-    demoPicks(
-      currentMatch
-    );
-
   const analysis =
     buildAnalysis(
-      basePicks,
+      currentSport,
       h2h,
       recentSummary
     );
@@ -805,18 +1287,15 @@ export default function Home() {
     h2h &&
     (
       Number(
-        h2h
-          ?.homeWins ??
+        h2h?.homeWins ??
           0
       ) +
         Number(
-          h2h
-            ?.awayWins ??
+          h2h?.awayWins ??
             0
         ) +
         Number(
-          h2h
-            ?.draws ??
+          h2h?.draws ??
             0
         ) >
       0
@@ -866,11 +1345,6 @@ export default function Home() {
     );
 
     try {
-      /*
-       * =========================================
-       * 1. 랜덤 경기 선택
-       * =========================================
-       */
       const randomResponse =
         await fetch(
           "/api/match?mode=random",
@@ -900,9 +1374,6 @@ export default function Home() {
             ?.fixtureId
         );
 
-      /*
-       * 랜덤 결과를 먼저 표시
-       */
       setMatched(
         randomData
       );
@@ -923,11 +1394,6 @@ export default function Home() {
         `Fixture #${fixtureId} 선택 · H2H/최근 경기 조회 중…`
       );
 
-      /*
-       * =========================================
-       * 2. Detail + H2H + Recent Form
-       * =========================================
-       */
       try {
         const extraResponse =
           await fetch(
@@ -1054,7 +1520,7 @@ export default function Home() {
           </div>
 
           <div className="sub">
-            SportsAPI 미래 경기 자동 탐색 · H2H + 최근 5경기 Form 분석
+            SportsAPI 미래 경기 자동 탐색 · H2H + 최근 Form + 득실점 분석
           </div>
         </div>
 
@@ -1336,9 +1802,12 @@ export default function Home() {
               게임유형별 분석 픽{" "}
               <span className="small">
                 {analysisFactors
-                  .hasRealData
-                  ? "※ 승패: H2H + 최근 Form 반영"
-                  : "※ 아직 데모 확률"}
+                  .scoringUsed
+                  ? "※ 승패 + 핸디캡 + U/O 실제 최근 득실점 반영"
+                  : analysisFactors
+                      .hasRealData
+                    ? "※ 승패에 H2H/Form 반영"
+                    : "※ 데이터 수집 전"}
               </span>
             </h3>
 
@@ -1415,6 +1884,16 @@ export default function Home() {
                 </div>
 
                 <div className="card">
+                  득실점 분석
+                  <b>
+                    {analysisFactors
+                      .scoringUsed
+                      ? "적용"
+                      : "데이터 부족"}
+                  </b>
+                </div>
+
+                <div className="card">
                   Lineups
                   <b>
                     {lineups
@@ -1439,7 +1918,7 @@ export default function Home() {
             .hasRealData && (
             <div className="section">
               <h3>
-                실제 분석 점수
+                승패 분석 점수
               </h3>
 
               <div className="cards">
@@ -1472,7 +1951,7 @@ export default function Home() {
                 </div>
 
                 <div className="card">
-                  Form 반영
+                  Form
                   <b>
                     {analysisFactors
                       .formUsed
@@ -1482,7 +1961,7 @@ export default function Home() {
                 </div>
 
                 <div className="card">
-                  H2H 반영
+                  H2H
                   <b>
                     {analysisFactors
                       .h2hUsed
@@ -1495,6 +1974,86 @@ export default function Home() {
                   홈 이점
                   <b>
                     20%
+                  </b>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {analysisFactors
+            .scoringUsed && (
+            <div className="section">
+              <h3>
+                실제 득실점 기반 예상
+              </h3>
+
+              <div className="cards">
+                <div className="card">
+                  {
+                    currentMatch
+                      .home
+                  }{" "}
+                  평균 득점
+                  <b>
+                    {analysisFactors
+                      .homeAvgScored
+                      ?.toFixed(2)}
+                  </b>
+                </div>
+
+                <div className="card">
+                  {
+                    currentMatch
+                      .away
+                  }{" "}
+                  평균 득점
+                  <b>
+                    {analysisFactors
+                      .awayAvgScored
+                      ?.toFixed(2)}
+                  </b>
+                </div>
+
+                <div className="card">
+                  예상 점수
+                  <b>
+                    {analysisFactors
+                      .expectedHomeScore
+                      ?.toFixed(1)}
+                    {" : "}
+                    {analysisFactors
+                      .expectedAwayScore
+                      ?.toFixed(1)}
+                  </b>
+                </div>
+
+                <div className="card">
+                  예상 총점
+                  <b>
+                    {analysisFactors
+                      .expectedTotal
+                      ?.toFixed(1)}
+                  </b>
+                </div>
+
+                <div className="card">
+                  자체 핸디캡
+                  <b>
+                    {analysisFactors
+                      .handicapLabel ??
+                      "-"}
+                  </b>
+                </div>
+
+                <div className="card">
+                  자체 U/O
+                  <b>
+                    {analysisFactors
+                      .totalLine ??
+                      "-"}{" "}
+                    {analysisFactors
+                      .totalLabel ??
+                      ""}
                   </b>
                 </div>
               </div>
@@ -1569,6 +2128,7 @@ export default function Home() {
                       currentMatch
                         .home
                     }
+
                     <b>
                       {homeForm
                         ?.wins ??
@@ -1613,6 +2173,7 @@ export default function Home() {
                       currentMatch
                         .away
                     }
+
                     <b>
                       {awayForm
                         ?.wins ??
@@ -1840,6 +2401,8 @@ export default function Home() {
                       matched
                         .recentSummary,
 
+                    analysisFactors,
+
                     lineups:
                       matched
                         .lineups,
@@ -1866,11 +2429,11 @@ export default function Home() {
           )}
 
           <div className="notice">
-            현재 분석은 실제 SportsAPI 경기 정보, H2H 상대전적,
-            양 팀 최근 5경기 Form을 사용합니다. 승패 방향은 최근
-            Form 50%, H2H 30%, 기본 홈 이점 20%를 조합한 테스트
-            분석입니다. 핸디캡과 U/O는 아직 실제 배당·세부 통계가
-            연결되지 않아 데모 수치입니다.
+            현재 승패 분석은 실제 SportsAPI H2H와 최근 5경기 Form을 사용합니다.
+            핸디캡과 U/O는 양 팀의 최근 5경기 실제 득점·실점 평균을 이용해
+            예상 점수와 예상 총점을 계산한 자체 분석값입니다. 스포츠북의 실제
+            배당 또는 공식 핸디캡/UO 기준점이 연결된 것은 아니므로 시장 배당과
+            직접 동일한 값으로 해석하면 안 됩니다.
           </div>
         </section>
       </div>
