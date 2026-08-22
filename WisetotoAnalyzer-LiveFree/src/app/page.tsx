@@ -1510,6 +1510,170 @@ export default function Home() {
     }
   }
 
+  async function analyzeReal() {
+    if (loading) {
+      return;
+    }
+
+    setLoading(true);
+    setMatched(null);
+    setBetman({
+      loading: false,
+      matched: null,
+      score: null,
+      error: null,
+    });
+
+    setStatus(
+      "Betman 72시간 발매경기 → SportsAPI 자동매칭 중…"
+    );
+
+    try {
+      const response =
+        await fetch(
+          "/api/match?mode=real",
+          {
+            cache:
+              "no-store",
+          }
+        );
+
+      const realData =
+        await response.json();
+
+      if (
+        !response.ok ||
+        !realData?.ok
+      ) {
+        throw new Error(
+          realData?.error ||
+            "실전 경기 매칭 실패"
+        );
+      }
+
+      const fixtureId =
+        Number(
+          realData?.fixtureId
+        );
+
+      setMatched(
+        realData
+      );
+
+      setBetman({
+        loading: false,
+        matched:
+          realData?.betmanMatch ??
+          null,
+        score: 1,
+        error: null,
+      });
+
+      if (
+        !Number.isFinite(
+          fixtureId
+        )
+      ) {
+        setStatus(
+          "Betman 매칭 성공 · Fixture ID 없음"
+        );
+
+        return;
+      }
+
+      const fixture =
+        realData?.selectedFixture;
+
+      setStatus(
+        `실전 경기 확보 · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"} · H2H/최근 Form 조회 중…`
+      );
+
+      try {
+        const extraResponse =
+          await fetch(
+            `/api/match/${fixtureId}`,
+            {
+              cache:
+                "no-store",
+            }
+          );
+
+        const extraData =
+          await extraResponse.json();
+
+        if (
+          extraResponse.ok &&
+          extraData?.ok
+        ) {
+          const combined = {
+            ...realData,
+            fixture:
+              extraData?.fixture ??
+              realData?.fixture,
+            detail:
+              extraData?.fixture ??
+              realData?.detail,
+            selectedFixture:
+              extraData?.selectedFixture ??
+              realData?.selectedFixture,
+            h2h:
+              extraData?.h2h ??
+              null,
+            recentSummary:
+              extraData?.recentSummary ??
+              null,
+            statistics:
+              extraData?.statistics ??
+              null,
+            lineups:
+              extraData?.lineups ??
+              null,
+            detailDebug:
+              extraData?.debug ??
+              null,
+          };
+
+          setMatched(
+            combined
+          );
+
+          const selected =
+            combined?.selectedFixture;
+
+          setStatus(
+            `실전 분석 완료 · ${selected?.home ?? "-"} vs ${selected?.away ?? "-"} · Betman 실제 핸디/UO 적용`
+          );
+
+          return;
+        }
+
+        setStatus(
+          `실전 경기 매칭 완료 · Fixture #${fixtureId} · H2H/Form 일부 미수신`
+        );
+      } catch (
+        detailError: any
+      ) {
+        setStatus(
+          `실전 경기 매칭 완료 · Fixture #${fixtureId} · 상세 분석 데이터 일부 미수신`
+        );
+
+        console.error(
+          "실전 상세 조회 실패:",
+          detailError?.message
+        );
+      }
+    } catch (
+      e: any
+    ) {
+      setStatus(
+        e?.message ||
+          "실전 경기 분석 실패"
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function collect() {
     if (loading) {
       return;
@@ -1725,7 +1889,7 @@ export default function Home() {
           </div>
 
           <div className="sub">
-            빠른 테스트: 가장 가까운 미시작 경기 · 실전 분석: 72시간 + Betman 기준
+            빠른 테스트: 가장 가까운 미시작 경기 · 실전 분석: Betman 72시간 발매경기 → SportsAPI 매칭
           </div>
         </div>
 
@@ -1750,14 +1914,16 @@ export default function Home() {
 
           <button
             className="btn light"
-            onClick={() =>
-              alert(
-                selected.length +
-                  "개 경기 분석"
-              )
+            onClick={
+              analyzeReal
+            }
+            disabled={
+              loading
             }
           >
-            📊 실전 경기 분석
+            {loading
+              ? "⏳ 분석 중"
+              : "📊 실전 경기 분석"}
           </button>
 
           <span className="small">
