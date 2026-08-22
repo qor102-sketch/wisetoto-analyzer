@@ -9,32 +9,49 @@ function arr(x: any): any[] {
 }
 
 async function api(path: string, key: string) {
-  const r = await fetch(BASE + path, {
-    headers: {
-      Authorization: `Bearer ${key}`,
-    },
-    cache: "no-store",
-  });
-
-  const text = await r.text();
-
-  let j: any;
-
   try {
-    j = JSON.parse(text);
-  } catch {
-    j = { raw: text };
-  }
+    const r = await fetch(BASE + path, {
+      headers: {
+        Authorization: `Bearer ${key}`,
+      },
+      cache: "no-store",
+    });
 
-  if (!r.ok) {
-    throw new Error(
-      j?.error?.message ||
-        j?.message ||
-        `SportsAPI ${r.status}`
-    );
-  }
+    const text = await r.text();
 
-  return j?.data ?? j;
+    let j: any;
+
+    try {
+      j = JSON.parse(text);
+    } catch {
+      j = { raw: text };
+    }
+
+    if (!r.ok) {
+      return {
+        ok: false,
+        data: null,
+        error:
+          j?.error?.message ||
+          j?.message ||
+          `SportsAPI ${r.status}`,
+      };
+    }
+
+    return {
+      ok: true,
+      data: j?.data ?? j,
+      error: null,
+    };
+  } catch (e: any) {
+    return {
+      ok: false,
+      data: null,
+      error:
+        e?.message ||
+        "SportsAPI 요청 실패",
+    };
+  }
 }
 
 function isNotStarted(fixture: AnyObj) {
@@ -156,51 +173,56 @@ async function discoverTeams(key: string) {
   const debug: AnyObj[] = [];
 
   for (const query of queries) {
-    try {
-      const raw = await api(
-        `/search?q=${encodeURIComponent(query)}`,
-        key
-      );
+    const result = await api(
+      `/search?q=${encodeURIComponent(query)}`,
+      key
+    );
 
-      const found =
-        extractTeams(raw);
-
+    if (!result.ok) {
       debug.push({
         query,
-
-        resultCount:
-          arr(raw).length,
-
-        teamCount:
-          found.length,
-
-        sample:
-          found
-            .slice(0, 10)
-            .map(
-              (team: AnyObj) => ({
-                id:
-                  team?.id ?? null,
-
-                name:
-                  team?.name ?? null,
-
-                sport:
-                  team?.sport ?? null,
-              })
-            ),
-      });
-
-      teams.push(...found);
-    } catch (e: any) {
-      debug.push({
-        query,
-
+        resultCount: 0,
+        teamCount: 0,
+        sample: [],
         error:
-          e?.message ||
+          result.error ||
           "검색 실패",
       });
+
+      continue;
     }
+
+    const raw = result.data;
+    const found =
+      extractTeams(raw);
+
+    debug.push({
+      query,
+
+      resultCount:
+        arr(raw).length,
+
+      teamCount:
+        found.length,
+
+      sample:
+        found
+          .slice(0, 10)
+          .map(
+            (team: AnyObj) => ({
+              id:
+                team?.id ?? null,
+
+              name:
+                team?.name ?? null,
+
+              sport:
+                team?.sport ?? null,
+            })
+          ),
+    });
+
+    teams.push(...found);
   }
 
   return {
@@ -218,20 +240,21 @@ async function getUpcoming(
   const pages = [0, 1];
 
   for (const page of pages) {
-    try {
-      const raw =
-        await api(
-          `/teams/${teamId}/fixtures?type=upcoming&page=${page}`,
-          key
-        );
+    const result =
+      await api(
+        `/teams/${teamId}/fixtures?type=upcoming&page=${page}`,
+        key
+      );
 
-      const fixtures = arr(raw);
+    if (!result.ok) {
+      continue;
+    }
 
-      if (fixtures.length > 0) {
-        return fixtures;
-      }
-    } catch {
-      // 다음 page 재시도
+    const fixtures =
+      arr(result.data);
+
+    if (fixtures.length > 0) {
+      return fixtures;
     }
   }
 
@@ -471,32 +494,37 @@ export async function GET(
       });
     }
 
-    let detail: any = null;
+    const selectedFixture =
+      summarizeFixture(
+        fixture
+      );
 
-    const detailResult:
-      AnyObj = {
-        ok: false,
-
-        data: null,
-
-        error: null,
-      };
-
-    try {
-      detail =
-        await api(
-          `/fixtures/${fixtureId}`,
-          key
+    const candidateSample =
+      candidates
+        .slice(0, 30)
+        .map(
+          summarizeFixture
         );
 
-      detailResult.ok = true;
-      detailResult.data =
-        detail;
-    } catch (e: any) {
-      detailResult.error =
-        e?.message ||
-        "detail 조회 실패";
-    }
+    /*
+     * 중요:
+     * SportsAPI detail endpoint는
+     * /fixture/:id 를 사용합니다.
+     *
+     * 기존의 /fixtures/:id 가 아니라
+     * 단수형 /fixture/:id 로 호출합니다.
+     */
+    const detailResult =
+      await api(
+        `/fixture/${fixtureId}`,
+        key
+      );
+
+    const detail:
+      AnyObj | null =
+      detailResult.ok
+        ? detailResult.data ?? null
+        : null;
 
     return Response.json({
       ok: true,
@@ -509,10 +537,7 @@ export async function GET(
 
       fixtureId,
 
-      selectedFixture:
-        summarizeFixture(
-          fixture
-        ),
+      selectedFixture,
 
       fixture,
 
@@ -526,7 +551,7 @@ export async function GET(
 
       debug: {
         message:
-          "경기 탐색 성공. 현재 단계에서는 detail endpoint만 호출했습니다.",
+          "경기 탐색 성공. 상세 데이터는 API 상태에 따라 제공됩니다.",
 
         discoveredTeamCount:
           teams.length,
@@ -539,21 +564,31 @@ export async function GET(
 
         randomIndex,
 
-        selectedFixture:
-          summarizeFixture(
-            fixture
-          ),
+        selectedFixture,
 
-        candidateSample:
-          candidates
-            .slice(0, 30)
-            .map(
-              summarizeFixture
-            ),
+        candidateSample,
 
         endpointStatus: {
           detail:
-            detailResult,
+            detailResult.ok
+              ? {
+                  ok: true,
+
+                  data:
+                    detail,
+
+                  error:
+                    null,
+                }
+              : {
+                  ok: false,
+
+                  data: null,
+
+                  error:
+                    detailResult.error ??
+                    "detail 조회 실패",
+                },
 
           lineups: {
             ok: false,
