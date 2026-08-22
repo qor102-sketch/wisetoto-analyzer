@@ -1,11 +1,11 @@
 const BASE = "https://api.sportsapi.app/v2";
 
+type AnyObj = Record<string, any>;
+
 function arr(x: any): any[] {
-  return Array.isArray(x)
-    ? x
-    : Array.isArray(x?.data)
-      ? x.data
-      : [];
+  if (Array.isArray(x)) return x;
+  if (Array.isArray(x?.data)) return x.data;
+  return [];
 }
 
 async function api(path: string, key: string) {
@@ -35,6 +35,100 @@ async function api(path: string, key: string) {
   return j?.data ?? j;
 }
 
+/*
+ * WiseToto 스포츠 → SportsAPI 스포츠
+ */
+function normalizeSport(sport: string) {
+  const s = String(sport || "").toLowerCase();
+
+  if (
+    s === "야구" ||
+    s === "baseball" ||
+    s === "mlb" ||
+    s === "npb" ||
+    s === "kbo"
+  ) {
+    return "baseball";
+  }
+
+  if (
+    s === "축구" ||
+    s === "football" ||
+    s === "soccer"
+  ) {
+    return "football";
+  }
+
+  if (
+    s === "농구" ||
+    s === "basketball" ||
+    s === "nba"
+  ) {
+    return "basketball";
+  }
+
+  if (
+    s === "배구" ||
+    s === "volleyball"
+  ) {
+    return "volleyball";
+  }
+
+  return s;
+}
+
+/*
+ * 팀의 스포츠 확인
+ */
+function teamSport(team: AnyObj) {
+  return String(
+    team?.sport ||
+    team?.sportType ||
+    team?.category?.sport ||
+    team?.league?.sport ||
+    ""
+  ).toLowerCase();
+}
+
+/*
+ * 스포츠가 같은 팀인지 확인
+ */
+function isSameSport(
+  team: AnyObj,
+  wantedSport: string
+) {
+  const actual = teamSport(team);
+  const wanted = normalizeSport(wantedSport);
+
+  if (!actual) return false;
+
+  if (wanted === "baseball") {
+    return (
+      actual.includes("baseball")
+    );
+  }
+
+  if (wanted === "football") {
+    return (
+      actual.includes("football") ||
+      actual.includes("soccer")
+    );
+  }
+
+  if (wanted === "basketball") {
+    return actual.includes("basketball");
+  }
+
+  if (wanted === "volleyball") {
+    return actual.includes("volleyball");
+  }
+
+  return actual === wanted;
+}
+
+/*
+ * 팀 이름 정규화
+ */
 function normalizeName(name: any) {
   return String(name || "")
     .toLowerCase()
@@ -42,134 +136,189 @@ function normalizeName(name: any) {
     .replace(/[^a-z0-9가-힣]/g, "");
 }
 
-function sportMatches(team: any, sport: string) {
-  const wanted = String(sport || "").toLowerCase();
+/*
+ * Fixture 상태
+ *
+ * 우리는 경기 시작 전만 분석한다.
+ */
+function isNotStarted(fixture: AnyObj) {
+  const status = fixture?.status;
 
-  const value = String(
-    team?.sport ||
-    team?.sportType ||
-    team?.category ||
-    ""
-  ).toLowerCase();
+  if (!status) return false;
 
-  if (!wanted) return true;
+  const type =
+    String(status?.type || "")
+      .toLowerCase();
 
-  const aliases: Record<string, string[]> = {
-    baseball: ["baseball"],
-    football: ["football", "soccer"],
-    basketball: ["basketball"],
-    volleyball: ["volleyball"],
-  };
+  const description =
+    String(status?.description || "")
+      .toLowerCase();
 
-  return (aliases[wanted] || [wanted]).some(
-    x => value.includes(x)
+  const code = Number(
+    status?.code
+  );
+
+  return (
+    type === "notstarted" ||
+    type === "scheduled" ||
+    type === "pending" ||
+    description.includes("not started") ||
+    description.includes("scheduled") ||
+    code === 0
   );
 }
 
 /*
- * 검색 결과에서 팀 후보를 찾는다.
- *
- * 중요한 점:
- * 특정 팀명을 코드에 넣지 않는다.
- *
- * 먼저:
- *   "콜로라도 MLB"
- * 를 검색하고,
- * 안 나오면:
- *   "콜로라도"
- * 를 검색한다.
+ * 두 팀이 실제로 맞붙는 Fixture인지 확인
  */
-async function searchTeam(
+function teamsMatch(
+  fixture: AnyObj,
+  teamA: AnyObj,
+  teamB: AnyObj
+) {
+  const homeId =
+    fixture?.home?.id;
+
+  const awayId =
+    fixture?.away?.id;
+
+  const a = Number(teamA?.id);
+  const b = Number(teamB?.id);
+
+  return (
+    (homeId === a && awayId === b) ||
+    (homeId === b && awayId === a)
+  );
+}
+
+/*
+ * Fixture 간단 정보
+ */
+function summarizeFixture(
+  fixture: AnyObj
+) {
+  return {
+    id: fixture?.id ?? null,
+
+    startTime:
+      fixture?.startTime ?? null,
+
+    status:
+      fixture?.status ?? null,
+
+    home:
+      fixture?.home?.name ?? null,
+
+    homeId:
+      fixture?.home?.id ?? null,
+
+    away:
+      fixture?.away?.name ?? null,
+
+    awayId:
+      fixture?.away?.id ?? null,
+  };
+}
+
+/*
+ * SportsAPI 검색
+ *
+ * 여기서는 검색 결과를 바로 선택하지 않는다.
+ */
+async function searchCandidates(
   name: string,
   sport: string,
-  league: string,
   key: string
 ) {
   const queries = [
-    `${name} ${league}`,
-    `${name} ${sport}`,
     name,
+
+    name
+      .replace(/FC/gi, "")
+      .trim(),
+
+    name
+      .replace(/MLB/gi, "")
+      .trim(),
+
+    name
+      .replace(/NPB/gi, "")
+      .trim(),
+
+    name
+      .replace(/KBO/gi, "")
+      .trim(),
+
+    name
+      .replace(/baseball/gi, "")
+      .trim(),
   ];
 
-  const attempts: any[] = [];
+  const uniqueQueries = [
+    ...new Set(
+      queries.filter(Boolean)
+    ),
+  ];
 
-  for (const q of [...new Set(queries)]) {
+  const allCandidates: AnyObj[] = [];
+
+  const debug: AnyObj[] = [];
+
+  for (const q of uniqueQueries) {
     try {
-      const raw = await api(
+      const result = await api(
         `/search?q=${encodeURIComponent(q)}`,
         key
       );
 
-      const results = arr(raw);
+      const results = arr(result);
 
       const teams = results.filter(
-        (x: any) => x?.type === "team"
+        (x: AnyObj) =>
+          x?.type === "team"
       );
 
-      const sportTeams = teams.filter(
-        (x: any) =>
-          sportMatches(x, sport)
-      );
+      const sportTeams =
+        teams.filter((team: AnyObj) =>
+          isSameSport(
+            team,
+            sport
+          )
+        );
 
-      attempts.push({
+      for (const team of sportTeams) {
+        if (
+          !allCandidates.some(
+            x => Number(x.id) === Number(team.id)
+          )
+        ) {
+          allCandidates.push(team);
+        }
+      }
+
+      debug.push({
         query: q,
         totalResults: results.length,
 
-        teams: teams.slice(0, 30).map(
-          (x: any) => ({
+        teams: teams
+          .slice(0, 20)
+          .map((x: AnyObj) => ({
             id: x?.id,
             name: x?.name,
             sport: x?.sport,
-            league:
-              x?.league?.name ??
-              x?.league ??
-              null,
-          })
-        ),
+          })),
 
         sportTeams:
-          sportTeams.slice(0, 30).map(
-            (x: any) => ({
+          sportTeams
+            .slice(0, 20)
+            .map((x: AnyObj) => ({
               id: x?.id,
               name: x?.name,
               sport: x?.sport,
-              league:
-                x?.league?.name ??
-                x?.league ??
-                null,
-            })
-          ),
+            })),
       });
-
-      if (sportTeams.length > 0) {
-        const target =
-          normalizeName(name);
-
-        sportTeams.sort(
-          (a: any, b: any) => {
-            const an =
-              normalizeName(a?.name);
-
-            const bn =
-              normalizeName(b?.name);
-
-            const aExact =
-              an === target ? 1 : 0;
-
-            const bExact =
-              bn === target ? 1 : 0;
-
-            return bExact - aExact;
-          }
-        );
-
-        return {
-          team: sportTeams[0],
-          attempts,
-        };
-      }
     } catch (e: any) {
-      attempts.push({
+      debug.push({
         query: q,
         error:
           e?.message ||
@@ -179,88 +328,147 @@ async function searchTeam(
   }
 
   return {
-    team: null,
-    attempts,
+    candidates: allCandidates,
+    debug,
   };
 }
 
-function isNotStarted(f: any) {
-  const status = f?.status;
-
-  if (!status) return false;
-
-  const type =
-    String(
-      status?.type || ""
-    ).toLowerCase();
-
-  const description =
-    String(
-      status?.description || ""
-    ).toLowerCase();
-
-  return (
-    type === "notstarted" ||
-    type === "scheduled" ||
-    type === "pending" ||
-    description.includes("not started") ||
-    description.includes("scheduled") ||
-    Number(status?.code) === 0
+/*
+ * 후보 팀의 upcoming 경기 조회
+ */
+async function getUpcoming(
+  teamId: number,
+  key: string
+) {
+  const result = await api(
+    `/teams/${teamId}/fixtures?type=upcoming&page=0`,
+    key
   );
+
+  return arr(result);
 }
 
-function namesMatch(
-  f: any,
-  homeTeam: any,
-  awayTeam: any
+/*
+ * 상대팀과 실제 예정 경기를 찾는다.
+ *
+ * 이것이 이번 코드의 핵심이다.
+ */
+async function findTeamByOpponent(
+  teamCandidates: AnyObj[],
+  opponentCandidates: AnyObj[],
+  sport: string,
+  key: string
 ) {
-  const homeId =
-    f?.home?.id;
+  const debug: AnyObj[] = [];
 
-  const awayId =
-    f?.away?.id;
+  for (const homeTeam of teamCandidates) {
+    let fixtures: AnyObj[] = [];
 
-  return (
-    (homeId === homeTeam.id &&
-      awayId === awayTeam.id) ||
-    (homeId === awayTeam.id &&
-      awayId === homeTeam.id)
-  );
-}
+    try {
+      fixtures =
+        await getUpcoming(
+          Number(homeTeam.id),
+          key
+        );
+    } catch (e: any) {
+      debug.push({
+        team: homeTeam,
+        error:
+          e?.message ||
+          "upcoming 조회 실패",
+      });
 
-function leagueMatches(
-  f: any,
-  league: string
-) {
-  if (!league) return true;
+      continue;
+    }
 
-  const target =
-    normalizeName(league);
+    for (const fixture of fixtures) {
+      if (
+        !isNotStarted(fixture)
+      ) {
+        continue;
+      }
 
-  const values = [
-    f?.league?.name,
-    f?.league?.slug,
-    f?.tournament?.name,
-    f?.tournament?.slug,
-  ]
-    .filter(Boolean)
-    .map(normalizeName);
+      /*
+       * 후보 원정팀 중
+       * Fixture의 상대팀과 일치하는 팀을 찾는다.
+       */
+      const opponent =
+        opponentCandidates.find(
+          (candidate: AnyObj) =>
+            teamsMatch(
+              fixture,
+              homeTeam,
+              candidate
+            )
+        );
 
-  return values.some(
-    x =>
-      x === target ||
-      x.includes(target) ||
-      target.includes(x)
-  );
+      if (opponent) {
+        return {
+          homeTeam,
+          awayTeam: opponent,
+          fixture,
+
+          debug: [
+            ...debug,
+
+            {
+              selected: true,
+
+              homeTeam: {
+                id: homeTeam.id,
+                name: homeTeam.name,
+              },
+
+              awayTeam: {
+                id: opponent.id,
+                name: opponent.name,
+              },
+
+              fixture:
+                summarizeFixture(
+                  fixture
+                ),
+            },
+          ],
+        };
+      }
+    }
+
+    debug.push({
+      team: {
+        id: homeTeam.id,
+        name: homeTeam.name,
+      },
+
+      upcomingCount:
+        fixtures.length,
+
+      upcomingSample:
+        fixtures
+          .slice(0, 10)
+          .map(
+            summarizeFixture
+          ),
+    });
+  }
+
+  return {
+    homeTeam: null,
+    awayTeam: null,
+    fixture: null,
+    debug,
+  };
 }
 
 function score(
-  f: any,
+  fixture: AnyObj,
   side: "home" | "away"
 ) {
   const s =
-    f?.[side + "Score"] ||
-    f?.score?.[side] ||
+    fixture?.[
+      side + "Score"
+    ] ||
+    fixture?.score?.[side] ||
     {};
 
   return (
@@ -271,42 +479,9 @@ function score(
   );
 }
 
-function summarizeFixture(f: any) {
-  return {
-    id: f?.id ?? null,
-
-    startTime:
-      f?.startTime ?? null,
-
-    status:
-      f?.status ?? null,
-
-    home:
-      f?.home?.name ?? null,
-
-    homeId:
-      f?.home?.id ?? null,
-
-    away:
-      f?.away?.name ?? null,
-
-    awayId:
-      f?.away?.id ?? null,
-
-    league:
-      f?.league?.name ??
-      f?.league ??
-      null,
-
-    homeScore:
-      score(f, "home"),
-
-    awayScore:
-      score(f, "away"),
-  };
-}
-
-export async function GET(req: Request) {
+export async function GET(
+  req: Request
+) {
   const key =
     process.env.SPORTSAPI_KEY;
 
@@ -321,20 +496,23 @@ export async function GET(req: Request) {
     );
   }
 
-  const u =
+  const url =
     new URL(req.url);
 
   const home =
-    u.searchParams.get("home") || "";
+    url.searchParams.get(
+      "home"
+    ) || "";
 
   const away =
-    u.searchParams.get("away") || "";
+    url.searchParams.get(
+      "away"
+    ) || "";
 
   const sport =
-    u.searchParams.get("sport") || "";
-
-  const league =
-    u.searchParams.get("league") || "";
+    url.searchParams.get(
+      "sport"
+    ) || "";
 
   if (!home || !away) {
     return Response.json(
@@ -360,201 +538,137 @@ export async function GET(req: Request) {
 
   try {
     /*
-     * 1. 팀 자동 검색
-     *
-     * 검색:
-     *   팀명 + 리그
-     *   팀명 + 스포츠
-     *   팀명
+     * --------------------------------
+     * 1. 홈팀 후보 검색
+     * --------------------------------
      */
-    const [
-      homeSearch,
-      awaySearch,
-    ] = await Promise.all([
-      searchTeam(
+    const homeSearch =
+      await searchCandidates(
         home,
         sport,
-        league,
         key
-      ),
+      );
 
-      searchTeam(
+    /*
+     * --------------------------------
+     * 2. 원정팀 후보 검색
+     * --------------------------------
+     */
+    const awaySearch =
+      await searchCandidates(
         away,
         sport,
-        league,
         key
-      ),
-    ]);
+      );
 
-    const ht =
-      homeSearch.team;
-
-    const at =
-      awaySearch.team;
-
-    if (!ht || !at) {
+    /*
+     * --------------------------------
+     * 검색 결과가 없으면
+     * 잘못된 팀을 임의 선택하지 않는다.
+     * --------------------------------
+     */
+    if (
+      homeSearch.candidates.length === 0 ||
+      awaySearch.candidates.length === 0
+    ) {
       return Response.json({
         ok: false,
         matched: false,
 
         error:
-          "SportsAPI에서 해당 스포츠의 두 팀을 찾지 못했습니다.",
+          "SportsAPI에서 해당 스포츠의 팀 후보를 충분히 찾지 못했습니다.",
 
         requested: {
           home,
           away,
           sport,
-          league,
         },
 
         debug: {
           homeSearch:
-            homeSearch.attempts,
+            homeSearch.debug,
 
           awaySearch:
-            awaySearch.attempts,
+            awaySearch.debug,
+
+          homeCandidateCount:
+            homeSearch.candidates.length,
+
+          awayCandidateCount:
+            awaySearch.candidates.length,
         },
       });
     }
 
     /*
-     * 2. 두 팀의 예정 경기 가져오기
+     * --------------------------------
+     * 3. 후보 팀들의 실제 예정 경기에서
+     * 상대팀을 찾는다.
+     * --------------------------------
      */
-    const [
-      homeFixturesRaw,
-      awayFixturesRaw,
-    ] = await Promise.all([
-      api(
-        `/teams/${ht.id}/fixtures?type=upcoming&page=0`,
+    const match =
+      await findTeamByOpponent(
+        homeSearch.candidates,
+        awaySearch.candidates,
+        sport,
         key
-      ),
-
-      api(
-        `/teams/${at.id}/fixtures?type=upcoming&page=0`,
-        key
-      ),
-    ]);
-
-    const homeFixtures =
-      arr(homeFixturesRaw);
-
-    const awayFixtures =
-      arr(awayFixturesRaw);
-
-    /*
-     * 3. 두 팀이 실제로 맞붙는
-     *    경기만 남긴다.
-     */
-    const matching =
-      [
-        ...homeFixtures,
-        ...awayFixtures,
-      ]
-        .filter(
-          (f: any) =>
-            namesMatch(
-              f,
-              ht,
-              at
-            )
-        );
-
-    /*
-     * 4. 리그가 전달된 경우
-     *    리그도 확인한다.
-     */
-    const leagueCandidates =
-      matching.filter(
-        (f: any) =>
-          leagueMatches(
-            f,
-            league
-          )
       );
 
     /*
-     * 5. 시작 전 경기만 사용
+     * --------------------------------
+     * 4. 실제 경기 못 찾음
+     * --------------------------------
      */
-    const candidates =
-      leagueCandidates
-        .filter(
-          (f: any) =>
-            isNotStarted(f)
-        )
-        .sort(
-          (a: any, b: any) =>
-            String(
-              a?.startTime || ""
-            ).localeCompare(
-              String(
-                b?.startTime || ""
-              )
-            )
-        );
-
-    const fixture =
-      candidates[0] || null;
-
-    if (!fixture) {
+    if (!match.fixture) {
       return Response.json({
         ok: false,
         matched: false,
 
         error:
-          "두 팀 사이에 현재 분석 가능한 경기(아직 시작하지 않은 경기)를 찾지 못했습니다.",
+          "두 팀 후보 중 실제로 서로 맞붙는 경기(경기 시작 전)를 찾지 못했습니다.",
 
         requested: {
           home,
           away,
           sport,
-          league,
-        },
-
-        teams: {
-          home: {
-            id: ht.id,
-            name: ht.name,
-            sport: ht.sport,
-          },
-
-          away: {
-            id: at.id,
-            name: at.name,
-            sport: at.sport,
-          },
         },
 
         debug: {
-          homeUpcomingCount:
-            homeFixtures.length,
-
-          awayUpcomingCount:
-            awayFixtures.length,
-
-          allMatching:
-            matching.map(
-              summarizeFixture
+          homeCandidates:
+            homeSearch.candidates.map(
+              (x: AnyObj) => ({
+                id: x.id,
+                name: x.name,
+                sport: x.sport,
+              })
             ),
 
-          leagueCandidates:
-            leagueCandidates.map(
-              summarizeFixture
+          awayCandidates:
+            awaySearch.candidates.map(
+              (x: AnyObj) => ({
+                id: x.id,
+                name: x.name,
+                sport: x.sport,
+              })
             ),
 
-          finalCandidates:
-            candidates.map(
-              summarizeFixture
-            ),
+          matching:
+            match.debug,
         },
       });
     }
 
-    /*
-     * 6. 실제 경기 상세 데이터
-     */
-    const id =
+    const fixture =
+      match.fixture;
+
+    const fixtureId =
       fixture.id;
 
+    /*
+     * --------------------------------
+     * 5. 실제 Fixture 상세 데이터
+     * --------------------------------
+     */
     const [
       detail,
       lineups,
@@ -564,81 +678,158 @@ export async function GET(req: Request) {
       awayRecent,
     ] = await Promise.all([
       api(
-        `/fixtures/${id}`,
+        `/fixtures/${fixtureId}`,
         key
       ).catch(
         () => null
       ),
 
       api(
-        `/fixtures/${id}/lineups`,
+        `/fixtures/${fixtureId}/lineups`,
         key
       ).catch(
         () => null
       ),
 
       api(
-        `/fixtures/${id}/statistics`,
+        `/fixtures/${fixtureId}/statistics`,
         key
       ).catch(
         () => null
       ),
 
       api(
-        `/fixtures/${id}/h2h`,
+        `/fixtures/${fixtureId}/h2h`,
         key
       ).catch(
         () => null
       ),
 
-      api(
-        `/teams/${ht.id}/fixtures?type=recent&page=0`,
+      getUpcoming(
+        Number(
+          match.homeTeam.id
+        ),
         key
       ).catch(
-        () => null
+        () => []
       ),
 
       api(
-        `/teams/${at.id}/fixtures?type=recent&page=0`,
+        `/teams/${match.awayTeam.id}/fixtures?type=recent&page=0`,
         key
       ).catch(
-        () => null
+        () => []
       ),
     ]);
 
-    const homeRecentList =
+    /*
+     * --------------------------------
+     * 6. 최근 경기 요약
+     * --------------------------------
+     */
+    const recentHome =
       arr(homeRecent)
         .slice(0, 20)
         .map(
-          summarizeFixture
+          (f: AnyObj) => ({
+            id: f?.id,
+            startTime:
+              f?.startTime,
+
+            status:
+              f?.status,
+
+            home:
+              f?.home?.name,
+
+            away:
+              f?.away?.name,
+
+            homeScore:
+              score(
+                f,
+                "home"
+              ),
+
+            awayScore:
+              score(
+                f,
+                "away"
+              ),
+          })
         );
 
-    const awayRecentList =
+    const recentAway =
       arr(awayRecent)
         .slice(0, 20)
         .map(
-          summarizeFixture
+          (f: AnyObj) => ({
+            id: f?.id,
+            startTime:
+              f?.startTime,
+
+            status:
+              f?.status,
+
+            home:
+              f?.home?.name,
+
+            away:
+              f?.away?.name,
+
+            homeScore:
+              score(
+                f,
+                "home"
+              ),
+
+            awayScore:
+              score(
+                f,
+                "away"
+              ),
+          })
         );
 
+    /*
+     * --------------------------------
+     * 7. 성공
+     * --------------------------------
+     */
     return Response.json({
       ok: true,
-
       matched: true,
 
-      fixtureId: id,
-
-      sport,
-
-      league,
+      fixtureId,
 
       requested: {
         home,
         away,
+        sport,
       },
 
       teams: {
-        home: ht,
-        away: at,
+        home: {
+          id:
+            match.homeTeam.id,
+
+          name:
+            match.homeTeam.name,
+
+          sport:
+            match.homeTeam.sport,
+        },
+
+        away: {
+          id:
+            match.awayTeam.id,
+
+          name:
+            match.awayTeam.name,
+
+          sport:
+            match.awayTeam.sport,
+        },
       },
 
       fixture,
@@ -663,33 +854,22 @@ export async function GET(req: Request) {
 
       recentSummary: {
         home:
-          homeRecentList,
+          recentHome,
 
         away:
-          awayRecentList,
+          recentAway,
       },
 
       debug: {
-        selectedHomeTeam: {
-          id: ht.id,
-          name: ht.name,
-          sport: ht.sport,
-        },
+        message:
+          "검색 후보 → 실제 상대 경기 → 시작 전 Fixture 순서로 매칭되었습니다.",
 
-        selectedAwayTeam: {
-          id: at.id,
-          name: at.name,
-          sport: at.sport,
-        },
-
-        requestedLeague:
-          league,
-
-        candidateCount:
-          candidates.length,
+        selectedFixture:
+          summarizeFixture(
+            fixture
+          ),
       },
     });
-
   } catch (e: any) {
     return Response.json(
       {
@@ -699,13 +879,6 @@ export async function GET(req: Request) {
         error:
           e?.message ||
           "match lookup failed",
-
-        requested: {
-          home,
-          away,
-          sport,
-          league,
-        },
       },
       { status: 502 }
     );
