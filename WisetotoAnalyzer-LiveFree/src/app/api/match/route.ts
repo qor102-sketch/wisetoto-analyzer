@@ -13,82 +13,50 @@ function arr(x: any): any[] {
 }
 
 /*
- * -----------------------------------------
  * SportsAPI 공통 호출
- * -----------------------------------------
  */
 async function api(
   path: string,
-  key: string,
-  retry = 2
+  key: string
 ) {
-  let lastError: any = null;
+  const r = await fetch(
+    BASE + path,
+    {
+      headers: {
+        Authorization: `Bearer ${key}`,
+      },
+      cache: "no-store",
+    },
+  );
 
-  for (
-    let attempt = 0;
-    attempt <= retry;
-    attempt++
-  ) {
-    try {
-      const r = await fetch(
-        BASE + path,
-        {
-          headers: {
-            Authorization: `Bearer ${key}`,
-          },
-          cache: "no-store",
-        }
-      );
+  const text = await r.text();
 
-      const text = await r.text();
+  let j: any;
 
-      let j: any;
-
-      try {
-        j = JSON.parse(text);
-      } catch {
-        j = {
-          raw: text,
-        };
-      }
-
-      if (!r.ok) {
-        throw new Error(
-          j?.error?.message ||
-            j?.message ||
-            `SportsAPI ${r.status}`
-        );
-      }
-
-      return j?.data ?? j;
-    } catch (e: any) {
-      lastError = e;
-
-      /*
-       * 잠깐 기다렸다가 재시도
-       */
-      if (attempt < retry) {
-        await new Promise(
-          (resolve) =>
-            setTimeout(
-              resolve,
-              500 * (attempt + 1)
-            )
-        );
-      }
-    }
+  try {
+    j = JSON.parse(text);
+  } catch {
+    j = {
+      raw: text,
+    };
   }
 
-  throw lastError;
+  if (!r.ok) {
+    throw new Error(
+      j?.error?.message ||
+        j?.message ||
+        `SportsAPI ${r.status}`,
+    );
+  }
+
+  return j?.data ?? j;
 }
 
 /*
- * -----------------------------------------
- * 경기 시작 전인지 확인
- * -----------------------------------------
+ * 경기 상태가 시작 전인지 확인
  */
 function isNotStarted(
-  fixture: AnyObj
+  fixture: AnyObj,
 ) {
   const status =
     fixture?.status;
@@ -99,17 +67,17 @@ function isNotStarted(
 
   const type =
     String(
-      status?.type || ""
+      status?.type || "",
     ).toLowerCase();
 
   const description =
     String(
-      status?.description || ""
+      status?.description || "",
     ).toLowerCase();
 
   const code =
     Number(
-      status?.code
+      status?.code,
     );
 
   return (
@@ -117,26 +85,24 @@ function isNotStarted(
     type === "scheduled" ||
     type === "pending" ||
     description.includes(
-      "not started"
+      "not started",
     ) ||
     description.includes(
-      "scheduled"
+      "scheduled",
     ) ||
     code === 0
   );
 }
 
 /*
- * -----------------------------------------
- * 실제 현재 시각 이후 경기인지 확인
- * -----------------------------------------
+ * 실제 현재 시각보다 미래인 경기인지 확인
  */
 function isFutureFixture(
-  fixture: AnyObj
+  fixture: AnyObj,
 ) {
   if (
     !isNotStarted(
-      fixture
+      fixture,
     )
   ) {
     return false;
@@ -151,12 +117,12 @@ function isFutureFixture(
 
   const timestamp =
     new Date(
-      startTime
+      startTime,
     ).getTime();
 
   if (
     !Number.isFinite(
-      timestamp
+      timestamp,
     )
   ) {
     return false;
@@ -168,12 +134,10 @@ function isFutureFixture(
 }
 
 /*
- * -----------------------------------------
  * Fixture 요약
- * -----------------------------------------
  */
 function summarizeFixture(
-  fixture: AnyObj
+  fixture: AnyObj,
 ) {
   return {
     id:
@@ -215,26 +179,22 @@ function summarizeFixture(
 }
 
 /*
- * -----------------------------------------
- * 팀 검색 결과에서 team만 추출
- * -----------------------------------------
+ * 검색 결과에서 팀만 추출
  */
 function extractTeams(
-  raw: any
+  raw: any,
 ) {
   return arr(raw).filter(
     (item: AnyObj) =>
-      item?.type === "team"
+      item?.type === "team",
   );
 }
 
 /*
- * -----------------------------------------
- * 팀 ID 중복 제거
- * -----------------------------------------
+ * 팀 ID 기준 중복 제거
  */
 function uniqueTeams(
-  teams: AnyObj[]
+  teams: AnyObj[],
 ) {
   const map =
     new Map<
@@ -247,7 +207,7 @@ function uniqueTeams(
   ) {
     const id =
       Number(
-        team?.id
+        team?.id,
       );
 
     if (
@@ -256,7 +216,7 @@ function uniqueTeams(
     ) {
       map.set(
         id,
-        team
+        team,
       );
     }
   }
@@ -267,82 +227,11 @@ function uniqueTeams(
 }
 
 /*
- * -----------------------------------------
- * 가상/특수 팀 판별
- *
- * 실제 프로팀을 우선적으로 검사하기 위한
- * 우선순위 계산
- * -----------------------------------------
- */
-function teamPriority(
-  team: AnyObj
-) {
-  const name =
-    String(
-      team?.name || ""
-    ).toLowerCase();
-
-  let score = 100;
-
-  const badWords = [
-    "selection",
-    "academy",
-    "cyber",
-    "u12",
-    "u13",
-    "u14",
-    "u15",
-    "u16",
-    "u17",
-    "u18",
-    "u19",
-    "u20",
-    "u21",
-    "u23",
-    "u24",
-    "g-league",
-    "g league",
-    "nba football",
-    "juvenil",
-    "youth",
-    "women",
-    "women's",
-    "reserve",
-    "reserves",
-  ];
-
-  for (
-    const word of badWords
-  ) {
-    if (
-      name.includes(word)
-    ) {
-      score -= 50;
-    }
-  }
-
-  /*
-   * 이름이 너무 짧은 특수 검색 결과도
-   * 우선순위를 낮춘다.
-   */
-  if (
-    name.length < 3
-  ) {
-    score -= 20;
-  }
-
-  return score;
-}
-
-/*
- * -----------------------------------------
- * 여러 스포츠 검색
- * -----------------------------------------
- *
- * 특정 팀을 코드에 넣지 않는다.
+ * SportsAPI 검색으로
+ * 테스트 가능한 팀 후보 찾기
  */
 async function discoverTeams(
-  key: string
+  key: string,
 ) {
   const queries = [
     "baseball",
@@ -356,11 +245,9 @@ async function discoverTeams(
     "NHL",
   ];
 
-  const allTeams:
-    AnyObj[] = [];
+  const teams: AnyObj[] = [];
 
-  const searchDebug:
-    AnyObj[] = [];
+  const debug: AnyObj[] = [];
 
   for (
     const query of queries
@@ -369,18 +256,17 @@ async function discoverTeams(
       const raw =
         await api(
           `/search?q=${encodeURIComponent(
-            query
+            query,
           )}`,
           key,
-          1
         );
 
       const found =
         extractTeams(
-          raw
+          raw,
         );
 
-      searchDebug.push({
+      debug.push({
         query,
 
         resultCount:
@@ -405,15 +291,15 @@ async function discoverTeams(
                 sport:
                   team?.sport ??
                   null,
-              })
+              }),
             ),
       });
 
-      allTeams.push(
-        ...found
+      teams.push(
+        ...found,
       );
     } catch (e: any) {
-      searchDebug.push({
+      debug.push({
         query,
 
         error:
@@ -423,41 +309,28 @@ async function discoverTeams(
     }
   }
 
-  const teams =
-    uniqueTeams(
-      allTeams
-    ).sort(
-      (
-        a,
-        b
-      ) =>
-        teamPriority(b) -
-        teamPriority(a)
-    );
-
   return {
-    teams,
+    teams:
+      uniqueTeams(
+        teams,
+      ),
 
-    debug:
-      searchDebug,
+    debug,
   };
 }
 
 /*
- * -----------------------------------------
- * 특정 팀의 upcoming 경기 조회
- * -----------------------------------------
+ * 특정 팀의 예정 경기 조회
  */
 async function getUpcoming(
   teamId: number,
-  key: string
+  key: string,
 ) {
   try {
     const raw =
       await api(
         `/teams/${teamId}/fixtures?type=upcoming&page=0`,
         key,
-        2
       );
 
     return arr(raw);
@@ -467,12 +340,10 @@ async function getUpcoming(
 }
 
 /*
- * -----------------------------------------
- * Fixture 중복 제거
- * -----------------------------------------
+ * Fixture ID 기준 중복 제거
  */
 function uniqueFixtures(
-  fixtures: AnyObj[]
+  fixtures: AnyObj[],
 ) {
   const map =
     new Map<
@@ -485,7 +356,7 @@ function uniqueFixtures(
   ) {
     const id =
       Number(
-        fixture?.id
+        fixture?.id,
       );
 
     if (
@@ -494,7 +365,7 @@ function uniqueFixtures(
     ) {
       map.set(
         id,
-        fixture
+        fixture,
       );
     }
   }
@@ -505,240 +376,33 @@ function uniqueFixtures(
 }
 
 /*
- * -----------------------------------------
- * 경기 시간순 정렬
- * -----------------------------------------
+ * 경기 시작 시간 순으로 정렬
  */
 function sortByStartTime(
-  fixtures: AnyObj[]
+  fixtures: AnyObj[],
 ) {
   return fixtures.sort(
     (
       a,
-      b
+      b,
     ) => {
       return (
         new Date(
-          a?.startTime
+          a?.startTime,
         ).getTime() -
         new Date(
-          b?.startTime
+          b?.startTime,
         ).getTime()
       );
-    }
+    },
   );
 }
 
 /*
- * -----------------------------------------
- * 팀 5개씩 병렬 조회
- *
- * 너무 많은 요청을 한꺼번에 보내지 않는다.
- * -----------------------------------------
- */
-async function collectFixtures(
-  teams: AnyObj[],
-  key: string
-) {
-  const allFixtures:
-    AnyObj[] = [];
-
-  const teamDebug:
-    AnyObj[] = [];
-
-  const batchSize = 5;
-
-  for (
-    let i = 0;
-    i < teams.length;
-    i += batchSize
-  ) {
-    const batch =
-      teams.slice(
-        i,
-        i + batchSize
-      );
-
-    const results =
-      await Promise.all(
-        batch.map(
-          async (
-            team
-          ) => {
-            const teamId =
-              Number(
-                team?.id
-              );
-
-            if (
-              !Number.isFinite(
-                teamId
-              )
-            ) {
-              return {
-                team,
-
-                fixtures:
-                  [],
-
-                future:
-                  [],
-              };
-            }
-
-            const fixtures =
-              await getUpcoming(
-                teamId,
-                key
-              );
-
-            const future =
-              fixtures.filter(
-                isFutureFixture
-              );
-
-            return {
-              team,
-
-              fixtures,
-
-              future,
-            };
-          }
-        )
-      );
-
-    for (
-      const result of results
-    ) {
-      if (
-        result.future.length
-      ) {
-        allFixtures.push(
-          ...result.future
-        );
-      }
-
-      teamDebug.push({
-        team: {
-          id:
-            result.team?.id ??
-            null,
-
-          name:
-            result.team?.name ??
-            null,
-
-          sport:
-            result.team?.sport ??
-            null,
-        },
-
-        upcomingCount:
-          result.fixtures.length,
-
-        futureCount:
-          result.future.length,
-
-        futureSample:
-          result.future
-            .slice(0, 5)
-            .map(
-              summarizeFixture
-            ),
-      });
-    }
-
-    /*
-     * API에 잠깐 쉬는 시간을 준다.
-     */
-    if (
-      i + batchSize <
-      teams.length
-    ) {
-      await new Promise(
-        (resolve) =>
-          setTimeout(
-            resolve,
-            300
-          )
-      );
-    }
-
-    /*
-     * 이미 충분한 경기 후보가 있으면
-     * 불필요한 API 호출을 중단한다.
-     *
-     * 50경기 이상 확보하면
-     * 그중 랜덤 선택이 가능하다.
-     */
-    if (
-      uniqueFixtures(
-        allFixtures
-      ).length >= 50
-    ) {
-      break;
-    }
-  }
-
-  return {
-    fixtures:
-      uniqueFixtures(
-        allFixtures
-      ),
-
-    teamDebug,
-  };
-}
-
-/*
- * -----------------------------------------
- * Fixture 상세 endpoint 안전 조회
- * -----------------------------------------
- */
-async function safeApi(
-  path: string,
-  key: string
-) {
-  try {
-    const data =
-      await api(
-        path,
-        key,
-        1
-      );
-
-    return {
-      ok: true,
-
-      data,
-
-      error:
-        null,
-    };
-  } catch (e: any) {
-    return {
-      ok: false,
-
-      data:
-        null,
-
-      error:
-        e?.message ||
-        "API 조회 실패",
-    };
-  }
-}
-
-/*
- * -----------------------------------------
- * GET
- *
- * /api/match?mode=random
- * -----------------------------------------
+ * GET /api/match?mode=random
  */
 export async function GET(
-  req: Request
+  req: Request,
 ) {
   const key =
     process.env.SPORTSAPI_KEY;
@@ -753,18 +417,18 @@ export async function GET(
       },
       {
         status: 503,
-      }
+      },
     );
   }
 
   const url =
     new URL(
-      req.url
+      req.url,
     );
 
   const mode =
     url.searchParams.get(
-      "mode"
+      "mode",
     ) || "";
 
   if (
@@ -783,13 +447,13 @@ export async function GET(
 
   try {
     /*
-     * =====================================
-     * 1. 여러 스포츠에서 팀 후보 발견
-     * =====================================
+     * --------------------------------
+     * 1. 팀 후보 검색
+     * --------------------------------
      */
     const discovered =
       await discoverTeams(
-        key
+        key,
       );
 
     const teams =
@@ -812,68 +476,118 @@ export async function GET(
     }
 
     /*
-     * =====================================
-     * 2. 후보 팀 순서를 섞는다.
-     *
-     * 우선순위가 높은 실제 팀들이 먼저
-     * 오지만, 같은 팀만 반복하지 않도록
-     * 일부 랜덤성을 준다.
-     * =====================================
+     * --------------------------------
+     * 2. 팀 후보 랜덤 섞기
+     * --------------------------------
      */
-    const prioritized =
-      [...teams].sort(
-        (
-          a,
-          b
-        ) =>
-          teamPriority(b) -
-          teamPriority(a)
-      );
-
-    /*
-     * 상위 후보를 랜덤하게 섞는다.
-     */
-    const topCount =
-      Math.min(
-        40,
-        prioritized.length
-      );
-
-    const topTeams =
-      prioritized.slice(
-        0,
-        topCount
-      );
-
     const shuffledTeams =
-      [...topTeams].sort(
+      [...teams].sort(
         () =>
           Math.random() -
-          0.5
+          0.5,
       );
 
     /*
-     * =====================================
-     * 3. 실제 예정 경기 수집
-     * =====================================
+     * 최대 30개 팀 검사
      */
-    const collected =
-      await collectFixtures(
-        shuffledTeams,
-        key
+    const selectedTeams =
+      shuffledTeams.slice(
+        0,
+        30,
       );
 
+    const allFixtures:
+      AnyObj[] = [];
+
+    const teamDebug:
+      AnyObj[] = [];
+
+    /*
+     * --------------------------------
+     * 3. 각 팀의 upcoming 조회
+     * --------------------------------
+     */
+    for (
+      const team of selectedTeams
+    ) {
+      const teamId =
+        Number(
+          team?.id,
+        );
+
+      if (
+        !Number.isFinite(
+          teamId,
+        )
+      ) {
+        continue;
+      }
+
+      const fixtures =
+        await getUpcoming(
+          teamId,
+          key,
+        );
+
+      const futureFixtures =
+        fixtures.filter(
+          isFutureFixture,
+        );
+
+      if (
+        futureFixtures.length
+      ) {
+        allFixtures.push(
+          ...futureFixtures,
+        );
+      }
+
+      teamDebug.push({
+        team: {
+          id:
+            team?.id ??
+            null,
+
+          name:
+            team?.name ??
+            null,
+
+          sport:
+            team?.sport ??
+            null,
+        },
+
+        upcomingCount:
+          fixtures.length,
+
+        futureCount:
+          futureFixtures.length,
+
+        futureSample:
+          futureFixtures
+            .slice(0, 5)
+            .map(
+              summarizeFixture,
+            ),
+      });
+    }
+
+    /*
+     * --------------------------------
+     * 4. 중복 제거 + 시간순 정렬
+     * --------------------------------
+     */
     const candidates =
       sortByStartTime(
         uniqueFixtures(
-          collected.fixtures
-        )
+          allFixtures,
+        ),
       );
 
     /*
-     * =====================================
-     * 4. 경기 없음
-     * =====================================
+     * --------------------------------
+     * 5. 미래 경기가 없으면 종료
+     * --------------------------------
      */
     if (
       !candidates.length
@@ -882,36 +596,32 @@ export async function GET(
         ok: false,
 
         error:
-          "현재 SportsAPI에서 앞으로 시작할 경기를 찾지 못했습니다.",
+          "현재 확인한 팀들에서 앞으로 시작할 경기를 찾지 못했습니다.",
 
         debug: {
           discoveredTeamCount:
             teams.length,
 
           checkedTeamCount:
-            shuffledTeams.length,
+            selectedTeams.length,
 
           candidateCount:
             0,
 
-          search:
-            discovered.debug,
-
-          teamDebug:
-            collected.teamDebug,
+          teamDebug,
         },
       });
     }
 
     /*
-     * =====================================
-     * 5. 앞으로 있을 경기 중 랜덤 선택
-     * =====================================
+     * --------------------------------
+     * 6. 랜덤 경기 선택
+     * --------------------------------
      */
     const randomIndex =
       Math.floor(
         Math.random() *
-          candidates.length
+          candidates.length,
       );
 
     const fixture =
@@ -920,70 +630,89 @@ export async function GET(
       ];
 
     const fixtureId =
-      Number(
-        fixture?.id
-      );
-
-    if (
-      !Number.isFinite(
-        fixtureId
-      )
-    ) {
-      return Response.json({
-        ok: false,
-
-        error:
-          "랜덤으로 선택한 경기의 Fixture ID가 올바르지 않습니다.",
-
-        debug: {
-          fixture:
-            summarizeFixture(
-              fixture
-            ),
-        },
-      });
-    }
+      fixture?.id;
 
     /*
-     * =====================================
-     * 6. 상세 데이터 수집
-     * =====================================
+     * --------------------------------
+     * 7. 이번 단계에서는
+     *    detail만 실제 호출
      *
-     * 각 API가 실패하더라도
-     * 전체 경기는 정상 반환한다.
+     *    lineups/statistics/h2h는
+     *    호출하지 않는다.
+     * --------------------------------
      */
-    const [
-      detailResult,
-      lineupsResult,
-      statisticsResult,
-      h2hResult,
-    ] =
-      await Promise.all([
-        safeApi(
-          `/fixtures/${fixtureId}`,
-          key
-        ),
+    const detailResult =
+      await api(
+        `/fixtures/${fixtureId}`,
+        key,
+      )
+        .then(
+          (data) => ({
+            ok: true,
 
-        safeApi(
-          `/fixtures/${fixtureId}/lineups`,
-          key
-        ),
+            data,
 
-        safeApi(
-          `/fixtures/${fixtureId}/statistics`,
-          key
-        ),
+            error:
+              null,
+          }),
+        )
+        .catch(
+          (e: any) => ({
+            ok: false,
 
-        safeApi(
-          `/fixtures/${fixtureId}/h2h`,
-          key
-        ),
-      ]);
+            data: null,
+
+            error:
+              e?.message ||
+              "detail 조회 실패",
+          }),
+        );
+
+    const detail =
+      detailResult.data;
 
     /*
-     * =====================================
-     * 7. 정상 반환
-     * =====================================
+     * Rate limit 확인을 위해
+     * 나머지 3개 API는 이번 단계에서
+     * 호출하지 않는다.
+     */
+    const lineupsResult = {
+      ok: false,
+
+      data: null,
+
+      error:
+        "이번 단계에서는 호출하지 않음",
+    };
+
+    const lineups = null;
+
+    const statisticsResult = {
+      ok: false,
+
+      data: null,
+
+      error:
+        "이번 단계에서는 호출하지 않음",
+    };
+
+    const statistics = null;
+
+    const h2hResult = {
+      ok: false,
+
+      data: null,
+
+      error:
+        "이번 단계에서는 호출하지 않음",
+    };
+
+    const h2h = null;
+
+    /*
+     * --------------------------------
+     * 8. 결과 반환
+     * --------------------------------
      */
     return Response.json({
       ok: true,
@@ -998,22 +727,18 @@ export async function GET(
 
       selectedFixture:
         summarizeFixture(
-          fixture
+          fixture,
         ),
 
       fixture,
 
-      detail:
-        detailResult.data,
+      detail,
 
-      lineups:
-        lineupsResult.data,
+      lineups,
 
-      statistics:
-        statisticsResult.data,
+      statistics,
 
-      h2h:
-        h2hResult.data,
+      h2h,
 
       debug: {
         message:
@@ -1023,7 +748,7 @@ export async function GET(
           teams.length,
 
         checkedTeamCount:
-          shuffledTeams.length,
+          selectedTeams.length,
 
         candidateCount:
           candidates.length,
@@ -1032,55 +757,34 @@ export async function GET(
 
         selectedFixture:
           summarizeFixture(
-            fixture
+            fixture,
           ),
 
         candidateSample:
           candidates
             .slice(0, 30)
             .map(
-              summarizeFixture
+              summarizeFixture,
             ),
 
         endpointStatus: {
-          detail: {
-            ok:
-              detailResult.ok,
+          detail:
+            detailResult,
 
-            error:
-              detailResult.error,
-          },
+          lineups:
+            lineupsResult,
 
-          lineups: {
-            ok:
-              lineupsResult.ok,
+          statistics:
+            statisticsResult,
 
-            error:
-              lineupsResult.error,
-          },
-
-          statistics: {
-            ok:
-              statisticsResult.ok,
-
-            error:
-              statisticsResult.error,
-          },
-
-          h2h: {
-            ok:
-              h2hResult.ok,
-
-            error:
-              h2hResult.error,
-          },
+          h2h:
+            h2hResult,
         },
 
         search:
           discovered.debug,
 
-        teamDebug:
-          collected.teamDebug,
+        teamDebug,
       },
     });
   } catch (e: any) {
@@ -1100,7 +804,7 @@ export async function GET(
       },
       {
         status: 502,
-      }
+      },
     );
   }
 }
