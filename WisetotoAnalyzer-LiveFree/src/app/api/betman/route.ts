@@ -251,7 +251,13 @@ function groupSchedules(rows: AnyObj[]) {
       });
     }
 
-    groups.get(key).markets.push({
+    const group = groups.get(key);
+
+    if (!group) {
+      continue;
+    }
+
+    group.markets.push({
       matchSeq: row.matchSeq,
       ...row.market,
       status: row.status,
