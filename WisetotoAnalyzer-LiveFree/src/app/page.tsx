@@ -1310,13 +1310,20 @@ export default function Home() {
   function handicapText(game: BetmanMatch) {
     const list = Array.isArray(game?.handicaps) ? game.handicaps : [];
     if (!list.length) return "-";
-    return list.map((m: any) => marketNumber(m)).filter((x: any) => x !== null).map((x: number) => `${x >= 0 ? "+" : ""}${x}`).join(" / ");
+    return list
+      .map((m: any) => marketNumber(m))
+      .filter((x): x is number => x !== null)
+      .map((x) => `${x >= 0 ? "+" : ""}${x}`)
+      .join(" / ");
   }
 
   function totalText(game: BetmanMatch) {
     const list = Array.isArray(game?.totals) ? game.totals : [];
     if (!list.length) return "-";
-    return list.map((m: any) => marketNumber(m)).filter((x: any) => x !== null).join(" / ");
+    return list
+      .map((m: any) => marketNumber(m))
+      .filter((x): x is number => x !== null)
+      .join(" / ");
   }
 
   async function loadBetmanList() {
