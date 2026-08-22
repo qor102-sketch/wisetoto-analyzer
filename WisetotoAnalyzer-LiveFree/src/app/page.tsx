@@ -403,70 +403,6 @@ function totalConfidence(
 
 
 
-function isFixtureWithinNext72Hours(fixture: any) {
-  const startTime =
-    fixture?.startTime ??
-    fixture?.time ??
-    null;
-
-  if (!startTime) {
-    return false;
-  }
-
-  const startMs =
-    new Date(startTime).getTime();
-
-  if (!Number.isFinite(startMs)) {
-    return false;
-  }
-
-  const now =
-    Date.now();
-
-  const max =
-    now +
-    72 * 60 * 60 * 1000;
-
-  const status =
-    fixture?.status ??
-    {};
-
-  const statusType =
-    String(
-      status?.type ??
-      ""
-    ).toLowerCase();
-
-  const statusDescription =
-    String(
-      status?.description ??
-      ""
-    ).toLowerCase();
-
-  const statusCode =
-    Number(
-      status?.code
-    );
-
-  const notStarted =
-    statusType === "notstarted" ||
-    statusType === "scheduled" ||
-    statusType === "pending" ||
-    statusDescription.includes(
-      "not started"
-    ) ||
-    statusDescription.includes(
-      "scheduled"
-    ) ||
-    statusCode === 0;
-
-  return (
-    notStarted &&
-    startMs > now &&
-    startMs <= max
-  );
-}
-
 function normalizeTeamName(value: unknown) {
   return String(value ?? "").toLowerCase().normalize("NFKC")
     .replace(/\([^)]*\)/g, "").replace(/\[[^\]]*\]/g, "")
@@ -1591,7 +1527,7 @@ export default function Home() {
     });
 
     setStatus(
-      "72시간 이내 미시작 경기 1건 테스트 수집 중…"
+      "가장 가까운 미시작 경기 1건 빠른 테스트 중…"
     );
 
     try {
@@ -1599,7 +1535,7 @@ export default function Home() {
        * 테스트 모드:
        * /api/match?mode=random 호출은 딱 1번만 합니다.
        *
-       * 72시간 이내 / 미시작 필터링은
+       * 미시작 미래 경기 선택은
        * 서버 route.ts가 담당합니다.
        */
       const randomResponse =
@@ -1735,7 +1671,7 @@ export default function Home() {
             combined?.selectedFixture;
 
           setStatus(
-            `테스트 수집 완료 · 72시간 이내 · Fixture #${fixtureId} · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"} · ${
+            `테스트 수집 완료 · 미시작 미래 경기 · Fixture #${fixtureId} · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"} · ${
               earlyBetmanMatch
                 ? "Betman 기준값 적용"
                 : "Betman 매칭 없음"
@@ -1789,7 +1725,7 @@ export default function Home() {
           </div>
 
           <div className="sub">
-            72시간 이내 미시작 경기 1건 빠른 테스트 · SportsAPI + Betman 연결 확인
+            빠른 테스트: 가장 가까운 미시작 경기 · 실전 분석: 72시간 + Betman 기준
           </div>
         </div>
 
@@ -1821,7 +1757,7 @@ export default function Home() {
               )
             }
           >
-            📊 선택 경기 분석
+            📊 실전 경기 분석
           </button>
 
           <span className="small">
