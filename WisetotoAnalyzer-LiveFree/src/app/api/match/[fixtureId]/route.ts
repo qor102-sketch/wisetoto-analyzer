@@ -124,9 +124,7 @@ function isFutureFixture(fixture: AnyObj) {
     status?.description || ""
   ).toLowerCase();
 
-  const code = Number(
-    status?.code
-  );
+  const code = Number(status?.code);
 
   const notStarted =
     type === "notstarted" ||
@@ -208,8 +206,7 @@ export async function GET(
   const { fixtureId } =
     await context.params;
 
-  const id =
-    Number(fixtureId);
+  const id = Number(fixtureId);
 
   if (
     !Number.isInteger(id) ||
@@ -229,22 +226,17 @@ export async function GET(
 
   try {
     /**
-     * ------------------------------------------------
-     * Fixture detail
-     * ------------------------------------------------
-     *
-     * 현재 확인된 안정적인 endpoint:
-     *
-     * /v2/fixtures/{fixtureId}
+     * ================================================
+     * 1. FIXTURE DETAIL
+     * ================================================
      */
-    const result =
-      await api(
-        `/fixtures/${id}`,
-        key
-      );
 
-    const fixture =
-      result.data;
+    const result = await api(
+      `/fixtures/${id}`,
+      key
+    );
+
+    const fixture = result.data;
 
     if (!fixture) {
       return Response.json(
@@ -260,30 +252,117 @@ export async function GET(
       );
     }
 
-    /**
-     * ------------------------------------------------
-     * 기본 검증
-     * ------------------------------------------------
-     */
     const future =
-      isFutureFixture(
-        fixture
-      );
-    let h2h: any = null;
-    try {
-  const h2hResult = await api(
-    `/fixtures/${id}/h2h`,
-    key
-  );
+      isFutureFixture(fixture);
 
-  h2h = h2hResult.data;
-      console.log("H2H OK", h2h);
-} catch (e: any) {
-  console.error(
-    "H2H 조회 실패:",
-    e?.message
-  );
-}
+    /**
+     * ================================================
+     * 2. H2H
+     * ================================================
+     */
+
+    let h2h: any = null;
+
+    let h2hStatus: AnyObj = {
+      ok: false,
+      error: null,
+    };
+
+    try {
+      const h2hResult = await api(
+        `/fixtures/${id}/h2h`,
+        key
+      );
+
+      h2h = h2hResult.data;
+
+      h2hStatus = {
+        ok: true,
+        error: null,
+        rateLimit:
+          h2hResult.rateLimit,
+      };
+    } catch (e: any) {
+      console.error(
+        "H2H 조회 실패:",
+        e?.message
+      );
+
+      h2hStatus = {
+        ok: false,
+        error:
+          e?.message ||
+          "H2H 조회 실패",
+        status:
+          e?.status ?? null,
+        retryAfterMs:
+          e?.retryAfterMs ?? null,
+      };
+    }
+
+    /**
+     * ================================================
+     * 3. STATISTICS
+     * ================================================
+     */
+
+    let statistics: any = null;
+
+    let statisticsStatus: AnyObj = {
+      ok: false,
+      error: null,
+    };
+
+    try {
+      const statisticsResult =
+        await api(
+          `/fixtures/${id}/statistics`,
+          key
+        );
+
+      statistics =
+        statisticsResult.data;
+
+      statisticsStatus = {
+        ok: true,
+        error: null,
+        rateLimit:
+          statisticsResult.rateLimit,
+      };
+    } catch (e: any) {
+      console.error(
+        "Statistics 조회 실패:",
+        e?.message
+      );
+
+      statisticsStatus = {
+        ok: false,
+        error:
+          e?.message ||
+          "Statistics 조회 실패",
+        status:
+          e?.status ?? null,
+        retryAfterMs:
+          e?.retryAfterMs ?? null,
+      };
+    }
+
+    /**
+     * ================================================
+     * 4. LINEUPS
+     * ================================================
+     *
+     * 아직 호출하지 않습니다.
+     * API 요청량을 줄이기 위해 다음 단계에서 추가합니다.
+     */
+
+    const lineups = null;
+
+    /**
+     * ================================================
+     * 5. RESPONSE
+     * ================================================
+     */
 
     return Response.json({
       ok: true,
@@ -299,43 +378,41 @@ export async function GET(
 
       fixture,
 
-      /**
-       * 다음 단계에서 실제 endpoint가
-       * 확인되면 이 부분에 추가합니다.
-       */
-      lineups: null,
+      lineups,
 
       statistics,
 
       h2h,
-      let statistics: any = null;
-
-try {
-  const statisticsResult = await api(
-    `/fixtures/${id}/statistics`,
-    key
-  );
-
-  statistics = statisticsResult.data;
-} catch (e: any) {
-  console.error(
-    "Statistics 조회 실패:",
-    e?.message
-  );
-}
 
       debug: {
         message:
-          "fixture detail 조회 성공",
+          "fixture detail + H2H + statistics 조회 완료",
 
         endpoint:
           `/v2/fixtures/${id}`,
 
-        rateLimit:
-          result.rateLimit,
+        endpointStatus: {
+          detail: {
+            ok: true,
+            rateLimit:
+              result.rateLimit,
+          },
+
+          h2h:
+            h2hStatus,
+
+          statistics:
+            statisticsStatus,
+
+          lineups: {
+            ok: false,
+            error:
+              "아직 호출하지 않음",
+          },
+        },
 
         nextStep:
-          "lineups/statistics/h2h endpoint 확인 후 추가",
+          "statistics 확인 후 lineups 추가",
       },
     });
   } catch (e: any) {
