@@ -1386,16 +1386,57 @@ export default function Home() {
   const analysisFactors =
     analysis.factors;
 
+  const betmanHandicap =
+    chooseBetmanHandicap(
+      betman.matched
+    );
+
+  const betmanTotal =
+    chooseBetmanTotal(
+      betman.matched
+    );
+
+  const displayPicks: Pick[] =
+    analysisPicks.map(
+      (pick) => {
+        if (
+          pick[0].includes("핸디") &&
+          !analysisFactors.scoringUsed &&
+          betmanHandicap
+        ) {
+          return [
+            pick[0],
+            `Betman 기준 ${betmanHandicap.line >= 0 ? "+" : ""}${betmanHandicap.line} · 확률 계산 대기`,
+            50,
+          ];
+        }
+
+        if (
+          pick[0].startsWith("U/O") &&
+          !analysisFactors.scoringUsed &&
+          betmanTotal
+        ) {
+          return [
+            `U/O ${betmanTotal.line}`,
+            "Betman 기준값 확보 · 확률 계산 대기",
+            50,
+          ];
+        }
+
+        return pick;
+      }
+    );
+
   const best =
     Math.max(
-      ...analysisPicks.map(
+      ...displayPicks.map(
         (x) =>
           x[2]
       )
     );
 
   const bestPick =
-    analysisPicks.find(
+    displayPicks.find(
       (x) =>
         x[2] ===
         best
@@ -1528,8 +1569,26 @@ export default function Home() {
         return;
       }
 
+      const baseFixture =
+        randomData?.selectedFixture ??
+        randomData?.fixture ??
+        null;
+
       setStatus(
-        `Fixture #${fixtureId} 선택 · H2H/최근 경기 조회 중…`
+        `Fixture #${fixtureId} 선택 · Betman 핸디/UO 매칭 중…`
+      );
+
+      const earlyBetmanMatch =
+        await loadBetmanForFixture(
+          baseFixture
+        );
+
+      setStatus(
+        `Fixture #${fixtureId} · ${
+          earlyBetmanMatch
+            ? "Betman 기준값 확보"
+            : "Betman 매칭 없음"
+        } · H2H/최근 경기 조회 중…`
       );
 
       try {
@@ -1604,10 +1663,12 @@ export default function Home() {
             combined
               ?.selectedFixture;
 
-          setStatus(`Fixture #${fixtureId} · Betman 핸디/UO 매칭 중…`);
-          const betmanGame = await loadBetmanForFixture(fixture);
           setStatus(
-            `수집 완료 · Fixture #${fixtureId} · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"} · ${betmanGame ? "Betman 기준값 적용" : "Betman 매칭 없음"}`
+            `수집 완료 · Fixture #${fixtureId} · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"} · ${
+              earlyBetmanMatch
+                ? "Betman 기준값 적용"
+                : "Betman 매칭 없음"
+            }`
           );
 
           return;
@@ -1931,8 +1992,10 @@ export default function Home() {
               <b>
                 {analysisFactors
                   .hasRealData
-                  ? "실데이터 반영"
-                  : "대기"}
+                  ? "SportsAPI 실데이터 반영"
+                  : betman.matched
+                    ? "Betman 기준값 확보"
+                    : "대기"}
               </b>
             </div>
           </div>
@@ -1941,17 +2004,22 @@ export default function Home() {
             <h3>
               게임유형별 분석 픽{" "}
               <span className="small">
-                {analysisFactors
-                  .scoringUsed
-                  ? "※ 승패 + 핸디캡 + U/O 실제 최근 득실점 반영"
+                {betman.matched
+                  ? analysisFactors
+                      .scoringUsed
+                    ? "※ Betman 실제 핸디캡/U/O 기준값 + SportsAPI 득실점 반영"
+                    : "※ Betman 기준값 확보 · SportsAPI 득실점 부족"
                   : analysisFactors
-                      .hasRealData
-                    ? "※ 승패에 H2H/Form 반영"
-                    : "※ 데이터 수집 전"}
+                      .scoringUsed
+                    ? "※ Betman 미매칭 · 자체 핸디/UO fallback"
+                    : analysisFactors
+                        .hasRealData
+                      ? "※ 승패에 H2H/Form 반영"
+                      : "※ SportsAPI 분석 데이터 부족"}
               </span>
             </h3>
 
-            {analysisPicks.map(
+            {displayPicks.map(
               (x) => (
                 <div
                   className={
