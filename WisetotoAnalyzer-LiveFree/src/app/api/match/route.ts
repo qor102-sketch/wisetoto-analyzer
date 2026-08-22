@@ -5,67 +5,129 @@ type AnyObj = Record<string, any>;
 function arr(x: any): any[] {
   if (Array.isArray(x)) return x;
   if (Array.isArray(x?.data)) return x.data;
+  if (Array.isArray(x?.items)) return x.items;
+  if (Array.isArray(x?.fixtures)) return x.fixtures;
+  if (Array.isArray(x?.events)) return x.events;
   return [];
 }
 
-async function api(path: string, key: string) {
-  try {
-    const r = await fetch(BASE + path, {
-      headers: {
-        Authorization: `Bearer ${key}`,
-      },
-      cache: "no-store",
-    });
-
-    const text = await r.text();
-
-    let j: any;
-
-    try {
-      j = JSON.parse(text);
-    } catch {
-      j = { raw: text };
-    }
-
-    if (!r.ok) {
-      return {
-        ok: false,
-        data: null,
-        error:
-          j?.error?.message ||
-          j?.message ||
-          `SportsAPI ${r.status}`,
-      };
-    }
-
-    return {
-      ok: true,
-      data: j?.data ?? j,
-      error: null,
-    };
-  } catch (e: any) {
-    return {
-      ok: false,
-      data: null,
-      error:
-        e?.message ||
-        "SportsAPI 요청 실패",
-    };
-  }
+function sleep(ms: number) {
+  return new Promise((resolve) =>
+    setTimeout(resolve, ms)
+  );
 }
 
-function isNotStarted(fixture: AnyObj) {
-  const status = fixture?.status;
+async function api(
+  path: string,
+  key: string,
+  retries = 2
+) {
+  let lastError =
+    "SportsAPI 요청 실패";
 
-  if (!status) return false;
+  for (
+    let attempt = 0;
+    attempt <= retries;
+    attempt++
+  ) {
+    try {
+      const r = await fetch(
+        BASE + path,
+        {
+          headers: {
+            Authorization: `Bearer ${key}`,
+          },
+          cache: "no-store",
+        }
+      );
+
+      const text =
+        await r.text();
+
+      let j: any;
+
+      try {
+        j = JSON.parse(text);
+      } catch {
+        j = {
+          raw: text,
+        };
+      }
+
+      if (!r.ok) {
+        lastError =
+          j?.error?.message ||
+          j?.error ||
+          j?.message ||
+          `SportsAPI ${r.status}`;
+
+        if (
+          r.status === 429 &&
+          attempt < retries
+        ) {
+          await sleep(
+            1000 * (attempt + 1)
+          );
+
+          continue;
+        }
+
+        return {
+          ok: false,
+          data: null,
+          error: lastError,
+          status: r.status,
+        };
+      }
+
+      return {
+        ok: true,
+        data:
+          j?.data ?? j,
+        error: null,
+        status: r.status,
+      };
+    } catch (e: any) {
+      lastError =
+        e?.message ||
+        "SportsAPI 요청 실패";
+
+      if (attempt < retries) {
+        await sleep(
+          500 * (attempt + 1)
+        );
+
+        continue;
+      }
+    }
+  }
+
+  return {
+    ok: false,
+    data: null,
+    error: lastError,
+    status: 0,
+  };
+}
+
+function isNotStarted(
+  fixture: AnyObj
+) {
+  const status =
+    fixture?.status;
+
+  if (!status) {
+    return false;
+  }
 
   const type = String(
     status?.type || ""
   ).toLowerCase();
 
-  const description = String(
-    status?.description || ""
-  ).toLowerCase();
+  const description =
+    String(
+      status?.description || ""
+    ).toLowerCase();
 
   const code = Number(
     status?.code
@@ -75,72 +137,117 @@ function isNotStarted(fixture: AnyObj) {
     type === "notstarted" ||
     type === "scheduled" ||
     type === "pending" ||
-    description.includes("not started") ||
-    description.includes("scheduled") ||
+    description.includes(
+      "not started"
+    ) ||
+    description.includes(
+      "scheduled"
+    ) ||
     code === 0
   );
 }
 
-function isFutureFixture(fixture: AnyObj) {
-  if (!isNotStarted(fixture)) {
+function isFutureFixture(
+  fixture: AnyObj
+) {
+  if (
+    !isNotStarted(fixture)
+  ) {
     return false;
   }
 
-  const startTime = fixture?.startTime;
+  const startTime =
+    fixture?.startTime;
 
   if (!startTime) {
     return false;
   }
 
-  const timestamp = new Date(
-    startTime
-  ).getTime();
+  const timestamp =
+    new Date(
+      startTime
+    ).getTime();
 
-  if (!Number.isFinite(timestamp)) {
+  if (
+    !Number.isFinite(timestamp)
+  ) {
     return false;
   }
 
-  return timestamp > Date.now();
-}
-
-function summarizeFixture(fixture: AnyObj) {
-  return {
-    id: fixture?.id ?? null,
-    startTime: fixture?.startTime ?? null,
-    status: fixture?.status ?? null,
-
-    home:
-      fixture?.home?.name ?? null,
-
-    homeId:
-      fixture?.home?.id ?? null,
-
-    away:
-      fixture?.away?.name ?? null,
-
-    awayId:
-      fixture?.away?.id ?? null,
-
-    sport:
-      fixture?.sport ?? null,
-
-    league:
-      fixture?.league?.name ?? null,
-  };
-}
-
-function extractTeams(raw: any) {
-  return arr(raw).filter(
-    (item: AnyObj) =>
-      item?.type === "team"
+  return (
+    timestamp > Date.now()
   );
 }
 
-function uniqueTeams(teams: AnyObj[]) {
+function summarizeFixture(
+  fixture: AnyObj
+) {
+  return {
+    id:
+      fixture?.id ?? null,
+
+    startTime:
+      fixture?.startTime ??
+      null,
+
+    status:
+      fixture?.status ??
+      null,
+
+    home:
+      fixture?.home?.name ??
+      fixture?.homeTeam?.name ??
+      fixture?.home?.team?.name ??
+      null,
+
+    homeId:
+      fixture?.home?.id ??
+      fixture?.homeTeam?.id ??
+      fixture?.home?.team?.id ??
+      null,
+
+    away:
+      fixture?.away?.name ??
+      fixture?.awayTeam?.name ??
+      fixture?.away?.team?.name ??
+      null,
+
+    awayId:
+      fixture?.away?.id ??
+      fixture?.awayTeam?.id ??
+      fixture?.away?.team?.id ??
+      null,
+
+    sport:
+      fixture?.sport ??
+      null,
+
+    league:
+      fixture?.league?.name ??
+      fixture?.tournament?.name ??
+      null,
+  };
+}
+
+function extractTeams(
+  raw: any
+) {
+  return arr(raw).filter(
+    (item: AnyObj) =>
+      item?.type === "team" ||
+      item?.entityType === "team"
+  );
+}
+
+function uniqueTeams(
+  teams: AnyObj[]
+) {
   const map =
     new Map<number, AnyObj>();
 
-  for (const team of teams) {
+  for (
+    const team of teams
+  ) {
     const id = Number(
       team?.id
     );
@@ -149,18 +256,25 @@ function uniqueTeams(teams: AnyObj[]) {
       Number.isFinite(id) &&
       !map.has(id)
     ) {
-      map.set(id, team);
+      map.set(
+        id,
+        team
+      );
     }
   }
 
-  return [...map.values()];
+  return [
+    ...map.values(),
+  ];
 }
 
-async function discoverTeams(key: string) {
+async function discoverTeams(
+  key: string
+) {
   const queries = [
-    "baseball",
-    "football",
     "basketball",
+    "football",
+    "baseball",
     "volleyball",
     "soccer",
     "MLB",
@@ -169,30 +283,48 @@ async function discoverTeams(key: string) {
     "NHL",
   ];
 
-  const teams: AnyObj[] = [];
-  const debug: AnyObj[] = [];
+  const teams: AnyObj[] =
+    [];
 
-  for (const query of queries) {
-    const result = await api(
-      `/search?q=${encodeURIComponent(query)}`,
-      key
-    );
+  const debug: AnyObj[] =
+    [];
+
+  for (
+    const query of queries
+  ) {
+    const result =
+      await api(
+        `/search?q=${encodeURIComponent(
+          query
+        )}`,
+        key
+      );
 
     if (!result.ok) {
       debug.push({
         query,
+
         resultCount: 0,
+
         teamCount: 0,
+
         sample: [],
+
         error:
           result.error ||
           "검색 실패",
+
+        status:
+          result.status ??
+          null,
       });
 
       continue;
     }
 
-    const raw = result.data;
+    const raw =
+      result.data;
+
     const found =
       extractTeams(raw);
 
@@ -209,20 +341,34 @@ async function discoverTeams(key: string) {
         found
           .slice(0, 10)
           .map(
-            (team: AnyObj) => ({
+            (
+              team: AnyObj
+            ) => ({
               id:
-                team?.id ?? null,
+                team?.id ??
+                null,
 
               name:
-                team?.name ?? null,
+                team?.name ??
+                null,
 
               sport:
-                team?.sport ?? null,
+                team?.sport ??
+                null,
             })
           ),
     });
 
-    teams.push(...found);
+    teams.push(
+      ...found
+    );
+
+    /*
+     * SportsAPI rate limit을
+     * 불필요하게 빠르게 소모하지 않도록
+     * 검색 사이에 짧게 대기합니다.
+     */
+    await sleep(150);
   }
 
   return {
@@ -237,9 +383,20 @@ async function getUpcoming(
   teamId: number,
   key: string
 ) {
-  const pages = [0, 1];
+  const pages = [
+    0,
+    1,
+  ];
 
-  for (const page of pages) {
+  const debug: AnyObj[] =
+    [];
+
+  const allFixtures:
+    AnyObj[] = [];
+
+  for (
+    const page of pages
+  ) {
     const result =
       await api(
         `/teams/${teamId}/fixtures?type=upcoming&page=${page}`,
@@ -247,18 +404,66 @@ async function getUpcoming(
       );
 
     if (!result.ok) {
+      debug.push({
+        page,
+
+        ok: false,
+
+        count: 0,
+
+        error:
+          result.error ??
+          "upcoming 조회 실패",
+
+        status:
+          result.status ??
+          null,
+      });
+
+      /*
+       * Rate limit이면 다음 페이지를
+       * 바로 호출하지 않습니다.
+       */
+      if (
+        result.status === 429
+      ) {
+        await sleep(1200);
+      }
+
       continue;
     }
 
     const fixtures =
       arr(result.data);
 
-    if (fixtures.length > 0) {
-      return fixtures;
+    debug.push({
+      page,
+
+      ok: true,
+
+      count:
+        fixtures.length,
+    });
+
+    if (
+      fixtures.length
+    ) {
+      allFixtures.push(
+        ...fixtures
+      );
     }
+
+    await sleep(150);
   }
 
-  return [];
+  return {
+    fixtures:
+      uniqueFixtures(
+        allFixtures
+      ),
+
+    debug,
+  };
 }
 
 function uniqueFixtures(
@@ -267,7 +472,9 @@ function uniqueFixtures(
   const map =
     new Map<number, AnyObj>();
 
-  for (const fixture of fixtures) {
+  for (
+    const fixture of fixtures
+  ) {
     const id = Number(
       fixture?.id
     );
@@ -276,11 +483,16 @@ function uniqueFixtures(
       Number.isFinite(id) &&
       !map.has(id)
     ) {
-      map.set(id, fixture);
+      map.set(
+        id,
+        fixture
+      );
     }
   }
 
-  return [...map.values()];
+  return [
+    ...map.values(),
+  ];
 }
 
 function sortByStartTime(
@@ -328,7 +540,9 @@ export async function GET(
       "mode"
     ) || "";
 
-  if (mode !== "random") {
+  if (
+    mode !== "random"
+  ) {
     return Response.json({
       ok: false,
 
@@ -342,12 +556,16 @@ export async function GET(
 
   try {
     const discovered =
-      await discoverTeams(key);
+      await discoverTeams(
+        key
+      );
 
     const teams =
       discovered.teams;
 
-    if (!teams.length) {
+    if (
+      !teams.length
+    ) {
       return Response.json({
         ok: false,
 
@@ -361,10 +579,15 @@ export async function GET(
       });
     }
 
+    /*
+     * 우선 실제 경기 데이터가 잘 나오는
+     * 팀을 발견할 수 있도록 팀을 섞습니다.
+     */
     const shuffledTeams =
       [...teams].sort(
         () =>
-          Math.random() - 0.5
+          Math.random() -
+          0.5
       );
 
     const selectedTeams =
@@ -383,19 +606,26 @@ export async function GET(
       const team of selectedTeams
     ) {
       const teamId =
-        Number(team?.id);
+        Number(
+          team?.id
+        );
 
       if (
-        !Number.isFinite(teamId)
+        !Number.isFinite(
+          teamId
+        )
       ) {
         continue;
       }
 
-      const fixtures =
+      const upcoming =
         await getUpcoming(
           teamId,
           key
         );
+
+      const fixtures =
+        upcoming.fixtures;
 
       const futureFixtures =
         fixtures.filter(
@@ -413,13 +643,16 @@ export async function GET(
       teamDebug.push({
         team: {
           id:
-            team?.id ?? null,
+            team?.id ??
+            null,
 
           name:
-            team?.name ?? null,
+            team?.name ??
+            null,
 
           sport:
-            team?.sport ?? null,
+            team?.sport ??
+            null,
         },
 
         upcomingCount:
@@ -434,7 +667,16 @@ export async function GET(
             .map(
               summarizeFixture
             ),
+
+        apiDebug:
+          upcoming.debug,
       });
+
+      /*
+       * 팀 하나 조회 후에도 너무 빠르게
+       * 다음 팀을 요청하지 않도록 대기합니다.
+       */
+      await sleep(200);
     }
 
     const candidates =
@@ -444,7 +686,9 @@ export async function GET(
         )
       );
 
-    if (!candidates.length) {
+    if (
+      !candidates.length
+    ) {
       return Response.json({
         ok: false,
 
@@ -460,6 +704,9 @@ export async function GET(
 
           candidateCount: 0,
 
+          search:
+            discovered.debug,
+
           teamDebug,
         },
       });
@@ -472,10 +719,14 @@ export async function GET(
       );
 
     const fixture =
-      candidates[randomIndex];
+      candidates[
+        randomIndex
+      ];
 
     const fixtureId =
-      Number(fixture?.id);
+      Number(
+        fixture?.id
+      );
 
     if (
       !Number.isFinite(
@@ -508,11 +759,14 @@ export async function GET(
 
     /*
      * 중요:
-     * SportsAPI detail endpoint는
-     * /fixture/:id 를 사용합니다.
      *
-     * 기존의 /fixtures/:id 가 아니라
-     * 단수형 /fixture/:id 로 호출합니다.
+     * detail endpoint는
+     *
+     * /fixture/:id
+     *
+     * 를 사용합니다.
+     *
+     * 기존 /fixtures/:id가 아닙니다.
      */
     const detailResult =
       await api(
@@ -523,7 +777,8 @@ export async function GET(
     const detail:
       AnyObj | null =
       detailResult.ok
-        ? detailResult.data ?? null
+        ? detailResult.data ??
+          null
         : null;
 
     return Response.json({
