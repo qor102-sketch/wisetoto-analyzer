@@ -4,6 +4,7 @@ type AnyObj = Record<string, any>;
 
 const MAX_SEARCH_REQUESTS = 4;
 const MAX_TEAM_REQUESTS = 4;
+const UPCOMING_WINDOW_MS = 72 * 60 * 60 * 1000;
 
 /**
  * 무료 플랜 10 req/min을 기준으로
@@ -437,12 +438,10 @@ function isNotStarted(
   );
 }
 
-function isFutureFixture(
+function isUpcomingWithin72Hours(
   fixture: AnyObj
 ) {
-  if (
-    !isNotStarted(fixture)
-  ) {
+  if (!isNotStarted(fixture)) {
     return false;
   }
 
@@ -454,19 +453,17 @@ function isFutureFixture(
   }
 
   const timestamp =
-    new Date(
-      startTime
-    ).getTime();
+    new Date(startTime).getTime();
 
-  if (
-    !Number.isFinite(timestamp)
-  ) {
+  if (!Number.isFinite(timestamp)) {
     return false;
   }
 
+  const now = Date.now();
+
   return (
-    timestamp >
-    Date.now()
+    timestamp > now &&
+    timestamp <= now + UPCOMING_WINDOW_MS
   );
 }
 
@@ -1073,16 +1070,16 @@ export async function GET(
       const fixtures =
         result.fixtures;
 
-      const futureFixtures =
+      const windowFixtures =
         fixtures.filter(
-          isFutureFixture
+          isUpcomingWithin72Hours
         );
 
       if (
-        futureFixtures.length
+        windowFixtures.length
       ) {
         allFixtures.push(
-          ...futureFixtures
+          ...windowFixtures
         );
       }
 
@@ -1104,11 +1101,11 @@ export async function GET(
         upcomingCount:
           fixtures.length,
 
-        futureCount:
-          futureFixtures.length,
+        within72HoursCount:
+          windowFixtures.length,
 
-        futureSample:
-          futureFixtures
+        within72HoursSample:
+          windowFixtures
             .slice(0, 5)
             .map(
               summarizeFixture
@@ -1151,7 +1148,7 @@ export async function GET(
         ok: false,
 
         error:
-          "현재 확인한 팀들에서 앞으로 시작할 경기를 찾지 못했습니다.",
+          "현재부터 72시간 이내에 시작하는 미시작 경기를 찾지 못했습니다.",
 
         debug: {
           discoveredTeamCount:
@@ -1266,8 +1263,8 @@ export async function GET(
       debug: {
         message:
           detailResult.ok
-            ? "경기 탐색 및 detail 조회 성공"
-            : "경기 탐색 성공. 상세 데이터는 API 상태에 따라 제공되지 않았습니다.",
+            ? "72시간 이내 미시작 경기 탐색 및 detail 조회 성공"
+            : "72시간 이내 미시작 경기 탐색 성공. 상세 데이터는 API 상태에 따라 제공되지 않았습니다.",
 
         discoveredTeamCount:
           teams.length,
