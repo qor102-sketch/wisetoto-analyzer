@@ -269,6 +269,20 @@ export async function GET(
       isFutureFixture(
         fixture
       );
+    let h2h: any = null;
+    try {
+  const h2hResult = await api(
+    `/fixtures/${id}/h2h`,
+    key
+  );
+
+  h2h = h2hResult.data;
+} catch (e: any) {
+  console.error(
+    "H2H 조회 실패:",
+    e?.message
+  );
+}
 
     return Response.json({
       ok: true,
@@ -292,7 +306,7 @@ export async function GET(
 
       statistics: null,
 
-      h2h: null,
+      h2h,
 
       debug: {
         message:
