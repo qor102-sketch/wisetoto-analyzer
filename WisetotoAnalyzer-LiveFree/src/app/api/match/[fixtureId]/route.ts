@@ -277,6 +277,7 @@ export async function GET(
   );
 
   h2h = h2hResult.data;
+      console.log("H2H OK", h2h);
 } catch (e: any) {
   console.error(
     "H2H 조회 실패:",
@@ -304,9 +305,24 @@ export async function GET(
        */
       lineups: null,
 
-      statistics: null,
+      statistics,
 
       h2h,
+      let statistics: any = null;
+
+try {
+  const statisticsResult = await api(
+    `/fixtures/${id}/statistics`,
+    key
+  );
+
+  statistics = statisticsResult.data;
+} catch (e: any) {
+  console.error(
+    "Statistics 조회 실패:",
+    e?.message
+  );
+}
 
       debug: {
         message:
