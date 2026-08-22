@@ -152,31 +152,57 @@ function isFutureFixture(fixture: AnyObj) {
 function summarizeFixture(fixture: AnyObj) {
   return {
     id: fixture?.id ?? null,
+    startTime: fixture?.startTime ?? null,
+    status: fixture?.status ?? null,
 
-    startTime:
-      fixture?.startTime ?? null,
+    home: fixture?.home?.name ?? null,
+    homeId: fixture?.home?.id ?? null,
 
-    status:
-      fixture?.status ?? null,
+    away: fixture?.away?.name ?? null,
+    awayId: fixture?.away?.id ?? null,
 
-    home:
-      fixture?.home?.name ?? null,
-
-    homeId:
-      fixture?.home?.id ?? null,
-
-    away:
-      fixture?.away?.name ?? null,
-
-    awayId:
-      fixture?.away?.id ?? null,
-
-    sport:
-      fixture?.sport ?? null,
-
-    league:
-      fixture?.league?.name ?? null,
+    sport: fixture?.sport ?? null,
+    league: fixture?.league?.name ?? null,
   };
+}
+
+async function optionalEndpoint(
+  path: string,
+  key: string,
+  label: string
+) {
+  try {
+    const result = await api(path, key);
+
+    return {
+      data: result.data,
+      status: {
+        ok: true,
+        error: null,
+        httpStatus: 200,
+        rateLimit: result.rateLimit,
+      },
+    };
+  } catch (e: any) {
+    console.error(
+      `${label} 조회 실패:`,
+      e?.message
+    );
+
+    return {
+      data: null,
+      status: {
+        ok: false,
+        error:
+          e?.message ||
+          `${label} 조회 실패`,
+        httpStatus:
+          e?.status ?? null,
+        retryAfterMs:
+          e?.retryAfterMs ?? null,
+      },
+    };
+  }
 }
 
 export async function GET(
@@ -225,18 +251,19 @@ export async function GET(
   }
 
   try {
-    /**
-     * ================================================
+    /*
+     * ==========================================
      * 1. FIXTURE DETAIL
-     * ================================================
+     * ==========================================
      */
 
-    const result = await api(
+    const detailResult = await api(
       `/fixtures/${id}`,
       key
     );
 
-    const fixture = result.data;
+    const fixture =
+      detailResult.data;
 
     if (!fixture) {
       return Response.json(
@@ -255,113 +282,56 @@ export async function GET(
     const future =
       isFutureFixture(fixture);
 
-    /**
-     * ================================================
+    /*
+     * ==========================================
      * 2. H2H
-     * ================================================
+     * ==========================================
      */
 
-    let h2h: any = null;
-
-    let h2hStatus: AnyObj = {
-      ok: false,
-      error: null,
-    };
-
-    try {
-      const h2hResult = await api(
+    const h2hResult =
+      await optionalEndpoint(
         `/fixtures/${id}/h2h`,
-        key
+        key,
+        "H2H"
       );
 
-      h2h = h2hResult.data;
-
-      h2hStatus = {
-        ok: true,
-        error: null,
-        rateLimit:
-          h2hResult.rateLimit,
-      };
-    } catch (e: any) {
-      console.error(
-        "H2H 조회 실패:",
-        e?.message
-      );
-
-      h2hStatus = {
-        ok: false,
-        error:
-          e?.message ||
-          "H2H 조회 실패",
-        status:
-          e?.status ?? null,
-        retryAfterMs:
-          e?.retryAfterMs ?? null,
-      };
-    }
-
-    /**
-     * ================================================
+    /*
+     * ==========================================
      * 3. STATISTICS
-     * ================================================
+     * ==========================================
+     *
+     * 해당 경기/상태에서 API가 제공하지 않으면
+     * 404가 나올 수 있습니다.
+     * 전체 API 요청은 실패시키지 않습니다.
      */
 
-    let statistics: any = null;
-
-    let statisticsStatus: AnyObj = {
-      ok: false,
-      error: null,
-    };
-
-    try {
-      const statisticsResult =
-        await api(
-          `/fixtures/${id}/statistics`,
-          key
-        );
-
-      statistics =
-        statisticsResult.data;
-
-      statisticsStatus = {
-        ok: true,
-        error: null,
-        rateLimit:
-          statisticsResult.rateLimit,
-      };
-    } catch (e: any) {
-      console.error(
-        "Statistics 조회 실패:",
-        e?.message
+    const statisticsResult =
+      await optionalEndpoint(
+        `/fixtures/${id}/statistics`,
+        key,
+        "Statistics"
       );
 
-      statisticsStatus = {
-        ok: false,
-        error:
-          e?.message ||
-          "Statistics 조회 실패",
-        status:
-          e?.status ?? null,
-        retryAfterMs:
-          e?.retryAfterMs ?? null,
-      };
-    }
-
-    /**
-     * ================================================
+    /*
+     * ==========================================
      * 4. LINEUPS
-     * ================================================
+     * ==========================================
      *
-     * 아직 호출하지 않습니다.
-     * API 요청량을 줄이기 위해 다음 단계에서 추가합니다.
+     * 경기 전 너무 이른 시점에는
+     * 데이터가 없거나 404가 날 수 있습니다.
      */
 
-    const lineups = null;
+    const lineupsResult =
+      await optionalEndpoint(
+        `/fixtures/${id}/lineups`,
+        key,
+        "Lineups"
+      );
 
-    /**
-     * ================================================
+    /*
+     * ==========================================
      * 5. RESPONSE
-     * ================================================
+     * ==========================================
      */
 
     return Response.json({
@@ -372,47 +342,43 @@ export async function GET(
       future,
 
       selectedFixture:
-        summarizeFixture(
-          fixture
-        ),
+        summarizeFixture(fixture),
 
       fixture,
 
-      lineups,
+      lineups:
+        lineupsResult.data,
 
-      statistics,
+      statistics:
+        statisticsResult.data,
 
-      h2h,
+      h2h:
+        h2hResult.data,
 
       debug: {
         message:
-          "fixture detail + H2H + statistics 조회 완료",
-
-        endpoint:
-          `/v2/fixtures/${id}`,
+          "fixture detail + H2H + statistics + lineups 조회 완료",
 
         endpointStatus: {
           detail: {
             ok: true,
+            httpStatus: 200,
             rateLimit:
-              result.rateLimit,
+              detailResult.rateLimit,
           },
 
           h2h:
-            h2hStatus,
+            h2hResult.status,
 
           statistics:
-            statisticsStatus,
+            statisticsResult.status,
 
-          lineups: {
-            ok: false,
-            error:
-              "아직 호출하지 않음",
-          },
+          lineups:
+            lineupsResult.status,
         },
 
-        nextStep:
-          "statistics 확인 후 lineups 추가",
+        note:
+          "statistics/lineups가 null이어도 endpoint가 404를 반환한 경우 전체 요청은 정상 처리됩니다.",
       },
     });
   } catch (e: any) {
