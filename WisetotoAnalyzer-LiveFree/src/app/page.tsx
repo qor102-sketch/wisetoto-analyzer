@@ -19,6 +19,10 @@ type Match = {
   venue: string;
 };
 
+type BetmanMarket = { line?: number | string | null; handicap?: number | string | null; baseValue?: number | string | null; value?: number | string | null; [key: string]: any; };
+type BetmanMatch = { home?: string | null; away?: string | null; homeTeam?: string | null; awayTeam?: string | null; handicaps?: BetmanMarket[]; totals?: BetmanMarket[]; markets?: BetmanMarket[]; [key: string]: any; };
+
+
 type Pick = [
   string,
   string,
@@ -397,6 +401,91 @@ function totalConfidence(
   );
 }
 
+
+function normalizeTeamName(value: unknown) {
+  return String(value ?? "").toLowerCase().normalize("NFKC")
+    .replace(/\([^)]*\)/g, "").replace(/\[[^\]]*\]/g, "")
+    .replace(/\b(fc|cf|bc|bk|sc|club)\b/gi, "")
+    .replace(/[^a-z0-9가-힣]/g, "");
+}
+
+function teamSimilarity(a: unknown, b: unknown) {
+  const x = normalizeTeamName(a), y = normalizeTeamName(b);
+  if (!x || !y) return 0;
+  if (x === y) return 1;
+  if (x.includes(y) || y.includes(x)) return 0.92;
+  const grams = (s: string) => {
+    const z = new Set<string>();
+    for (let i=0;i<s.length-1;i++) z.add(s.slice(i,i+2));
+    return z;
+  };
+  const A=grams(x), B=grams(y);
+  if (!A.size || !B.size) return 0;
+  let common=0; A.forEach(v=>{ if(B.has(v)) common++; });
+  return (2*common)/(A.size+B.size);
+}
+
+function getBetmanGames(payload: any): BetmanMatch[] {
+  const root=payload?.data ?? payload;
+  for (const key of ["games","matches","items","gameList","matchList","scheduleList"]) {
+    if (Array.isArray(root?.[key])) return root[key];
+  }
+  if (Array.isArray(root)) return root;
+  const found: BetmanMatch[]=[]; const seen=new Set<any>();
+  const walk=(v:any,d:number)=>{
+    if(!v || typeof v!=="object" || d>6 || seen.has(v)) return;
+    seen.add(v);
+    if(Array.isArray(v)){
+      if(v.some(x=>x && typeof x==="object" && (x.home||x.homeTeam||x.away||x.awayTeam) && (x.handicaps||x.totals||x.markets))){
+        found.push(...v); return;
+      }
+      v.forEach(x=>walk(x,d+1)); return;
+    }
+    Object.values(v).forEach(x=>walk(x,d+1));
+  };
+  walk(root,0); return found;
+}
+
+function betmanTeam(g: BetmanMatch, side:"home"|"away") {
+  return side==="home"
+    ? (g.home ?? g.homeTeam ?? g?.teams?.home?.name ?? g?.homeTeamName ?? "")
+    : (g.away ?? g.awayTeam ?? g?.teams?.away?.name ?? g?.awayTeamName ?? "");
+}
+
+function matchBetmanGame(games: BetmanMatch[], home:string, away:string) {
+  let game:BetmanMatch|null=null, score=0;
+  for(const g of games){
+    const direct=(teamSimilarity(home,betmanTeam(g,"home"))+teamSimilarity(away,betmanTeam(g,"away")))/2;
+    const reverse=((teamSimilarity(home,betmanTeam(g,"away"))+teamSimilarity(away,betmanTeam(g,"home")))/2)*0.85;
+    const s=Math.max(direct,reverse);
+    if(s>score){ score=s; game=g; }
+  }
+  return score>=0.62 ? {game,score} : {game:null,score};
+}
+
+function marketNumber(m:any) {
+  for(const v of [m?.line,m?.handicap,m?.baseValue,m?.value,m?.standard,m?.criterion,m?.point]){
+    const n=Number(v); if(Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function chooseBetmanHandicap(g:BetmanMatch|null|undefined) {
+  if(!g) return null;
+  const a=Array.isArray(g.handicaps)?g.handicaps:
+    Array.isArray(g.markets)?g.markets.filter((m:any)=>/handi|핸디/i.test(String(m?.type??m?.marketType??m?.name??""))):[];
+  for(const market of a){ const line=marketNumber(market); if(line!==null) return {line,market}; }
+  return null;
+}
+
+function chooseBetmanTotal(g:BetmanMatch|null|undefined) {
+  if(!g) return null;
+  const a=Array.isArray(g.totals)?g.totals:
+    Array.isArray(g.markets)?g.markets.filter((m:any)=>/total|over|under|u\/o|언더|오버/i.test(String(m?.type??m?.marketType??m?.name??""))):[];
+  for(const market of a){ const line=marketNumber(market); if(line!==null) return {line,market}; }
+  return null;
+}
+
 function buildAnalysis(
   sport: Exclude<
     Sport,
@@ -406,7 +495,8 @@ function buildAnalysis(
   recentSummary:
     | RecentSummary
     | null
-    | undefined
+    | undefined,
+  betmanMatch: BetmanMatch | null | undefined
 ) {
   const homeFormData =
     recentSummary
@@ -847,6 +937,17 @@ function buildAnalysis(
     }
   }
 
+
+  const betmanHandicap = chooseBetmanHandicap(betmanMatch);
+  if (scoringUsed && expectedMargin !== null && betmanHandicap) {
+    handicapLine = betmanHandicap.line;
+    const adjustedHomeMargin = expectedMargin + handicapLine;
+    handicapLabel = adjustedHomeMargin >= 0
+      ? `홈 ${handicapLine >= 0 ? "+" : ""}${handicapLine}`
+      : `원정 ${handicapLine >= 0 ? "-" : "+"}${Math.abs(handicapLine)}`;
+    handicapProbability = handicapConfidence(sport, adjustedHomeMargin);
+  }
+
   /*
    * ========================================
    * U/O
@@ -888,6 +989,14 @@ function buildAnalysis(
         expectedTotal,
         totalLine
       );
+  }
+
+
+  const betmanTotal = chooseBetmanTotal(betmanMatch);
+  if (scoringUsed && expectedTotal !== null && betmanTotal) {
+    totalLine = betmanTotal.line;
+    totalLabel = expectedTotal >= totalLine ? "OVER" : "UNDER";
+    totalProbability = totalConfidence(sport, expectedTotal, totalLine);
   }
 
   const winMarket =
@@ -1146,6 +1255,14 @@ export default function Home() {
   ] =
     useState(false);
 
+  const [betman, setBetman] = useState<{
+    loading: boolean;
+    matched: BetmanMatch | null;
+    score: number | null;
+    error: string | null;
+  }>({ loading:false, matched:null, score:null, error:null });
+
+
   const list =
     useMemo(
       () =>
@@ -1259,7 +1376,8 @@ export default function Home() {
     buildAnalysis(
       currentSport,
       h2h,
-      recentSummary
+      recentSummary,
+      betman.matched
     );
 
   const analysisPicks =
@@ -1331,6 +1449,25 @@ export default function Home() {
     awayRecent.length >
       0;
 
+
+  async function loadBetmanForFixture(fixture:any) {
+    const home=String(fixture?.home??""), away=String(fixture?.away??"");
+    if(!home||!away) return null;
+    setBetman({loading:true,matched:null,score:null,error:null});
+    try {
+      const r=await fetch("/api/betman",{cache:"no-store"});
+      const p=await r.json();
+      if(!r.ok || !p?.ok) throw new Error(p?.error||"Betman 데이터 수집 실패");
+      const games=getBetmanGames(p);
+      const m=matchBetmanGame(games,home,away);
+      setBetman({loading:false,matched:m.game,score:Number(m.score.toFixed(3)),error:m.game?null:`Betman 자동매칭 실패 (${games.length}경기 확인)`});
+      return m.game;
+    } catch(e:any) {
+      setBetman({loading:false,matched:null,score:null,error:e?.message||"Betman 데이터 수집 실패"});
+      return null;
+    }
+  }
+
   async function collect() {
     if (loading) {
       return;
@@ -1339,6 +1476,7 @@ export default function Home() {
     setLoading(true);
 
     setMatched(null);
+    setBetman({loading:false,matched:null,score:null,error:null});
 
     setStatus(
       "SportsAPI에서 미래 경기 찾는 중…"
@@ -1466,8 +1604,10 @@ export default function Home() {
             combined
               ?.selectedFixture;
 
+          setStatus(`Fixture #${fixtureId} · Betman 핸디/UO 매칭 중…`);
+          const betmanGame = await loadBetmanForFixture(fixture);
           setStatus(
-            `수집 완료 · Fixture #${fixtureId} · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"}`
+            `수집 완료 · Fixture #${fixtureId} · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"} · ${betmanGame ? "Betman 기준값 적용" : "Betman 매칭 없음"}`
           );
 
           return;
@@ -1773,7 +1913,7 @@ export default function Home() {
             <div className="card">
               데이터 공급원
               <b>
-                SportsAPI
+                SportsAPI + Betman
               </b>
             </div>
 
@@ -2037,7 +2177,7 @@ export default function Home() {
                 </div>
 
                 <div className="card">
-                  자체 핸디캡
+                  핸디캡 기준
                   <b>
                     {analysisFactors
                       .handicapLabel ??
@@ -2046,7 +2186,7 @@ export default function Home() {
                 </div>
 
                 <div className="card">
-                  자체 U/O
+                  U/O 기준
                   <b>
                     {analysisFactors
                       .totalLine ??
@@ -2403,6 +2543,14 @@ export default function Home() {
 
                     analysisFactors,
 
+                    betman: {
+                      matched: betman.matched,
+                      matchScore: betman.score,
+                      error: betman.error,
+                      handicap: chooseBetmanHandicap(betman.matched),
+                      total: chooseBetmanTotal(betman.matched),
+                    },
+
                     lineups:
                       matched
                         .lineups,
@@ -2429,11 +2577,10 @@ export default function Home() {
           )}
 
           <div className="notice">
-            현재 승패 분석은 실제 SportsAPI H2H와 최근 5경기 Form을 사용합니다.
-            핸디캡과 U/O는 양 팀의 최근 5경기 실제 득점·실점 평균을 이용해
-            예상 점수와 예상 총점을 계산한 자체 분석값입니다. 스포츠북의 실제
-            배당 또는 공식 핸디캡/UO 기준점이 연결된 것은 아니므로 시장 배당과
-            직접 동일한 값으로 해석하면 안 됩니다.
+            승패 분석은 SportsAPI H2H와 최근 Form을 사용합니다.
+            핸디캡과 U/O는 Betman 경기 자동매칭 성공 시 Betman의 실제 기준값을
+            우선 적용하고 최근 득실점 예상치와 비교해 방향과 확률을 계산합니다.
+            Betman 매칭에 실패한 경우에만 기존 자체 기준값을 사용합니다.
           </div>
         </section>
       </div>
