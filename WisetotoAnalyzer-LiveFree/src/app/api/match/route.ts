@@ -1097,274 +1097,228 @@ async function findSportsFixtureForBetman(
     };
   }
 
-  /*
-   * 실전 모드의 첫 단계는 Vercel 응답시간과
-   * SportsAPI 무료 rate-limit을 고려해
-   * SportsAPI 호출을 최대 2회로 제한합니다.
-   *
-   * 1) 홈팀 검색 1회
-   * 2) 가장 유사한 팀의 upcoming 1회
-   */
-  let searchResult: any;
+  const searchQueries = [
+    home,
+    away,
+  ];
 
-  try {
-    searchResult =
-      await api(
-        `/search?q=${encodeURIComponent(
-          home
-        )}`,
-        key
-      );
-  } catch (e: any) {
-    return {
-      fixture: null,
-      debug: {
-        stage:
-          "search",
-        query:
-          home,
+  const checkedTeams: AnyObj[] = [];
+  const debug: AnyObj[] = [];
+
+  for (const query of searchQueries) {
+    let searchResult: any;
+
+    try {
+      searchResult =
+        await api(
+          `/search?q=${encodeURIComponent(
+            query
+          )}`,
+          key
+        );
+    } catch (e: any) {
+      debug.push({
+        query,
+        stage: "search",
         error:
           e?.message ??
-          "홈팀 검색 실패",
-        status:
-          e?.status ??
-          null,
-      },
-    };
-  }
+          "검색 실패",
+      });
 
-  const teams =
-    extractTeams(
-      searchResult.data
-    )
-      .map(
-        (team: AnyObj) => ({
-          team,
-          score:
+      continue;
+    }
+
+    const teams =
+      extractTeams(
+        searchResult.data
+      ).slice(0, 3);
+
+    debug.push({
+      query,
+      stage: "search",
+      teamCount:
+        teams.length,
+      teams:
+        teams.map((x) => ({
+          id: x?.id ?? null,
+          name:
+            x?.name ?? null,
+          sport:
+            x?.sport ?? null,
+        })),
+    });
+
+    for (const team of teams) {
+      const teamId =
+        Number(team?.id);
+
+      if (
+        !Number.isFinite(
+          teamId
+        )
+      ) {
+        continue;
+      }
+
+      if (
+        checkedTeams.some(
+          (x) =>
+            Number(x?.id) ===
+            teamId
+        )
+      ) {
+        continue;
+      }
+
+      checkedTeams.push(team);
+
+      const upcoming =
+        await getUpcoming(
+          teamId,
+          key
+        );
+
+      const fixtures =
+        upcoming.fixtures.filter(
+          isFutureNotStartedFixture
+        );
+
+      let bestFixture: AnyObj | null =
+        null;
+
+      let bestScore =
+        0;
+
+      for (const fixture of fixtures) {
+        const f =
+          summarizeFixture(
+            fixture
+          );
+
+        const direct =
+          similarity(
+            home,
+            f.home
+          ) *
+            0.45 +
+          similarity(
+            away,
+            f.away
+          ) *
+            0.45;
+
+        const reverse =
+          (
             similarity(
               home,
-              team?.name
-            ),
-        })
-      )
-      .sort(
-        (a, b) =>
-          b.score -
-          a.score
-      );
+              f.away
+            ) *
+              0.45 +
+            similarity(
+              away,
+              f.home
+            ) *
+              0.45
+          ) *
+          0.85;
 
-  const bestTeam =
-    teams[0];
+        const fixtureTime =
+          new Date(
+            f.startTime
+          ).getTime();
 
-  if (
-    !bestTeam ||
-    bestTeam.score < 0.35
-  ) {
-    return {
-      fixture: null,
-      debug: {
+        const betmanTime =
+          betmanGameTimeMs(
+            betmanGame
+          );
+
+        const timeDiffHours =
+          Number.isFinite(
+            fixtureTime
+          ) &&
+          Number.isFinite(
+            betmanTime
+          )
+            ? Math.abs(
+                fixtureTime -
+                  betmanTime
+              ) /
+              3_600_000
+            : 999;
+
+        const timeScore =
+          timeDiffHours <= 2
+            ? 0.1
+            : timeDiffHours <= 12
+              ? 0.06
+              : timeDiffHours <= 24
+                ? 0.02
+                : 0;
+
+        const score =
+          Math.max(
+            direct,
+            reverse
+          ) +
+          timeScore;
+
+        if (
+          score >
+          bestScore
+        ) {
+          bestScore =
+            score;
+
+          bestFixture =
+            fixture;
+        }
+      }
+
+      debug.push({
+        query,
         stage:
-          "search",
-        query:
-          home,
-        error:
-          "SportsAPI에서 홈팀 후보를 찾지 못했습니다.",
-        candidates:
-          teams
-            .slice(0, 5)
-            .map((x) => ({
-              id:
-                x.team?.id ??
-                null,
-              name:
-                x.team?.name ??
-                null,
-              score:
-                Number(
-                  x.score.toFixed(
-                    3
-                  )
-                ),
-            })),
-      },
-    };
-  }
+          "upcoming",
+        teamId,
+        fixtureCount:
+          fixtures.length,
+        bestScore,
+        bestFixture:
+          bestFixture
+            ? summarizeFixture(
+                bestFixture
+              )
+            : null,
+      });
 
-  const teamId =
-    Number(
-      bestTeam.team?.id
-    );
-
-  if (
-    !Number.isFinite(
-      teamId
-    )
-  ) {
-    return {
-      fixture: null,
-      debug: {
-        stage:
-          "team",
-        error:
-          "SportsAPI 팀 ID가 올바르지 않습니다.",
-      },
-    };
-  }
-
-  const upcoming =
-    await getUpcoming(
-      teamId,
-      key
-    );
-
-  const fixtures =
-    upcoming.fixtures.filter(
-      isFutureNotStartedFixture
-    );
-
-  let bestFixture:
-    | AnyObj
-    | null =
-    null;
-
-  let bestScore =
-    0;
-
-  for (const fixture of fixtures) {
-    const f =
-      summarizeFixture(
-        fixture
-      );
-
-    const direct =
-      similarity(
-        home,
-        f.home
-      ) *
-        0.45 +
-      similarity(
-        away,
-        f.away
-      ) *
-        0.45;
-
-    const reverse =
-      (
-        similarity(
-          home,
-          f.away
-        ) *
-          0.45 +
-        similarity(
-          away,
-          f.home
-        ) *
-          0.45
-      ) *
-      0.85;
-
-    const fixtureTime =
-      new Date(
-        f.startTime
-      ).getTime();
-
-    const betmanTime =
-      betmanGameTimeMs(
-        betmanGame
-      );
-
-    const timeDiffHours =
-      Number.isFinite(
-        fixtureTime
-      ) &&
-      Number.isFinite(
-        betmanTime
-      )
-        ? Math.abs(
-            fixtureTime -
-              betmanTime
-          ) /
-          3_600_000
-        : 999;
-
-    const timeScore =
-      timeDiffHours <= 2
-        ? 0.1
-        : timeDiffHours <= 12
-          ? 0.06
-          : timeDiffHours <= 24
-            ? 0.02
-            : 0;
-
-    const score =
-      Math.max(
-        direct,
-        reverse
-      ) +
-      timeScore;
-
-    if (
-      score >
-      bestScore
-    ) {
-      bestScore =
-        score;
-
-      bestFixture =
-        fixture;
+      if (
+        bestFixture &&
+        bestScore >= 0.62
+      ) {
+        return {
+          fixture:
+            bestFixture,
+          debug: {
+            matched: true,
+            score:
+              Number(
+                bestScore.toFixed(
+                  3
+                )
+              ),
+            attempts:
+              debug,
+          },
+        };
+      }
     }
   }
 
   return {
-    fixture:
-      bestFixture &&
-      bestScore >= 0.62
-        ? bestFixture
-        : null,
-
+    fixture: null,
     debug: {
-      matched:
-        Boolean(
-          bestFixture &&
-          bestScore >= 0.62
-        ),
-
-      query:
-        home,
-
-      selectedTeam: {
-        id:
-          bestTeam.team?.id ??
-          null,
-
-        name:
-          bestTeam.team?.name ??
-          null,
-
-        searchScore:
-          Number(
-            bestTeam.score.toFixed(
-              3
-            )
-          ),
-      },
-
-      upcomingCount:
-        fixtures.length,
-
-      bestScore:
-        Number(
-          bestScore.toFixed(
-            3
-          )
-        ),
-
-      bestFixture:
-        bestFixture
-          ? summarizeFixture(
-              bestFixture
-            )
-          : null,
+      matched: false,
+      attempts:
+        debug,
     },
   };
 }
@@ -1373,15 +1327,22 @@ async function runRealMode(
   req: Request,
   key: string
 ) {
-  const origin =
-    new URL(req.url).origin;
+  const betmanUrl =
+    new URL(
+      "/api/betman",
+      req.url
+    );
 
   const betmanResponse =
     await fetch(
-      `${origin}/api/betman`,
+      betmanUrl,
       {
         cache:
           "no-store",
+        headers: {
+          Accept:
+            "application/json",
+        },
       }
     );
 
@@ -1442,7 +1403,7 @@ async function runRealMode(
 
   const maxBetmanChecks =
     Math.min(
-      1,
+      3,
       candidates.length
     );
 
@@ -1534,7 +1495,7 @@ async function runRealMode(
     matched:
       false,
     error:
-      "Betman 72시간 발매경기는 확인했지만 첫 후보를 SportsAPI에서 빠르게 자동매칭하지 못했습니다. debug의 팀 검색 결과를 확인해주세요.",
+      "Betman 72시간 발매경기는 찾았지만 SportsAPI 동일경기 자동매칭에 실패했습니다.",
     betmanCandidateCount:
       candidates.length,
     checkedBetmanCount:
