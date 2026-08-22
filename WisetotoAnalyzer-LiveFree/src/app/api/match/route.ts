@@ -930,6 +930,506 @@ async function getFixtureDetail(
   }
 }
 
+
+function normalizeMatchName(value: any) {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKC")
+    .replace(/\([^)]*\)/g, "")
+    .replace(/\[[^\]]*\]/g, "")
+    .replace(/\b(fc|cf|bc|bk|sc|club)\b/gi, "")
+    .replace(/[^a-z0-9가-힣]/g, "");
+}
+
+function similarity(a: any, b: any) {
+  const x = normalizeMatchName(a);
+  const y = normalizeMatchName(b);
+
+  if (!x || !y) return 0;
+  if (x === y) return 1;
+  if (x.includes(y) || y.includes(x)) return 0.92;
+
+  const grams = (s: string) => {
+    const set = new Set<string>();
+    for (let i = 0; i < s.length - 1; i++) {
+      set.add(s.slice(i, i + 2));
+    }
+    return set;
+  };
+
+  const aSet = grams(x);
+  const bSet = grams(y);
+
+  if (!aSet.size || !bSet.size) return 0;
+
+  let common = 0;
+  aSet.forEach((v) => {
+    if (bSet.has(v)) common++;
+  });
+
+  return (2 * common) / (aSet.size + bSet.size);
+}
+
+function betmanGameTimeMs(game: AnyObj) {
+  const raw =
+    game?.gameDateMs ??
+    game?.gameDate ??
+    game?.startTime ??
+    null;
+
+  const n = Number(raw);
+
+  if (Number.isFinite(n) && n > 10_000_000_000) {
+    return n;
+  }
+
+  const parsed =
+    new Date(raw).getTime();
+
+  return Number.isFinite(parsed)
+    ? parsed
+    : NaN;
+}
+
+function isBetmanWithin72Hours(game: AnyObj) {
+  const start =
+    betmanGameTimeMs(game);
+
+  if (!Number.isFinite(start)) {
+    return false;
+  }
+
+  const now = Date.now();
+  const max =
+    now + 72 * 60 * 60 * 1000;
+
+  return (
+    start > now &&
+    start <= max
+  );
+}
+
+async function findSportsFixtureForBetman(
+  betmanGame: AnyObj,
+  key: string
+) {
+  const home =
+    String(
+      betmanGame?.home ?? ""
+    );
+
+  const away =
+    String(
+      betmanGame?.away ?? ""
+    );
+
+  if (!home || !away) {
+    return {
+      fixture: null,
+      debug: {
+        error:
+          "Betman 팀명이 없습니다.",
+      },
+    };
+  }
+
+  const searchQueries = [
+    home,
+    away,
+  ];
+
+  const checkedTeams: AnyObj[] = [];
+  const debug: AnyObj[] = [];
+
+  for (const query of searchQueries) {
+    let searchResult: any;
+
+    try {
+      searchResult =
+        await api(
+          `/search?q=${encodeURIComponent(
+            query
+          )}`,
+          key
+        );
+    } catch (e: any) {
+      debug.push({
+        query,
+        stage: "search",
+        error:
+          e?.message ??
+          "검색 실패",
+      });
+
+      continue;
+    }
+
+    const teams =
+      extractTeams(
+        searchResult.data
+      ).slice(0, 3);
+
+    debug.push({
+      query,
+      stage: "search",
+      teamCount:
+        teams.length,
+      teams:
+        teams.map((x) => ({
+          id: x?.id ?? null,
+          name:
+            x?.name ?? null,
+          sport:
+            x?.sport ?? null,
+        })),
+    });
+
+    for (const team of teams) {
+      const teamId =
+        Number(team?.id);
+
+      if (
+        !Number.isFinite(
+          teamId
+        )
+      ) {
+        continue;
+      }
+
+      if (
+        checkedTeams.some(
+          (x) =>
+            Number(x?.id) ===
+            teamId
+        )
+      ) {
+        continue;
+      }
+
+      checkedTeams.push(team);
+
+      const upcoming =
+        await getUpcoming(
+          teamId,
+          key
+        );
+
+      const fixtures =
+        upcoming.fixtures.filter(
+          isFutureFixture
+        );
+
+      let bestFixture: AnyObj | null =
+        null;
+
+      let bestScore =
+        0;
+
+      for (const fixture of fixtures) {
+        const f =
+          summarizeFixture(
+            fixture
+          );
+
+        const direct =
+          similarity(
+            home,
+            f.home
+          ) *
+            0.45 +
+          similarity(
+            away,
+            f.away
+          ) *
+            0.45;
+
+        const reverse =
+          (
+            similarity(
+              home,
+              f.away
+            ) *
+              0.45 +
+            similarity(
+              away,
+              f.home
+            ) *
+              0.45
+          ) *
+          0.85;
+
+        const fixtureTime =
+          new Date(
+            f.startTime
+          ).getTime();
+
+        const betmanTime =
+          betmanGameTimeMs(
+            betmanGame
+          );
+
+        const timeDiffHours =
+          Number.isFinite(
+            fixtureTime
+          ) &&
+          Number.isFinite(
+            betmanTime
+          )
+            ? Math.abs(
+                fixtureTime -
+                  betmanTime
+              ) /
+              3_600_000
+            : 999;
+
+        const timeScore =
+          timeDiffHours <= 2
+            ? 0.1
+            : timeDiffHours <= 12
+              ? 0.06
+              : timeDiffHours <= 24
+                ? 0.02
+                : 0;
+
+        const score =
+          Math.max(
+            direct,
+            reverse
+          ) +
+          timeScore;
+
+        if (
+          score >
+          bestScore
+        ) {
+          bestScore =
+            score;
+
+          bestFixture =
+            fixture;
+        }
+      }
+
+      debug.push({
+        query,
+        stage:
+          "upcoming",
+        teamId,
+        fixtureCount:
+          fixtures.length,
+        bestScore,
+        bestFixture:
+          bestFixture
+            ? summarizeFixture(
+                bestFixture
+              )
+            : null,
+      });
+
+      if (
+        bestFixture &&
+        bestScore >= 0.62
+      ) {
+        return {
+          fixture:
+            bestFixture,
+          debug: {
+            matched: true,
+            score:
+              Number(
+                bestScore.toFixed(
+                  3
+                )
+              ),
+            attempts:
+              debug,
+          },
+        };
+      }
+    }
+  }
+
+  return {
+    fixture: null,
+    debug: {
+      matched: false,
+      attempts:
+        debug,
+    },
+  };
+}
+
+async function runRealMode(
+  req: Request,
+  key: string
+) {
+  const origin =
+    new URL(req.url).origin;
+
+  const betmanResponse =
+    await fetch(
+      `${origin}/api/betman`,
+      {
+        cache:
+          "no-store",
+      }
+    );
+
+  const betmanPayload =
+    await betmanResponse.json();
+
+  if (
+    !betmanResponse.ok ||
+    !betmanPayload?.ok
+  ) {
+    return Response.json(
+      {
+        ok: false,
+        mode:
+          "real",
+        error:
+          betmanPayload?.error ||
+          "Betman 발매경기 수집 실패",
+      },
+      {
+        status: 502,
+      }
+    );
+  }
+
+  const games =
+    Array.isArray(
+      betmanPayload?.games
+    )
+      ? betmanPayload.games
+      : [];
+
+  const candidates =
+    games
+      .filter(
+        isBetmanWithin72Hours
+      )
+      .sort(
+        (a: AnyObj, b: AnyObj) =>
+          betmanGameTimeMs(a) -
+          betmanGameTimeMs(b)
+      );
+
+  if (!candidates.length) {
+    return Response.json({
+      ok: false,
+      mode:
+        "real",
+      error:
+        "Betman에서 현재부터 72시간 이내의 미시작 발매경기를 찾지 못했습니다.",
+      betmanCount:
+        games.length,
+    });
+  }
+
+  const maxBetmanChecks =
+    Math.min(
+      3,
+      candidates.length
+    );
+
+  const attempts: AnyObj[] =
+    [];
+
+  for (
+    let i = 0;
+    i < maxBetmanChecks;
+    i++
+  ) {
+    const betmanGame =
+      candidates[i];
+
+    const result =
+      await findSportsFixtureForBetman(
+        betmanGame,
+        key
+      );
+
+    attempts.push({
+      betman: {
+        home:
+          betmanGame?.home ??
+          null,
+        away:
+          betmanGame?.away ??
+          null,
+        sport:
+          betmanGame?.sport ??
+          null,
+        league:
+          betmanGame?.league ??
+          null,
+        gameDate:
+          betmanGame?.gameDate ??
+          null,
+        gameDateMs:
+          betmanGame?.gameDateMs ??
+          null,
+      },
+      sportsApi:
+        result.debug,
+    });
+
+    if (result.fixture) {
+      const fixture =
+        result.fixture;
+
+      const fixtureId =
+        Number(
+          fixture?.id
+        );
+
+      return Response.json({
+        ok: true,
+        mode:
+          "real",
+        matched: true,
+        fixtureId,
+        selectedFixture:
+          summarizeFixture(
+            fixture
+          ),
+        fixture,
+        betmanMatch:
+          betmanGame,
+        detail: null,
+        lineups: null,
+        statistics: null,
+        h2h: null,
+        debug: {
+          message:
+            "Betman 72시간 발매경기에서 SportsAPI 동일경기를 찾았습니다.",
+          betmanCandidateCount:
+            candidates.length,
+          checkedBetmanCount:
+            i + 1,
+          attempts,
+        },
+      });
+    }
+  }
+
+  return Response.json({
+    ok: false,
+    mode:
+      "real",
+    matched:
+      false,
+    error:
+      "Betman 72시간 발매경기는 찾았지만 SportsAPI 동일경기 자동매칭에 실패했습니다.",
+    betmanCandidateCount:
+      candidates.length,
+    checkedBetmanCount:
+      maxBetmanChecks,
+    attempts,
+  });
+}
+
 export async function GET(
   req: Request
 ) {
@@ -959,17 +1459,53 @@ export async function GET(
     ) || "";
 
   if (
-    mode !== "random"
+    mode !== "random" &&
+    mode !== "real"
   ) {
     return Response.json({
       ok: false,
 
       error:
-        "현재 테스트 모드는 mode=random 입니다.",
+        "지원 모드는 mode=random 또는 mode=real 입니다.",
 
       usage:
-        "/api/match?mode=random",
+        [
+          "/api/match?mode=random",
+          "/api/match?mode=real",
+        ],
     });
+  }
+
+  if (mode === "real") {
+    try {
+      return await runRealMode(
+        req,
+        key
+      );
+    } catch (e: any) {
+      return Response.json(
+        {
+          ok: false,
+          mode: "real",
+          matched: false,
+          error:
+            e?.message ||
+            "실전 경기 자동매칭 실패",
+          status:
+            e?.status ??
+            null,
+          retryAfterMs:
+            e?.retryAfterMs ??
+            null,
+        },
+        {
+          status:
+            e?.status === 429
+              ? 429
+              : 502,
+        }
+      );
+    }
   }
 
   try {
