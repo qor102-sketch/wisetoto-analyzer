@@ -62,138 +62,63 @@ const DEMO: Match[] = [
   },
 ];
 
-function picks(
+function demoPicks(
   match: Match
 ): Pick[] {
-  if (
-    match.sport ===
-    "야구"
-  ) {
+  if (match.sport === "야구") {
     return [
-      [
-        "일반 승패",
-        "홈 승",
-        61.8,
-      ],
-      [
-        "핸디캡 -2.5",
-        "원정 +2.5",
-        70.1,
-      ],
-      [
-        "U/O",
-        "UNDER",
-        56.1,
-      ],
+      ["일반 승패", "홈 승", 61.8],
+      ["핸디캡 -2.5", "원정 +2.5", 70.1],
+      ["U/O", "UNDER", 56.1],
     ];
   }
 
-  if (
-    match.sport ===
-    "축구"
-  ) {
+  if (match.sport === "축구") {
     return [
-      [
-        "승무패",
-        "홈 승",
-        64.2,
-      ],
-      [
-        "핸디캡",
-        "원정 +1",
-        67.1,
-      ],
-      [
-        "U/O 2.5",
-        "UNDER",
-        55.8,
-      ],
+      ["승무패", "홈 승", 64.2],
+      ["핸디캡", "원정 +1", 67.1],
+      ["U/O 2.5", "UNDER", 55.8],
     ];
   }
 
-  if (
-    match.sport ===
-    "농구"
-  ) {
+  if (match.sport === "농구") {
     return [
-      [
-        "승패",
-        "홈 승",
-        67.4,
-      ],
-      [
-        "핸디캡",
-        "홈 -3.5",
-        58.2,
-      ],
-      [
-        "U/O",
-        "UNDER",
-        55.4,
-      ],
+      ["승패", "홈 승", 67.4],
+      ["핸디캡", "홈 -3.5", 58.2],
+      ["U/O", "UNDER", 55.4],
     ];
   }
 
   return [
-    [
-      "승패",
-      "홈 승",
-      68.7,
-    ],
-    [
-      "세트 핸디",
-      "홈 -1.5",
-      57.8,
-    ],
-    [
-      "U/O",
-      "UNDER",
-      54.9,
-    ],
+    ["승패", "홈 승", 68.7],
+    ["세트 핸디", "홈 -1.5", 57.8],
+    ["U/O", "UNDER", 54.9],
   ];
 }
 
 function koreanSport(
-  sport:
-    | string
-    | null
-    | undefined
-): Exclude<
-  Sport,
-  "전체"
-> {
-  const value =
-    String(
-      sport || ""
-    ).toLowerCase();
+  sport: string | null | undefined
+): Exclude<Sport, "전체"> {
+  const value = String(
+    sport || ""
+  ).toLowerCase();
 
   if (
-    value ===
-      "football" ||
-    value ===
-      "soccer"
+    value === "football" ||
+    value === "soccer"
   ) {
     return "축구";
   }
 
-  if (
-    value ===
-    "baseball"
-  ) {
+  if (value === "baseball") {
     return "야구";
   }
 
-  if (
-    value ===
-    "basketball"
-  ) {
+  if (value === "basketball") {
     return "농구";
   }
 
-  if (
-    value ===
-    "volleyball"
-  ) {
+  if (value === "volleyball") {
     return "배구";
   }
 
@@ -201,17 +126,13 @@ function koreanSport(
 }
 
 function formatKST(
-  value:
-    | string
-    | null
-    | undefined
+  value: string | null | undefined
 ) {
   if (!value) {
     return "-";
   }
 
-  const date =
-    new Date(value);
+  const date = new Date(value);
 
   if (
     Number.isNaN(
@@ -224,18 +145,145 @@ function formatKST(
   return date.toLocaleString(
     "ko-KR",
     {
-      timeZone:
-        "Asia/Seoul",
-      year:
-        "numeric",
-      month:
-        "2-digit",
-      day:
-        "2-digit",
-      hour:
-        "2-digit",
-      minute:
-        "2-digit",
+      timeZone: "Asia/Seoul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }
+  );
+}
+
+/**
+ * H2H를 승패 픽에 반영합니다.
+ *
+ * 아직 라인업/통계가 없는 상태이므로
+ * 핸디캡과 U/O는 데모 수치를 유지합니다.
+ *
+ * 승패 시장은 실제 H2H 결과가 있으면
+ * 우세 팀과 확률을 H2H 기반으로 계산합니다.
+ */
+function applyH2H(
+  picks: Pick[],
+  h2h: any
+): Pick[] {
+  if (!h2h) {
+    return picks;
+  }
+
+  const homeWins =
+    Number(
+      h2h?.homeWins ?? 0
+    );
+
+  const awayWins =
+    Number(
+      h2h?.awayWins ?? 0
+    );
+
+  const draws =
+    Number(
+      h2h?.draws ?? 0
+    );
+
+  const total =
+    homeWins +
+    awayWins +
+    draws;
+
+  if (total <= 0) {
+    return picks;
+  }
+
+  return picks.map(
+    ([type, label, probability]) => {
+      if (
+        type !== "승패" &&
+        type !== "승무패" &&
+        type !== "일반 승패"
+      ) {
+        return [
+          type,
+          label,
+          probability,
+        ];
+      }
+
+      /*
+       * 홈이 H2H 우세
+       */
+      if (homeWins > awayWins) {
+        const share =
+          homeWins /
+          Math.max(
+            1,
+            homeWins +
+              awayWins
+          );
+
+        const adjusted =
+          Math.min(
+            85,
+            Math.max(
+              51,
+              50 +
+                share * 25
+            )
+          );
+
+        return [
+          type,
+          "홈 승",
+          Number(
+            adjusted.toFixed(
+              1
+            )
+          ),
+        ];
+      }
+
+      /*
+       * 원정이 H2H 우세
+       */
+      if (awayWins > homeWins) {
+        const share =
+          awayWins /
+          Math.max(
+            1,
+            homeWins +
+              awayWins
+          );
+
+        const adjusted =
+          Math.min(
+            85,
+            Math.max(
+              51,
+              50 +
+                share * 25
+            )
+          );
+
+        return [
+          type,
+          "원정 승",
+          Number(
+            adjusted.toFixed(
+              1
+            )
+          ),
+        ];
+      }
+
+      /*
+       * H2H 동률이면 기존 데모값 유지
+       */
+      return [
+        type,
+        label,
+        probability,
+      ];
     }
   );
 }
@@ -313,11 +361,29 @@ export default function Home() {
     matched?.detail ??
     null;
 
+  const lineups =
+    matched?.lineups ??
+    null;
+
+  const statistics =
+    matched?.statistics ??
+    null;
+
+  const h2h =
+    matched?.h2h ??
+    null;
+
+  const venue =
+    detail?.venue ??
+    matched?.fixture
+      ?.venue ??
+    null;
+
   const currentSport =
     selectedFixture
       ? koreanSport(
           selectedFixture
-            .sport
+            ?.sport
         )
       : demoMatch.sport;
 
@@ -356,25 +422,60 @@ export default function Home() {
             ),
 
           venue:
-            detail?.venue
-              ?.name ??
-            matched?.fixture
-              ?.venue
-              ?.name ??
+            venue?.name ??
             "-",
         }
       : demoMatch;
 
-  const ps =
-    picks(
+  /*
+   * 기본 데모 픽
+   */
+  const basePicks =
+    demoPicks(
       currentMatch
+    );
+
+  /*
+   * H2H 실제 데이터가 있으면
+   * 승패 시장에 반영
+   */
+  const analysisPicks =
+    applyH2H(
+      basePicks,
+      h2h
     );
 
   const best =
     Math.max(
-      ...ps.map(
+      ...analysisPicks.map(
         (x) =>
           x[2]
+      )
+    );
+
+  const bestPick =
+    analysisPicks.find(
+      (x) =>
+        x[2] === best
+    );
+
+  const hasH2H =
+    h2h &&
+    (
+      Number.isFinite(
+        Number(
+          h2h?.homeWins
+        )
+      ) ||
+      Number.isFinite(
+        Number(
+          h2h?.awayWins
+        )
+      ) ||
+      Number.isFinite(
+        Number(
+          h2h?.draws
+        )
       )
     );
 
@@ -393,16 +494,15 @@ export default function Home() {
 
     try {
       /*
-       * --------------------------------
-       * 1. 랜덤 미래 경기 선택
-       * --------------------------------
+       * =========================================
+       * 1. 랜덤 경기 선택
+       * =========================================
        */
       const randomResponse =
         await fetch(
           "/api/match?mode=random",
           {
-            cache:
-              "no-store",
+            cache: "no-store",
           }
         );
 
@@ -426,8 +526,8 @@ export default function Home() {
         );
 
       /*
-       * 일단 랜덤 경기 자체는
-       * 바로 화면에 표시할 수 있도록 저장
+       * 랜덤 경기 자체는
+       * 먼저 화면에 표시
        */
       setMatched(
         randomData
@@ -439,26 +539,23 @@ export default function Home() {
         )
       ) {
         setStatus(
-          "경기 수집 완료 · 상세 Fixture ID 없음"
+          "경기 수집 완료 · Fixture ID 없음"
         );
 
         return;
       }
 
       setStatus(
-        `Fixture #${fixtureId} 선택 완료 · H2H 불러오는 중…`
+        `Fixture #${fixtureId} 선택 · H2H 조회 중…`
       );
 
       /*
-       * --------------------------------
-       * 2. 선택된 fixture의
-       * Detail + H2H 조회
-       * --------------------------------
-       *
-       * 이 API에서 실제 H2H가 들어옴.
+       * =========================================
+       * 2. Detail + H2H 조회
+       * =========================================
        */
       try {
-        const detailResponse =
+        const extraResponse =
           await fetch(
             `/api/match/${fixtureId}`,
             {
@@ -467,59 +564,54 @@ export default function Home() {
             }
           );
 
-        const detailData =
-          await detailResponse.json();
+        const extraData =
+          await extraResponse.json();
 
-        /*
-         * 상세 API가 성공하면
-         * 랜덤 API 결과에 합친다.
-         */
         if (
-          detailResponse.ok &&
-          detailData?.ok
+          extraResponse.ok &&
+          extraData?.ok
         ) {
-          const combined =
-            {
-              ...randomData,
+          const combined = {
+            ...randomData,
 
-              fixture:
-                detailData
-                  ?.fixture ??
-                randomData
-                  ?.fixture,
+            fixture:
+              extraData
+                ?.fixture ??
+              randomData
+                ?.fixture,
 
-              detail:
-                detailData
-                  ?.fixture ??
-                randomData
-                  ?.detail,
+            detail:
+              extraData
+                ?.fixture ??
+              randomData
+                ?.detail,
 
-              selectedFixture:
-                detailData
-                  ?.selectedFixture ??
-                randomData
-                  ?.selectedFixture,
+            selectedFixture:
+              extraData
+                ?.selectedFixture ??
+              randomData
+                ?.selectedFixture,
 
-              h2h:
-                detailData
-                  ?.h2h ??
-                null,
+            h2h:
+              extraData
+                ?.h2h ??
+              null,
 
-              statistics:
-                detailData
-                  ?.statistics ??
-                null,
+            statistics:
+              extraData
+                ?.statistics ??
+              null,
 
-              lineups:
-                detailData
-                  ?.lineups ??
-                null,
+            lineups:
+              extraData
+                ?.lineups ??
+              null,
 
-              detailDebug:
-                detailData
-                  ?.debug ??
-                null,
-            };
+            detailDebug:
+              extraData
+                ?.debug ??
+              null,
+          };
 
           setMatched(
             combined
@@ -527,7 +619,7 @@ export default function Home() {
 
           const fixture =
             combined
-              .selectedFixture;
+              ?.selectedFixture;
 
           setStatus(
             `수집 완료 · Fixture #${fixtureId} · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"}`
@@ -536,25 +628,16 @@ export default function Home() {
           return;
         }
 
-        /*
-         * 상세 API 실패 시에도
-         * 랜덤 경기 결과는 유지
-         */
         const fixture =
           randomData
             ?.selectedFixture;
 
         setStatus(
-          `경기 수집 완료 · Fixture #${fixtureId} · H2H 조회 실패 · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"}`
+          `경기 수집 완료 · Fixture #${fixtureId} · H2H 미수신 · ${fixture?.home ?? "-"} vs ${fixture?.away ?? "-"}`
         );
       } catch (
         detailError: any
       ) {
-        /*
-         * H2H/detail API가
-         * 429 등으로 실패해도
-         * 랜덤 경기 자체는 버리지 않음.
-         */
         const fixture =
           randomData
             ?.selectedFixture;
@@ -577,45 +660,11 @@ export default function Home() {
           "수집 실패"
       );
     } finally {
-      setLoading(false);
+      setLoading(
+        false
+      );
     }
   }
-
-  /*
-   * 중복 선언 없이
-   * 각각 한 번만 선언
-   */
-  const lineups =
-    matched?.lineups;
-
-  const statistics =
-    matched?.statistics;
-
-  const h2h =
-    matched?.h2h;
-
-  const venue =
-    detail?.venue;
-
-  const hasH2H =
-    h2h &&
-    (
-      Number.isFinite(
-        Number(
-          h2h?.homeWins
-        )
-      ) ||
-      Number.isFinite(
-        Number(
-          h2h?.awayWins
-        )
-      ) ||
-      Number.isFinite(
-        Number(
-          h2h?.draws
-        )
-      )
-    );
 
   return (
     <main className="app">
@@ -626,7 +675,7 @@ export default function Home() {
           </div>
 
           <div className="sub">
-            SportsAPI 미래 경기 자동 탐색 · 실제 H2H · 랜덤 테스트 분석
+            SportsAPI 미래 경기 자동 탐색 · 실제 H2H 반영 · 랜덤 테스트 분석
           </div>
         </div>
 
@@ -857,21 +906,20 @@ export default function Home() {
 
             <div className="right">
               <div className="small">
-                테스트 최고 픽
+                현재 최고 픽
               </div>
 
               <div className="big">
                 {
-                  ps.find(
-                    (x) =>
-                      x[2] ===
-                      best
-                  )?.[1]
+                  bestPick?.[1]
                 }
               </div>
 
               <div className="pct">
-                {best}%
+                {best.toFixed(
+                  1
+                )}
+                %
               </div>
             </div>
           </div>
@@ -905,13 +953,15 @@ export default function Home() {
 
           <div className="section">
             <h3>
-              게임유형별 최적 픽{" "}
+              게임유형별 분석 픽{" "}
               <span className="small">
-                ※ 아직 데모 확률
+                {hasH2H
+                  ? "※ 승패 시장에 실제 H2H 반영"
+                  : "※ H2H 없을 경우 데모 확률"}
               </span>
             </h3>
 
-            {ps.map(
+            {analysisPicks.map(
               (x) => (
                 <div
                   className={
@@ -1119,11 +1169,11 @@ export default function Home() {
           )}
 
           <div className="notice">
-            현재 테스트 버전은 SportsAPI에서 아직 시작하지 않은 미래 경기를 찾고,
-            그중 하나를 무작위로 선택합니다. 선택된 경기의 Fixture 상세정보와 실제
-            H2H 상대전적을 추가로 조회합니다. Statistics와 Lineups는 현재 미래
-            경기에서 제공되지 않는 경우 호출하지 않습니다. 현재 픽과 확률은 아직
-            데모이며 이후 실제 분석 로직으로 교체합니다.
+            현재 버전은 SportsAPI에서 아직 시작하지 않은 미래 경기를 무작위로
+            선택하고, 선택된 경기의 Fixture 상세정보와 실제 H2H 상대전적을
+            조회합니다. 승패 시장에는 H2H 결과를 일부 반영합니다. 핸디캡과
+            U/O는 아직 데모 수치이며, 향후 추가 통계 데이터가 확보되면 실제
+            분석식으로 교체합니다.
           </div>
         </section>
       </div>
