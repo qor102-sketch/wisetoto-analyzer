@@ -1,3 +1,6 @@
+export const runtime = "nodejs";
+export const preferredRegion = "icn1";
+
 const BETMAN_URL =
   "https://www.betman.co.kr/matchinfo/inqMainGameInfo.do";
 
