@@ -1116,7 +1116,7 @@ async function findSportsFixtureForBetman(
 
       const fixtures =
         upcoming.fixtures.filter(
-          isFutureFixture
+          isFutureNotStartedFixture
         );
 
       let bestFixture: AnyObj | null =
