@@ -215,16 +215,27 @@ async function getUpcoming(
   teamId: number,
   key: string
 ) {
-  try {
-    const raw = await api(
-      `/teams/${teamId}/fixtures?type=upcoming&page=0`,
-      key
-    );
+  const pages = [0, 1];
 
-    return arr(raw);
-  } catch {
-    return [];
+  for (const page of pages) {
+    try {
+      const raw =
+        await api(
+          `/teams/${teamId}/fixtures?type=upcoming&page=${page}`,
+          key
+        );
+
+      const fixtures = arr(raw);
+
+      if (fixtures.length > 0) {
+        return fixtures;
+      }
+    } catch {
+      // 다음 page 재시도
+    }
   }
+
+  return [];
 }
 
 function uniqueFixtures(
