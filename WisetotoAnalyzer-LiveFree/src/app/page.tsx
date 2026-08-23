@@ -1359,16 +1359,43 @@ export default function Home() {
         market
       );
 
-    if (
-      type === "moneyline"
-    ) {
-      return "";
-    }
+    const betName =
+      String(
+        market?.betName ??
+        ""
+      ).trim();
+
+    const betTypeName =
+      String(
+        market?.betTypeName ??
+        market?.displayName ??
+        ""
+      ).trim();
+
+    const cleanSportPrefix =
+      (value: string) =>
+        value
+          .replace(
+            /^(축구|야구|농구|배구)\s*/i,
+            ""
+          )
+          .replace(
+            /^일반\s*/,
+            ""
+          )
+          .trim();
 
     if (
       type === "handicap"
     ) {
-      return `H ${
+      const prefix =
+        /전반/i.test(
+          betName
+        )
+          ? "전반 H"
+          : "H";
+
+      return `${prefix} ${
         line === null
           ? ""
           : `${line >= 0 ? "+" : ""}${line}`
@@ -1378,27 +1405,67 @@ export default function Home() {
     if (
       type === "total"
     ) {
-      return `U ${line ?? "-"}`;
-    }
+      const prefix =
+        /전반/i.test(
+          betName
+        )
+          ? "전반 U"
+          : "U";
 
-    const betName =
-      String(
-        market?.betName ??
-        ""
-      );
+      return `${prefix} ${line ?? "-"}`;
+    }
 
     if (
       /sum|홀짝/i.test(
-        betName
+        `${betName} ${betTypeName}`
       )
     ) {
       return "SUM";
     }
 
+    if (
+      type === "moneyline"
+    ) {
+      /*
+       * Betman betName을 최우선 사용:
+       * 야구 승패 -> 승패
+       * 야구 승1패 -> 승1패
+       * 야구 전반 승무패 -> 전반 승무패
+       * 축구 승무패 -> 승무패
+       */
+      const fromBetName =
+        cleanSportPrefix(
+          betName
+        );
+
+      if (
+        fromBetName
+      ) {
+        return fromBetName;
+      }
+
+      const fromType =
+        cleanSportPrefix(
+          betTypeName
+        );
+
+      if (
+        fromType
+      ) {
+        return fromType;
+      }
+
+      return "승패";
+    }
+
     return (
+      cleanSportPrefix(
+        betName
+      ) ||
+      cleanSportPrefix(
+        betTypeName
+      ) ||
       String(
-        market?.betTypeName ??
-        market?.betName ??
         market?.type ??
         "-"
       )
@@ -1815,12 +1882,32 @@ export default function Home() {
                   marginTop: 5,
                 }}
               >
-                경기번호 · 시간 · 리그 · 유형 · 실제 Betman 배당
+                경기번호 · 시간 · 리그 · 게임유형 · Betman 실제 배당 · 전체 목록 스크롤
+              </div>
+
+              <div
+                className="small"
+                style={{
+                  marginTop: 4,
+                }}
+              >
+                축구 {betmanGames.filter((g) => koreanSport(String((g as any)?.sport ?? "")) === "축구").length}
+                {" · "}야구 {betmanGames.filter((g) => koreanSport(String((g as any)?.sport ?? "")) === "야구").length}
+                {" · "}농구 {betmanGames.filter((g) => koreanSport(String((g as any)?.sport ?? "")) === "농구").length}
+                {" · "}배구 {betmanGames.filter((g) => koreanSport(String((g as any)?.sport ?? "")) === "배구").length}
               </div>
             </div>
 
             <span className="small">
-              {filteredGames.length}경기
+              {filteredGames.length}경기 ·{" "}
+              {filteredGames.reduce(
+                (sum, game) =>
+                  sum +
+                  marketRows(
+                    game
+                  ).length,
+                0
+              )}배당행
             </span>
           </div>
 
@@ -1831,7 +1918,7 @@ export default function Home() {
                 margin: 14,
               }}
             >
-              표시할 Betman 발매경기가 없습니다.
+              현재 Betman API가 반환한 데이터 중 이 종목의 미시작 배당 경기가 없습니다.
             </div>
           )}
 
@@ -1840,6 +1927,12 @@ export default function Home() {
               style={{
                 overflowX:
                   "auto",
+                overflowY:
+                  "auto",
+                maxHeight:
+                  "calc(100vh - 250px)",
+                minHeight:
+                  520,
                 borderTop:
                   "1px solid #cfd6dc",
               }}
@@ -1865,6 +1958,10 @@ export default function Home() {
                       "#263e61",
                     color:
                       "#fff",
+                    position:
+                      "sticky",
+                    top: 0,
+                    zIndex: 5,
                     fontWeight:
                       800,
                     textAlign:
@@ -1876,7 +1973,7 @@ export default function Home() {
                   <div>경기번호</div>
                   <div>일시</div>
                   <div>리그</div>
-                  <div>유형</div>
+                  <div>게임유형</div>
                   <div>대상경기</div>
                   <div>승/언더</div>
                   <div>무</div>
