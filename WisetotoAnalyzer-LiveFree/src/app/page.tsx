@@ -3361,8 +3361,10 @@ function buildActualMarketPicks(
             fallbackEv.expectedValue,
           edge,
           confidence,
-          signalConflictScore:
-            signalConflict.score,
+          decisionRiskScore:
+            decisionRisk.score,
+          decisionRiskReason:
+            decisionRisk.reason,
         });
 
       result.push({
