@@ -2503,7 +2503,8 @@ function buildActualMarketPicks(
         recentSummary,
         h2h,
         market,
-        marketFair.overround
+        marketFair.overround,
+      signalConflict
       );
       result.push({
         key,
@@ -2551,7 +2552,8 @@ function buildActualMarketPicks(
         recentSummary,
         h2h,
         market,
-        marketFair.overround
+        marketFair.overround,
+      signalConflict
       );
 
       const calibrated =
