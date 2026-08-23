@@ -95,6 +95,17 @@ type AnalysisFactors = {
   homeVenueSample: number;
   awayVenueSample: number;
   scoreShrinkage: number | null;
+
+  rawExpectedHomeScore: number | null;
+  rawExpectedAwayScore: number | null;
+  scorePrior: number | null;
+
+  homeWeightedScored: number | null;
+  homeWeightedConceded: number | null;
+  awayWeightedScored: number | null;
+  awayWeightedConceded: number | null;
+
+  h2hSample: number;
 };
 
 const I = {
@@ -930,6 +941,12 @@ function buildAnalysis(
     awayWins +
     draws;
 
+  const h2hSample =
+    Math.max(
+      0,
+      h2hTotal
+    );
+
   const h2hUsed =
     h2hTotal > 0;
 
@@ -1024,6 +1041,18 @@ function buildAnalysis(
     | number
     | null = null;
 
+  let rawExpectedHomeScore:
+    | number
+    | null = null;
+
+  let rawExpectedAwayScore:
+    | number
+    | null = null;
+
+  let scorePrior:
+    | number
+    | null = null;
+
   if (scoringUsed) {
     const rawHome =
       (
@@ -1038,6 +1067,12 @@ function buildAnalysis(
         homeAvgConceded!
       ) /
       2;
+
+    rawExpectedHomeScore =
+      rawHome;
+
+    rawExpectedAwayScore =
+      rawAway;
 
     const recentSample =
       Math.min(
@@ -1070,6 +1105,9 @@ function buildAnalysis(
       neutralScorePrior(
         sport
       );
+
+    scorePrior =
+      prior;
 
     expectedHomeScore =
       shrinkExpectedScore(
@@ -1642,6 +1680,43 @@ function buildAnalysis(
                 2
               )
             ),
+
+      rawExpectedHomeScore:
+        rawExpectedHomeScore === null
+          ? null
+          : Number(rawExpectedHomeScore.toFixed(3)),
+
+      rawExpectedAwayScore:
+        rawExpectedAwayScore === null
+          ? null
+          : Number(rawExpectedAwayScore.toFixed(3)),
+
+      scorePrior:
+        scorePrior === null
+          ? null
+          : Number(scorePrior.toFixed(3)),
+
+      homeWeightedScored:
+        homeAvgScored === null
+          ? null
+          : Number(homeAvgScored.toFixed(3)),
+
+      homeWeightedConceded:
+        homeAvgConceded === null
+          ? null
+          : Number(homeAvgConceded.toFixed(3)),
+
+      awayWeightedScored:
+        awayAvgScored === null
+          ? null
+          : Number(awayAvgScored.toFixed(3)),
+
+      awayWeightedConceded:
+        awayAvgConceded === null
+          ? null
+          : Number(awayAvgConceded.toFixed(3)),
+
+      h2hSample,
     } as AnalysisFactors,
   };
 }
@@ -1651,10 +1726,12 @@ type MarketPick = {
   key: string;
   market: string;
   pick: string;
+  rawProbability: number;
   probability: number;
   odds: number | null;
   marketProbability: number | null;
   edge: number | null;
+  calibrationWeight: number | null;
   confidenceScore: number;
   confidenceGrade: string;
   recommendationScore: number;
@@ -1825,6 +1902,42 @@ function marketConfidence(
   return clamp(score, 30, 84);
 }
 
+function calibrateModelProbability(
+  rawProbability: number,
+  marketProbability: number | null,
+  confidence: number
+) {
+  if (
+    marketProbability === null ||
+    !Number.isFinite(marketProbability)
+  ) {
+    return {
+      probability: rawProbability,
+      modelWeight: null as number | null,
+    };
+  }
+
+  // 신뢰도에 따라 모델과 시장 공정확률을 보수적으로 혼합.
+  const modelWeight =
+    clamp(
+      0.28 +
+      (confidence / 100) * 0.48,
+      0.42,
+      0.70
+    );
+
+  return {
+    probability:
+      clamp(
+        rawProbability * modelWeight +
+        marketProbability * (1 - modelWeight),
+        1,
+        99
+      ),
+    modelWeight,
+  };
+}
+
 function recommendationScore(
   modelProbability: number,
   edge: number | null,
@@ -1953,11 +2066,9 @@ function buildActualMarketPicks(
         const safeOdds = Number.isFinite(odds) && odds > 1 ? odds : null;
         const fair = marketFair.probabilities[best.identity];
         const marketProbability =
-          Number.isFinite(fair) ? Number(fair.toFixed(1)) : null;
-        const edge =
-          marketProbability === null
-            ? null
-            : Number((best.probability - marketProbability).toFixed(1));
+          Number.isFinite(fair)
+            ? Number(fair.toFixed(1))
+            : null;
 
         const confidence = marketConfidence(
           factors,
@@ -1966,8 +2077,31 @@ function buildActualMarketPicks(
           market,
           marketFair.overround
         );
+
+        const calibrated =
+          calibrateModelProbability(
+            best.probability,
+            marketProbability,
+            confidence
+          );
+
+        const calibratedProbability =
+          Number(
+            calibrated.probability.toFixed(1)
+          );
+
+        const edge =
+          marketProbability === null
+            ? null
+            : Number(
+                (
+                  calibratedProbability -
+                  marketProbability
+                ).toFixed(1)
+              );
+
         const recScore = recommendationScore(
-          best.probability,
+          calibratedProbability,
           edge,
           confidence
         );
@@ -1980,10 +2114,19 @@ function buildActualMarketPicks(
           key,
           market: label,
           pick: best.label,
-          probability: Number(best.probability.toFixed(1)),
+          rawProbability:
+            Number(best.probability.toFixed(1)),
+          probability:
+            calibratedProbability,
           odds: safeOdds,
           marketProbability,
           edge,
+          calibrationWeight:
+            calibrated.modelWeight === null
+              ? null
+              : Number(
+                  calibrated.modelWeight.toFixed(2)
+                ),
           confidenceScore: Number(confidence.toFixed(1)),
           confidenceGrade: confidenceGrade(confidence),
           recommendationScore: Number(recScore.toFixed(1)),
@@ -2017,10 +2160,14 @@ function buildActualMarketPicks(
         key,
         market: label,
         pick: fallbackLabel,
-        probability: Number(fallbackProbability.toFixed(1)),
+        rawProbability:
+          Number(fallbackProbability.toFixed(1)),
+        probability:
+          Number(fallbackProbability.toFixed(1)),
         odds: null,
         marketProbability: null,
         edge: null,
+        calibrationWeight: null,
         confidenceScore: Number(confidence.toFixed(1)),
         confidenceGrade: confidenceGrade(confidence),
         recommendationScore: Number(
@@ -2041,10 +2188,6 @@ function buildActualMarketPicks(
       const fair = marketFair.probabilities[fallbackBest.identity];
       const marketProbability =
         Number.isFinite(fair) ? Number(fair.toFixed(1)) : null;
-      const edge =
-        marketProbability === null
-          ? null
-          : Number((fallbackBest.probability - marketProbability).toFixed(1));
       const confidence = marketConfidence(
         factors,
         recentSummary,
@@ -2053,21 +2196,52 @@ function buildActualMarketPicks(
         marketFair.overround
       );
 
+      const calibrated =
+        calibrateModelProbability(
+          fallbackBest.probability,
+          marketProbability,
+          confidence
+        );
+
+      const calibratedProbability =
+        Number(
+          calibrated.probability.toFixed(1)
+        );
+
+      const edge =
+        marketProbability === null
+          ? null
+          : Number(
+              (
+                calibratedProbability -
+                marketProbability
+              ).toFixed(1)
+            );
+
       result.push({
         key,
         market: label,
         pick: fallbackBest.label,
-        probability: Number(fallbackBest.probability.toFixed(1)),
+        rawProbability:
+          Number(fallbackBest.probability.toFixed(1)),
+        probability:
+          calibratedProbability,
         odds:
           Number(fallbackBest.selection?.odds) > 1
             ? Number(fallbackBest.selection?.odds)
             : null,
         marketProbability,
         edge,
+        calibrationWeight:
+          calibrated.modelWeight === null
+            ? null
+            : Number(
+                calibrated.modelWeight.toFixed(2)
+              ),
         confidenceScore: Number(confidence.toFixed(1)),
         confidenceGrade: confidenceGrade(confidence),
         recommendationScore: Number(
-          recommendationScore(fallbackBest.probability, edge, confidence).toFixed(1)
+          recommendationScore(calibratedProbability, edge, confidence).toFixed(1)
         ),
         detail: "SportsAPI Form/H2H 기반",
       });
@@ -3426,12 +3600,12 @@ export default function Home() {
               {actualMarketPicks.length ? (
                 <div className="compactMarket">
                   <div className="compactMarketHead">
-                    <div>유형</div><div>추천</div><div className="cmNum">모델</div><div className="cmNum">시장</div><div className="cmNum">엣지</div><div className="cmNum">신뢰</div><div className="cmNum">점수</div>
+                    <div>유형</div><div>추천</div><div className="cmNum">보정</div><div className="cmNum">시장</div><div className="cmNum">엣지</div><div className="cmNum">신뢰</div><div className="cmNum">점수</div>
                   </div>
                   {actualMarketPicks.map((pick) => {
                     const isBest = bestActualPick?.key === pick.key;
                     return (
-                      <div className={`compactMarketRow ${isBest ? "bestRow" : ""}`} key={pick.key} title={`${pick.detail} · ${pickValueStatus(pick).label}`}>
+                      <div className={`compactMarketRow ${isBest ? "bestRow" : ""}`} key={pick.key} title={`${pick.detail} · 원모델 ${pick.rawProbability.toFixed(1)}% · 보정 ${pick.probability.toFixed(1)}% · ${pickValueStatus(pick).label}`}>
                         <div className="cmName">{pick.market}</div>
                         <div className="cmPick">{pick.pick}</div>
                         <div className="cmNum"><b>{pick.probability.toFixed(1)}%</b></div>
@@ -3452,8 +3626,94 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>상세 분석 근거 · 모델 보정 · 예상득점 · H2H · 최근 Form</summary>
+              <summary>V10 계산 추적 · 가중득실점 · 수축 전/후 · 시장 보정 · H2H/Form</summary>
               <div className="uiDetailBody">
+                <div className="section" style={{ marginTop: 0 }}>
+                  <h3>V10 계산 추적</h3>
+                  <div className="cards">
+                    <div className="card">
+                      홈 가중 득/실
+                      <b>{analysisFactors.homeWeightedScored?.toFixed(2) ?? "-"} / {analysisFactors.homeWeightedConceded?.toFixed(2) ?? "-"}</b>
+                      <div className="small">최신경기 시간가중</div>
+                    </div>
+                    <div className="card">
+                      원정 가중 득/실
+                      <b>{analysisFactors.awayWeightedScored?.toFixed(2) ?? "-"} / {analysisFactors.awayWeightedConceded?.toFixed(2) ?? "-"}</b>
+                      <div className="small">최신경기 시간가중</div>
+                    </div>
+                    <div className="card">
+                      수축 전 예상
+                      <b>{analysisFactors.rawExpectedHomeScore?.toFixed(2) ?? "-"} : {analysisFactors.rawExpectedAwayScore?.toFixed(2) ?? "-"}</b>
+                      <div className="small">공격 × 상대수비</div>
+                    </div>
+                    <div className="card">
+                      중립 사전값
+                      <b>{analysisFactors.scorePrior?.toFixed(2) ?? "-"}</b>
+                      <div className="small">모델 강도 {analysisFactors.scoreShrinkage === null ? "-" : `${Math.round(analysisFactors.scoreShrinkage * 100)}%`}</div>
+                    </div>
+                    <div className="card">
+                      수축 후 예상
+                      <b>{analysisFactors.expectedHomeScore?.toFixed(2) ?? "-"} : {analysisFactors.expectedAwayScore?.toFixed(2) ?? "-"}</b>
+                      <div className="small">Poisson λ</div>
+                    </div>
+                    <div className="card">
+                      H2H 표본
+                      <b>{analysisFactors.h2hSample}</b>
+                      <div className="small">승패 모델 최대 15%</div>
+                    </div>
+                  </div>
+
+                  {actualMarketPicks.length > 0 && (
+                    <div style={{ marginTop: 8, overflowX: "auto" }}>
+                      <div style={{ minWidth: 620 }}>
+                        <div style={{
+                          display: "grid",
+                          gridTemplateColumns: "90px 70px 70px 70px 70px 70px",
+                          gap: 6,
+                          fontSize: 9,
+                          fontWeight: 900,
+                          color: "#64748b",
+                          padding: "5px 6px",
+                          background: "#f1f5f9",
+                          borderRadius: 8,
+                        }}>
+                          <div>마켓</div><div>원모델</div><div>시장</div><div>모델가중</div><div>보정</div><div>엣지</div>
+                        </div>
+
+                        {actualMarketPicks.map((pick) => (
+                          <div
+                            key={`trace-${pick.key}`}
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "90px 70px 70px 70px 70px 70px",
+                              gap: 6,
+                              fontSize: 9,
+                              padding: "5px 6px",
+                              borderBottom: "1px solid #edf1f6",
+                            }}
+                          >
+                            <div><b>{pick.market}</b></div>
+                            <div>{pick.rawProbability.toFixed(1)}%</div>
+                            <div>{pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`}</div>
+                            <div>{pick.calibrationWeight === null ? "-" : `${Math.round(pick.calibrationWeight * 100)}%`}</div>
+                            <div><b>{pick.probability.toFixed(1)}%</b></div>
+                            <div style={{
+                              color: pick.edge !== null && pick.edge >= 0 ? "#07884a" : "#d33d3d",
+                              fontWeight: 800
+                            }}>
+                              {pick.edge === null ? "-" : `${pick.edge >= 0 ? "+" : ""}${pick.edge.toFixed(1)}%p`}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="notice" style={{ margin: "8px 0 0" }}>
+                    V10 보정확률은 원모델 확률과 Betman 마진 제거 시장확률을 데이터 신뢰도에 따라 혼합합니다.
+                    신뢰도가 높아도 시장을 완전히 무시하지 않아 과도한 엣지를 줄입니다.
+                  </div>
+                </div>
             {analysisFactors.scoringUsed && (
               <div className="section">
                 <h3>V9 모델 보정 상태</h3>
@@ -3486,7 +3746,7 @@ export default function Home() {
               <div className="section">
                 <h3>V9 지표 해석</h3>
                 <div className="notice" style={{ margin: 0 }}>
-                  모델확률은 SportsAPI Form/H2H 및 최근 득실점에서 계산한 값입니다.
+                  원모델확률은 SportsAPI Form/H2H 및 최근 득실점에서 계산하고, 화면의 보정확률은 데이터 신뢰도에 따라 시장 사전값을 일부 혼합한 값입니다.
                   시장확률은 Betman 배당의 마진(오버라운드)을 제거한 공정 내재확률이고,
                   엣지는 모델확률 - 시장확률입니다.
                   V9는 V8의 U/O·SUM 마켓 해석을 유지하면서 최근경기 시간가중치, 홈/원정 분리, 표본수 수축을 추가합니다.
