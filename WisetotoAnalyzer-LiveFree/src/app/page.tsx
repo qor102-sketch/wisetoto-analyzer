@@ -1340,13 +1340,20 @@ function selectionIdentity(selection: any) {
   const side = String(selection?.side ?? "").toLowerCase();
   const label = selectionLabel(selection).toLowerCase();
 
-  if (side === "win" || /^(승|홈|home)$/i.test(label) || label.includes("home")) return "home";
-  if (side === "draw" || /^(무|draw)$/i.test(label) || label.includes("draw")) return "draw";
-  if (side === "lose" || /^(패|원정|away)$/i.test(label) || label.includes("away")) return "away";
+  // Betman의 win/lose 컬럼은 마켓에 따라 의미가 달라집니다.
+  // U/O에서는 win/lose가 언더/오버, SUM에서는 홀/짝이므로
+  // 실제 선택지 라벨을 generic side보다 반드시 먼저 해석합니다.
   if (/오버|over/i.test(label)) return "over";
   if (/언더|under/i.test(label)) return "under";
-  if (/홀|odd/i.test(label)) return "odd";
-  if (/짝|even/i.test(label)) return "even";
+  if (/^(홀|odd)$/i.test(label) || label.includes("홀")) return "odd";
+  if (/^(짝|even)$/i.test(label) || label.includes("짝")) return "even";
+  if (/^(승|홈|home)$/i.test(label) || label.includes("home")) return "home";
+  if (/^(무|draw)$/i.test(label) || label.includes("draw")) return "draw";
+  if (/^(패|원정|away)$/i.test(label) || label.includes("away")) return "away";
+
+  if (side === "win") return "home";
+  if (side === "draw") return "draw";
+  if (side === "lose") return "away";
   return side || label;
 }
 
@@ -1400,9 +1407,9 @@ function fairMarketProbabilities(market: any) {
 }
 
 function confidenceGrade(score: number) {
-  if (score >= 82) return "A";
-  if (score >= 74) return "B+";
-  if (score >= 66) return "B";
+  if (score >= 84) return "A";
+  if (score >= 76) return "B+";
+  if (score >= 68) return "B";
   if (score >= 58) return "C+";
   return "C";
 }
@@ -1416,37 +1423,48 @@ function marketConfidence(
 ) {
   const homePlayed = Math.max(0, Number(recentSummary?.home?.form?.played ?? 0));
   const awayPlayed = Math.max(0, Number(recentSummary?.away?.form?.played ?? 0));
-  const recentCoverage =
-    ((Math.min(homePlayed, 5) + Math.min(awayPlayed, 5)) / 10) * 55;
 
+  // 최근 경기 표본: 양 팀 각각 5경기를 확보해야 최대점.
+  const recentCoverage =
+    ((Math.min(homePlayed, 5) + Math.min(awayPlayed, 5)) / 10) * 30;
+
+  // H2H는 과거 상대전적이 현재 전력보다 과대평가되지 않도록 최대 10점만 반영.
   const h2hCount =
     Math.max(0, Number(h2h?.homeWins ?? 0)) +
     Math.max(0, Number(h2h?.awayWins ?? 0)) +
     Math.max(0, Number(h2h?.draws ?? 0));
-  const h2hCoverage = (Math.min(h2hCount, 5) / 5) * 20;
+  const h2hCoverage = (Math.min(h2hCount, 5) / 5) * 10;
 
+  // 실제 최근 득점/실점이 모두 확보됐을 때만 점수모델 가점.
   const scoringCoverage = factors.scoringUsed ? 20 : 0;
 
-  // 시장 배당이 정상적으로 여러 선택지에서 형성돼 있을수록 소폭 가점.
+  // 배당시장이 정상 형성됐는지. 오버라운드가 클수록 감점.
   const marketQuality =
     Number.isFinite(overround) && overround > 0
-      ? clamp(100 - Math.max(0, overround - 1) * 220, 45, 100)
-      : 45;
+      ? clamp(100 - Math.max(0, overround - 1) * 250, 35, 100)
+      : 35;
 
   const betName = String(market?.betName ?? market?.displayName ?? "");
+  const betTypeName = String(market?.betTypeName ?? "");
   const isFirstHalf = /전반|1st\s*half|first\s*half/i.test(betName);
-  const isSpecial = /sum|홀짝|odd|even/i.test(betName);
+  const isOddEven = /sum|홀짝|odd|even/i.test(`${betName} ${betTypeName}`);
 
   let score =
+    22 +                 // 기본 데이터 품질
     recentCoverage +
     h2hCoverage +
     scoringCoverage +
-    marketQuality * 0.05;
+    marketQuality * 0.08;
 
-  if (isFirstHalf) score -= 8; // 전반은 현재 전체경기 득점 기반 근사치 사용
-  if (isSpecial) score -= 8;   // 특수 마켓은 분포 민감도가 높아 보수적으로 처리
+  // 현재 전반 예상은 전체경기 예상득점의 45% 근사치이므로 강하게 감점.
+  if (isFirstHalf) score -= 18;
 
-  return clamp(score, 35, 92);
+  // SUM=홀짝은 Betman 원본 의미는 확정됐지만 점수 parity에 민감하므로 보수적 감점.
+  if (isOddEven) score -= 10;
+
+  // 현재 SportsAPI recentSummary는 홈경기/원정경기 분리 성적이 아니라 전체 recent 요약.
+  // 이 한계를 반영해 최고 신뢰도를 86으로 제한.
+  return clamp(score, 30, 86);
 }
 
 function recommendationScore(
@@ -1454,19 +1472,50 @@ function recommendationScore(
   edge: number | null,
   confidence: number
 ) {
-  // 확률만 높은 픽보다 시장 대비 우위와 데이터 신뢰도를 함께 평가.
+  // V8: 확률이 높아도 시장보다 불리한(음수 엣지) 픽이 최상단으로 올라오지 않게 함.
   const edgeScore =
     edge === null
-      ? 50
-      : clamp(50 + edge * 2.2, 0, 100);
+      ? 35
+      : clamp(50 + edge * 2.5, 0, 100);
 
-  return clamp(
-    modelProbability * 0.50 +
-      edgeScore * 0.30 +
-      confidence * 0.20,
-    0,
-    100
-  );
+  let score =
+    modelProbability * 0.42 +
+    edgeScore * 0.38 +
+    confidence * 0.20;
+
+  if (edge !== null && edge < 0) {
+    score -= Math.min(20, Math.abs(edge) * 1.5);
+  }
+
+  if (edge === null) {
+    score -= 8;
+  }
+
+  return clamp(score, 0, 100);
+}
+
+function pickValueStatus(pick: MarketPick) {
+  if (pick.marketProbability === null || pick.edge === null) {
+    return { label: "시장비교 불가", eligible: false };
+  }
+
+  if (pick.edge < 0) {
+    return { label: "제외 · 음수 엣지", eligible: false };
+  }
+
+  if (pick.confidenceScore < 58) {
+    return { label: "관망 · 신뢰도 부족", eligible: false };
+  }
+
+  if (pick.edge < 3) {
+    return { label: "관망 · 엣지 미미", eligible: false };
+  }
+
+  if (pick.edge >= 8 && pick.confidenceScore >= 68) {
+    return { label: "가치 우수", eligible: true };
+  }
+
+  return { label: "가치 후보", eligible: true };
 }
 
 function buildActualMarketPicks(
@@ -1533,7 +1582,8 @@ function buildActualMarketPicks(
           over: decided > 0 ? (over / decided) * 100 : 50,
           under: decided > 0 ? (under / decided) * 100 : 50,
         };
-      } else if (/sum|홀짝|odd|even/i.test(betName)) {
+      } else if (/sum|홀짝|odd|even/i.test(`${betName} ${String(market?.betTypeName ?? "")}`)) {
+        // Betman 원본: betName="축구 SUM", betTypeName="일반 홀짝", 선택지=홀/짝.
         probs = { odd: odd * 100, even: even * 100 };
       } else {
         probs = { home: home * 100, draw: draw * 100, away: away * 100 };
@@ -2240,8 +2290,12 @@ export default function Home() {
         return pick;
       });
 
-  const bestActualPick = actualMarketPicks.length
-    ? [...actualMarketPicks].sort(
+  const eligibleMarketPicks = actualMarketPicks.filter(
+    (pick) => pickValueStatus(pick).eligible
+  );
+
+  const bestActualPick = eligibleMarketPicks.length
+    ? [...eligibleMarketPicks].sort(
         (a, b) => b.recommendationScore - a.recommendationScore
       )[0]
     : null;
@@ -2838,8 +2892,8 @@ export default function Home() {
               </div>
               <div className="right">
                 <div className="small">현재 최고 픽</div>
-                <div className="big">{analysisFactors.hasRealData ? bestPick?.[1] : "분석 대기"}</div>
-                <div className="pct">{analysisFactors.hasRealData ? `${best.toFixed(1)}%` : "-"}</div>
+                <div className="big">{analysisFactors.hasRealData ? (bestActualPick ? bestActualPick.pick : actualMarketPicks.length ? "가치픽 없음" : bestPick?.[1]) : "분석 대기"}</div>
+                <div className="pct">{analysisFactors.hasRealData ? (bestActualPick ? `${best.toFixed(1)}%` : actualMarketPicks.length ? "-" : `${best.toFixed(1)}%`) : "-"}</div>
                 {bestActualPick && (
                   <div className="small" style={{ marginTop: 4 }}>
                     추천점수 {bestActualPick.recommendationScore.toFixed(1)}
@@ -2878,6 +2932,13 @@ export default function Home() {
                         {" · "}신뢰도 {pick.confidenceGrade} ({pick.confidenceScore.toFixed(0)})
                         {" · "}추천점수 {pick.recommendationScore.toFixed(1)}
                       </div>
+                      <div className="small" style={{
+                        marginTop: 3,
+                        fontWeight: 800,
+                        color: pickValueStatus(pick).eligible ? "#087a39" : pick.edge !== null && pick.edge < 0 ? "#c62828" : "#805500"
+                      }}>
+                        {pickValueStatus(pick).label}
+                      </div>
                     </div>
                     <div className="pct">{pick.probability.toFixed(1)}%</div>
                   </div>
@@ -2892,13 +2953,15 @@ export default function Home() {
 
             {actualMarketPicks.length > 0 && (
               <div className="section">
-                <h3>V7 지표 해석</h3>
+                <h3>V8 지표 해석</h3>
                 <div className="notice" style={{ margin: 0 }}>
                   모델확률은 SportsAPI Form/H2H 및 최근 득실점에서 계산한 값입니다.
                   시장확률은 Betman 배당의 마진(오버라운드)을 제거한 공정 내재확률이고,
                   엣지는 모델확률 - 시장확률입니다.
-                  신뢰도는 최근 경기 표본, H2H 표본, 득실점 데이터 사용 여부와 마켓 특성을 따로 평가합니다.
-                  추천점수는 모델확률·엣지·신뢰도를 합친 비교용 점수이며 실제 적중률을 보장하는 수치는 아닙니다.
+                  V8부터 U/O는 Betman의 언더/오버 선택지 라벨을 우선 해석하며, SUM은 Betman 원본의 일반 홀짝(홀/짝)으로 계산합니다.
+                  전반 마켓은 전체경기 득점의 45% 근사치를 사용하므로 신뢰도를 크게 감점합니다.
+                  음수 엣지, 시장비교 불가, 낮은 신뢰도 픽은 최고 추천에서 제외합니다.
+                  추천점수는 비교용 지표이며 실제 적중률을 보장하는 수치는 아닙니다.
                 </div>
               </div>
             )}
