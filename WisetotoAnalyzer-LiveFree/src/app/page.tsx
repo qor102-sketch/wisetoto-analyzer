@@ -2752,7 +2752,69 @@ export default function Home() {
         .notice{border-radius:10px!important;font-size:10px!important;line-height:1.4!important;padding:7px 9px!important}
         @media(max-width:1250px){.quickStats{grid-template-columns:repeat(3,1fr)}.compactMarketHead,.compactMarketRow{grid-template-columns:minmax(65px,.8fr) minmax(68px,.8fr) 52px 52px 55px 44px 52px}}
         @media(max-width:980px){.layout{grid-template-columns:1fr!important}.quickStats{grid-template-columns:repeat(3,1fr)}}
-      `}</style>
+      
+        /* V9.2 polished dashboard */
+        .top{padding:10px 14px!important;min-height:68px!important}
+        .title{font-size:18px!important;line-height:1.15!important}
+        .sub{font-size:11px!important;margin-top:4px!important}
+        .bar{gap:7px!important}.bar .btn{min-height:34px!important;padding:7px 12px!important;font-size:11px!important}
+        .tabs{margin:8px 0!important}.tab{min-height:32px!important;padding:6px 12px!important;font-size:11px!important}
+        .panelHeaderTight{padding:11px 13px 8px!important}
+        .analysisShell{padding:10px!important}
+        .matchSummary{
+          display:grid;grid-template-columns:minmax(0,1fr) 112px;gap:10px;
+          background:linear-gradient(135deg,#f8fbff,#eef5ff);
+          border:1px solid #cfe0ff;border-radius:13px;padding:11px 12px;
+        }
+        .matchSummary h2{margin:3px 0 4px;font-size:17px;line-height:1.18}
+        .matchSummary .matchTime{font-size:17px;font-weight:950;letter-spacing:-.3px}
+        .matchSummary .matchMeta{font-size:10px;color:var(--ui-muted);margin-top:2px}
+        .matchSummary .matchOk{font-size:10px;color:var(--ui-green);font-weight:800;margin-top:2px}
+        .bestBox{
+          border:1px solid #bde6ce;background:linear-gradient(135deg,#f2fbf6,#e8f8ef);
+          border-radius:11px;padding:9px;display:flex;flex-direction:column;justify-content:center;text-align:right
+        }
+        .bestBox .label{font-size:9px;color:#507060;font-weight:850}
+        .bestBox .pickName{font-size:14px;font-weight:950;color:#116837;margin:3px 0}
+        .bestBox .pickPct{font-size:22px;font-weight:950;color:var(--ui-green)}
+        .bestBox .pickMeta{font-size:9px;color:#5d6f65;line-height:1.3}
+        .betStrip{display:grid;grid-template-columns:1.25fr .9fr .9fr .85fr .7fr .7fr;gap:6px;margin-top:7px}
+        .betCell{border:1px solid var(--ui-line);background:#fbfcfe;border-radius:9px;padding:6px 7px;min-width:0}
+        .betCell span{display:block;font-size:8px;color:#708096;font-weight:850}
+        .betCell b{display:block;margin-top:2px;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .kpiGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:8px}
+        .kpiCard{border-radius:11px;padding:9px 10px;border:1px solid var(--ui-line);background:#fff;min-height:72px}
+        .kpiCard.green{background:#f2fbf6;border-color:#bde6ce}
+        .kpiCard.violet{background:#f7f4ff;border-color:#d9cdfd}
+        .kpiCard.orange{background:#fff8f1;border-color:#f5d7b6}
+        .kpiCard.blue{background:#f2f7ff;border-color:#cfe0ff}
+        .kpiTitle{font-size:9px;font-weight:900;color:#65758a;margin-bottom:5px}
+        .kpiValue{font-size:17px;font-weight:950;line-height:1.1}
+        .kpiSub{font-size:9px;color:#6c7a90;margin-top:4px}
+        .kpiSplit{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+        .kpiSplit div{text-align:center}
+        .kpiSplit b{display:block;font-size:15px}
+        .progressTrack{height:5px;background:#e7e5f4;border-radius:999px;overflow:hidden;margin-top:7px}
+        .progressBar{height:100%;background:#6d4aff;border-radius:999px}
+        .analysisTitleRow{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:9px;margin-bottom:5px}
+        .analysisTitleRow h3{margin:0;font-size:12px}
+        .legend{display:flex;gap:8px;font-size:8px;color:#758397;white-space:nowrap}
+        .dot{width:6px;height:6px;border-radius:50%;display:inline-block;margin-right:3px}
+        .dot.good{background:#0a9b53}.dot.neutral{background:#aeb8c6}.dot.bad{background:#df4242}
+        .compactMarket{border-radius:11px!important}
+        .compactMarketHead,.compactMarketRow{
+          grid-template-columns:minmax(74px,.9fr) minmax(76px,.9fr) 56px 56px 59px 49px 58px!important;
+          padding:6px 8px!important;min-height:30px
+        }
+        .compactMarketHead{font-size:8px!important}
+        .compactMarketRow{font-size:9px!important}
+        .detailFooter{margin-top:8px}
+        details.uiDetail>summary{font-size:10px!important;padding:7px 9px!important}
+        @media(max-width:1350px){
+          .betStrip{grid-template-columns:repeat(3,1fr)}
+          .kpiGrid{grid-template-columns:repeat(2,1fr)}
+        }
+`}</style>
       <div className="top">
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
@@ -2792,9 +2854,10 @@ export default function Home() {
           }}
         >
           <div
+            className="panelHeaderTight"
             style={{
               padding:
-                "16px 16px 10px",
+                "11px 13px 8px",
               display:
                 "flex",
               justifyContent:
@@ -3257,47 +3320,109 @@ export default function Home() {
           )}
         </section>
 
-        <section className="panel" style={{ position: "sticky", top: 10, maxHeight: "calc(100vh - 20px)", overflowY: "auto", padding: 12 }}>
+        <section className="panel analysisShell" style={{ position: "sticky", top: 8, maxHeight: "calc(100vh - 16px)", overflowY: "auto" }}>
           {!selectedBetman ? <div className="notice">왼쪽 경기목록에서 분석할 경기를 선택하세요.</div> : <>
-            <div className="hero">
+            <div className="matchSummary">
               <div>
-                <div className="small">{I[currentMatch.sport]} {currentMatch.league}{matched?.fixtureId ? ` · Fixture #${matched.fixtureId}` : ""}</div>
-                <h2>{currentMatch.home} vs {currentMatch.away}</h2>
-                <div className="big">{currentMatch.time}</div>
-                <div className="small">경기장: {currentMatch.venue}</div>
-                <div className="ok">
-                  ✓ Betman 실제 발매경기 선택
-                  {primaryMatchSeq(selectedBetman) !== null
-                    ? ` · 대표 경기번호 #${primaryMatchSeq(selectedBetman)}`
-                    : ""}
+                <div className="small">
+                  {I[currentMatch.sport]} {currentMatch.league}
+                  {matched?.fixtureId ? ` · Fixture #${matched.fixtureId}` : ""}
                 </div>
-                {matched?.fixtureId && <div className="ok">✓ SportsAPI 동일경기 매칭 완료</div>}
+                <h2>{currentMatch.home} vs {currentMatch.away}</h2>
+                <div className="matchTime">{currentMatch.time}</div>
+                <div className="matchMeta">경기장: {currentMatch.venue}</div>
+                <div className="matchOk">
+                  ✓ Betman 실제 발매경기 선택
+                  {primaryMatchSeq(selectedBetman) !== null ? ` · #${primaryMatchSeq(selectedBetman)}` : ""}
+                </div>
+                {matched?.fixtureId && <div className="matchOk">✓ SportsAPI 동일경기 매칭 완료</div>}
               </div>
-              <div className="right">
-                <div className="small">현재 최고 픽</div>
-                <div className="big">{analysisFactors.hasRealData ? (bestActualPick ? bestActualPick.pick : actualMarketPicks.length ? "가치픽 없음" : bestPick?.[1]) : "분석 대기"}</div>
-                <div className="pct">{analysisFactors.hasRealData ? (bestActualPick ? `${best.toFixed(1)}%` : actualMarketPicks.length ? "-" : `${best.toFixed(1)}%`) : "-"}</div>
+
+              <div className="bestBox">
+                <div className="label">현재 최고 가치픽</div>
+                <div className="pickName">
+                  {analysisFactors.hasRealData
+                    ? (bestActualPick ? `${bestActualPick.market} ${bestActualPick.pick}` : actualMarketPicks.length ? "가치픽 없음" : bestPick?.[1])
+                    : "분석 대기"}
+                </div>
+                <div className="pickPct">
+                  {analysisFactors.hasRealData && bestActualPick ? `${best.toFixed(1)}%` : "-"}
+                </div>
                 {bestActualPick && (
-                  <div className="small" style={{ marginTop: 4 }}>
+                  <div className="pickMeta">
                     추천점수 {bestActualPick.recommendationScore.toFixed(1)}
-                    {" · "}엣지 {bestActualPick.edge === null ? "-" : `${bestActualPick.edge >= 0 ? "+" : ""}${bestActualPick.edge.toFixed(1)}%p`}
-                    {" · "}신뢰도 {bestActualPick.confidenceGrade}
+                    <br />
+                    엣지 {bestActualPick.edge === null ? "-" : `${bestActualPick.edge >= 0 ? "+" : ""}${bestActualPick.edge.toFixed(1)}%p`}
+                    {" · "}신뢰 {bestActualPick.confidenceGrade}
                   </div>
                 )}
               </div>
             </div>
 
-            <div className="quickStats">
-              <div className="quickStat"><span>승패 배당</span><b>{moneylineText(selectedBetman)}</b></div>
-              <div className="quickStat"><span>핸디</span><b>{handicapText(selectedBetman)}</b></div>
-              <div className="quickStat"><span>U/O</span><b>{totalText(selectedBetman)}</b></div>
-              <div className="quickStat"><span>SportsAPI</span><b>{matched?.fixtureId ? "✓ 매칭" : "대기"}</b></div>
-              <div className="quickStat"><span>H2H</span><b>{hasH2H ? "✓ 수신" : "대기"}</b></div>
-              <div className="quickStat"><span>Form</span><b>{hasRecent ? "✓ 수신" : "대기"}</b></div>
+            <div className="betStrip">
+              <div className="betCell"><span>승패 배당</span><b>{moneylineText(selectedBetman)}</b></div>
+              <div className="betCell"><span>핸디</span><b>{handicapText(selectedBetman)}</b></div>
+              <div className="betCell"><span>U/O</span><b>{totalText(selectedBetman)}</b></div>
+              <div className="betCell"><span>SportsAPI</span><b>{matched?.fixtureId ? "✓ 매칭 완료" : "대기"}</b></div>
+              <div className="betCell"><span>H2H</span><b>{hasH2H ? "✓ 수신" : "대기"}</b></div>
+              <div className="betCell"><span>Form</span><b>{hasRecent ? "✓ 수신" : "대기"}</b></div>
             </div>
 
-            <div className="section">
-              <h3>게임유형별 분석 <span className="small">{actualMarketPicks.length ? `· ${actualMarketPicks.length}개 마켓 · 모델/시장/엣지 비교` : "· 분석 대기"}</span></h3>
+            <div className="kpiGrid">
+              <div className="kpiCard green">
+                <div className="kpiTitle">예상득점 · 모델</div>
+                <div className="kpiSplit">
+                  <div><b>{analysisFactors.expectedHomeScore?.toFixed(2) ?? "-"}</b><span className="kpiSub">홈</span></div>
+                  <div><b>{analysisFactors.expectedAwayScore?.toFixed(2) ?? "-"}</b><span className="kpiSub">원정</span></div>
+                </div>
+              </div>
+
+              <div className="kpiCard violet">
+                <div className="kpiTitle">모델 강도</div>
+                <div className="kpiValue">
+                  {analysisFactors.scoreShrinkage === null ? "-" : `${Math.round(analysisFactors.scoreShrinkage * 100)}%`}
+                </div>
+                <div className="progressTrack">
+                  <div
+                    className="progressBar"
+                    style={{ width: `${analysisFactors.scoreShrinkage === null ? 0 : Math.round(analysisFactors.scoreShrinkage * 100)}%` }}
+                  />
+                </div>
+                <div className="kpiSub">
+                  최근 {analysisFactors.homeRecentSample}/{analysisFactors.awayRecentSample} · 장소 {analysisFactors.homeVenueSample}/{analysisFactors.awayVenueSample}
+                </div>
+              </div>
+
+              <div className="kpiCard orange">
+                <div className="kpiTitle">최근 Form</div>
+                <div className="kpiSplit">
+                  <div><b>{homeForm ? `${homeForm.wins ?? 0}-${homeForm.draws ?? 0}-${homeForm.losses ?? 0}` : "-"}</b><span className="kpiSub">홈</span></div>
+                  <div><b>{awayForm ? `${awayForm.wins ?? 0}-${awayForm.draws ?? 0}-${awayForm.losses ?? 0}` : "-"}</b><span className="kpiSub">원정</span></div>
+                </div>
+              </div>
+
+              <div className="kpiCard blue">
+                <div className="kpiTitle">H2H 최근 표본</div>
+                <div className="kpiSplit">
+                  <div><b>{hasH2H ? Number(h2h?.homeWins ?? 0) : "-"}</b><span className="kpiSub">홈 승</span></div>
+                  <div><b>{hasH2H ? Number(h2h?.awayWins ?? 0) : "-"}</b><span className="kpiSub">원정 승</span></div>
+                </div>
+                <div className="kpiSub" style={{ textAlign: "center" }}>
+                  {hasH2H ? `무 ${Number(h2h?.draws ?? 0)}` : "분석 대기"}
+                </div>
+              </div>
+            </div>
+
+            <div className="analysisTitleRow">
+              <h3>게임유형별 분석 요약</h3>
+              <div className="legend">
+                <span><i className="dot good" />가치 있음</span>
+                <span><i className="dot neutral" />관망</span>
+                <span><i className="dot bad" />가치 없음</span>
+              </div>
+            </div>
+
+            <div className="section" style={{ marginTop: 0 }}>
               {actualMarketPicks.length ? (
                 <div className="compactMarket">
                   <div className="compactMarketHead">
@@ -3327,7 +3452,7 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>상세 분석 근거 · 모델 보정 / 예상득점 / H2H / 최근 Form</summary>
+              <summary>상세 분석 근거 · 모델 보정 · 예상득점 · H2H · 최근 Form</summary>
               <div className="uiDetailBody">
             {analysisFactors.scoringUsed && (
               <div className="section">
