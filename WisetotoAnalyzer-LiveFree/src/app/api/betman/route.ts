@@ -329,8 +329,8 @@ function summarizeRow(row: AnyObj) {
 
       displayName:
         firstText(
-          row?.betTypNm,
-          row?.betNm
+          row?.betNm,
+          row?.betTypNm
         ) || null,
 
       line:
@@ -962,9 +962,9 @@ export async function GET(
       ];
 
     /*
-     * 같은 matchSeq가 compSchedules와 다른 배열에 동시에
-     * 존재할 수 있으므로 경기번호 기준으로 중복 제거합니다.
-     * matchSeq가 없는 경우에는 기존 필드 조합을 사용합니다.
+     * compSchedules와 다른 배열에 같은 마켓 행이 동시에
+     * 존재할 수 있으므로 경기번호 + 마켓 식별값 + 기준값/배당 조합으로
+     * 완전히 같은 행만 중복 제거합니다.
      */
     const deduped =
       new Map<
@@ -978,21 +978,29 @@ export async function GET(
       const matchSeq =
         rowMatchSeq(row);
 
-      const key =
+      /*
+       * matchSeq는 "실제 경기"를 가리키는 값이라 같은 경기의
+       * 승패/승1패/핸디/UO/SUM 행에서 반복될 수 있습니다.
+       * 따라서 matchSeq 하나만으로 중복 제거하면 서로 다른 마켓이
+       * 사라질 수 있으므로, 마켓 식별값과 기준값/배당까지 함께 사용합니다.
+       */
+      const key = [
         matchSeq !== null
           ? `seq:${matchSeq}`
-          : [
-              rowHome(row),
-              rowAway(row),
-              row?.gameDate ??
-                "",
-              row?.betId ??
-                "",
-              row?.betTypId ??
-                "",
-              row?.handi ??
-                "",
-            ].join("|");
+          : `teams:${normalizeName(rowHome(row))}:${normalizeName(rowAway(row))}`,
+        row?.gameDate ?? "",
+        row?.betId ?? "",
+        row?.betTypId ?? "",
+        row?.betNm ?? "",
+        row?.betTypNm ?? "",
+        row?.handi ?? "",
+        row?.winHandi ?? "",
+        row?.drawHandi ?? "",
+        row?.loseHandi ?? "",
+        row?.winAllot ?? row?.homeAllot ?? row?.winOdds ?? row?.homeOdds ?? "",
+        row?.drawAllot ?? row?.drawOdds ?? "",
+        row?.loseAllot ?? row?.awayAllot ?? row?.loseOdds ?? row?.awayOdds ?? "",
+      ].join("|");
 
       /*
        * compSchedules 복원 행을 우선 보존합니다.
