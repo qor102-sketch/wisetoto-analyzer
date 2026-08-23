@@ -120,6 +120,14 @@ type AnalysisFactors = {
   marketAwayFair: number | null;
   scoreGuardApplied: boolean;
   scoreGuardStrength: number;
+
+  homeRobustScored: number | null;
+  homeRobustConceded: number | null;
+  awayRobustScored: number | null;
+  awayRobustConceded: number | null;
+
+  homeMetricShrink: number;
+  awayMetricShrink: number;
 };
 
 const I = {
@@ -941,6 +949,105 @@ function guardExpectedScoresByMarketDirection(input: {
 }
 
 
+function sportMetricPrior(
+  sport: Exclude<Sport, "전체">
+) {
+  if (sport === "축구") return 1.35;
+  if (sport === "야구") return 4.5;
+  if (sport === "농구") return 108;
+  return 1.5;
+}
+
+function robustRecentMetric(input: {
+  value: number | null;
+  played: number;
+  venuePlayed: number;
+  sport: Exclude<Sport, "전체">;
+}) {
+  const {
+    value,
+    played,
+    venuePlayed,
+    sport,
+  } = input;
+
+  if (
+    value === null ||
+    !Number.isFinite(value)
+  ) {
+    return {
+      value: null as number | null,
+      shrink: 1,
+    };
+  }
+
+  const prior =
+    sportMetricPrior(
+      sport
+    );
+
+  let lower = 0;
+  let upper = prior * 2;
+
+  if (sport === "축구") {
+    lower = 0.30;
+    upper = 2.70;
+  } else if (sport === "야구") {
+    lower = 1.5;
+    upper = 7.5;
+  } else if (sport === "농구") {
+    lower = 75;
+    upper = 140;
+  } else {
+    lower = 0.5;
+    upper = 2.8;
+  }
+
+  // 1) 최근 극단값 winsorization
+  const clipped =
+    clamp(
+      value,
+      lower,
+      upper
+    );
+
+  // 2) 표본이 5경기여도 최근폼은 변동성이 크므로 pseudo sample 사용.
+  // 장소 표본이 없으면 pseudo sample을 더 크게 잡아 보수화.
+  const effectivePlayed =
+    clamp(
+      played,
+      0,
+      5
+    );
+
+  const pseudo =
+    venuePlayed > 0
+      ? 2.5
+      : 4.0;
+
+  const weight =
+    effectivePlayed /
+    Math.max(
+      1,
+      effectivePlayed +
+      pseudo
+    );
+
+  const robust =
+    clipped * weight +
+    prior * (1 - weight);
+
+  return {
+    value:
+      robust,
+    shrink:
+      Number(
+        (1 - weight).toFixed(2)
+      ),
+  };
+}
+
+
 function buildAnalysis(
   sport: Exclude<
     Sport,
@@ -1103,17 +1210,61 @@ function buildAnalysis(
       awayFormData
     );
 
+  const homeRobustScored =
+    robustRecentMetric({
+      value:
+        homeWeighted.scored,
+      played:
+        homeWeighted.played,
+      venuePlayed:
+        homeWeighted.venuePlayed,
+      sport,
+    });
+
+  const homeRobustConceded =
+    robustRecentMetric({
+      value:
+        homeWeighted.conceded,
+      played:
+        homeWeighted.played,
+      venuePlayed:
+        homeWeighted.venuePlayed,
+      sport,
+    });
+
+  const awayRobustScored =
+    robustRecentMetric({
+      value:
+        awayWeighted.scored,
+      played:
+        awayWeighted.played,
+      venuePlayed:
+        awayWeighted.venuePlayed,
+      sport,
+    });
+
+  const awayRobustConceded =
+    robustRecentMetric({
+      value:
+        awayWeighted.conceded,
+      played:
+        awayWeighted.played,
+      venuePlayed:
+        awayWeighted.venuePlayed,
+      sport,
+    });
+
   const homeAvgScored =
-    homeWeighted.scored;
+    homeRobustScored.value;
 
   const homeAvgConceded =
-    homeWeighted.conceded;
+    homeRobustConceded.value;
 
   const awayAvgScored =
-    awayWeighted.scored;
+    awayRobustScored.value;
 
   const awayAvgConceded =
-    awayWeighted.conceded;
+    awayRobustConceded.value;
 
   const scoringUsed =
     homeAvgScored !== null &&
@@ -1239,12 +1390,28 @@ function buildAnalysis(
     if (sport === "배구") expectedHomeScore += 0.03;
 
     if (sport === "축구") {
+      const venueCoverage =
+        clamp(
+          (
+            Math.min(homeWeighted.venuePlayed, 3) +
+            Math.min(awayWeighted.venuePlayed, 3)
+          ) / 6,
+          0,
+          1
+        );
+
       const guarded = guardExpectedScoresByMarketDirection({
         homeScore: expectedHomeScore,
         awayScore: expectedAwayScore,
         marketHome: moneylineFair.home,
         marketAway: moneylineFair.away,
-        sampleStrength,
+        sampleStrength:
+          clamp(
+            sampleStrength -
+            (1 - venueCoverage) * 0.12,
+            0.35,
+            0.82
+          ),
       });
 
       expectedHomeScore = guarded.homeScore;
@@ -1868,6 +2035,34 @@ function buildAnalysis(
 
       scoreGuardApplied,
       scoreGuardStrength,
+
+      homeRobustScored:
+        homeAvgScored === null
+          ? null
+          : Number(homeAvgScored.toFixed(3)),
+      homeRobustConceded:
+        homeAvgConceded === null
+          ? null
+          : Number(homeAvgConceded.toFixed(3)),
+      awayRobustScored:
+        awayAvgScored === null
+          ? null
+          : Number(awayAvgScored.toFixed(3)),
+      awayRobustConceded:
+        awayAvgConceded === null
+          ? null
+          : Number(awayAvgConceded.toFixed(3)),
+
+      homeMetricShrink:
+        Math.max(
+          homeRobustScored.shrink,
+          homeRobustConceded.shrink
+        ),
+      awayMetricShrink:
+        Math.max(
+          awayRobustScored.shrink,
+          awayRobustConceded.shrink
+        ),
     } as AnalysisFactors,
   };
 }
@@ -4484,10 +4679,10 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V10.5 계산 추적 · 예상득점 진단 · 가치등급 · EV</summary>
+              <summary>V10.6 계산 추적 · robust 예상득점 · 가치등급 · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
-                  <h3>V10.5 계산 추적 · 예상득점 진단</h3>
+                  <h3>V10.6 계산 추적 · robust 예상득점</h3>
 
                   <div
                     className="notice"
@@ -4529,8 +4724,44 @@ export default function Home() {
 
                     <div className="cards" style={{ marginTop: 7 }}>
                       <div className="card">
+                        홈 robust 득/실
+                        <b>
+                          {analysisFactors.homeRobustScored?.toFixed(2) ?? "-"}
+                          {" / "}
+                          {analysisFactors.homeRobustConceded?.toFixed(2) ?? "-"}
+                        </b>
+                        <div className="small">
+                          최근값 수축 {Math.round(analysisFactors.homeMetricShrink * 100)}%
+                        </div>
+                      </div>
+
+                      <div className="card">
+                        원정 robust 득/실
+                        <b>
+                          {analysisFactors.awayRobustScored?.toFixed(2) ?? "-"}
+                          {" / "}
+                          {analysisFactors.awayRobustConceded?.toFixed(2) ?? "-"}
+                        </b>
+                        <div className="small">
+                          최근값 수축 {Math.round(analysisFactors.awayMetricShrink * 100)}%
+                        </div>
+                      </div>
+
+                      <div className="card">
                         수축 전 예상
                         <b>{analysisFactors.rawExpectedHomeScore?.toFixed(2) ?? "-"} : {analysisFactors.rawExpectedAwayScore?.toFixed(2) ?? "-"}</b>
+                      </div>
+
+                      <div className="card">
+                        방향 안전장치
+                        <b>{analysisFactors.scoreGuardApplied ? `적용 ${Math.round(analysisFactors.scoreGuardStrength * 100)}%` : "미적용"}</b>
+                      </div>
+                    </div>
+
+                    <div className="cards" style={{ marginTop: 7 }}>
+                      <div className="card">
+                        최종 예상득점
+                        <b>{analysisFactors.expectedHomeScore?.toFixed(2) ?? "-"} : {analysisFactors.expectedAwayScore?.toFixed(2) ?? "-"}</b>
                       </div>
                       <div className="card">
                         중립 사전값
@@ -4547,8 +4778,9 @@ export default function Home() {
                     </div>
 
                     <div className="notice" style={{ margin: "8px 0" }}>
-                      예상득점은 배당을 그대로 점수로 바꾸지 않습니다. 최근 득실·홈/원정 표본으로 독립 계산한 뒤,
-                      시장과 방향이 크게 반대이고 표본이 약할 때만 득점차를 중립 쪽으로 일부 수축합니다.
+                      예상득점은 배당을 그대로 점수로 바꾸지 않습니다. 최근 득실을 먼저 robust 처리해 극단값을 줄이고,
+                      장소 표본이 없으면 사전값 쪽으로 더 강하게 수축합니다. 이후 공격×상대수비로 λ를 만들며,
+                      시장과 방향이 크게 반대이고 표본이 약할 때만 득점차를 중립 쪽으로 추가 수축합니다.
                     </div>
                   </div>
 
