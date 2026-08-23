@@ -88,6 +88,13 @@ type AnalysisFactors = {
   totalLine: number | null;
   totalLabel: string | null;
   totalProbability: number | null;
+
+  weightedRecentUsed: boolean;
+  homeRecentSample: number;
+  awayRecentSample: number;
+  homeVenueSample: number;
+  awayVenueSample: number;
+  scoreShrinkage: number | null;
 };
 
 const I = {
@@ -569,6 +576,261 @@ function chooseBetmanTotal(g:BetmanMatch|null|undefined) {
   return null;
 }
 
+type WeightedProfile = {
+  scored: number | null;
+  conceded: number | null;
+  played: number;
+  venuePlayed: number;
+  usedVenueBlend: boolean;
+};
+
+function fixtureTimeMs(fixture: any) {
+  const raw =
+    fixture?.startTime ??
+    fixture?.date ??
+    fixture?.fixture?.date ??
+    fixture?.timestamp ??
+    fixture?.fixture?.timestamp ??
+    null;
+
+  const n = Number(raw);
+  if (Number.isFinite(n) && n > 10_000_000_000) return n;
+  if (Number.isFinite(n) && n > 1_000_000_000) return n * 1000;
+
+  const parsed = new Date(raw as any).getTime();
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function scoreNumber(...values: any[]) {
+  for (const value of values) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return null;
+}
+
+function fixtureTeamId(fixture: any, side: "home" | "away") {
+  return Number(
+    fixture?.[side]?.id ??
+    fixture?.teams?.[side]?.id ??
+    fixture?.participants?.find?.((x: any) =>
+      String(x?.position ?? x?.type ?? "").toLowerCase() === side
+    )?.id
+  );
+}
+
+function fixtureTeamName(fixture: any, side: "home" | "away") {
+  return String(
+    fixture?.[side]?.name ??
+    fixture?.teams?.[side]?.name ??
+    fixture?.participants?.find?.((x: any) =>
+      String(x?.position ?? x?.type ?? "").toLowerCase() === side
+    )?.name ??
+    ""
+  );
+}
+
+function fixtureFinalScore(fixture: any) {
+  const home = scoreNumber(
+    fixture?.homeScore,
+    fixture?.score?.home,
+    fixture?.scores?.home,
+    fixture?.goals?.home,
+    fixture?.result?.home,
+    fixture?.score?.fullTime?.home,
+    fixture?.score?.fulltime?.home,
+    fixture?.scores?.current?.home,
+    fixture?.home?.score
+  );
+
+  const away = scoreNumber(
+    fixture?.awayScore,
+    fixture?.score?.away,
+    fixture?.scores?.away,
+    fixture?.goals?.away,
+    fixture?.result?.away,
+    fixture?.score?.fullTime?.away,
+    fixture?.score?.fulltime?.away,
+    fixture?.scores?.current?.away,
+    fixture?.away?.score
+  );
+
+  return home !== null && away !== null ? { home, away } : null;
+}
+
+function sameTeam(
+  team: RecentTeam | null | undefined,
+  fixture: any,
+  side: "home" | "away"
+) {
+  const teamId = Number(team?.teamId);
+  const candidateId = fixtureTeamId(fixture, side);
+
+  if (
+    Number.isFinite(teamId) &&
+    Number.isFinite(candidateId) &&
+    teamId > 0 &&
+    candidateId > 0
+  ) {
+    return teamId === candidateId;
+  }
+
+  return (
+    teamSimilarity(
+      team?.teamName,
+      fixtureTeamName(fixture, side)
+    ) >= 0.72
+  );
+}
+
+function weightedAverageRows(
+  rows: Array<{ scored: number; conceded: number; time: number }>,
+  maxGames = 5
+) {
+  const sorted = [...rows]
+    .sort((a, b) => b.time - a.time)
+    .slice(0, maxGames);
+
+  if (!sorted.length) {
+    return {
+      scored: null as number | null,
+      conceded: null as number | null,
+      played: 0,
+    };
+  }
+
+  let scored = 0;
+  let conceded = 0;
+  let weightSum = 0;
+
+  sorted.forEach((row, index) => {
+    // 최신 경기일수록 높은 가중치. 1.00 → 0.78 → 0.61 → ...
+    const weight = Math.pow(0.78, index);
+    scored += row.scored * weight;
+    conceded += row.conceded * weight;
+    weightSum += weight;
+  });
+
+  return {
+    scored: weightSum > 0 ? scored / weightSum : null,
+    conceded: weightSum > 0 ? conceded / weightSum : null,
+    played: sorted.length,
+  };
+}
+
+function buildWeightedRecentProfile(
+  team: RecentTeam | null | undefined,
+  wantedVenue: "home" | "away",
+  fallbackForm: FormData | null | undefined
+): WeightedProfile {
+  const fixtures = Array.isArray(team?.fixtures) ? team!.fixtures! : [];
+  const overallRows: Array<{ scored: number; conceded: number; time: number }> = [];
+  const venueRows: Array<{ scored: number; conceded: number; time: number }> = [];
+
+  fixtures.forEach((fixture: any, index: number) => {
+    const score = fixtureFinalScore(fixture);
+    if (!score) return;
+
+    let venue: "home" | "away" | null = null;
+    if (sameTeam(team, fixture, "home")) venue = "home";
+    else if (sameTeam(team, fixture, "away")) venue = "away";
+    if (!venue) return;
+
+    const row = {
+      scored: venue === "home" ? score.home : score.away,
+      conceded: venue === "home" ? score.away : score.home,
+      time: Number.isFinite(fixtureTimeMs(fixture))
+        ? fixtureTimeMs(fixture)
+        : Date.now() - index * 86_400_000,
+    };
+
+    overallRows.push(row);
+    if (venue === wantedVenue) venueRows.push(row);
+  });
+
+  const overall = weightedAverageRows(overallRows, 5);
+  const venue = weightedAverageRows(venueRows, 5);
+
+  // fixture 배열의 점수 구조를 읽지 못한 경우 기존 aggregate Form으로 안전하게 fallback.
+  const formPlayed = Math.max(0, Number(fallbackForm?.played ?? 0));
+  const formScored = safeAverage(fallbackForm?.scored, formPlayed);
+  const formConceded = safeAverage(fallbackForm?.conceded, formPlayed);
+
+  const baseScored =
+    overall.scored !== null
+      ? overall.scored
+      : formScored;
+
+  const baseConceded =
+    overall.conceded !== null
+      ? overall.conceded
+      : formConceded;
+
+  if (baseScored === null || baseConceded === null) {
+    return {
+      scored: null,
+      conceded: null,
+      played: overall.played || formPlayed,
+      venuePlayed: venue.played,
+      usedVenueBlend: false,
+    };
+  }
+
+  if (venue.scored === null || venue.conceded === null || venue.played === 0) {
+    return {
+      scored: baseScored,
+      conceded: baseConceded,
+      played: overall.played || formPlayed,
+      venuePlayed: 0,
+      usedVenueBlend: false,
+    };
+  }
+
+  // 홈/원정 표본이 3경기 미만이면 전체 최근값과 섞어서 과적합 방지.
+  const venueWeight = clamp(venue.played / 3, 0.25, 0.75);
+
+  return {
+    scored:
+      venue.scored * venueWeight +
+      baseScored * (1 - venueWeight),
+    conceded:
+      venue.conceded * venueWeight +
+      baseConceded * (1 - venueWeight),
+    played: overall.played || formPlayed,
+    venuePlayed: venue.played,
+    usedVenueBlend: true,
+  };
+}
+
+function neutralScorePrior(
+  sport: Exclude<Sport, "전체">
+) {
+  if (sport === "축구") return 1.35;
+  if (sport === "야구") return 4.5;
+  if (sport === "농구") return 108;
+  return 1.5;
+}
+
+function shrinkExpectedScore(
+  raw: number,
+  prior: number,
+  sampleStrength: number,
+  sport: Exclude<Sport, "전체">
+) {
+  const strength = clamp(sampleStrength, 0.35, 0.82);
+  let value =
+    raw * strength +
+    prior * (1 - strength);
+
+  if (sport === "축구") value = clamp(value, 0.45, 2.75);
+  if (sport === "야구") value = clamp(value, 2.0, 7.5);
+  if (sport === "농구") value = clamp(value, 80, 140);
+  if (sport === "배구") value = clamp(value, 0.7, 2.4);
+
+  return value;
+}
+
+
 function buildAnalysis(
   sport: Exclude<
     Sport,
@@ -706,39 +968,41 @@ function buildAnalysis(
     }
   }
 
-  const homeAvgScored =
-    safeAverage(
+  const homeWeighted =
+    buildWeightedRecentProfile(
+      recentSummary?.home ?? null,
+      "home",
       homeFormData
-        ?.scored,
-      homePlayed
     );
+
+  const awayWeighted =
+    buildWeightedRecentProfile(
+      recentSummary?.away ?? null,
+      "away",
+      awayFormData
+    );
+
+  const homeAvgScored =
+    homeWeighted.scored;
 
   const homeAvgConceded =
-    safeAverage(
-      homeFormData
-        ?.conceded,
-      homePlayed
-    );
+    homeWeighted.conceded;
 
   const awayAvgScored =
-    safeAverage(
-      awayFormData
-        ?.scored,
-      awayPlayed
-    );
+    awayWeighted.scored;
 
   const awayAvgConceded =
-    safeAverage(
-      awayFormData
-        ?.conceded,
-      awayPlayed
-    );
+    awayWeighted.conceded;
 
   const scoringUsed =
     homeAvgScored !== null &&
     homeAvgConceded !== null &&
     awayAvgScored !== null &&
     awayAvgConceded !== null;
+
+  const weightedRecentUsed =
+    homeWeighted.played > 0 ||
+    awayWeighted.played > 0;
 
   let expectedHomeScore:
     | number
@@ -756,46 +1020,78 @@ function buildAnalysis(
     | number
     | null = null;
 
+  let scoreShrinkage:
+    | number
+    | null = null;
+
   if (scoringUsed) {
-    expectedHomeScore =
+    const rawHome =
       (
         homeAvgScored! +
         awayAvgConceded!
       ) /
       2;
 
-    expectedAwayScore =
+    const rawAway =
       (
         awayAvgScored! +
         homeAvgConceded!
       ) /
       2;
 
-    /*
-     * 아주 약한 홈 보정.
-     * 승패 분석의 홈 이점과
-     * 동일한 방향이지만
-     * 점수를 과도하게 변경하지 않음.
-     */
-    if (sport === "축구") {
-      expectedHomeScore +=
-        0.1;
-    }
+    const recentSample =
+      Math.min(
+        10,
+        homeWeighted.played +
+        awayWeighted.played
+      );
 
-    if (sport === "야구") {
-      expectedHomeScore +=
-        0.15;
-    }
+    const venueSample =
+      Math.min(
+        6,
+        homeWeighted.venuePlayed +
+        awayWeighted.venuePlayed
+      );
 
-    if (sport === "농구") {
-      expectedHomeScore +=
-        1.5;
-    }
+    // 최근 전체 표본 70% + 홈/원정 분리 표본 30%.
+    const sampleStrength =
+      clamp(
+        0.35 +
+        (recentSample / 10) * 0.33 +
+        (venueSample / 6) * 0.14,
+        0.35,
+        0.82
+      );
 
-    if (sport === "배구") {
-      expectedHomeScore +=
-        0.05;
-    }
+    scoreShrinkage =
+      sampleStrength;
+
+    const prior =
+      neutralScorePrior(
+        sport
+      );
+
+    expectedHomeScore =
+      shrinkExpectedScore(
+        rawHome,
+        prior,
+        sampleStrength,
+        sport
+      );
+
+    expectedAwayScore =
+      shrinkExpectedScore(
+        rawAway,
+        prior,
+        sampleStrength,
+        sport
+      );
+
+    // 아주 약한 홈 이점만 마지막에 부여.
+    if (sport === "축구") expectedHomeScore += 0.08;
+    if (sport === "야구") expectedHomeScore += 0.10;
+    if (sport === "농구") expectedHomeScore += 1.0;
+    if (sport === "배구") expectedHomeScore += 0.03;
 
     expectedTotal =
       expectedHomeScore +
@@ -832,35 +1128,66 @@ function buildAnalysis(
     if (formUsed) {
       homeScore +=
         (homeForm ?? 50) *
-        0.5;
+        0.55;
 
       awayScore +=
         (awayForm ?? 50) *
-        0.5;
+        0.55;
 
-      weight += 0.5;
+      weight += 0.55;
     }
 
     if (h2hUsed) {
       homeScore +=
         (homeH2H ?? 50) *
-        0.3;
+        0.15;
 
       awayScore +=
         (awayH2H ?? 50) *
-        0.3;
+        0.15;
 
-      weight += 0.3;
+      weight += 0.15;
+    }
+
+    if (
+      scoringUsed &&
+      expectedMargin !== null
+    ) {
+      const marginSignal =
+        clamp(
+          50 +
+          expectedMargin *
+            (sport === "축구"
+              ? 12
+              : sport === "야구"
+                ? 5
+                : sport === "농구"
+                  ? 1.2
+                  : 8),
+          30,
+          70
+        );
+
+      homeScore +=
+        marginSignal *
+        0.15;
+
+      awayScore +=
+        (100 - marginSignal) *
+        0.15;
+
+      weight +=
+        0.15;
     }
 
     homeScore +=
-      55 * 0.2;
+      54 * 0.15;
 
     awayScore +=
-      45 * 0.2;
+      46 * 0.15;
 
     weight +=
-      0.2;
+      0.15;
 
     if (weight > 0) {
       homeScore /=
@@ -1291,6 +1618,30 @@ function buildAnalysis(
                 1
               )
             ),
+
+      weightedRecentUsed,
+
+      homeRecentSample:
+        homeWeighted.played,
+
+      awayRecentSample:
+        awayWeighted.played,
+
+      homeVenueSample:
+        homeWeighted.venuePlayed,
+
+      awayVenueSample:
+        awayWeighted.venuePlayed,
+
+      scoreShrinkage:
+        scoreShrinkage ===
+        null
+          ? null
+          : Number(
+              scoreShrinkage.toFixed(
+                2
+              )
+            ),
     } as AnalysisFactors,
   };
 }
@@ -1436,7 +1787,13 @@ function marketConfidence(
   const h2hCoverage = (Math.min(h2hCount, 5) / 5) * 10;
 
   // 실제 최근 득점/실점이 모두 확보됐을 때만 점수모델 가점.
-  const scoringCoverage = factors.scoringUsed ? 20 : 0;
+  const scoringCoverage = factors.scoringUsed ? 16 : 0;
+
+  const venueCoverage =
+    (
+      Math.min(factors.homeVenueSample, 3) +
+      Math.min(factors.awayVenueSample, 3)
+    ) / 6 * 8;
 
   // 배당시장이 정상 형성됐는지. 오버라운드가 클수록 감점.
   const marketQuality =
@@ -1454,6 +1811,7 @@ function marketConfidence(
     recentCoverage +
     h2hCoverage +
     scoringCoverage +
+    venueCoverage +
     marketQuality * 0.08;
 
   // 현재 전반 예상은 전체경기 예상득점의 45% 근사치이므로 강하게 감점.
@@ -1464,7 +1822,7 @@ function marketConfidence(
 
   // 현재 SportsAPI recentSummary는 홈경기/원정경기 분리 성적이 아니라 전체 recent 요약.
   // 이 한계를 반영해 최고 신뢰도를 86으로 제한.
-  return clamp(score, 30, 86);
+  return clamp(score, 30, 84);
 }
 
 function recommendationScore(
@@ -1472,7 +1830,7 @@ function recommendationScore(
   edge: number | null,
   confidence: number
 ) {
-  // V8: 확률이 높아도 시장보다 불리한(음수 엣지) 픽이 최상단으로 올라오지 않게 함.
+  // V9: 확률이 높아도 시장보다 불리한(음수 엣지) 픽이 최상단으로 올라오지 않게 함.
   const edgeScore =
     edge === null
       ? 35
@@ -2951,14 +3309,42 @@ export default function Home() {
               ))}
             </div>
 
+            {analysisFactors.scoringUsed && (
+              <div className="section">
+                <h3>V9 모델 보정 상태</h3>
+                <div className="cards">
+                  <div className="card">
+                    최근 표본
+                    <b>{analysisFactors.homeRecentSample} / {analysisFactors.awayRecentSample}</b>
+                    <div className="small">홈팀 / 원정팀 최근경기</div>
+                  </div>
+                  <div className="card">
+                    장소 표본
+                    <b>{analysisFactors.homeVenueSample} / {analysisFactors.awayVenueSample}</b>
+                    <div className="small">홈팀 홈경기 / 원정팀 원정경기</div>
+                  </div>
+                  <div className="card">
+                    모델 강도
+                    <b>{analysisFactors.scoreShrinkage === null ? "-" : `${Math.round(analysisFactors.scoreShrinkage * 100)}%`}</b>
+                    <div className="small">나머지는 중립값으로 수축</div>
+                  </div>
+                </div>
+                <div className="notice" style={{ margin: "10px 0 0" }}>
+                  V9는 최근 경기에 시간가중치를 적용하고 홈팀은 홈경기, 원정팀은 원정경기를 우선 반영합니다.
+                  장소 표본이 부족하면 전체 최근 성적과 섞고, 예상득점은 표본수에 따라 중립 사전값 쪽으로 수축해 과신을 줄입니다.
+                  H2H는 보조지표로만 제한합니다.
+                </div>
+              </div>
+            )}
+
             {actualMarketPicks.length > 0 && (
               <div className="section">
-                <h3>V8 지표 해석</h3>
+                <h3>V9 지표 해석</h3>
                 <div className="notice" style={{ margin: 0 }}>
                   모델확률은 SportsAPI Form/H2H 및 최근 득실점에서 계산한 값입니다.
                   시장확률은 Betman 배당의 마진(오버라운드)을 제거한 공정 내재확률이고,
                   엣지는 모델확률 - 시장확률입니다.
-                  V8부터 U/O는 Betman의 언더/오버 선택지 라벨을 우선 해석하며, SUM은 Betman 원본의 일반 홀짝(홀/짝)으로 계산합니다.
+                  V9는 V8의 U/O·SUM 마켓 해석을 유지하면서 최근경기 시간가중치, 홈/원정 분리, 표본수 수축을 추가합니다.
                   전반 마켓은 전체경기 득점의 45% 근사치를 사용하므로 신뢰도를 크게 감점합니다.
                   음수 엣지, 시장비교 불가, 낮은 신뢰도 픽은 최고 추천에서 제외합니다.
                   추천점수는 비교용 지표이며 실제 적중률을 보장하는 수치는 아닙니다.
