@@ -156,12 +156,76 @@ function marketType(row: AnyObj): MarketType {
 }
 
 function getSport(row: AnyObj) {
-  return firstText(
+  const values = [
     row?.sportsItem?.sportsItemEngName,
     row?.sportsItemEngName,
     row?.sport,
     row?.sportCode,
-    row?.itemCode
+    row?.itemCode,
+    row?.matchSportId,
+  ]
+    .map((value) => text(value).toLowerCase())
+    .filter(Boolean);
+
+  for (const value of values) {
+    if (
+      value === "sc" ||
+      value === "1" ||
+      value === "soccer" ||
+      value === "football" ||
+      value === "축구"
+    ) {
+      return "soccer";
+    }
+
+    if (
+      value === "bs" ||
+      value === "2" ||
+      value === "baseball" ||
+      value === "야구"
+    ) {
+      return "baseball";
+    }
+
+    if (
+      value === "bk" ||
+      value === "bb" ||
+      value === "3" ||
+      value === "basketball" ||
+      value === "농구"
+    ) {
+      return "basketball";
+    }
+
+    if (
+      value === "vl" ||
+      value === "vb" ||
+      value === "4" ||
+      value === "volleyball" ||
+      value === "배구"
+    ) {
+      return "volleyball";
+    }
+  }
+
+  return firstText(
+    row?.itemCode,
+    row?.sportCode,
+    row?.sport
+  ) || null;
+}
+
+function getSportName(row: AnyObj) {
+  const sport = getSport(row);
+
+  if (sport === "soccer") return "축구";
+  if (sport === "baseball") return "야구";
+  if (sport === "basketball") return "농구";
+  if (sport === "volleyball") return "배구";
+
+  return firstText(
+    row?.itemName,
+    row?.sportsItem?.sportsItemName
   ) || null;
 }
 
@@ -268,8 +332,7 @@ function summarizeRow(row: AnyObj) {
     sport: getSport(row),
 
     sportName:
-      row?.sportsItem?.sportsItemName ??
-      null,
+      getSportName(row),
 
     leagueCode:
       row?.leagueCode ??
@@ -864,6 +927,88 @@ function collectAllScheduleRows(
   };
 }
 
+function rowHasUsableOdds(row: AnyObj) {
+  return (
+    (["win", "draw", "lose"] as const).some((side) => {
+      const odds = rowOdds(row, side);
+      return odds !== null && odds > 1;
+    })
+  );
+}
+
+function rowIsFuture(row: AnyObj, now = Date.now()) {
+  const value =
+    num(row?.gameDate) ??
+    num(row?.gameDateMs);
+
+  return (
+    value !== null &&
+    value > now
+  );
+}
+
+function marketHasUsableOdds(market: AnyObj) {
+  return arr(market?.selections).some(
+    (selection) =>
+      num(selection?.odds) !== null &&
+      Number(selection?.odds) > 1
+  );
+}
+
+function gameIsFutureWithOdds(game: AnyObj, now = Date.now()) {
+  const value =
+    num(game?.gameDateMs) ??
+    (game?.gameDate
+      ? new Date(game.gameDate).getTime()
+      : null);
+
+  return (
+    value !== null &&
+    Number.isFinite(value) &&
+    value > now &&
+    arr(game?.markets).some(marketHasUsableOdds)
+  );
+}
+
+function sportCounts(games: AnyObj[], onlyFuture = false) {
+  const now = Date.now();
+  const base = {
+    soccer: { games: 0, markets: 0 },
+    baseball: { games: 0, markets: 0 },
+    basketball: { games: 0, markets: 0 },
+    volleyball: { games: 0, markets: 0 },
+    other: { games: 0, markets: 0 },
+  };
+
+  for (const game of games) {
+    if (
+      onlyFuture &&
+      !gameIsFutureWithOdds(game, now)
+    ) {
+      continue;
+    }
+
+    const sport = String(game?.sport ?? "");
+    const key =
+      sport === "soccer" ||
+      sport === "baseball" ||
+      sport === "basketball" ||
+      sport === "volleyball"
+        ? sport
+        : "other";
+
+    base[key].games += 1;
+
+    base[key].markets += arr(game?.markets).filter(
+      (market) =>
+        !onlyFuture ||
+        marketHasUsableOdds(market)
+    ).length;
+  }
+
+  return base;
+}
+
 async function fetchBetman() {
   let lastError: Error | null = null;
 
@@ -1090,6 +1235,35 @@ export async function GET(
         schedules
       );
 
+    const now =
+      Date.now();
+
+    const rawCompFutureRowCount =
+      expandedCompSchedules.filter(
+        (row) =>
+          rowIsFuture(row, now) &&
+          rowHasUsableOdds(row)
+      ).length;
+
+    const routeFutureGames =
+      games.filter(
+        (game) =>
+          gameIsFutureWithOdds(
+            game,
+            now
+          )
+      );
+
+    const routeFutureMarketRowCount =
+      routeFutureGames.reduce(
+        (sum, game) =>
+          sum +
+          arr(game?.markets).filter(
+            marketHasUsableOdds
+          ).length,
+        0
+      );
+
     const filtered =
       filterGames(
         games,
@@ -1241,6 +1415,50 @@ export async function GET(
             ).length,
           0
         ),
+
+      diagnostics: {
+        rawCompScheduleRows:
+          expandedCompSchedules.length,
+
+        rawCompFutureRowCount,
+
+        recursivelyCollectedRows:
+          collected.rows.length,
+
+        mergedRowCount:
+          mergedRows.length,
+
+        dedupedRowCount:
+          schedules.length,
+
+        groupedGameCount:
+          games.length,
+
+        groupedMarketRowCount:
+          games.reduce(
+            (sum, game) =>
+              sum +
+              arr(game?.markets).length,
+            0
+          ),
+
+        routeFutureGameCount:
+          routeFutureGames.length,
+
+        routeFutureMarketRowCount,
+
+        sportsAll:
+          sportCounts(
+            games,
+            false
+          ),
+
+        sportsFuture:
+          sportCounts(
+            games,
+            true
+          ),
+      },
 
       filters: {
         home:
