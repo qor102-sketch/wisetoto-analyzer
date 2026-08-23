@@ -1,5 +1,9 @@
 const BETMAN_PROXY_URL =
+  process.env.BETMAN_PROXY_URL?.trim() ||
   "https://codes-int-pieces-continuously.trycloudflare.com/betman";
+
+const BETMAN_FETCH_TIMEOUT_MS = 20_000;
+const BETMAN_FETCH_RETRIES = 3;
 
 type AnyObj = Record<string, any>;
 
@@ -861,64 +865,124 @@ function collectAllScheduleRows(
 }
 
 async function fetchBetman() {
-  const response =
-    await fetch(
-      BETMAN_PROXY_URL,
-      {
-        method: "GET",
+  let lastError: Error | null = null;
 
-        headers: {
-          Accept:
-            "application/json, text/plain, */*",
-        },
+  for (
+    let attempt = 1;
+    attempt <= BETMAN_FETCH_RETRIES;
+    attempt++
+  ) {
+    const controller =
+      new AbortController();
 
-        cache:
-          "no-store",
+    const timer =
+      setTimeout(
+        () => controller.abort(),
+        BETMAN_FETCH_TIMEOUT_MS
+      );
+
+    try {
+      const response =
+        await fetch(
+          BETMAN_PROXY_URL,
+          {
+            method: "GET",
+
+            headers: {
+              Accept:
+                "application/json, text/plain, */*",
+              "User-Agent":
+                "WisetotoAnalyzer/1.0 Vercel",
+              "Cache-Control":
+                "no-cache",
+            },
+
+            cache:
+              "no-store",
+
+            signal:
+              controller.signal,
+          }
+        );
+
+      const raw =
+        await response.text();
+
+      let json: any = null;
+
+      try {
+        json = JSON.parse(raw);
+      } catch {
+        const preview =
+          raw
+            .replace(/\s+/g, " ")
+            .slice(0, 300);
+
+        throw new Error(
+          `Betman 프록시가 JSON이 아닌 응답을 반환했습니다 · HTTP ${response.status} · ${preview || "응답 본문 없음"}`
+        );
       }
-    );
 
-  const raw =
-    await response.text();
+      if (!response.ok) {
+        throw new Error(
+          json?.error ||
+            json?.message ||
+            `Betman 프록시 HTTP ${response.status}`
+        );
+      }
 
-  let json: any;
+      if (!json?.ok) {
+        throw new Error(
+          json?.error ||
+            json?.message ||
+            "Betman 프록시가 실패 응답을 반환했습니다."
+        );
+      }
 
-  try {
-    json =
-      JSON.parse(raw);
-  } catch {
-    throw new Error(
-      `Betman 프록시 응답을 JSON으로 해석하지 못했습니다. HTTP ${response.status}: ${raw.slice(
-        0,
-        300
-      )}`
-    );
+      const betmanData =
+        json?.data;
+
+      if (!betmanData) {
+        throw new Error(
+          "Betman 프록시 응답에 data가 없습니다."
+        );
+      }
+
+      return betmanData;
+    } catch (error: any) {
+      const message =
+        error?.name === "AbortError"
+          ? `Betman 프록시 응답 시간 초과 (${BETMAN_FETCH_TIMEOUT_MS / 1000}초)`
+          : error?.message ||
+            "Betman 프록시 호출 실패";
+
+      lastError =
+        new Error(
+          `시도 ${attempt}/${BETMAN_FETCH_RETRIES} · ${message}`
+        );
+
+      if (
+        attempt < BETMAN_FETCH_RETRIES
+      ) {
+        await new Promise(
+          (resolve) =>
+            setTimeout(
+              resolve,
+              700 * attempt
+            )
+        );
+      }
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
-  if (!response.ok) {
-    throw new Error(
-      json?.error ||
-        json?.message ||
-        `Betman 프록시 HTTP ${response.status}`
-    );
-  }
-
-  if (!json?.ok) {
-    throw new Error(
-      json?.error ||
-        "Betman 프록시가 실패 응답을 반환했습니다."
-    );
-  }
-
-  const betmanData =
-    json?.data;
-
-  if (!betmanData) {
-    throw new Error(
-      "Betman 프록시 응답에 data가 없습니다."
-    );
-  }
-
-  return betmanData;
+  throw (
+    lastError ??
+    new Error(
+      "Betman 프록시 호출 실패"
+    )
+  );
 }
 
 export async function GET(
@@ -1239,9 +1303,15 @@ export async function GET(
         source:
           "Betman",
 
+        proxyUrl:
+          BETMAN_PROXY_URL,
+
         error:
           e?.message ||
           "Betman 데이터 수집 실패",
+
+        fetchedAt:
+          new Date().toISOString(),
       },
       {
         status: 502,
