@@ -1104,18 +1104,46 @@ function sportsCompatible(wanted: any, actual: any) {
 }
 
 const TEAM_SEARCH_ALIASES: Record<string, string[]> = {
+  // K League
   "대전하나시티즌": ["Daejeon Hana Citizen", "Daejeon Citizen"],
   "강원": ["Gangwon FC", "Gangwon"],
   "강원fc": ["Gangwon FC", "Gangwon"],
   "광주fc": ["Gwangju FC", "Gwangju"],
   "광주": ["Gwangju FC", "Gwangju"],
   "인천유나이티드": ["Incheon United", "Incheon United FC"],
+
+  // England - Championship / Premier League
+  "웨스트브로미치앨비언": ["West Bromwich Albion", "West Brom", "WBA"],
+  "웨스트브로미치": ["West Bromwich Albion", "West Brom", "WBA"],
+  "번리": ["Burnley", "Burnley FC"],
+  "브라이턴호브앨비언": ["Brighton & Hove Albion", "Brighton", "Brighton and Hove Albion"],
+  "브라이튼호브앨비언": ["Brighton & Hove Albion", "Brighton", "Brighton and Hove Albion"],
+  "애스턴빌라": ["Aston Villa", "Aston Villa FC"],
+  "아스톤빌라": ["Aston Villa", "Aston Villa FC"],
+  "맨체스터시티": ["Manchester City", "Man City", "Manchester City FC"],
+  "맨시티": ["Manchester City", "Man City", "Manchester City FC"],
+  "afc본머스": ["AFC Bournemouth", "Bournemouth"],
+  "본머스": ["AFC Bournemouth", "Bournemouth"],
+
+  // Netherlands
+  "psv에인트호번": ["PSV Eindhoven", "PSV"],
+  "psv아인트호벤": ["PSV Eindhoven", "PSV"],
+  "흐로닝언": ["FC Groningen", "Groningen"],
+  "흐로닝겐": ["FC Groningen", "Groningen"],
 };
 
 function teamAliases(name: string) {
   const normalized = normalizeMatchName(name);
   const aliases = TEAM_SEARCH_ALIASES[normalized] ?? [];
   return [name, ...aliases].filter(Boolean);
+}
+
+function searchQueryForTeam(name: string, aliases: string[]) {
+  // SportsAPI 검색은 영문 팀명에서 가장 안정적이므로 alias가 있으면 첫 영문명을 우선.
+  // alias가 없을 때만 Betman 원문 팀명을 사용합니다.
+  return aliases.length > 1
+    ? aliases[1]
+    : aliases[0] ?? name;
 }
 
 function bestNameSimilarity(wantedAliases: string[], actual: any) {
@@ -1221,8 +1249,8 @@ async function findSportsFixtureForBetman(
   // 한국어 팀명만 검색하면 SportsAPI 검색 결과가 비어 있을 수 있으므로
   // 알려진 영문 표기가 있으면 영문 alias를 우선 검색한다.
   const plans = [
-    { side: "home", aliases: homeAliases, query: homeAliases[1] ?? homeAliases[0] },
-    { side: "away", aliases: awayAliases, query: awayAliases[1] ?? awayAliases[0] },
+    { side: "home", aliases: homeAliases, query: searchQueryForTeam(home, homeAliases) },
+    { side: "away", aliases: awayAliases, query: searchQueryForTeam(away, awayAliases) },
   ];
 
   const debug: AnyObj[] = [];
