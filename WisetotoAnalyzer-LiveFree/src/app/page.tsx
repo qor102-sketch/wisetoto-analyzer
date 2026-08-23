@@ -1732,6 +1732,8 @@ type MarketPick = {
   marketProbability: number | null;
   edge: number | null;
   calibrationWeight: number | null;
+  signalConflictScore: number;
+  signalConflictLabel: string;
   confidenceScore: number;
   confidenceGrade: string;
   recommendationScore: number;
@@ -2594,6 +2596,10 @@ function buildActualMarketPicks(
             : Number(
                 calibrated.modelWeight.toFixed(2)
               ),
+        signalConflictScore:
+          signalConflict.score,
+        signalConflictLabel:
+          signalConflict.label,
         confidenceScore: Number(confidence.toFixed(1)),
         confidenceGrade: confidenceGrade(confidence),
         recommendationScore: Number(
