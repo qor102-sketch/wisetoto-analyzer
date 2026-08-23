@@ -128,6 +128,12 @@ type AnalysisFactors = {
 
   homeMetricShrink: number;
   awayMetricShrink: number;
+
+  preMarketHomeScore: number | null;
+  preMarketAwayScore: number | null;
+  marketMarginPrior: number | null;
+  marketPriorWeight: number;
+  venueCoverage: number;
 };
 
 const I = {
@@ -903,39 +909,123 @@ function fairMoneylineForGame(
   };
 }
 
-function guardExpectedScoresByMarketDirection(input: {
+function blendExpectedScoresWithMarketPrior(input: {
   homeScore: number;
   awayScore: number;
   marketHome: number | null;
   marketAway: number | null;
-  sampleStrength: number;
+  venueCoverage: number;
 }) {
-  let { homeScore, awayScore, marketHome, marketAway, sampleStrength } = input;
+  let {
+    homeScore,
+    awayScore,
+    marketHome,
+    marketAway,
+    venueCoverage,
+  } = input;
+
+  const originalHome =
+    homeScore;
+
+  const originalAway =
+    awayScore;
+
   let applied = false;
-  let strength = 0;
+  let weight = 0;
+  let marketMarginPrior:
+    | number
+    | null = null;
 
-  if (marketHome !== null && marketAway !== null) {
-    const marketDiff = marketHome - marketAway;
-    const modelMargin = homeScore - awayScore;
-    const opposite =
-      (marketDiff >= 18 && modelMargin < -0.10) ||
-      (marketDiff <= -18 && modelMargin > 0.10);
+  if (
+    marketHome !== null &&
+    marketAway !== null
+  ) {
+    const marketDiff =
+      marketHome -
+      marketAway;
 
-    if (opposite) {
-      const marketSeverity = clamp((Math.abs(marketDiff) - 18) / 35, 0, 1);
-      const samplePenalty = 1 - clamp(sampleStrength, 0.35, 0.82);
-      strength = clamp(
-        0.18 + marketSeverity * 0.24 + samplePenalty * 0.35,
-        0.18,
-        0.48
+    const modelMargin =
+      homeScore -
+      awayScore;
+
+    /*
+     * 시장 공정확률의 방향만 약한 score-margin prior로 변환합니다.
+     * 확률을 점수로 직접 복사하지 않으며, 축구 기준 ±0.85골로 제한합니다.
+     */
+    marketMarginPrior =
+      clamp(
+        (marketDiff / 100) * 1.15,
+        -0.85,
+        0.85
       );
 
-      const total = Math.max(0.2, homeScore + awayScore);
-      const midpoint = total / 2;
+    const opposite =
+      (
+        marketDiff >= 18 &&
+        modelMargin < -0.05
+      ) ||
+      (
+        marketDiff <= -18 &&
+        modelMargin > 0.05
+      );
 
-      // 시장 방향으로 강제 역전하지 않고, 과도한 반대 방향만 중립 쪽으로 축소.
-      homeScore = homeScore * (1 - strength) + midpoint * strength;
-      awayScore = awayScore * (1 - strength) + midpoint * strength;
+    if (opposite) {
+      const severity =
+        clamp(
+          (
+            Math.abs(
+              marketDiff
+            ) -
+            18
+          ) /
+            35,
+          0,
+          1
+        );
+
+      /*
+       * 장소표본이 없을수록 prior 비중을 늘리되 최대 38%.
+       * 시장이 매우 강하게 한쪽을 보더라도 독립모델을 완전히 덮지 않습니다.
+       */
+      weight =
+        clamp(
+          0.14 +
+            (1 -
+              venueCoverage) *
+              0.16 +
+            severity *
+              0.08,
+          0.14,
+          0.38
+        );
+
+      const total =
+        Math.max(
+          0.40,
+          homeScore +
+            awayScore
+        );
+
+      const blendedMargin =
+        modelMargin *
+          (1 - weight) +
+        marketMarginPrior *
+          weight;
+
+      homeScore =
+        Math.max(
+          0.20,
+          total / 2 +
+            blendedMargin / 2
+        );
+
+      awayScore =
+        Math.max(
+          0.20,
+          total / 2 -
+            blendedMargin / 2
+        );
+
       applied = true;
     }
   }
@@ -943,11 +1033,25 @@ function guardExpectedScoresByMarketDirection(input: {
   return {
     homeScore,
     awayScore,
+    originalHome,
+    originalAway,
     applied,
-    strength: Number(strength.toFixed(2)),
+    weight:
+      Number(
+        weight.toFixed(
+          2
+        )
+      ),
+    marketMarginPrior:
+      marketMarginPrior === null
+        ? null
+        : Number(
+            marketMarginPrior.toFixed(
+              2
+            )
+          ),
   };
 }
-
 
 function sportMetricPrior(
   sport: Exclude<Sport, "전체">
@@ -1299,6 +1403,24 @@ function buildAnalysis(
   let scoreGuardApplied = false;
   let scoreGuardStrength = 0;
 
+  let preMarketHomeScore:
+    | number
+    | null = null;
+
+  let preMarketAwayScore:
+    | number
+    | null = null;
+
+  let marketMarginPrior:
+    | number
+    | null = null;
+
+  let marketPriorWeight =
+    0;
+
+  let venueCoverage =
+    0;
+
   let rawExpectedHomeScore:
     | number
     | null = null;
@@ -1390,34 +1512,59 @@ function buildAnalysis(
     if (sport === "배구") expectedHomeScore += 0.03;
 
     if (sport === "축구") {
-      const venueCoverage =
+      venueCoverage =
         clamp(
           (
-            Math.min(homeWeighted.venuePlayed, 3) +
-            Math.min(awayWeighted.venuePlayed, 3)
-          ) / 6,
+            Math.min(
+              homeWeighted.venuePlayed,
+              3
+            ) +
+            Math.min(
+              awayWeighted.venuePlayed,
+              3
+            )
+          ) /
+            6,
           0,
           1
         );
 
-      const guarded = guardExpectedScoresByMarketDirection({
-        homeScore: expectedHomeScore,
-        awayScore: expectedAwayScore,
-        marketHome: moneylineFair.home,
-        marketAway: moneylineFair.away,
-        sampleStrength:
-          clamp(
-            sampleStrength -
-            (1 - venueCoverage) * 0.12,
-            0.35,
-            0.82
-          ),
-      });
+      preMarketHomeScore =
+        expectedHomeScore;
 
-      expectedHomeScore = guarded.homeScore;
-      expectedAwayScore = guarded.awayScore;
-      scoreGuardApplied = guarded.applied;
-      scoreGuardStrength = guarded.strength;
+      preMarketAwayScore =
+        expectedAwayScore;
+
+      const blended =
+        blendExpectedScoresWithMarketPrior({
+          homeScore:
+            expectedHomeScore,
+          awayScore:
+            expectedAwayScore,
+          marketHome:
+            moneylineFair.home,
+          marketAway:
+            moneylineFair.away,
+          venueCoverage,
+        });
+
+      expectedHomeScore =
+        blended.homeScore;
+
+      expectedAwayScore =
+        blended.awayScore;
+
+      scoreGuardApplied =
+        blended.applied;
+
+      scoreGuardStrength =
+        blended.weight;
+
+      marketPriorWeight =
+        blended.weight;
+
+      marketMarginPrior =
+        blended.marketMarginPrior;
     }
 
     expectedTotal =
@@ -2062,6 +2209,33 @@ function buildAnalysis(
         Math.max(
           awayRobustScored.shrink,
           awayRobustConceded.shrink
+        ),
+
+      preMarketHomeScore:
+        preMarketHomeScore === null
+          ? null
+          : Number(
+              preMarketHomeScore.toFixed(
+                3
+              )
+            ),
+
+      preMarketAwayScore:
+        preMarketAwayScore === null
+          ? null
+          : Number(
+              preMarketAwayScore.toFixed(
+                3
+              )
+            ),
+
+      marketMarginPrior,
+      marketPriorWeight,
+      venueCoverage:
+        Number(
+          venueCoverage.toFixed(
+            2
+          )
         ),
     } as AnalysisFactors,
   };
@@ -4871,10 +5045,10 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V10.7 계산 추적 · 마켓별 위험 · robust 예상득점 · EV</summary>
+              <summary>V10.8 계산 추적 · 시장 prior λ · 마켓별 위험 · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
-                  <h3>V10.7 계산 추적 · 마켓별 의사결정 위험</h3>
+                  <h3>V10.8 계산 추적 · 저신뢰 λ 교정</h3>
 
                   <div
                     className="notice"
@@ -4892,7 +5066,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V10.7 의사결정 규칙</b><br />
+                    <b>V10.8 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -4952,12 +5126,19 @@ export default function Home() {
                       </div>
 
                       <div className="card">
-                        방향 안전장치
-                        <b>{analysisFactors.scoreGuardApplied ? `적용 ${Math.round(analysisFactors.scoreGuardStrength * 100)}%` : "미적용"}</b>
+                        시장 방향 prior
+                        <b>{analysisFactors.scoreGuardApplied ? `적용 ${Math.round(analysisFactors.marketPriorWeight * 100)}%` : "미적용"}</b>
+                        <div className="small">
+                          장소커버 {Math.round(analysisFactors.venueCoverage * 100)}%
+                        </div>
                       </div>
                     </div>
 
                     <div className="cards" style={{ marginTop: 7 }}>
+                      <div className="card">
+                        독립모델 λ
+                        <b>{analysisFactors.preMarketHomeScore?.toFixed(2) ?? "-"} : {analysisFactors.preMarketAwayScore?.toFixed(2) ?? "-"}</b>
+                      </div>
                       <div className="card">
                         최종 예상득점
                         <b>{analysisFactors.expectedHomeScore?.toFixed(2) ?? "-"} : {analysisFactors.expectedAwayScore?.toFixed(2) ?? "-"}</b>
@@ -4971,15 +5152,18 @@ export default function Home() {
                         <b>{analysisFactors.marketHomeFair?.toFixed(1) ?? "-"}% / {analysisFactors.marketAwayFair?.toFixed(1) ?? "-"}%</b>
                       </div>
                       <div className="card">
-                        방향 안전장치
-                        <b>{analysisFactors.scoreGuardApplied ? `적용 ${Math.round(analysisFactors.scoreGuardStrength * 100)}%` : "미적용"}</b>
+                        시장 방향 prior
+                        <b>{analysisFactors.scoreGuardApplied ? `적용 ${Math.round(analysisFactors.marketPriorWeight * 100)}%` : "미적용"}</b>
+                        <div className="small">
+                          prior 점수차 {analysisFactors.marketMarginPrior?.toFixed(2) ?? "-"}
+                        </div>
                       </div>
                     </div>
 
                     <div className="notice" style={{ margin: "8px 0" }}>
-                      예상득점은 배당을 그대로 점수로 바꾸지 않습니다. 최근 득실을 먼저 robust 처리해 극단값을 줄이고,
-                      장소 표본이 없으면 사전값 쪽으로 더 강하게 수축합니다. 이후 공격×상대수비로 λ를 만들며,
-                      시장과 방향이 크게 반대이고 표본이 약할 때만 득점차를 중립 쪽으로 추가 수축합니다.
+                      예상득점은 배당을 그대로 점수로 바꾸지 않습니다. 최근 득실을 robust 처리한 뒤 공격×상대수비로 독립 λ를 먼저 만듭니다.
+                      장소표본이 부족하고 독립 λ의 방향이 시장 공정확률과 강하게 반대일 때만 시장 방향을 최대 38%의 약한 prior로 사용합니다.
+                      총 예상득점은 유지하고 홈-원정 점수차만 보수적으로 조정합니다.
                     </div>
                   </div>
 
