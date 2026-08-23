@@ -1904,7 +1904,8 @@ function buildSignalConflict(
     factors.expectedMargin;
 
   // 1) 가장 강한 안전장치:
-  // 시장의 승패 방향과 예상득점 방향이 정반대일 때.
+  // 오직 일반 승패/승무패 시장 방향과 예상득점 방향을 비교합니다.
+  // H -1의 "패"는 원정팀 단순승이 아니므로 여기에서 직접 비교하지 않습니다.
   if (
     marketHome !== null &&
     marketAway !== null &&
@@ -2246,6 +2247,65 @@ function pickValueStatus(pick: MarketPick) {
   return { label: "가치 후보", eligible: true };
 }
 
+type HandicapOutcome = "home" | "draw" | "away";
+
+/**
+ * Betman 절대 규칙:
+ * - 왼쪽 팀 = 홈팀
+ * - 모든 handicap line은 홈팀에 적용
+ * - 결과 승/무/패는 handicap 적용 후 홈팀 기준
+ *
+ * 예:
+ * 홈 2:1, H -1 => (2-1):1 = 1:1 => 무
+ * 홈 1:1, H -1 => (1-1):1 = 0:1 => 패
+ * 홈 3:1, H -1 => (3-1):1 = 2:1 => 승
+ */
+function settleBetmanHomeHandicap(
+  homeScore: number,
+  awayScore: number,
+  homeHandicapLine: number
+): HandicapOutcome {
+  const adjustedHome =
+    homeScore +
+    homeHandicapLine;
+
+  if (adjustedHome > awayScore) {
+    return "home";
+  }
+
+  if (adjustedHome < awayScore) {
+    return "away";
+  }
+
+  return "draw";
+}
+
+function settleBetmanMoneyline(
+  homeScore: number,
+  awayScore: number
+): HandicapOutcome {
+  if (homeScore > awayScore) {
+    return "home";
+  }
+
+  if (homeScore < awayScore) {
+    return "away";
+  }
+
+  return "draw";
+}
+
+function betmanHandicapRuleText(
+  line: number | null
+) {
+  if (line === null) {
+    return "홈팀 기준 핸디";
+  }
+
+  return `홈팀 기준 ${line >= 0 ? "+" : ""}${line}`;
+}
+
+
 function buildActualMarketPicks(
   game: BetmanMatch | null | undefined,
   sport: Exclude<Sport, "전체">,
@@ -2295,9 +2355,21 @@ function buildActualMarketPicks(
       let home = 0, draw = 0, away = 0, over = 0, under = 0, push = 0, odd = 0, even = 0;
 
       for (const row of grid) {
-        const adjustedHome = row.home + (type === "handicap" && line !== null ? line : 0);
-        if (adjustedHome > row.away) home += row.p;
-        else if (adjustedHome < row.away) away += row.p;
+        const outcome =
+          type === "handicap" &&
+          line !== null
+            ? settleBetmanHomeHandicap(
+                row.home,
+                row.away,
+                line
+              )
+            : settleBetmanMoneyline(
+                row.home,
+                row.away
+              );
+
+        if (outcome === "home") home += row.p;
+        else if (outcome === "away") away += row.p;
         else draw += row.p;
 
         if (line !== null) {
@@ -2373,7 +2445,12 @@ function buildActualMarketPicks(
         );
 
         const periodText = isFirstHalf ? "전반 예상득점 근사" : "전체 예상득점";
-        const lineText = line !== null ? ` · 기준 ${line >= 0 && type === "handicap" ? "+" : ""}${line}` : "";
+        const lineText =
+          line !== null
+            ? type === "handicap"
+              ? ` · ${betmanHandicapRuleText(line)}`
+              : ` · 기준 ${line}`
+            : "";
         const pushText = push > 0.001 && type === "total" ? ` · 적중무효 ${(push * 100).toFixed(1)}% 제외` : "";
 
         result.push({
@@ -2447,7 +2524,12 @@ function buildActualMarketPicks(
         recommendationScore: Number(
           recommendationScore(fallbackProbability, null, confidence).toFixed(1)
         ),
-        detail: line !== null ? `Betman 기준 ${line}` : "Betman 실제 기준",
+        detail:
+          type === "handicap"
+            ? betmanHandicapRuleText(line)
+            : line !== null
+              ? `Betman 기준 ${line}`
+              : "Betman 실제 기준",
       });
       continue;
     }
@@ -2536,6 +2618,7 @@ function marketLabelStandalone(market: any) {
     .trim();
 
   if (type === "handicap") {
+    // Betman H 라인은 항상 왼쪽 홈팀 기준.
     const prefix = /전반/i.test(betName) ? "전반 H" : "H";
     return `${prefix} ${line === null ? "" : `${line >= 0 ? "+" : ""}${line}`}`.trim();
   }
@@ -3905,7 +3988,7 @@ export default function Home() {
                   {actualMarketPicks.map((pick) => {
                     const isBest = bestActualPick?.key === pick.key;
                     return (
-                      <div className={`compactMarketRow ${isBest ? "bestRow" : ""}`} key={pick.key} title={`${pick.detail} · 원모델 ${pick.rawProbability.toFixed(1)}% · 보정 ${pick.probability.toFixed(1)}% · ${pickValueStatus(pick).label}`}>
+                      <div className={`compactMarketRow ${isBest ? "bestRow" : ""}`} key={pick.key} title={`${pick.detail} · 핸디는 항상 홈팀(왼쪽) 기준 · 원모델 ${pick.rawProbability.toFixed(1)}% · 보정 ${pick.probability.toFixed(1)}% · ${pickValueStatus(pick).label}`}>
                         <div className="cmName">{pick.market}</div>
                         <div className="cmPick">{pick.pick}</div>
                         <div className="cmNum"><b>{pick.probability.toFixed(1)}%</b></div>
@@ -3926,10 +4009,26 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V10.1 계산 추적 · 신호충돌 · 가중득실점 · 수축 전/후 · H2H/Form</summary>
+              <summary>V10.2 계산 추적 · 홈팀 핸디 정산 · 신호충돌 · 수축 전/후</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
-                  <h3>V10 계산 추적</h3>
+                  <h3>V10.2 계산 추적 · 홈팀 기준 정산</h3>
+
+                  <div
+                    className="notice"
+                    style={{
+                      margin: "0 0 8px",
+                      background: "#f2f7ff",
+                      borderColor: "#cfe0ff",
+                    }}
+                  >
+                    <b>Betman 정산 절대 규칙</b>
+                    <br />
+                    왼쪽 팀 = 홈팀 · 모든 핸디캡은 홈팀에 적용 · 승/무/패는 핸디 적용 후 홈팀 기준 결과입니다.
+                    <br />
+                    예: 홈 2:1 + H -1 → 1:1 = 무 · 홈 1:1 + H -1 → 0:1 = 패 · 홈 3:1 + H -1 → 2:1 = 승
+                  </div>
+
                   <div className="cards">
                     <div className="card">
                       홈 가중 득/실
@@ -4037,8 +4136,8 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "8px 0 0" }}>
-                    V10.1은 원모델과 시장의 확률 차이뿐 아니라, 시장 방향·H2H·최근 Form과 예상득점 방향의 충돌도 별도로 검사합니다.
-                    충돌이 크면 신뢰도를 낮추고 최고 가치픽 선정에서 제외합니다.
+                    V10.2는 모든 핸디캡을 홈팀(왼쪽)에 먼저 적용한 뒤 승/무/패를 계산합니다.
+                    일반 승패 시장과 핸디캡 시장의 "패" 의미를 분리하고, 신호충돌 진단은 일반 승패 방향에만 사용합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
