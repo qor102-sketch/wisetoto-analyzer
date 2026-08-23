@@ -1731,6 +1731,8 @@ type MarketPick = {
   odds: number | null;
   marketProbability: number | null;
   edge: number | null;
+  breakEvenProbability: number | null;
+  expectedValue: number | null;
   calibrationWeight: number | null;
   signalConflictScore: number;
   signalConflictLabel: string;
@@ -2211,6 +2213,43 @@ function recommendationScore(
   return clamp(score, 0, 100);
 }
 
+function betExpectedValue(
+  probabilityPercent: number,
+  odds: number | null
+) {
+  if (
+    odds === null ||
+    !Number.isFinite(odds) ||
+    odds <= 1 ||
+    !Number.isFinite(probabilityPercent)
+  ) {
+    return {
+      breakEvenProbability: null,
+      expectedValue: null,
+    };
+  }
+
+  const breakEvenProbability =
+    100 / odds;
+
+  // 1단위 베팅 기준 순 기대수익률.
+  // EV% = P(win) * odds - 1
+  const expectedValue =
+    (probabilityPercent / 100) *
+      odds *
+      100 -
+    100;
+
+  return {
+    breakEvenProbability:
+      Number(
+        breakEvenProbability.toFixed(1)
+      ),
+    expectedValue:
+      Number(expectedValue.toFixed(1)),
+  };
+}
+
 function pickValueStatus(pick: MarketPick) {
   if (pick.signalConflictScore >= 60) {
     return {
@@ -2226,27 +2265,81 @@ function pickValueStatus(pick: MarketPick) {
     };
   }
 
-  if (pick.marketProbability === null || pick.edge === null) {
-    return { label: "시장비교 불가", eligible: false };
+  if (
+    pick.marketProbability === null ||
+    pick.edge === null
+  ) {
+    return {
+      label: "시장비교 불가",
+      eligible: false,
+    };
+  }
+
+  // V10.3 핵심:
+  // 공정시장확률 대비 edge와 실제 Betman 배당 EV를 분리합니다.
+  // edge가 양수여도 실제 배당 손익분기 확률을 넘지 못하면 가치픽이 아닙니다.
+  if (
+    pick.odds === null ||
+    pick.breakEvenProbability === null ||
+    pick.expectedValue === null
+  ) {
+    return {
+      label: "제외 · 실제배당 EV 계산불가",
+      eligible: false,
+    };
+  }
+
+  if (pick.expectedValue <= 0) {
+    return {
+      label: "제외 · 음수 EV",
+      eligible: false,
+    };
   }
 
   if (pick.edge < 0) {
-    return { label: "제외 · 음수 엣지", eligible: false };
+    return {
+      label: "제외 · 음수 엣지",
+      eligible: false,
+    };
   }
 
   if (pick.confidenceScore < 58) {
-    return { label: "관망 · 신뢰도 부족", eligible: false };
+    return {
+      label: "관망 · 신뢰도 부족",
+      eligible: false,
+    };
   }
 
   if (pick.edge < 3) {
-    return { label: "관망 · 엣지 미미", eligible: false };
+    return {
+      label: "관망 · 엣지 미미",
+      eligible: false,
+    };
   }
 
-  if (pick.edge >= 8 && pick.confidenceScore >= 68) {
-    return { label: "가치 우수", eligible: true };
+  // 작은 양수 EV는 오차에 쉽게 뒤집힐 수 있으므로 최고 가치픽에서 제외.
+  if (pick.expectedValue < 3) {
+    return {
+      label: "관망 · EV 안전마진 부족",
+      eligible: false,
+    };
   }
 
-  return { label: "가치 후보", eligible: true };
+  if (
+    pick.expectedValue >= 5 &&
+    pick.edge >= 8 &&
+    pick.confidenceScore >= 68
+  ) {
+    return {
+      label: "가치 우수",
+      eligible: true,
+    };
+  }
+
+  return {
+    label: "가치 후보",
+    eligible: true,
+  };
 }
 
 type HandicapOutcome = "home" | "draw" | "away";
@@ -2440,6 +2533,11 @@ function buildActualMarketPicks(
                 ).toFixed(1)
               );
 
+        const ev = betExpectedValue(
+          calibratedProbability,
+          safeOdds
+        );
+
         const recScore = recommendationScore(
           calibratedProbability,
           edge,
@@ -2466,6 +2564,10 @@ function buildActualMarketPicks(
           odds: safeOdds,
           marketProbability,
           edge,
+          breakEvenProbability:
+            ev.breakEvenProbability,
+          expectedValue:
+            ev.expectedValue,
           calibrationWeight:
             calibrated.modelWeight === null
               ? null
@@ -2517,6 +2619,8 @@ function buildActualMarketPicks(
         odds: null,
         marketProbability: null,
         edge: null,
+        breakEvenProbability: null,
+        expectedValue: null,
         calibrationWeight: null,
         signalConflictScore:
           signalConflict.score,
@@ -2578,6 +2682,17 @@ function buildActualMarketPicks(
               ).toFixed(1)
             );
 
+      const fallbackOdds =
+        Number(fallbackBest.selection?.odds) > 1
+          ? Number(fallbackBest.selection?.odds)
+          : null;
+
+      const fallbackEv =
+        betExpectedValue(
+          calibratedProbability,
+          fallbackOdds
+        );
+
       result.push({
         key,
         market: label,
@@ -2586,12 +2701,13 @@ function buildActualMarketPicks(
           Number(fallbackBest.probability.toFixed(1)),
         probability:
           calibratedProbability,
-        odds:
-          Number(fallbackBest.selection?.odds) > 1
-            ? Number(fallbackBest.selection?.odds)
-            : null,
+        odds: fallbackOdds,
         marketProbability,
         edge,
+        breakEvenProbability:
+          fallbackEv.breakEvenProbability,
+        expectedValue:
+          fallbackEv.expectedValue,
         calibrationWeight:
           calibrated.modelWeight === null
             ? null
@@ -3900,6 +4016,10 @@ export default function Home() {
                     추천점수 {bestActualPick.recommendationScore.toFixed(1)}
                     <br />
                     엣지 {bestActualPick.edge === null ? "-" : `${bestActualPick.edge >= 0 ? "+" : ""}${bestActualPick.edge.toFixed(1)}%p`}
+                    {" · "}EV {bestActualPick.expectedValue === null ? "-" : `${bestActualPick.expectedValue >= 0 ? "+" : ""}${bestActualPick.expectedValue.toFixed(1)}%`}
+                    <br />
+                    배당 {bestActualPick.odds === null ? "-" : bestActualPick.odds.toFixed(2)}
+                    {" · "}손익분기 {bestActualPick.breakEvenProbability === null ? "-" : `${bestActualPick.breakEvenProbability.toFixed(1)}%`}
                     {" · "}신뢰 {bestActualPick.confidenceGrade}
                   </div>
                 )}
@@ -3991,7 +4111,7 @@ export default function Home() {
               {actualMarketPicks.length ? (
                 <div className="compactMarket">
                   <div className="compactMarketHead">
-                    <div>유형</div><div>추천</div><div className="cmNum">보정</div><div className="cmNum">시장</div><div className="cmNum">엣지</div><div className="cmNum">신뢰</div><div className="cmNum">점수</div>
+                    <div>유형</div><div>추천</div><div className="cmNum">보정</div><div className="cmNum">시장</div><div className="cmNum">엣지</div><div className="cmNum">EV</div><div className="cmNum">신뢰</div><div className="cmNum">점수</div>
                   </div>
                   {actualMarketPicks.map((pick) => {
                     const isBest = bestActualPick?.key === pick.key;
@@ -4002,6 +4122,7 @@ export default function Home() {
                         <div className="cmNum"><b>{pick.probability.toFixed(1)}%</b></div>
                         <div className="cmNum">{pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`}</div>
                         <div className={`cmNum ${pick.edge !== null && pick.edge >= 0 ? "cmPos" : "cmNeg"}`}>{pick.edge === null ? "-" : `${pick.edge >= 0 ? "+" : ""}${pick.edge.toFixed(1)}`}</div>
+                        <div className={`cmNum ${pick.expectedValue !== null && pick.expectedValue >= 0 ? "cmPos" : "cmNeg"}`}>{pick.expectedValue === null ? "-" : `${pick.expectedValue >= 0 ? "+" : ""}${pick.expectedValue.toFixed(1)}%`}</div>
                         <div className="cmNum"><span className="cmGrade">{pick.confidenceGrade}</span></div>
                         <div className="cmNum"><b>{pick.recommendationScore.toFixed(1)}</b></div>
                       </div>
@@ -4017,10 +4138,10 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V10.2 계산 추적 · 홈팀 핸디 정산 · 신호충돌 · 수축 전/후</summary>
+              <summary>V10.3 계산 추적 · 실제배당 EV · 홈팀 핸디 정산 · 신호충돌</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
-                  <h3>V10.2 계산 추적 · 홈팀 기준 정산</h3>
+                  <h3>V10.3 계산 추적 · EV + 홈팀 기준 정산</h3>
 
                   <div
                     className="notice"
@@ -4075,7 +4196,7 @@ export default function Home() {
                       <div style={{ minWidth: 620 }}>
                         <div style={{
                           display: "grid",
-                          gridTemplateColumns: "90px 70px 70px 70px 70px 70px",
+                          gridTemplateColumns: "90px 62px 62px 62px 62px 62px 62px",
                           gap: 6,
                           fontSize: 9,
                           fontWeight: 900,
@@ -4084,7 +4205,7 @@ export default function Home() {
                           background: "#f1f5f9",
                           borderRadius: 8,
                         }}>
-                          <div>마켓</div><div>원모델</div><div>시장</div><div>모델가중</div><div>보정</div><div>엣지</div>
+                          <div>마켓</div><div>원모델</div><div>시장</div><div>보정</div><div>손익분기</div><div>엣지</div><div>EV</div>
                         </div>
 
                         {actualMarketPicks.map((pick) => (
@@ -4092,7 +4213,7 @@ export default function Home() {
                             key={`trace-${pick.key}`}
                             style={{
                               display: "grid",
-                              gridTemplateColumns: "90px 70px 70px 70px 70px 70px",
+                              gridTemplateColumns: "90px 62px 62px 62px 62px 62px 62px",
                               gap: 6,
                               fontSize: 9,
                               padding: "5px 6px",
@@ -4102,13 +4223,19 @@ export default function Home() {
                             <div><b>{pick.market}</b></div>
                             <div>{pick.rawProbability.toFixed(1)}%</div>
                             <div>{pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`}</div>
-                            <div>{pick.calibrationWeight === null ? "-" : `${Math.round(pick.calibrationWeight * 100)}%`}</div>
                             <div><b>{pick.probability.toFixed(1)}%</b></div>
+                            <div>{pick.breakEvenProbability === null ? "-" : `${pick.breakEvenProbability.toFixed(1)}%`}</div>
                             <div style={{
                               color: pick.edge !== null && pick.edge >= 0 ? "#07884a" : "#d33d3d",
                               fontWeight: 800
                             }}>
                               {pick.edge === null ? "-" : `${pick.edge >= 0 ? "+" : ""}${pick.edge.toFixed(1)}%p`}
+                            </div>
+                            <div style={{
+                              color: pick.expectedValue !== null && pick.expectedValue >= 0 ? "#07884a" : "#d33d3d",
+                              fontWeight: 800
+                            }}>
+                              {pick.expectedValue === null ? "-" : `${pick.expectedValue >= 0 ? "+" : ""}${pick.expectedValue.toFixed(1)}%`}
                             </div>
                           </div>
                         ))}
@@ -4144,8 +4271,8 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "8px 0 0" }}>
-                    V10.2는 모든 핸디캡을 홈팀(왼쪽)에 먼저 적용한 뒤 승/무/패를 계산합니다.
-                    일반 승패 시장과 핸디캡 시장의 "패" 의미를 분리하고, 신호충돌 진단은 일반 승패 방향에만 사용합니다.
+                    V10.3은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, 공정시장확률 대비 엣지와 실제 Betman 배당 EV를 별도로 계산합니다.
+                    EV = 보정확률 × 실제배당 - 1이며, EV가 0 이하이면 가치픽에서 제외하고 +3% 미만은 안전마진 부족으로 관망 처리합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
