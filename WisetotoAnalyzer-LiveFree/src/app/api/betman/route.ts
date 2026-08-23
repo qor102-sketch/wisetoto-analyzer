@@ -1,3 +1,4 @@
+// WISETOTO_ROUTE_DIAG_V4_20260823
 const BETMAN_PROXY_URL =
   process.env.BETMAN_PROXY_URL?.trim() ||
   "https://codes-int-pieces-continuously.trycloudflare.com/betman";
@@ -435,7 +436,7 @@ function summarizeRow(row: AnyObj) {
   };
 }
 
-function groupSchedules(rows: AnyObj[]) {
+function groupSchedules(rows: AnyObj[]): AnyObj[] {
   const groups = new Map<string, AnyObj>();
 
   for (const raw of rows) {
@@ -487,7 +488,7 @@ function groupSchedules(rows: AnyObj[]) {
     });
   }
 
-  return [...groups.values()].map((game) => {
+  return [...groups.values()].map((game: AnyObj): AnyObj => {
     const markets = arr(game.markets);
 
     return {
@@ -1230,7 +1231,7 @@ export async function GET(
         deduped.values()
       );
 
-    const games =
+    const games: AnyObj[] =
       groupSchedules(
         schedules
       );
@@ -1245,9 +1246,9 @@ export async function GET(
           rowHasUsableOdds(row)
       ).length;
 
-    const routeFutureGames =
+    const routeFutureGames: AnyObj[] =
       games.filter(
-        (game) =>
+        (game: AnyObj) =>
           gameIsFutureWithOdds(
             game,
             now
@@ -1255,8 +1256,8 @@ export async function GET(
       );
 
     const routeFutureMarketRowCount =
-      routeFutureGames.reduce(
-        (sum, game) =>
+      routeFutureGames.reduce<number>(
+        (sum: number, game: AnyObj) =>
           sum +
           arr(game?.markets).filter(
             marketHasUsableOdds
