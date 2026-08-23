@@ -2728,6 +2728,31 @@ export default function Home() {
 
   return (
     <main className="app">
+      <style jsx global>{`
+        :root{--ui-bg:#f3f6fb;--ui-panel:#fff;--ui-line:#dbe4ef;--ui-text:#172235;--ui-muted:#6c7a90;--ui-blue:#2563eb;--ui-green:#07884a;--ui-red:#d33d3d}
+        body{background:var(--ui-bg)!important;color:var(--ui-text)!important}
+        .app{max-width:1880px!important;margin:0 auto!important;padding:14px 18px 28px!important}
+        .top{background:linear-gradient(135deg,#ffffff,#f5f9ff)!important;border:1px solid var(--ui-line)!important;border-radius:16px!important;padding:14px 16px!important;box-shadow:0 8px 26px rgba(30,50,80,.07)!important}
+        .title{font-size:23px!important;letter-spacing:-.5px!important}.sub,.small{color:var(--ui-muted)}
+        .tabs{margin:10px 0!important}.tab,.btn{border-radius:10px!important;font-weight:800!important}.tab.active,.btn.primary{background:var(--ui-blue)!important;color:#fff!important}
+        .panel{background:#fff!important;border:1px solid var(--ui-line)!important;border-radius:16px!important;box-shadow:0 8px 26px rgba(30,50,80,.07)!important}
+        .hero{border-radius:14px!important;background:linear-gradient(135deg,#f8fbff,#eef5ff)!important;border:1px solid #cfe0ff!important;padding:12px 14px!important;margin-bottom:8px!important}
+        .hero h2{margin:3px 0!important;font-size:19px!important}.hero .big{font-size:17px!important}.hero .right .pct{color:var(--ui-green)!important;font-size:25px!important}
+        .cards{gap:6px!important}.card{border-radius:10px!important;background:#f8fafc!important;border-color:var(--ui-line)!important;padding:7px 8px!important;font-size:10px!important}.card b{font-size:14px!important;margin-top:2px!important}
+        .section{border-radius:12px!important;border-color:var(--ui-line)!important;margin-top:8px!important;padding:9px!important}.section h3{font-size:13px!important;margin:0 0 6px!important}
+        .compactMarket{border:1px solid var(--ui-line);border-radius:12px;overflow:hidden}
+        .compactMarketHead,.compactMarketRow{display:grid;grid-template-columns:minmax(72px,.9fr) minmax(74px,.85fr) 57px 57px 60px 48px 57px;gap:5px;align-items:center;padding:6px 8px}
+        .compactMarketHead{background:#edf3fa;color:#617086;font-size:9px;font-weight:900}
+        .compactMarketRow{border-top:1px solid #edf1f6;font-size:10px;min-height:31px}
+        .compactMarketRow:hover{background:#f7faff}.compactMarketRow.bestRow{background:#eaf8f0;box-shadow:inset 3px 0 0 var(--ui-green)}
+        .cmName,.cmPick{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:850}.cmNum{text-align:right;font-variant-numeric:tabular-nums}.cmPos{color:var(--ui-green);font-weight:900}.cmNeg{color:var(--ui-red);font-weight:900}.cmGrade{display:inline-block;background:#edf2f7;border-radius:999px;padding:2px 5px;font-weight:900}
+        .quickStats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin:7px 0}
+        .quickStat{background:#f8fafc;border:1px solid var(--ui-line);border-radius:9px;padding:6px 7px;min-width:0}.quickStat span{display:block;font-size:9px;color:var(--ui-muted);font-weight:800}.quickStat b{display:block;font-size:11px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        details.uiDetail{margin-top:7px;border:1px solid var(--ui-line);border-radius:10px;overflow:hidden;background:#fff}details.uiDetail>summary{cursor:pointer;padding:7px 9px;background:#f7f9fc;font-size:11px;font-weight:900;list-style:none}details.uiDetail>summary:after{content:"＋";float:right;color:var(--ui-blue)}details.uiDetail[open]>summary:after{content:"－"}.uiDetailBody{padding:8px}
+        .notice{border-radius:10px!important;font-size:10px!important;line-height:1.4!important;padding:7px 9px!important}
+        @media(max-width:1250px){.quickStats{grid-template-columns:repeat(3,1fr)}.compactMarketHead,.compactMarketRow{grid-template-columns:minmax(65px,.8fr) minmax(68px,.8fr) 52px 52px 55px 44px 52px}}
+        @media(max-width:980px){.layout{grid-template-columns:1fr!important}.quickStats{grid-template-columns:repeat(3,1fr)}}
+      `}</style>
       <div className="top">
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
@@ -2754,7 +2779,7 @@ export default function Home() {
         className="layout"
         style={{
           gridTemplateColumns:
-            "minmax(720px, 1.25fr) minmax(520px, 1fr)",
+            "minmax(720px, 1.32fr) minmax(500px, .88fr)",
         }}
       >
         <section
@@ -3232,7 +3257,7 @@ export default function Home() {
           )}
         </section>
 
-        <section className="panel">
+        <section className="panel" style={{ position: "sticky", top: 10, maxHeight: "calc(100vh - 20px)", overflowY: "auto", padding: 12 }}>
           {!selectedBetman ? <div className="notice">왼쪽 경기목록에서 분석할 경기를 선택하세요.</div> : <>
             <div className="hero">
               <div>
@@ -3262,46 +3287,38 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="cards">
-              <div className="card">승패 배당<b>{moneylineText(selectedBetman)}</b></div>
-              <div className="card">Betman 핸디<b>{handicapText(selectedBetman)}</b></div>
-              <div className="card">Betman U/O<b>{totalText(selectedBetman)}</b></div>
-              <div className="card">SportsAPI<b>{matched?.fixtureId ? "매칭 완료" : "분석 전"}</b></div>
-              <div className="card">H2H<b>{hasH2H ? "수신" : "없음/대기"}</b></div>
-              <div className="card">최근 Form<b>{hasRecent ? "수신" : "없음/대기"}</b></div>
+            <div className="quickStats">
+              <div className="quickStat"><span>승패 배당</span><b>{moneylineText(selectedBetman)}</b></div>
+              <div className="quickStat"><span>핸디</span><b>{handicapText(selectedBetman)}</b></div>
+              <div className="quickStat"><span>U/O</span><b>{totalText(selectedBetman)}</b></div>
+              <div className="quickStat"><span>SportsAPI</span><b>{matched?.fixtureId ? "✓ 매칭" : "대기"}</b></div>
+              <div className="quickStat"><span>H2H</span><b>{hasH2H ? "✓ 수신" : "대기"}</b></div>
+              <div className="quickStat"><span>Form</span><b>{hasRecent ? "✓ 수신" : "대기"}</b></div>
             </div>
 
             <div className="section">
-              <h3>게임유형별 분석 픽 <span className="small">{actualMarketPicks.length ? `※ 모델확률 · 시장확률 · 엣지 · 신뢰도까지 ${actualMarketPicks.length}개 유형 개별 계산` : analysisFactors.scoringUsed ? "※ Betman 실제 기준값 + SportsAPI 최근 득실점 반영" : "※ 분석 전 또는 SportsAPI 데이터 부족"}</span></h3>
-
-              {actualMarketPicks.length ? actualMarketPicks.map((pick) => {
-                const isBest = bestActualPick?.key === pick.key;
-                return (
-                  <div className={"pick " + (isBest ? "best" : "")} key={pick.key}>
-                    <div style={{ minWidth: 0 }}>
-                      <b>{pick.market}</b>
-                      <div className="small">
-                        {pick.pick} · {pick.detail}
-                      </div>
-                      <div className="small" style={{ marginTop: 3 }}>
-                        배당 {pick.odds?.toFixed(2) ?? "-"}
-                        {" · "}시장 {pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`}
-                        {" · "}엣지 {pick.edge === null ? "-" : `${pick.edge >= 0 ? "+" : ""}${pick.edge.toFixed(1)}%p`}
-                        {" · "}신뢰도 {pick.confidenceGrade} ({pick.confidenceScore.toFixed(0)})
-                        {" · "}추천점수 {pick.recommendationScore.toFixed(1)}
-                      </div>
-                      <div className="small" style={{
-                        marginTop: 3,
-                        fontWeight: 800,
-                        color: pickValueStatus(pick).eligible ? "#087a39" : pick.edge !== null && pick.edge < 0 ? "#c62828" : "#805500"
-                      }}>
-                        {pickValueStatus(pick).label}
-                      </div>
-                    </div>
-                    <div className="pct">{pick.probability.toFixed(1)}%</div>
+              <h3>게임유형별 분석 <span className="small">{actualMarketPicks.length ? `· ${actualMarketPicks.length}개 마켓 · 모델/시장/엣지 비교` : "· 분석 대기"}</span></h3>
+              {actualMarketPicks.length ? (
+                <div className="compactMarket">
+                  <div className="compactMarketHead">
+                    <div>유형</div><div>추천</div><div className="cmNum">모델</div><div className="cmNum">시장</div><div className="cmNum">엣지</div><div className="cmNum">신뢰</div><div className="cmNum">점수</div>
                   </div>
-                );
-              }) : displayPicks.map((x) => (
+                  {actualMarketPicks.map((pick) => {
+                    const isBest = bestActualPick?.key === pick.key;
+                    return (
+                      <div className={`compactMarketRow ${isBest ? "bestRow" : ""}`} key={pick.key} title={`${pick.detail} · ${pickValueStatus(pick).label}`}>
+                        <div className="cmName">{pick.market}</div>
+                        <div className="cmPick">{pick.pick}</div>
+                        <div className="cmNum"><b>{pick.probability.toFixed(1)}%</b></div>
+                        <div className="cmNum">{pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`}</div>
+                        <div className={`cmNum ${pick.edge !== null && pick.edge >= 0 ? "cmPos" : "cmNeg"}`}>{pick.edge === null ? "-" : `${pick.edge >= 0 ? "+" : ""}${pick.edge.toFixed(1)}`}</div>
+                        <div className="cmNum"><span className="cmGrade">{pick.confidenceGrade}</span></div>
+                        <div className="cmNum"><b>{pick.recommendationScore.toFixed(1)}</b></div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : displayPicks.map((x) => (
                 <div className={"pick " + (analysisFactors.hasRealData && x[2] === best ? "best" : "")} key={x[0]}>
                   <div><b>{x[0]}</b><div className="small">{x[1]}</div></div>
                   <div className="pct">{analysisFactors.hasRealData ? `${Number(x[2]).toFixed(1)}%` : "-"}</div>
@@ -3309,6 +3326,9 @@ export default function Home() {
               ))}
             </div>
 
+            <details className="uiDetail">
+              <summary>상세 분석 근거 · 모델 보정 / 예상득점 / H2H / 최근 Form</summary>
+              <div className="uiDetailBody">
             {analysisFactors.scoringUsed && (
               <div className="section">
                 <h3>V9 모델 보정 상태</h3>
@@ -3371,6 +3391,8 @@ export default function Home() {
               <div className="card">{recentSummary?.home?.teamName ?? currentMatch.home}<b>{homeForm?.wins ?? 0}승 {homeForm?.draws ?? 0}무 {homeForm?.losses ?? 0}패</b><div className="small">득점 {homeForm?.scored ?? 0} / 실점 {homeForm?.conceded ?? 0}</div></div>
               <div className="card">{recentSummary?.away?.teamName ?? currentMatch.away}<b>{awayForm?.wins ?? 0}승 {awayForm?.draws ?? 0}무 {awayForm?.losses ?? 0}패</b><div className="small">득점 {awayForm?.scored ?? 0} / 실점 {awayForm?.conceded ?? 0}</div></div>
             </div></div>}
+              </div>
+            </details>
 
             {betman.error && <div className="notice">{betman.error}</div>}
             <div className="notice">실전 화면은 Betman에서 현재 배당이 제공되는 모든 미시작 발매경기를 표시합니다. 왼쪽에서 경기를 직접 선택한 뒤 분석 버튼을 누르면 SportsAPI H2H/Form 계산이 시작됩니다.</div>
