@@ -1295,6 +1295,222 @@ function buildAnalysis(
   };
 }
 
+
+type MarketPick = {
+  key: string;
+  market: string;
+  pick: string;
+  probability: number;
+  detail: string;
+};
+
+function poissonPmf(lambda: number, k: number) {
+  if (!Number.isFinite(lambda) || lambda < 0 || k < 0) return 0;
+  let factorial = 1;
+  for (let i = 2; i <= k; i++) factorial *= i;
+  return Math.exp(-lambda) * Math.pow(lambda, k) / factorial;
+}
+
+function soccerScoreGrid(homeLambda: number, awayLambda: number) {
+  const rows: { home: number; away: number; p: number }[] = [];
+  let total = 0;
+  for (let h = 0; h <= 12; h++) {
+    const hp = poissonPmf(homeLambda, h);
+    for (let a = 0; a <= 12; a++) {
+      const p = hp * poissonPmf(awayLambda, a);
+      rows.push({ home: h, away: a, p });
+      total += p;
+    }
+  }
+  if (total > 0) rows.forEach((row) => { row.p /= total; });
+  return rows;
+}
+
+function selectionLabel(selection: any) {
+  return String(selection?.label ?? selection?.side ?? "").trim();
+}
+
+function bestSelection(
+  market: any,
+  probabilities: Record<string, number>
+) {
+  const selections = Array.isArray(market?.selections) ? market.selections : [];
+  let best: { label: string; probability: number } | null = null;
+
+  for (const selection of selections) {
+    const label = selectionLabel(selection);
+    const side = String(selection?.side ?? "").toLowerCase();
+    const normalized = label.toLowerCase();
+
+    let probability: number | null = null;
+    if (side === "win") probability = probabilities.home ?? probabilities.win ?? null;
+    if (side === "draw") probability = probabilities.draw ?? null;
+    if (side === "lose") probability = probabilities.away ?? probabilities.lose ?? null;
+
+    if (/^(승|홈|home)$/i.test(label) || normalized.includes("home")) probability = probabilities.home ?? probability;
+    if (/^(무|draw)$/i.test(label) || normalized.includes("draw")) probability = probabilities.draw ?? probability;
+    if (/^(패|원정|away)$/i.test(label) || normalized.includes("away")) probability = probabilities.away ?? probability;
+    if (/오버|over/i.test(label)) probability = probabilities.over ?? probability;
+    if (/언더|under/i.test(label)) probability = probabilities.under ?? probability;
+    if (/홀|odd/i.test(label)) probability = probabilities.odd ?? probability;
+    if (/짝|even/i.test(label)) probability = probabilities.even ?? probability;
+
+    if (probability !== null && Number.isFinite(probability)) {
+      if (!best || probability > best.probability) best = { label: label || side, probability };
+    }
+  }
+  return best;
+}
+
+function buildActualMarketPicks(
+  game: BetmanMatch | null | undefined,
+  sport: Exclude<Sport, "전체">,
+  factors: AnalysisFactors
+): MarketPick[] {
+  if (!game || !Array.isArray(game?.markets) || !factors.hasRealData) return [];
+
+  const expectedHome = factors.expectedHomeScore;
+  const expectedAway = factors.expectedAwayScore;
+  const canScoreModel =
+    expectedHome !== null && expectedAway !== null &&
+    Number.isFinite(expectedHome) && Number.isFinite(expectedAway);
+
+  const result: MarketPick[] = [];
+
+  for (let index = 0; index < game.markets.length; index++) {
+    const market: any = game.markets[index];
+    const selections = Array.isArray(market?.selections) ? market.selections : [];
+    if (!selections.some((s: any) => Number(s?.odds) > 1)) continue;
+
+    const betName = String(market?.betName ?? market?.displayName ?? market?.betTypeName ?? "");
+    const isFirstHalf = /전반|1st\s*half|first\s*half/i.test(betName);
+    const type = String(market?.type ?? "").toLowerCase();
+    const line = marketNumber(market);
+    const label = marketLabelStandalone(market);
+    const key = String(market?.betId ?? market?.betTypeId ?? `${betName}|${line ?? ""}|${index}`);
+
+    // 축구는 예상 득점에서 Poisson score grid를 만들어 실제 Betman 각 기준값을 직접 계산.
+    if (sport === "축구" && canScoreModel) {
+      const periodFactor = isFirstHalf ? 0.45 : 1;
+      const grid = soccerScoreGrid(
+        Math.max(0.05, expectedHome! * periodFactor),
+        Math.max(0.05, expectedAway! * periodFactor)
+      );
+
+      let home = 0, draw = 0, away = 0, over = 0, under = 0, push = 0, odd = 0, even = 0;
+
+      for (const row of grid) {
+        const adjustedHome = row.home + (type === "handicap" && line !== null ? line : 0);
+        if (adjustedHome > row.away) home += row.p;
+        else if (adjustedHome < row.away) away += row.p;
+        else draw += row.p;
+
+        if (line !== null) {
+          const total = row.home + row.away;
+          if (total > line) over += row.p;
+          else if (total < line) under += row.p;
+          else push += row.p;
+        }
+
+        if ((row.home + row.away) % 2 === 0) even += row.p;
+        else odd += row.p;
+      }
+
+      let probs: Record<string, number> = {};
+      if (type === "total") {
+        const decided = over + under;
+        probs = {
+          over: decided > 0 ? (over / decided) * 100 : 50,
+          under: decided > 0 ? (under / decided) * 100 : 50,
+        };
+      } else if (/sum|홀짝|odd|even/i.test(betName)) {
+        probs = { odd: odd * 100, even: even * 100 };
+      } else {
+        probs = { home: home * 100, draw: draw * 100, away: away * 100 };
+      }
+
+      const best = bestSelection(market, probs);
+      if (best) {
+        const periodText = isFirstHalf ? "전반 예상득점 모델" : "경기 전체 예상득점 모델";
+        const lineText = line !== null ? ` · Betman 기준 ${line >= 0 && type === "handicap" ? "+" : ""}${line}` : "";
+        const pushText = push > 0.001 && type === "total" ? ` · 적중무효 ${(push * 100).toFixed(1)}% 제외` : "";
+        result.push({
+          key,
+          market: label,
+          pick: best.label,
+          probability: Number(best.probability.toFixed(1)),
+          detail: `${periodText}${lineText}${pushText}`,
+        });
+        continue;
+      }
+    }
+
+    // 다른 종목/미지원 마켓은 기존 실제 데이터 분석을 안전한 fallback으로 사용.
+    if (type === "handicap" && factors.handicapLabel && factors.handicapProbability !== null) {
+      result.push({
+        key,
+        market: label,
+        pick: factors.handicapLabel,
+        probability: factors.handicapProbability,
+        detail: line !== null ? `Betman 기준 ${line >= 0 ? "+" : ""}${line}` : "Betman 핸디 기준",
+      });
+      continue;
+    }
+
+    if (type === "total" && factors.totalLabel && factors.totalProbability !== null) {
+      result.push({
+        key,
+        market: label,
+        pick: factors.totalLabel,
+        probability: factors.totalProbability,
+        detail: line !== null ? `Betman 기준 ${line}` : "Betman U/O 기준",
+      });
+      continue;
+    }
+
+    const fallbackBest = bestSelection(market, {
+      home: factors.homeProbability ?? 50,
+      away: factors.awayProbability ?? 50,
+      draw: 0,
+    });
+    if (fallbackBest) {
+      result.push({
+        key,
+        market: label,
+        pick: fallbackBest.label,
+        probability: Number(fallbackBest.probability.toFixed(1)),
+        detail: "SportsAPI Form/H2H 기반",
+      });
+    }
+  }
+
+  return result;
+}
+
+function marketLabelStandalone(market: any) {
+  const type = String(market?.type ?? "").toLowerCase();
+  const line = marketNumber(market);
+  const betName = String(market?.betName ?? "").trim();
+  const betTypeName = String(market?.betTypeName ?? market?.displayName ?? "").trim();
+  const clean = (value: string) => value
+    .replace(/^(축구|야구|농구|배구)\s*/i, "")
+    .replace(/^일반\s*/, "")
+    .trim();
+
+  if (type === "handicap") {
+    const prefix = /전반/i.test(betName) ? "전반 H" : "H";
+    return `${prefix} ${line === null ? "" : `${line >= 0 ? "+" : ""}${line}`}`.trim();
+  }
+  if (type === "total") {
+    const prefix = /전반/i.test(betName) ? "전반 U/O" : "U/O";
+    return `${prefix} ${line ?? ""}`.trim();
+  }
+
+  const preferred = clean(betName) || clean(betTypeName);
+  if (/sum/i.test(preferred)) return /전반/i.test(preferred) ? "전반 SUM" : "SUM";
+  return preferred || "기타";
+}
+
 export default function Home() {
   const [sport, setSport] = useState<Sport>("전체");
   const [status, setStatus] = useState("Betman 발매경기 불러오는 중…");
@@ -1818,16 +2034,29 @@ export default function Home() {
   const analysisFactors = analysis.factors;
   const betmanHandicap = chooseBetmanHandicap(betman.matched);
   const betmanTotal = chooseBetmanTotal(betman.matched);
-  const displayPicks: Pick[] = analysis.picks.map((pick) => {
-    if (pick[0].includes("핸디") && !analysisFactors.scoringUsed && betmanHandicap) {
-      return [pick[0], `Betman 기준 ${betmanHandicap.line >= 0 ? "+" : ""}${betmanHandicap.line} · 분석 대기`, 50];
-    }
-    if (pick[0].startsWith("U/O") && !analysisFactors.scoringUsed && betmanTotal) {
-      return [`U/O ${betmanTotal.line}`, "Betman 기준값 확보 · 분석 대기", 50];
-    }
-    return pick;
-  });
-  const best = Math.max(...displayPicks.map((x) => x[2]));
+  const actualMarketPicks = buildActualMarketPicks(
+    betman.matched,
+    currentSport,
+    analysisFactors
+  );
+
+  const displayPicks: Pick[] = actualMarketPicks.length
+    ? actualMarketPicks.map((pick) => [
+        pick.market,
+        `${pick.pick} · ${pick.detail}`,
+        pick.probability,
+      ] as Pick)
+    : analysis.picks.map((pick) => {
+        if (pick[0].includes("핸디") && !analysisFactors.scoringUsed && betmanHandicap) {
+          return [pick[0], `Betman 기준 ${betmanHandicap.line >= 0 ? "+" : ""}${betmanHandicap.line} · 분석 대기`, 50];
+        }
+        if (pick[0].startsWith("U/O") && !analysisFactors.scoringUsed && betmanTotal) {
+          return [`U/O ${betmanTotal.line}`, "Betman 기준값 확보 · 분석 대기", 50];
+        }
+        return pick;
+      });
+
+  const best = displayPicks.length ? Math.max(...displayPicks.map((x) => x[2])) : 0;
   const bestPick = displayPicks.find((x) => x[2] === best);
   const homeForm = recentSummary?.home?.form ?? null;
   const awayForm = recentSummary?.away?.form ?? null;
@@ -2427,7 +2656,7 @@ export default function Home() {
             </div>
 
             <div className="section">
-              <h3>게임유형별 분석 픽 <span className="small">{analysisFactors.scoringUsed ? "※ Betman 실제 기준값 + SportsAPI 최근 득실점 반영" : "※ 분석 전 또는 SportsAPI 데이터 부족"}</span></h3>
+              <h3>게임유형별 분석 픽 <span className="small">{actualMarketPicks.length ? `※ Betman 실제 발매 ${actualMarketPicks.length}개 유형을 각각 계산` : analysisFactors.scoringUsed ? "※ Betman 실제 기준값 + SportsAPI 최근 득실점 반영" : "※ 분석 전 또는 SportsAPI 데이터 부족"}</span></h3>
               {displayPicks.map((x) => (
                 <div className={"pick " + (analysisFactors.hasRealData && x[2] === best ? "best" : "")} key={x[0]}>
                   <div><b>{x[0]}</b><div className="small">{x[1]}</div></div>
