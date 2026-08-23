@@ -29,31 +29,121 @@ function normalizeName(value: any) {
     .replace(/[().,\-_/]/g, "");
 }
 
+function firstText(
+  ...values: any[]
+) {
+  for (const value of values) {
+    const t = text(value);
+    if (t) return t;
+  }
+  return "";
+}
+
+function rowHome(
+  row: AnyObj
+) {
+  return firstText(
+    row?.homeName,
+    row?.homeTeamName,
+    row?.home?.name,
+    row?.homeTeam?.name
+  );
+}
+
+function rowAway(
+  row: AnyObj
+) {
+  return firstText(
+    row?.awayName,
+    row?.awayTeamName,
+    row?.away?.name,
+    row?.awayTeam?.name
+  );
+}
+
+function rowMatchSeq(
+  row: AnyObj
+) {
+  return (
+    num(row?.matchSeq) ??
+    num(row?.gameSeq) ??
+    num(row?.scheduleSeq) ??
+    num(row?.seqNo)
+  );
+}
+
+function rowOdds(
+  row: AnyObj,
+  side:
+    | "win"
+    | "draw"
+    | "lose"
+) {
+  const aliases =
+    side === "win"
+      ? [
+          row?.winAllot,
+          row?.homeAllot,
+          row?.winOdds,
+          row?.homeOdds,
+        ]
+      : side === "draw"
+        ? [
+            row?.drawAllot,
+            row?.drawOdds,
+          ]
+        : [
+            row?.loseAllot,
+            row?.awayAllot,
+            row?.loseOdds,
+            row?.awayOdds,
+          ];
+
+  for (const value of aliases) {
+    const n = num(value);
+    if (n !== null) return n;
+  }
+
+  return null;
+}
+
+
 function marketType(row: AnyObj): MarketType {
   const betNm = text(row?.betNm);
   const betTypNm = text(row?.betTypNm);
+  const combined =
+    `${betNm} ${betTypNm}`.toLowerCase();
 
   if (
-    betNm.includes("언더오버") ||
-    betTypNm.includes("언더오버")
+    combined.includes("언더오버") ||
+    combined.includes("under") ||
+    combined.includes("over")
   ) {
     return "total";
   }
 
   if (
-    betNm.includes("핸디캡") ||
-    betTypNm.includes("핸디캡")
+    combined.includes("핸디캡") ||
+    combined.includes("handicap")
   ) {
     return "handicap";
   }
 
   if (
-    betNm.includes("승패") ||
-    betNm.includes("승무패") ||
-    betNm.includes("승1패") ||
-    betTypNm.includes("승패") ||
-    betTypNm.includes("승무패") ||
-    betTypNm.includes("승N패")
+    combined.includes("sum") ||
+    combined.includes("홀짝") ||
+    combined.includes("odd") ||
+    combined.includes("even")
+  ) {
+    return "other";
+  }
+
+  if (
+    combined.includes("승패") ||
+    combined.includes("승무패") ||
+    combined.includes("승1패") ||
+    combined.includes("승n패") ||
+    combined.includes("moneyline")
   ) {
     return "moneyline";
   }
@@ -62,11 +152,13 @@ function marketType(row: AnyObj): MarketType {
 }
 
 function getSport(row: AnyObj) {
-  return (
-    row?.sportsItem?.sportsItemEngName ??
-    row?.itemCode ??
-    null
-  );
+  return firstText(
+    row?.sportsItem?.sportsItemEngName,
+    row?.sportsItemEngName,
+    row?.sport,
+    row?.sportCode,
+    row?.itemCode
+  ) || null;
 }
 
 function getMarketLine(row: AnyObj) {
@@ -93,25 +185,60 @@ function getSelections(row: AnyObj) {
   return [
     {
       side: "win",
-      label: text(row?.winTxt) || null,
-      odds: num(row?.winAllot),
-      line: num(row?.winHandi),
+      label:
+        text(row?.winTxt) ||
+        text(row?.homeTxt) ||
+        null,
+      odds:
+        rowOdds(
+          row,
+          "win"
+        ),
+      line:
+        num(row?.winHandi),
     },
     {
       side: "draw",
-      label: text(row?.drawTxt) || null,
-      odds: num(row?.drawAllot),
-      line: num(row?.drawHandi),
+      label:
+        text(row?.drawTxt) ||
+        null,
+      odds:
+        rowOdds(
+          row,
+          "draw"
+        ),
+      line:
+        num(row?.drawHandi),
     },
     {
       side: "lose",
-      label: text(row?.loseTxt) || null,
-      odds: num(row?.loseAllot),
-      line: num(row?.loseHandi),
+      label:
+        text(row?.loseTxt) ||
+        text(row?.awayTxt) ||
+        null,
+      odds:
+        rowOdds(
+          row,
+          "lose"
+        ),
+      line:
+        num(row?.loseHandi),
     },
   ].filter((x) => {
-    if (x.label && x.label !== "-") return true;
-    if (x.odds !== null && x.odds > 0) return true;
+    if (
+      x.label &&
+      x.label !== "-"
+    ) {
+      return true;
+    }
+
+    if (
+      x.odds !== null &&
+      x.odds > 0
+    ) {
+      return true;
+    }
+
     return false;
   });
 }
@@ -120,7 +247,8 @@ function summarizeRow(row: AnyObj) {
   const type = marketType(row);
 
   return {
-    matchSeq: num(row?.matchSeq),
+    matchSeq:
+      rowMatchSeq(row),
 
     gameKey: row?.gameKey ?? null,
 
@@ -140,22 +268,38 @@ function summarizeRow(row: AnyObj) {
       null,
 
     leagueCode:
-      row?.leagueCode ?? null,
+      row?.leagueCode ??
+      row?.league?.code ??
+      row?.league?.id ??
+      null,
 
     league:
-      row?.leagueName ?? null,
+      firstText(
+        row?.leagueName,
+        row?.league?.name,
+        row?.meetName,
+        row?.tournamentName
+      ) || null,
 
     homeId:
-      row?.homeId ?? null,
+      row?.homeId ??
+      row?.home?.id ??
+      row?.homeTeam?.id ??
+      null,
 
     home:
-      row?.homeName ?? null,
+      rowHome(row) ||
+      null,
 
     awayId:
-      row?.awayId ?? null,
+      row?.awayId ??
+      row?.away?.id ??
+      row?.awayTeam?.id ??
+      null,
 
     away:
-      row?.awayName ?? null,
+      rowAway(row) ||
+      null,
 
     stadium:
       row?.meetStadiumFullName ??
@@ -176,6 +320,18 @@ function summarizeRow(row: AnyObj) {
 
       betTypeName:
         row?.betTypNm ?? null,
+
+      marketCode:
+        row?.betCode ??
+        row?.betTypCode ??
+        row?.handi ??
+        null,
+
+      displayName:
+        firstText(
+          row?.betTypNm,
+          row?.betNm
+        ) || null,
 
       line:
         getMarketLine(row),
@@ -416,26 +572,32 @@ function isScheduleLikeRow(
 
   const hasTeams =
     Boolean(
-      text(value?.homeName) &&
-      text(value?.awayName)
+      rowHome(value) &&
+      rowAway(value)
     );
 
   const hasMatchSeq =
-    num(value?.matchSeq) !== null;
+    rowMatchSeq(value) !==
+    null;
 
   const hasOdds =
-    [
-      value?.winAllot,
-      value?.drawAllot,
-      value?.loseAllot,
-    ].some(
-      (odds) => {
-        const n =
-          num(odds);
+    (
+      [
+        "win",
+        "draw",
+        "lose",
+      ] as const
+    ).some(
+      (side) => {
+        const odds =
+          rowOdds(
+            value,
+            side
+          );
 
         return (
-          n !== null &&
-          n > 0
+          odds !== null &&
+          odds > 0
         );
       }
     );
@@ -445,13 +607,10 @@ function isScheduleLikeRow(
       text(value?.betNm) ||
       text(value?.betTypNm) ||
       value?.betId != null ||
-      value?.betTypId != null
+      value?.betTypId != null ||
+      value?.handi != null
     );
 
-  /*
-   * Betman 경기/배당 행으로 판단:
-   * 팀명 + 경기번호 + (배당 또는 마켓정보)
-   */
   return (
     hasTeams &&
     hasMatchSeq &&
@@ -485,14 +644,16 @@ function collectAllScheduleRows(
       row?.matchSeq ?? "",
       row?.gameDate ?? "",
       row?.homeId ??
-        row?.homeName ??
+        rowHome(row) ??
         "",
       row?.awayId ??
-        row?.awayName ??
+        rowAway(row) ??
         "",
       row?.betId ?? "",
       row?.betTypId ?? "",
       row?.betNm ?? "",
+      row?.betTypNm ?? "",
+      row?.handi ?? "",
       row?.winHandi ?? "",
       row?.drawHandi ?? "",
       row?.loseHandi ?? "",
@@ -810,6 +971,46 @@ export async function GET(
               0
           )
           .slice(0, 50),
+
+      collectedSports:
+        Array.from(
+          new Set(
+            games
+              .map(
+                (g) =>
+                  g?.sportName ??
+                  g?.sport ??
+                  null
+              )
+              .filter(Boolean)
+          )
+        ),
+
+      collectedLeagues:
+        Array.from(
+          new Set(
+            games
+              .map(
+                (g) =>
+                  g?.league ??
+                  null
+              )
+              .filter(Boolean)
+          )
+        ),
+
+      marketRowCount:
+        games.reduce(
+          (
+            sum,
+            game
+          ) =>
+            sum +
+            arr(
+              game?.markets
+            ).length,
+          0
+        ),
 
       filters: {
         home:
