@@ -128,28 +128,50 @@ const DEMO: Match[] = [
 ];
 
 function koreanSport(
-  sport: string | null | undefined
+  sport: string | number | null | undefined
 ): Exclude<Sport, "전체"> {
   const value = String(
-    sport || ""
-  ).toLowerCase();
+    sport ?? ""
+  )
+    .trim()
+    .toLowerCase();
 
   if (
     value === "football" ||
-    value === "soccer"
+    value === "soccer" ||
+    value === "sc" ||
+    value === "1" ||
+    value === "축구"
   ) {
     return "축구";
   }
 
-  if (value === "baseball") {
+  if (
+    value === "baseball" ||
+    value === "bs" ||
+    value === "2" ||
+    value === "야구"
+  ) {
     return "야구";
   }
 
-  if (value === "basketball") {
+  if (
+    value === "basketball" ||
+    value === "bk" ||
+    value === "bb" ||
+    value === "3" ||
+    value === "농구"
+  ) {
     return "농구";
   }
 
-  if (value === "volleyball") {
+  if (
+    value === "volleyball" ||
+    value === "vl" ||
+    value === "vb" ||
+    value === "4" ||
+    value === "배구"
+  ) {
     return "배구";
   }
 
@@ -1267,6 +1289,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [matched, setMatched] = useState<any>(null);
   const [betmanGames, setBetmanGames] = useState<BetmanMatch[]>([]);
+  const [betmanDiagnostics, setBetmanDiagnostics] = useState<any>(null);
   const [selectedBetmanKey, setSelectedBetmanKey] = useState<string | null>(null);
   const [betman, setBetman] = useState<{
     loading: boolean;
@@ -1643,6 +1666,7 @@ export default function Home() {
       const response = await fetch("/api/betman", { cache: "no-store" });
       const payload = await readApiResponse(response, "Betman 경기목록 API");
       if (!response.ok || !payload?.ok) throw new Error(readableError(payload?.error, "Betman 경기목록 수집 실패"));
+      setBetmanDiagnostics(payload?.diagnostics ?? null);
       const now = Date.now();
 
       const games = getBetmanGames(payload)
@@ -1695,6 +1719,7 @@ export default function Home() {
     } catch (e:any) {
       const message = readableError(e,"Betman 경기목록 수집 실패");
       setBetmanGames([]);
+      setBetmanDiagnostics(null);
       setSelectedBetmanKey(null);
       setBetman({ loading:false, matched:null, score:null, error:message });
       setStatus(message);
@@ -1706,6 +1731,37 @@ export default function Home() {
   const filteredGames = useMemo(() => betmanGames.filter((game) =>
     sport === "전체" || koreanSport(String((game as any)?.sport ?? "")) === sport
   ), [betmanGames, sport]);
+
+  const uiMarketRowCount = useMemo(
+    () =>
+      betmanGames.reduce(
+        (sum, game) =>
+          sum +
+          marketRows(game).length,
+        0
+      ),
+    [betmanGames]
+  );
+
+  const uiSportCounts = useMemo(() => {
+    const counts: Record<Exclude<Sport, "전체">, { games: number; markets: number }> = {
+      축구: { games: 0, markets: 0 },
+      야구: { games: 0, markets: 0 },
+      농구: { games: 0, markets: 0 },
+      배구: { games: 0, markets: 0 },
+    };
+
+    for (const game of betmanGames) {
+      const key = koreanSport(
+        String((game as any)?.sport ?? "")
+      );
+
+      counts[key].games += 1;
+      counts[key].markets += marketRows(game).length;
+    }
+
+    return counts;
+  }, [betmanGames]);
 
   const selectedBetman = useMemo(() => {
     if (!selectedBetmanKey) return null;
@@ -1891,10 +1947,10 @@ export default function Home() {
                   marginTop: 4,
                 }}
               >
-                축구 {betmanGames.filter((g) => koreanSport(String((g as any)?.sport ?? "")) === "축구").length}
-                {" · "}야구 {betmanGames.filter((g) => koreanSport(String((g as any)?.sport ?? "")) === "야구").length}
-                {" · "}농구 {betmanGames.filter((g) => koreanSport(String((g as any)?.sport ?? "")) === "농구").length}
-                {" · "}배구 {betmanGames.filter((g) => koreanSport(String((g as any)?.sport ?? "")) === "배구").length}
+                ⚽ 축구 {uiSportCounts.축구.games}경기/{uiSportCounts.축구.markets}행
+                {" · "}⚾ 야구 {uiSportCounts.야구.games}경기/{uiSportCounts.야구.markets}행
+                {" · "}🏀 농구 {uiSportCounts.농구.games}경기/{uiSportCounts.농구.markets}행
+                {" · "}🏐 배구 {uiSportCounts.배구.games}경기/{uiSportCounts.배구.markets}행
               </div>
             </div>
 
@@ -1910,6 +1966,41 @@ export default function Home() {
               )}배당행
             </span>
           </div>
+
+          {betmanDiagnostics && (
+            <div
+              style={{
+                margin:
+                  "0 14px 10px",
+                padding:
+                  "8px 10px",
+                border:
+                  "1px solid #d8dee5",
+                borderRadius:
+                  8,
+                background:
+                  "#f7f9fb",
+                fontSize:
+                  11,
+                lineHeight:
+                  1.55,
+                color:
+                  "#425466",
+              }}
+            >
+              <strong>발매행 진단</strong>
+              {" · "}Betman 원본 {Number(betmanDiagnostics?.rawCompScheduleRows ?? 0)}행
+              {" → "}원본 미시작/유효배당 {Number(betmanDiagnostics?.rawCompFutureRowCount ?? 0)}행
+              {" → "}route 미시작 {Number(betmanDiagnostics?.routeFutureMarketRowCount ?? 0)}행
+              {" → "}UI {uiMarketRowCount}행
+              <br />
+              <span>
+                route 전체: 병합 {Number(betmanDiagnostics?.mergedRowCount ?? 0)}행
+                {" → "}중복정리 {Number(betmanDiagnostics?.dedupedRowCount ?? 0)}행
+                {" → "}그룹 {Number(betmanDiagnostics?.groupedGameCount ?? 0)}경기/{Number(betmanDiagnostics?.groupedMarketRowCount ?? 0)}행
+              </span>
+            </div>
+          )}
 
           {!filteredGames.length && (
             <div
