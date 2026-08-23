@@ -396,6 +396,238 @@ function filterGames(
   });
 }
 
+
+type ArrayDebug = {
+  path: string;
+  length: number;
+  scheduleLikeCount: number;
+};
+
+function isScheduleLikeRow(
+  value: any
+) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
+    return false;
+  }
+
+  const hasTeams =
+    Boolean(
+      text(value?.homeName) &&
+      text(value?.awayName)
+    );
+
+  const hasMatchSeq =
+    num(value?.matchSeq) !== null;
+
+  const hasOdds =
+    [
+      value?.winAllot,
+      value?.drawAllot,
+      value?.loseAllot,
+    ].some(
+      (odds) => {
+        const n =
+          num(odds);
+
+        return (
+          n !== null &&
+          n > 0
+        );
+      }
+    );
+
+  const hasMarketInfo =
+    Boolean(
+      text(value?.betNm) ||
+      text(value?.betTypNm) ||
+      value?.betId != null ||
+      value?.betTypId != null
+    );
+
+  /*
+   * Betman 경기/배당 행으로 판단:
+   * 팀명 + 경기번호 + (배당 또는 마켓정보)
+   */
+  return (
+    hasTeams &&
+    hasMatchSeq &&
+    (
+      hasOdds ||
+      hasMarketInfo
+    )
+  );
+}
+
+function collectAllScheduleRows(
+  root: any
+) {
+  const rows: AnyObj[] =
+    [];
+
+  const arrays:
+    ArrayDebug[] =
+    [];
+
+  const seenObjects =
+    new Set<any>();
+
+  const seenRows =
+    new Set<string>();
+
+  function rowKey(
+    row: AnyObj
+  ) {
+    return [
+      row?.matchSeq ?? "",
+      row?.gameDate ?? "",
+      row?.homeId ??
+        row?.homeName ??
+        "",
+      row?.awayId ??
+        row?.awayName ??
+        "",
+      row?.betId ?? "",
+      row?.betTypId ?? "",
+      row?.betNm ?? "",
+      row?.winHandi ?? "",
+      row?.drawHandi ?? "",
+      row?.loseHandi ?? "",
+    ].join("|");
+  }
+
+  function addRow(
+    row: AnyObj
+  ) {
+    const key =
+      rowKey(row);
+
+    if (
+      seenRows.has(key)
+    ) {
+      return;
+    }
+
+    seenRows.add(key);
+    rows.push(row);
+  }
+
+  function walk(
+    value: any,
+    path: string,
+    depth: number
+  ) {
+    if (
+      value == null ||
+      depth > 12
+    ) {
+      return;
+    }
+
+    if (
+      typeof value !==
+      "object"
+    ) {
+      return;
+    }
+
+    if (
+      seenObjects.has(value)
+    ) {
+      return;
+    }
+
+    seenObjects.add(value);
+
+    if (
+      Array.isArray(value)
+    ) {
+      let scheduleLikeCount =
+        0;
+
+      for (
+        let i = 0;
+        i < value.length;
+        i++
+      ) {
+        const item =
+          value[i];
+
+        if (
+          isScheduleLikeRow(
+            item
+          )
+        ) {
+          scheduleLikeCount++;
+          addRow(item);
+        }
+
+        walk(
+          item,
+          `${path}[${i}]`,
+          depth + 1
+        );
+      }
+
+      arrays.push({
+        path,
+        length:
+          value.length,
+        scheduleLikeCount,
+      });
+
+      return;
+    }
+
+    if (
+      isScheduleLikeRow(
+        value
+      )
+    ) {
+      addRow(value);
+    }
+
+    for (
+      const [
+        key,
+        child,
+      ] of Object.entries(
+        value
+      )
+    ) {
+      walk(
+        child,
+        path
+          ? `${path}.${key}`
+          : key,
+        depth + 1
+      );
+    }
+  }
+
+  walk(
+    root,
+    "root",
+    0
+  );
+
+  arrays.sort(
+    (a, b) =>
+      b.scheduleLikeCount -
+        a.scheduleLikeCount ||
+      b.length -
+        a.length
+  );
+
+  return {
+    rows,
+    arrays,
+  };
+}
+
 async function fetchBetman() {
   const response =
     await fetch(
@@ -467,10 +699,18 @@ export async function GET(
     const raw =
       await fetchBetman();
 
-    const schedules =
-      arr(
-        raw?.schedulesList
+    /*
+     * 예전에는 raw.schedulesList 하나만 읽었습니다.
+     * 이제는 Betman 원본 JSON 전체를 재귀 탐색해서
+     * matchSeq + 홈/원정 + 배당/마켓 정보가 있는 모든 행을 수집합니다.
+     */
+    const collected =
+      collectAllScheduleRows(
+        raw
       );
+
+    const schedules =
+      collected.rows;
 
     const games =
       groupSchedules(
@@ -559,6 +799,18 @@ export async function GET(
       rawScheduleCount:
         schedules.length,
 
+      sourceArrayCount:
+        collected.arrays.length,
+
+      sourceArrays:
+        collected.arrays
+          .filter(
+            (x) =>
+              x.scheduleLikeCount >
+              0
+          )
+          .slice(0, 50),
+
       filters: {
         home:
           url.searchParams.get(
@@ -591,7 +843,7 @@ export async function GET(
 
       debug: {
         message:
-          "Betman schedulesList를 경기별로 묶고 승패/핸디캡/UO 마켓으로 분류했습니다.",
+          "Betman 원본 JSON 전체에서 경기/배당 행을 재귀 수집한 뒤 경기별로 묶고 승패/핸디캡/UO 마켓으로 분류했습니다.",
 
         usage: [
           "/api/betman",
@@ -603,9 +855,11 @@ export async function GET(
 
         notes: [
           "핸디캡은 Betman 안내에 따라 홈팀 기준으로 해석합니다.",
-          "언더오버 기준값은 schedulesList의 winHandi/loseHandi에서 읽습니다.",
+          "언더오버 기준값은 수집된 경기행의 winHandi/loseHandi에서 읽습니다.",
           "같은 실제 경기에 여러 핸디캡/UO 기준값이 존재할 수 있으므로 배열로 보존합니다.",
-          "배당은 schedulesList의 winAllot/drawAllot/loseAllot 실수값을 그대로 사용합니다.",
+          "배당은 Betman 원본에서 발견한 모든 경기행의 winAllot/drawAllot/loseAllot 값을 그대로 사용합니다.",
+          "schedulesList 하나만 보지 않고 원본 JSON의 모든 중첩 배열을 검사합니다.",
+          "응답의 sourceArrays를 보면 실제로 어느 배열에서 몇 개의 경기행을 찾았는지 확인할 수 있습니다.",
         ],
       },
     });
