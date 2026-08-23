@@ -2087,6 +2087,10 @@ type MarketPick = {
   calibrationWeight: number | null;
   signalConflictScore: number;
   signalConflictLabel: string;
+
+  decisionRiskScore: number;
+  decisionRiskReason: string;
+
   confidenceScore: number;
   confidenceGrade: string;
   recommendationScore: number;
@@ -2436,6 +2440,109 @@ function buildSignalConflict(
 }
 
 
+function marketDecisionRisk(
+  market: any,
+  factors: AnalysisFactors,
+  signalConflict: SignalConflict
+) {
+  const type =
+    String(market?.type ?? "").toLowerCase();
+
+  const betName =
+    String(
+      market?.betName ??
+      market?.displayName ??
+      market?.betTypeName ??
+      ""
+    );
+
+  const isTotal =
+    type === "total" ||
+    /U\/O|언더|오버|over|under/i.test(
+      betName
+    );
+
+  const isSum =
+    /SUM|홀짝|홀\/짝/i.test(
+      betName
+    );
+
+  const isDirectional =
+    !isTotal &&
+    !isSum;
+
+  const reasons: string[] = [];
+
+  // 승무패/핸디는 예상 점수차 방향에 직접 의존하므로
+  // 시장/H2H 방향 충돌을 그대로 사용합니다.
+  // U/O와 SUM은 승패 방향 충돌로 차단하지 않습니다.
+  let score =
+    isDirectional
+      ? signalConflict.score
+      : 0;
+
+  if (
+    isDirectional &&
+    factors.homeVenueSample === 0 &&
+    factors.awayVenueSample === 0
+  ) {
+    score += 18;
+    reasons.push(
+      "홈/원정 장소표본 0/0"
+    );
+  } else if (
+    isDirectional &&
+    (
+      factors.homeVenueSample === 0 ||
+      factors.awayVenueSample === 0
+    )
+  ) {
+    score += 9;
+    reasons.push(
+      "한쪽 장소표본 부족"
+    );
+  }
+
+  if (
+    isDirectional &&
+    factors.scoreGuardApplied
+  ) {
+    score += 8;
+    reasons.push(
+      "예상득점 방향 안전장치 작동"
+    );
+  }
+
+  if (
+    isDirectional &&
+    signalConflict.score >= 35
+  ) {
+    reasons.push(
+      signalConflict.label
+    );
+  }
+
+  score =
+    clamp(
+      score,
+      0,
+      100
+    );
+
+  return {
+    score:
+      Number(score.toFixed(1)),
+    reason:
+      reasons.length
+        ? reasons.join(" · ")
+        : isDirectional
+          ? "방향 신호 안정"
+          : "승패 방향충돌 비적용 마켓",
+    isDirectional,
+  };
+}
+
+
 function marketConfidence(
   factors: AnalysisFactors,
   recentSummary: RecentSummary | null | undefined,
@@ -2613,14 +2720,16 @@ function evaluateValueGrade(input: {
   expectedValue: number | null;
   edge: number | null;
   confidence: number;
-  signalConflictScore: number;
+  decisionRiskScore: number;
+  decisionRiskReason: string;
 }) {
   const {
     odds,
     expectedValue,
     edge,
     confidence,
-    signalConflictScore,
+    decisionRiskScore,
+    decisionRiskReason,
   } = input;
 
   const reasons: string[] = [];
@@ -2663,7 +2772,7 @@ function evaluateValueGrade(input: {
 
   const conflictQuality =
     clamp(
-      100 - signalConflictScore * 1.45,
+      100 - decisionRiskScore * 1.35,
       0,
       100
     );
@@ -2688,10 +2797,28 @@ function evaluateValueGrade(input: {
     };
   }
 
-  if (signalConflictScore >= 35) {
-    reasons.push("신호 충돌");
+  if (decisionRiskScore >= 35) {
+    reasons.push(
+      `검증 필요 (${decisionRiskReason})`
+    );
     return {
-      grade: "PASS" as ValueGrade,
+      grade: "WATCH" as ValueGrade,
+      score: Number(score.toFixed(1)),
+      reason: reasons.join(" · "),
+    };
+  }
+
+  // 모델-시장 괴리가 지나치게 크면 EV가 양수여도
+  // 곧바로 VALUE로 승격하지 않고 데이터/매칭을 먼저 검증합니다.
+  if (
+    expectedValue >= 35 ||
+    edge >= 20
+  ) {
+    reasons.push(
+      "Extreme Edge 검증 필요"
+    );
+    return {
+      grade: "WATCH" as ValueGrade,
       score: Number(score.toFixed(1)),
       reason: reasons.join(" · "),
     };
@@ -2717,7 +2844,7 @@ function evaluateValueGrade(input: {
     expectedValue >= 8 &&
     edge >= 8 &&
     confidence >= 68 &&
-    signalConflictScore < 15 &&
+    decisionRiskScore < 15 &&
     odds >= 1.35 &&
     odds <= 4.00 &&
     score >= 72;
@@ -2734,7 +2861,7 @@ function evaluateValueGrade(input: {
     expectedValue >= 3 &&
     edge >= 3 &&
     confidence >= 58 &&
-    signalConflictScore < 35 &&
+    decisionRiskScore < 35 &&
     score >= 58;
 
   if (value) {
@@ -2889,6 +3016,27 @@ function buildActualMarketPicks(
     const key = String(market?.betId ?? market?.betTypeId ?? `${betName}|${line ?? ""}|${index}`);
     const marketFair = fairMarketProbabilities(market);
 
+    const decisionRisk =
+      marketDecisionRisk(
+        market,
+        factors,
+        {
+        ...signalConflict,
+        score:
+          decisionRisk.score,
+        confidencePenalty:
+          Number(
+            clamp(
+              decisionRisk.score * 0.28,
+              0,
+              24
+            ).toFixed(1)
+          ),
+        label:
+          decisionRisk.reason,
+      }
+      );
+
     // 축구: 예상 득점 → Poisson 스코어 분포 → Betman 실제 기준별 확률.
     if (sport === "축구" && canScoreModel) {
       const periodFactor = isFirstHalf ? 0.45 : 1;
@@ -2958,7 +3106,21 @@ function buildActualMarketPicks(
           h2h,
           market,
           marketFair.overround,
-          signalConflict
+          {
+            ...signalConflict,
+            score:
+              decisionRisk.score,
+            confidencePenalty:
+              Number(
+                clamp(
+                  decisionRisk.score * 0.28,
+                  0,
+                  24
+                ).toFixed(1)
+              ),
+            label:
+              decisionRisk.reason,
+          }
         );
 
         const calibrated =
@@ -2995,8 +3157,10 @@ function buildActualMarketPicks(
               ev.expectedValue,
             edge,
             confidence,
-            signalConflictScore:
-              signalConflict.score,
+            decisionRiskScore:
+              decisionRisk.score,
+            decisionRiskReason:
+              decisionRisk.reason,
           });
 
         const recScore = recommendationScore(
@@ -3047,6 +3211,10 @@ function buildActualMarketPicks(
             signalConflict.score,
           signalConflictLabel:
             signalConflict.label,
+          decisionRiskScore:
+            decisionRisk.score,
+          decisionRiskReason:
+            decisionRisk.reason,
           confidenceScore: Number(confidence.toFixed(1)),
           confidenceGrade: confidenceGrade(confidence),
           recommendationScore: Number(recScore.toFixed(1)),
@@ -3075,7 +3243,21 @@ function buildActualMarketPicks(
         h2h,
         market,
         marketFair.overround,
-      signalConflict
+      {
+        ...signalConflict,
+        score:
+          decisionRisk.score,
+        confidencePenalty:
+          Number(
+            clamp(
+              decisionRisk.score * 0.28,
+              0,
+              24
+            ).toFixed(1)
+          ),
+        label:
+          decisionRisk.reason,
+      }
       );
       result.push({
         key,
@@ -3101,6 +3283,10 @@ function buildActualMarketPicks(
           signalConflict.score,
         signalConflictLabel:
           signalConflict.label,
+        decisionRiskScore:
+          decisionRisk.score,
+        decisionRiskReason:
+          decisionRisk.reason,
         confidenceScore: Number(confidence.toFixed(1)),
         confidenceGrade: confidenceGrade(confidence),
         recommendationScore: Number(
@@ -3132,7 +3318,21 @@ function buildActualMarketPicks(
         h2h,
         market,
         marketFair.overround,
-      signalConflict
+      {
+        ...signalConflict,
+        score:
+          decisionRisk.score,
+        confidencePenalty:
+          Number(
+            clamp(
+              decisionRisk.score * 0.28,
+              0,
+              24
+            ).toFixed(1)
+          ),
+        label:
+          decisionRisk.reason,
+      }
       );
 
       const calibrated =
@@ -3212,6 +3412,10 @@ function buildActualMarketPicks(
           signalConflict.score,
         signalConflictLabel:
           signalConflict.label,
+        decisionRiskScore:
+          decisionRisk.score,
+        decisionRiskReason:
+          decisionRisk.reason,
         confidenceScore: Number(confidence.toFixed(1)),
         confidenceGrade: confidenceGrade(confidence),
         recommendationScore: Number(
@@ -4641,7 +4845,7 @@ export default function Home() {
                         <div className={`cmNum ${pick.expectedValue !== null && pick.expectedValue >= 0 ? "cmPos" : "cmNeg"}`}>{pick.expectedValue === null ? "-" : `${pick.expectedValue >= 0 ? "+" : ""}${pick.expectedValue.toFixed(1)}%`}</div>
                         <div
                           className="cmNum"
-                          title={`${pick.valueGradeReason} · 신뢰 ${pick.confidenceGrade}(${pick.confidenceScore.toFixed(0)}) · 가치점수 ${pick.valueGradeScore.toFixed(1)}`}
+                          title={`${pick.valueGradeReason} · 의사결정 위험 ${pick.decisionRiskScore.toFixed(0)} · ${pick.decisionRiskReason} · 신뢰 ${pick.confidenceGrade}(${pick.confidenceScore.toFixed(0)}) · 가치점수 ${pick.valueGradeScore.toFixed(1)}`}
                         >
                           <span
                             className="cmGrade"
@@ -4679,10 +4883,10 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V10.6 계산 추적 · robust 예상득점 · 가치등급 · EV</summary>
+              <summary>V10.7 계산 추적 · 마켓별 위험 · robust 예상득점 · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
-                  <h3>V10.6 계산 추적 · robust 예상득점</h3>
+                  <h3>V10.7 계산 추적 · 마켓별 의사결정 위험</h3>
 
                   <div
                     className="notice"
@@ -4697,6 +4901,13 @@ export default function Home() {
                     왼쪽 팀 = 홈팀 · 모든 핸디캡은 홈팀에 적용 · 승/무/패는 핸디 적용 후 홈팀 기준 결과입니다.
                     <br />
                     예: 홈 2:1 + H -1 → 1:1 = 무 · 홈 1:1 + H -1 → 0:1 = 패 · 홈 3:1 + H -1 → 2:1 = 승
+                  </div>
+
+                  <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
+                    <b>V10.7 의사결정 규칙</b><br />
+                    승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
+                    U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
+                    위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
                   </div>
 
                   <div className="section" style={{ marginTop: 0 }}>
@@ -4866,7 +5077,7 @@ export default function Home() {
                             <div>
                               <b>{pick.valueGrade}</b>
                               <div style={{ color: "#64748b", fontSize: 8 }}>
-                                {pick.valueGradeScore.toFixed(1)}
+                                위험 {pick.decisionRiskScore.toFixed(0)}
                               </div>
                             </div>
                           </div>
