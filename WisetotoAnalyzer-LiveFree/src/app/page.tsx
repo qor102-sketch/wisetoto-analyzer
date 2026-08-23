@@ -106,6 +106,20 @@ type AnalysisFactors = {
   awayWeightedConceded: number | null;
 
   h2hSample: number;
+  homeOverallScored: number | null;
+  homeOverallConceded: number | null;
+  awayOverallScored: number | null;
+  awayOverallConceded: number | null;
+  homeVenueScored: number | null;
+  homeVenueConceded: number | null;
+  awayVenueScored: number | null;
+  awayVenueConceded: number | null;
+  homeVenueWeight: number;
+  awayVenueWeight: number;
+  marketHomeFair: number | null;
+  marketAwayFair: number | null;
+  scoreGuardApplied: boolean;
+  scoreGuardStrength: number;
 };
 
 const I = {
@@ -593,6 +607,11 @@ type WeightedProfile = {
   played: number;
   venuePlayed: number;
   usedVenueBlend: boolean;
+  overallScored: number | null;
+  overallConceded: number | null;
+  venueScored: number | null;
+  venueConceded: number | null;
+  venueWeight: number;
 };
 
 function fixtureTimeMs(fixture: any) {
@@ -784,6 +803,11 @@ function buildWeightedRecentProfile(
       played: overall.played || formPlayed,
       venuePlayed: venue.played,
       usedVenueBlend: false,
+      overallScored: overall.scored ?? formScored,
+      overallConceded: overall.conceded ?? formConceded,
+      venueScored: venue.scored,
+      venueConceded: venue.conceded,
+      venueWeight: 0,
     };
   }
 
@@ -794,6 +818,11 @@ function buildWeightedRecentProfile(
       played: overall.played || formPlayed,
       venuePlayed: 0,
       usedVenueBlend: false,
+      overallScored: overall.scored ?? formScored,
+      overallConceded: overall.conceded ?? formConceded,
+      venueScored: null,
+      venueConceded: null,
+      venueWeight: 0,
     };
   }
 
@@ -810,6 +839,11 @@ function buildWeightedRecentProfile(
     played: overall.played || formPlayed,
     venuePlayed: venue.played,
     usedVenueBlend: true,
+    overallScored: overall.scored ?? formScored,
+    overallConceded: overall.conceded ?? formConceded,
+    venueScored: venue.scored,
+    venueConceded: venue.conceded,
+    venueWeight,
   };
 }
 
@@ -839,6 +873,71 @@ function shrinkExpectedScore(
   if (sport === "배구") value = clamp(value, 0.7, 2.4);
 
   return value;
+}
+
+
+function fairMoneylineForGame(
+  game: BetmanMatch | null | undefined
+) {
+  const markets = Array.isArray(game?.markets) ? game!.markets! : [];
+  const moneyline = markets.find((market: any) => {
+    const type = String(market?.type ?? "").toLowerCase();
+    const name = String(market?.betName ?? market?.displayName ?? "");
+    return type !== "handicap" && type !== "total" && !/전반/i.test(name) && /승무패|승패/i.test(name);
+  }) ?? null;
+
+  if (!moneyline) return { home: null as number | null, away: null as number | null };
+
+  const fair = fairMarketProbabilities(moneyline).probabilities;
+  return {
+    home: Number.isFinite(fair.home) ? Number(fair.home) : null,
+    away: Number.isFinite(fair.away) ? Number(fair.away) : null,
+  };
+}
+
+function guardExpectedScoresByMarketDirection(input: {
+  homeScore: number;
+  awayScore: number;
+  marketHome: number | null;
+  marketAway: number | null;
+  sampleStrength: number;
+}) {
+  let { homeScore, awayScore, marketHome, marketAway, sampleStrength } = input;
+  let applied = false;
+  let strength = 0;
+
+  if (marketHome !== null && marketAway !== null) {
+    const marketDiff = marketHome - marketAway;
+    const modelMargin = homeScore - awayScore;
+    const opposite =
+      (marketDiff >= 18 && modelMargin < -0.10) ||
+      (marketDiff <= -18 && modelMargin > 0.10);
+
+    if (opposite) {
+      const marketSeverity = clamp((Math.abs(marketDiff) - 18) / 35, 0, 1);
+      const samplePenalty = 1 - clamp(sampleStrength, 0.35, 0.82);
+      strength = clamp(
+        0.18 + marketSeverity * 0.24 + samplePenalty * 0.35,
+        0.18,
+        0.48
+      );
+
+      const total = Math.max(0.2, homeScore + awayScore);
+      const midpoint = total / 2;
+
+      // 시장 방향으로 강제 역전하지 않고, 과도한 반대 방향만 중립 쪽으로 축소.
+      homeScore = homeScore * (1 - strength) + midpoint * strength;
+      awayScore = awayScore * (1 - strength) + midpoint * strength;
+      applied = true;
+    }
+  }
+
+  return {
+    homeScore,
+    awayScore,
+    applied,
+    strength: Number(strength.toFixed(2)),
+  };
 }
 
 
@@ -985,6 +1084,11 @@ function buildAnalysis(
     }
   }
 
+  const moneylineFair =
+    fairMoneylineForGame(
+      betmanMatch
+    );
+
   const homeWeighted =
     buildWeightedRecentProfile(
       recentSummary?.home ?? null,
@@ -1040,6 +1144,9 @@ function buildAnalysis(
   let scoreShrinkage:
     | number
     | null = null;
+
+  let scoreGuardApplied = false;
+  let scoreGuardStrength = 0;
 
   let rawExpectedHomeScore:
     | number
@@ -1130,6 +1237,21 @@ function buildAnalysis(
     if (sport === "야구") expectedHomeScore += 0.10;
     if (sport === "농구") expectedHomeScore += 1.0;
     if (sport === "배구") expectedHomeScore += 0.03;
+
+    if (sport === "축구") {
+      const guarded = guardExpectedScoresByMarketDirection({
+        homeScore: expectedHomeScore,
+        awayScore: expectedAwayScore,
+        marketHome: moneylineFair.home,
+        marketAway: moneylineFair.away,
+        sampleStrength,
+      });
+
+      expectedHomeScore = guarded.homeScore;
+      expectedAwayScore = guarded.awayScore;
+      scoreGuardApplied = guarded.applied;
+      scoreGuardStrength = guarded.strength;
+    }
 
     expectedTotal =
       expectedHomeScore +
@@ -1717,6 +1839,35 @@ function buildAnalysis(
           : Number(awayAvgConceded.toFixed(3)),
 
       h2hSample,
+
+      homeOverallScored:
+        homeWeighted.overallScored === null ? null : Number(homeWeighted.overallScored.toFixed(3)),
+      homeOverallConceded:
+        homeWeighted.overallConceded === null ? null : Number(homeWeighted.overallConceded.toFixed(3)),
+      awayOverallScored:
+        awayWeighted.overallScored === null ? null : Number(awayWeighted.overallScored.toFixed(3)),
+      awayOverallConceded:
+        awayWeighted.overallConceded === null ? null : Number(awayWeighted.overallConceded.toFixed(3)),
+
+      homeVenueScored:
+        homeWeighted.venueScored === null ? null : Number(homeWeighted.venueScored.toFixed(3)),
+      homeVenueConceded:
+        homeWeighted.venueConceded === null ? null : Number(homeWeighted.venueConceded.toFixed(3)),
+      awayVenueScored:
+        awayWeighted.venueScored === null ? null : Number(awayWeighted.venueScored.toFixed(3)),
+      awayVenueConceded:
+        awayWeighted.venueConceded === null ? null : Number(awayWeighted.venueConceded.toFixed(3)),
+
+      homeVenueWeight: Number(homeWeighted.venueWeight.toFixed(2)),
+      awayVenueWeight: Number(awayWeighted.venueWeight.toFixed(2)),
+
+      marketHomeFair:
+        moneylineFair.home === null ? null : Number(moneylineFair.home.toFixed(1)),
+      marketAwayFair:
+        moneylineFair.away === null ? null : Number(moneylineFair.away.toFixed(1)),
+
+      scoreGuardApplied,
+      scoreGuardStrength,
     } as AnalysisFactors,
   };
 }
@@ -4333,10 +4484,10 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V10.4 계산 추적 · 최종 가치등급 · EV · 홈팀 핸디 · 신호충돌</summary>
+              <summary>V10.5 계산 추적 · 예상득점 진단 · 가치등급 · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
-                  <h3>V10.4 계산 추적 · 최종 가치등급</h3>
+                  <h3>V10.5 계산 추적 · 예상득점 진단</h3>
 
                   <div
                     className="notice"
@@ -4351,6 +4502,54 @@ export default function Home() {
                     왼쪽 팀 = 홈팀 · 모든 핸디캡은 홈팀에 적용 · 승/무/패는 핸디 적용 후 홈팀 기준 결과입니다.
                     <br />
                     예: 홈 2:1 + H -1 → 1:1 = 무 · 홈 1:1 + H -1 → 0:1 = 패 · 홈 3:1 + H -1 → 2:1 = 승
+                  </div>
+
+                  <div className="section" style={{ marginTop: 0 }}>
+                    <h3>예상득점 계산 진단</h3>
+                    <div className="cards">
+                      <div className="card">
+                        홈 최근 전체 득/실
+                        <b>{analysisFactors.homeOverallScored?.toFixed(2) ?? "-"} / {analysisFactors.homeOverallConceded?.toFixed(2) ?? "-"}</b>
+                      </div>
+                      <div className="card">
+                        홈 전용 득/실
+                        <b>{analysisFactors.homeVenueScored?.toFixed(2) ?? "-"} / {analysisFactors.homeVenueConceded?.toFixed(2) ?? "-"}</b>
+                        <div className="small">장소가중 {Math.round(analysisFactors.homeVenueWeight * 100)}%</div>
+                      </div>
+                      <div className="card">
+                        원정 최근 전체 득/실
+                        <b>{analysisFactors.awayOverallScored?.toFixed(2) ?? "-"} / {analysisFactors.awayOverallConceded?.toFixed(2) ?? "-"}</b>
+                      </div>
+                      <div className="card">
+                        원정 전용 득/실
+                        <b>{analysisFactors.awayVenueScored?.toFixed(2) ?? "-"} / {analysisFactors.awayVenueConceded?.toFixed(2) ?? "-"}</b>
+                        <div className="small">장소가중 {Math.round(analysisFactors.awayVenueWeight * 100)}%</div>
+                      </div>
+                    </div>
+
+                    <div className="cards" style={{ marginTop: 7 }}>
+                      <div className="card">
+                        수축 전 예상
+                        <b>{analysisFactors.rawExpectedHomeScore?.toFixed(2) ?? "-"} : {analysisFactors.rawExpectedAwayScore?.toFixed(2) ?? "-"}</b>
+                      </div>
+                      <div className="card">
+                        중립 사전값
+                        <b>{analysisFactors.scorePrior?.toFixed(2) ?? "-"}</b>
+                      </div>
+                      <div className="card">
+                        시장 공정 승률
+                        <b>{analysisFactors.marketHomeFair?.toFixed(1) ?? "-"}% / {analysisFactors.marketAwayFair?.toFixed(1) ?? "-"}%</b>
+                      </div>
+                      <div className="card">
+                        방향 안전장치
+                        <b>{analysisFactors.scoreGuardApplied ? `적용 ${Math.round(analysisFactors.scoreGuardStrength * 100)}%` : "미적용"}</b>
+                      </div>
+                    </div>
+
+                    <div className="notice" style={{ margin: "8px 0" }}>
+                      예상득점은 배당을 그대로 점수로 바꾸지 않습니다. 최근 득실·홈/원정 표본으로 독립 계산한 뒤,
+                      시장과 방향이 크게 반대이고 표본이 약할 때만 득점차를 중립 쪽으로 일부 수축합니다.
+                    </div>
                   </div>
 
                   <div className="cards">
