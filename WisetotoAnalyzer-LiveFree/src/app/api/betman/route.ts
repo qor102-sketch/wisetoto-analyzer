@@ -1,5 +1,5 @@
 const BETMAN_PROXY_URL =
-  "https://association-robertson-jefferson-enormous.trycloudflare.com/betman";
+  "https://codes-int-pieces-continuously.trycloudflare.com/betman";
 
 type AnyObj = Record<string, any>;
 
