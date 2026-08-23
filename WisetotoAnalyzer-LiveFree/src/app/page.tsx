@@ -195,17 +195,29 @@ function formatKST(
     return value;
   }
 
-  return date.toLocaleString(
-    "ko-KR",
-    {
-      timeZone: "Asia/Seoul",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    }
-  );
+  const parts =
+    new Intl.DateTimeFormat(
+      "ko-KR",
+      {
+        timeZone: "Asia/Seoul",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        weekday: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }
+    ).formatToParts(date);
+
+  const get =
+    (type: string) =>
+      parts.find(
+        (part) =>
+          part.type === type
+      )?.value ?? "";
+
+  return `${get("year")}.${get("month")}.${get("day")}(${get("weekday")}) ${get("hour")}:${get("minute")}`;
 }
 
 function formatShortDate(
@@ -1358,13 +1370,29 @@ export default function Home() {
         ? (game as any).markets
         : [];
 
+    /*
+     * route.ts의 routeFutureMarketRowCount와 같은 기준을 사용합니다.
+     * selection 배열이 존재하기만 하는 마켓이 아니라, 실제 배당이 1보다 큰
+     * 선택지가 하나 이상 있는 마켓만 UI 행으로 표시합니다.
+     */
     return markets.filter(
       (market: any) =>
         Array.isArray(
           market?.selections
         ) &&
-        market.selections.length >
-          0
+        market.selections.some(
+          (selection: any) => {
+            const odds =
+              Number(
+                selection?.odds
+              );
+
+            return (
+              Number.isFinite(odds) &&
+              odds > 1
+            );
+          }
+        )
     );
   }
 
@@ -1568,20 +1596,6 @@ export default function Home() {
   function compactGameDate(
     game: BetmanMatch
   ) {
-    const raw =
-      String(
-        (game as any)
-          ?.gameDateStr ??
-        ""
-      );
-
-    if (raw) {
-      return raw
-        .replace(/^26\./, "")
-        .replace(/\s+/g, " ")
-        .trim();
-    }
-
     const time =
       gameTimeMs(
         game
@@ -1608,6 +1622,8 @@ export default function Home() {
             "2-digit",
           day:
             "2-digit",
+          weekday:
+            "short",
           hour:
             "2-digit",
           minute:
@@ -1632,7 +1648,9 @@ export default function Home() {
       "month"
     )}.${get(
       "day"
-    )} ${get(
+    )}(${get(
+      "weekday"
+    )}) ${get(
       "hour"
     )}:${get(
       "minute"
