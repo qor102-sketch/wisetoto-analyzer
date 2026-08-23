@@ -3020,21 +3020,7 @@ function buildActualMarketPicks(
       marketDecisionRisk(
         market,
         factors,
-        {
-        ...signalConflict,
-        score:
-          decisionRisk.score,
-        confidencePenalty:
-          Number(
-            clamp(
-              decisionRisk.score * 0.28,
-              0,
-              24
-            ).toFixed(1)
-          ),
-        label:
-          decisionRisk.reason,
-      }
+        signalConflict
       );
 
     // 축구: 예상 득점 → Poisson 스코어 분포 → Betman 실제 기준별 확률.
