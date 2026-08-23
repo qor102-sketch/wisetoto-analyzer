@@ -2016,10 +2016,19 @@ export default function Home() {
                               ?.matchSeq
                           );
 
-                        const rowKey =
-                          `${key}-${Number.isFinite(
-                            matchSeq
-                          ) ? matchSeq : marketIndex}`;
+                        const rowKey = [
+                          key,
+                          Number.isFinite(matchSeq)
+                            ? matchSeq
+                            : "no-seq",
+                          market?.betId ?? "",
+                          market?.betTypeId ?? "",
+                          market?.betName ?? "",
+                          market?.betTypeName ?? "",
+                          market?.rawHandiCode ?? "",
+                          market?.line ?? "",
+                          marketIndex,
+                        ].join("|");
 
                         const label =
                           marketLabel(
