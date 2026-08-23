@@ -1842,12 +1842,251 @@ function confidenceGrade(score: number) {
   return "C";
 }
 
+type SignalConflict = {
+  score: number;
+  confidencePenalty: number;
+  label: string;
+  reasons: string[];
+  marketHome: number | null;
+  marketAway: number | null;
+  modelMargin: number | null;
+};
+
+function buildSignalConflict(
+  game: BetmanMatch | null | undefined,
+  factors: AnalysisFactors,
+  recentSummary: RecentSummary | null | undefined,
+  h2h: any
+): SignalConflict {
+  const reasons: string[] = [];
+  let score = 0;
+
+  const markets =
+    Array.isArray(game?.markets)
+      ? game!.markets!
+      : [];
+
+  const moneyline =
+    markets.find((market: any) => {
+      const type =
+        String(market?.type ?? "").toLowerCase();
+      const name =
+        String(market?.betName ?? market?.displayName ?? "");
+      return (
+        type !== "handicap" &&
+        type !== "total" &&
+        !/전반/i.test(name) &&
+        /승무패|승패/i.test(name)
+      );
+    }) ?? null;
+
+  let marketHome: number | null = null;
+  let marketAway: number | null = null;
+
+  if (moneyline) {
+    const fair =
+      fairMarketProbabilities(
+        moneyline
+      ).probabilities;
+
+    marketHome =
+      Number.isFinite(fair.home)
+        ? fair.home
+        : null;
+
+    marketAway =
+      Number.isFinite(fair.away)
+        ? fair.away
+        : null;
+  }
+
+  const modelMargin =
+    factors.expectedMargin;
+
+  // 1) 가장 강한 안전장치:
+  // 시장의 승패 방향과 예상득점 방향이 정반대일 때.
+  if (
+    marketHome !== null &&
+    marketAway !== null &&
+    modelMargin !== null
+  ) {
+    const marketDiff =
+      marketHome -
+      marketAway;
+
+    if (
+      marketDiff >= 12 &&
+      modelMargin < -0.05
+    ) {
+      const severity =
+        clamp(
+          18 +
+          (marketDiff - 12) * 0.45 +
+          Math.abs(modelMargin) * 18,
+          18,
+          48
+        );
+      score += severity;
+      reasons.push(
+        `시장 홈우세 ${marketHome.toFixed(1)}% vs 모델 원정우세`
+      );
+    }
+
+    if (
+      marketDiff <= -12 &&
+      modelMargin > 0.05
+    ) {
+      const severity =
+        clamp(
+          18 +
+          (Math.abs(marketDiff) - 12) * 0.45 +
+          Math.abs(modelMargin) * 18,
+          18,
+          48
+        );
+      score += severity;
+      reasons.push(
+        `시장 원정우세 ${marketAway.toFixed(1)}% vs 모델 홈우세`
+      );
+    }
+  }
+
+  // 2) H2H가 매우 한쪽인데 득점모델 방향이 반대면 추가 경고.
+  const homeWins =
+    Number(h2h?.homeWins ?? 0);
+  const awayWins =
+    Number(h2h?.awayWins ?? 0);
+  const h2hDecisions =
+    homeWins +
+    awayWins;
+
+  if (
+    h2hDecisions >= 5 &&
+    modelMargin !== null
+  ) {
+    const homeShare =
+      homeWins /
+      h2hDecisions;
+
+    if (
+      homeShare >= 0.7 &&
+      modelMargin < -0.05
+    ) {
+      score += 16;
+      reasons.push(
+        `H2H 홈 ${homeWins}-${awayWins} 우세와 득점모델 방향 충돌`
+      );
+    }
+
+    if (
+      homeShare <= 0.3 &&
+      modelMargin > 0.05
+    ) {
+      score += 16;
+      reasons.push(
+        `H2H 원정 ${awayWins}-${homeWins} 우세와 득점모델 방향 충돌`
+      );
+    }
+  }
+
+  // 3) 최근 Form 방향도 반대면 소폭 추가.
+  const homeForm =
+    Number(
+      recentSummary?.home?.form?.formPercent
+    );
+
+  const awayForm =
+    Number(
+      recentSummary?.away?.form?.formPercent
+    );
+
+  if (
+    Number.isFinite(homeForm) &&
+    Number.isFinite(awayForm) &&
+    modelMargin !== null
+  ) {
+    const formDiff =
+      homeForm -
+      awayForm;
+
+    if (
+      formDiff >= 18 &&
+      modelMargin < -0.05
+    ) {
+      score += 8;
+      reasons.push(
+        "최근 Form 홈우세와 득점모델 방향 충돌"
+      );
+    }
+
+    if (
+      formDiff <= -18 &&
+      modelMargin > 0.05
+    ) {
+      score += 8;
+      reasons.push(
+        "최근 Form 원정우세와 득점모델 방향 충돌"
+      );
+    }
+  }
+
+  score =
+    clamp(
+      score,
+      0,
+      100
+    );
+
+  const confidencePenalty =
+    clamp(
+      score * 0.28,
+      0,
+      24
+    );
+
+  const label =
+    score >= 60
+      ? "강한 신호 충돌"
+      : score >= 35
+        ? "신호 충돌 주의"
+        : score >= 15
+          ? "경미한 충돌"
+          : "신호 일치";
+
+  return {
+    score:
+      Number(score.toFixed(1)),
+    confidencePenalty:
+      Number(
+        confidencePenalty.toFixed(
+          1
+        )
+      ),
+    label,
+    reasons,
+    marketHome:
+      marketHome === null
+        ? null
+        : Number(marketHome.toFixed(1)),
+    marketAway:
+      marketAway === null
+        ? null
+        : Number(marketAway.toFixed(1)),
+    modelMargin:
+      modelMargin === null
+        ? null
+        : Number(modelMargin.toFixed(2)),
+  };
+}
+
+
 function marketConfidence(
   factors: AnalysisFactors,
   recentSummary: RecentSummary | null | undefined,
   h2h: any,
   market: any,
-  overround: number
+  overround: number,
+  signalConflict: SignalConflict
 ) {
   const homePlayed = Math.max(0, Number(recentSummary?.home?.form?.played ?? 0));
   const awayPlayed = Math.max(0, Number(recentSummary?.away?.form?.played ?? 0));
@@ -1897,9 +2136,13 @@ function marketConfidence(
   // SUM=홀짝은 Betman 원본 의미는 확정됐지만 점수 parity에 민감하므로 보수적 감점.
   if (isOddEven) score -= 10;
 
-  // 현재 SportsAPI recentSummary는 홈경기/원정경기 분리 성적이 아니라 전체 recent 요약.
-  // 이 한계를 반영해 최고 신뢰도를 86으로 제한.
-  return clamp(score, 30, 84);
+  // 서로 독립적인 신호(시장/H2H/Form)가 득점모델과 충돌하면
+  // 데이터 수신 성공과 예측 신뢰도를 구분하여 강하게 감점.
+  score -=
+    signalConflict.confidencePenalty;
+
+  // 현재 SportsAPI recentSummary는 홈/원정 분리 표본이 제한적이므로 상한 유지.
+  return clamp(score, 28, 84);
 }
 
 function calibrateModelProbability(
@@ -1966,6 +2209,20 @@ function recommendationScore(
 }
 
 function pickValueStatus(pick: MarketPick) {
+  if (pick.signalConflictScore >= 60) {
+    return {
+      label: "검증 필요 · 강한 신호 충돌",
+      eligible: false,
+    };
+  }
+
+  if (pick.signalConflictScore >= 35) {
+    return {
+      label: "주의 · 신호 충돌",
+      eligible: false,
+    };
+  }
+
   if (pick.marketProbability === null || pick.edge === null) {
     return { label: "시장비교 불가", eligible: false };
   }
@@ -2005,6 +2262,14 @@ function buildActualMarketPicks(
     Number.isFinite(expectedHome) && Number.isFinite(expectedAway);
 
   const result: MarketPick[] = [];
+
+  const signalConflict =
+    buildSignalConflict(
+      game,
+      factors,
+      recentSummary,
+      h2h
+    );
 
   for (let index = 0; index < game.markets.length; index++) {
     const market: any = game.markets[index];
@@ -2075,7 +2340,8 @@ function buildActualMarketPicks(
           recentSummary,
           h2h,
           market,
-          marketFair.overround
+          marketFair.overround,
+          signalConflict
         );
 
         const calibrated =
@@ -2127,6 +2393,10 @@ function buildActualMarketPicks(
               : Number(
                   calibrated.modelWeight.toFixed(2)
                 ),
+          signalConflictScore:
+            signalConflict.score,
+          signalConflictLabel:
+            signalConflict.label,
           confidenceScore: Number(confidence.toFixed(1)),
           confidenceGrade: confidenceGrade(confidence),
           recommendationScore: Number(recScore.toFixed(1)),
@@ -2168,6 +2438,10 @@ function buildActualMarketPicks(
         marketProbability: null,
         edge: null,
         calibrationWeight: null,
+        signalConflictScore:
+          signalConflict.score,
+        signalConflictLabel:
+          signalConflict.label,
         confidenceScore: Number(confidence.toFixed(1)),
         confidenceGrade: confidenceGrade(confidence),
         recommendationScore: Number(
@@ -2805,6 +3079,14 @@ export default function Home() {
     recentSummary,
     h2h
   );
+
+  const currentSignalConflict =
+    buildSignalConflict(
+      betman.matched,
+      analysisFactors,
+      recentSummary,
+      h2h
+    );
 
   const displayPicks: Pick[] = actualMarketPicks.length
     ? actualMarketPicks.map((pick) => [
@@ -3584,6 +3866,24 @@ export default function Home() {
                 <div className="kpiSub" style={{ textAlign: "center" }}>
                   {hasH2H ? `무 ${Number(h2h?.draws ?? 0)}` : "분석 대기"}
                 </div>
+                <div
+                  className="kpiSub"
+                  style={{
+                    textAlign: "center",
+                    marginTop: 3,
+                    fontWeight: 900,
+                    color:
+                      currentSignalConflict.score >= 35
+                        ? "#d33d3d"
+                        : currentSignalConflict.score >= 15
+                          ? "#a46600"
+                          : "#07884a",
+                  }}
+                >
+                  {currentSignalConflict.label}
+                  {" · "}
+                  {currentSignalConflict.score.toFixed(0)}
+                </div>
               </div>
             </div>
 
@@ -3626,7 +3926,7 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V10 계산 추적 · 가중득실점 · 수축 전/후 · 시장 보정 · H2H/Form</summary>
+              <summary>V10.1 계산 추적 · 신호충돌 · 가중득실점 · 수축 전/후 · H2H/Form</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
                   <h3>V10 계산 추적</h3>
@@ -3709,9 +4009,36 @@ export default function Home() {
                     </div>
                   )}
 
+                  <div
+                    className="notice"
+                    style={{
+                      margin: "8px 0 0",
+                      borderColor:
+                        currentSignalConflict.score >= 35
+                          ? "#f1b8b8"
+                          : "#d8e2ef",
+                      background:
+                        currentSignalConflict.score >= 35
+                          ? "#fff3f3"
+                          : "#f8fafc",
+                    }}
+                  >
+                    <b>신호 충돌 진단: {currentSignalConflict.label} · {currentSignalConflict.score.toFixed(0)}/100</b>
+                    <br />
+                    승패 시장 홈 {currentSignalConflict.marketHome === null ? "-" : `${currentSignalConflict.marketHome.toFixed(1)}%`}
+                    {" · "}원정 {currentSignalConflict.marketAway === null ? "-" : `${currentSignalConflict.marketAway.toFixed(1)}%`}
+                    {" · "}모델 예상 점수차 {currentSignalConflict.modelMargin === null ? "-" : currentSignalConflict.modelMargin.toFixed(2)}
+                    {currentSignalConflict.reasons.length > 0 && (
+                      <>
+                        <br />
+                        {currentSignalConflict.reasons.join(" · ")}
+                      </>
+                    )}
+                  </div>
+
                   <div className="notice" style={{ margin: "8px 0 0" }}>
-                    V10 보정확률은 원모델 확률과 Betman 마진 제거 시장확률을 데이터 신뢰도에 따라 혼합합니다.
-                    신뢰도가 높아도 시장을 완전히 무시하지 않아 과도한 엣지를 줄입니다.
+                    V10.1은 원모델과 시장의 확률 차이뿐 아니라, 시장 방향·H2H·최근 Form과 예상득점 방향의 충돌도 별도로 검사합니다.
+                    충돌이 크면 신뢰도를 낮추고 최고 가치픽 선정에서 제외합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
