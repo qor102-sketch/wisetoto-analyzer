@@ -1733,6 +1733,11 @@ type MarketPick = {
   edge: number | null;
   breakEvenProbability: number | null;
   expectedValue: number | null;
+
+  valueGrade: "PASS" | "WATCH" | "VALUE" | "STRONG VALUE";
+  valueGradeScore: number;
+  valueGradeReason: string;
+
   calibrationWeight: number | null;
   signalConflictScore: number;
   signalConflictLabel: string;
@@ -2250,95 +2255,194 @@ function betExpectedValue(
   };
 }
 
-function pickValueStatus(pick: MarketPick) {
-  if (pick.signalConflictScore >= 60) {
+
+type ValueGrade =
+  | "PASS"
+  | "WATCH"
+  | "VALUE"
+  | "STRONG VALUE";
+
+function evaluateValueGrade(input: {
+  odds: number | null;
+  expectedValue: number | null;
+  edge: number | null;
+  confidence: number;
+  signalConflictScore: number;
+}) {
+  const {
+    odds,
+    expectedValue,
+    edge,
+    confidence,
+    signalConflictScore,
+  } = input;
+
+  const reasons: string[] = [];
+
+  if (
+    odds === null ||
+    expectedValue === null ||
+    edge === null
+  ) {
     return {
-      label: "검증 필요 · 강한 신호 충돌",
-      eligible: false,
+      grade: "PASS" as ValueGrade,
+      score: 0,
+      reason: "필수 시장/배당 데이터 부족",
     };
   }
 
-  if (pick.signalConflictScore >= 35) {
+  const oddsQuality =
+    odds >= 1.40 && odds <= 3.50
+      ? 100
+      : odds >= 1.25 && odds <= 5.00
+        ? 72
+        : 45;
+
+  if (odds < 1.25) reasons.push("초저배당");
+  if (odds > 5.00) reasons.push("고배당 변동성");
+
+  const evScore =
+    clamp(
+      50 + expectedValue * 3.2,
+      0,
+      100
+    );
+
+  const edgeScore =
+    clamp(
+      50 + edge * 3.0,
+      0,
+      100
+    );
+
+  const conflictQuality =
+    clamp(
+      100 - signalConflictScore * 1.45,
+      0,
+      100
+    );
+
+  const score =
+    clamp(
+      evScore * 0.36 +
+      edgeScore * 0.22 +
+      confidence * 0.22 +
+      conflictQuality * 0.12 +
+      oddsQuality * 0.08,
+      0,
+      100
+    );
+
+  if (expectedValue <= 0) {
+    reasons.push("EV 음수");
     return {
-      label: "주의 · 신호 충돌",
-      eligible: false,
+      grade: "PASS" as ValueGrade,
+      score: Number(score.toFixed(1)),
+      reason: reasons.join(" · "),
+    };
+  }
+
+  if (signalConflictScore >= 35) {
+    reasons.push("신호 충돌");
+    return {
+      grade: "PASS" as ValueGrade,
+      score: Number(score.toFixed(1)),
+      reason: reasons.join(" · "),
     };
   }
 
   if (
-    pick.marketProbability === null ||
-    pick.edge === null
+    expectedValue < 3 ||
+    edge < 3 ||
+    confidence < 58
   ) {
+    if (expectedValue < 3) reasons.push("EV 안전마진 부족");
+    if (edge < 3) reasons.push("엣지 미미");
+    if (confidence < 58) reasons.push("신뢰도 부족");
+
     return {
-      label: "시장비교 불가",
-      eligible: false,
+      grade: "WATCH" as ValueGrade,
+      score: Number(score.toFixed(1)),
+      reason: reasons.join(" · "),
     };
   }
 
-  // V10.3 핵심:
-  // 공정시장확률 대비 edge와 실제 Betman 배당 EV를 분리합니다.
-  // edge가 양수여도 실제 배당 손익분기 확률을 넘지 못하면 가치픽이 아닙니다.
-  if (
-    pick.odds === null ||
-    pick.breakEvenProbability === null ||
-    pick.expectedValue === null
-  ) {
+  const strong =
+    expectedValue >= 8 &&
+    edge >= 8 &&
+    confidence >= 68 &&
+    signalConflictScore < 15 &&
+    odds >= 1.35 &&
+    odds <= 4.00 &&
+    score >= 72;
+
+  if (strong) {
     return {
-      label: "제외 · 실제배당 EV 계산불가",
-      eligible: false,
+      grade: "STRONG VALUE" as ValueGrade,
+      score: Number(score.toFixed(1)),
+      reason: "EV·엣지·신뢰도·신호 일치 우수",
     };
   }
 
-  if (pick.expectedValue <= 0) {
-    return {
-      label: "제외 · 음수 EV",
-      eligible: false,
-    };
-  }
+  const value =
+    expectedValue >= 3 &&
+    edge >= 3 &&
+    confidence >= 58 &&
+    signalConflictScore < 35 &&
+    score >= 58;
 
-  if (pick.edge < 0) {
-    return {
-      label: "제외 · 음수 엣지",
-      eligible: false,
-    };
-  }
+  if (value) {
+    if (oddsQuality < 70) {
+      return {
+        grade: "WATCH" as ValueGrade,
+        score: Number(score.toFixed(1)),
+        reason: reasons.length
+          ? reasons.join(" · ")
+          : "배당구간 변동성 주의",
+      };
+    }
 
-  if (pick.confidenceScore < 58) {
     return {
-      label: "관망 · 신뢰도 부족",
-      eligible: false,
-    };
-  }
-
-  if (pick.edge < 3) {
-    return {
-      label: "관망 · 엣지 미미",
-      eligible: false,
-    };
-  }
-
-  // 작은 양수 EV는 오차에 쉽게 뒤집힐 수 있으므로 최고 가치픽에서 제외.
-  if (pick.expectedValue < 3) {
-    return {
-      label: "관망 · EV 안전마진 부족",
-      eligible: false,
-    };
-  }
-
-  if (
-    pick.expectedValue >= 5 &&
-    pick.edge >= 8 &&
-    pick.confidenceScore >= 68
-  ) {
-    return {
-      label: "가치 우수",
-      eligible: true,
+      grade: "VALUE" as ValueGrade,
+      score: Number(score.toFixed(1)),
+      reason: "양수 EV + 시장 대비 우위",
     };
   }
 
   return {
-    label: "가치 후보",
-    eligible: true,
+    grade: "WATCH" as ValueGrade,
+    score: Number(score.toFixed(1)),
+    reason: reasons.length
+      ? reasons.join(" · ")
+      : "조건 일부 미충족",
+  };
+}
+
+function pickValueStatus(pick: MarketPick) {
+  if (pick.valueGrade === "STRONG VALUE") {
+    return {
+      label: "STRONG VALUE",
+      eligible: true,
+    };
+  }
+
+  if (pick.valueGrade === "VALUE") {
+    return {
+      label: "VALUE",
+      eligible: true,
+    };
+  }
+
+  if (pick.valueGrade === "WATCH") {
+    return {
+      label: `WATCH · ${pick.valueGradeReason}`,
+      eligible: false,
+    };
+  }
+
+  return {
+    label: `PASS · ${pick.valueGradeReason}`,
+    eligible: false,
   };
 }
 
@@ -2538,6 +2642,17 @@ function buildActualMarketPicks(
           safeOdds
         );
 
+        const valueGrade =
+          evaluateValueGrade({
+            odds: safeOdds,
+            expectedValue:
+              ev.expectedValue,
+            edge,
+            confidence,
+            signalConflictScore:
+              signalConflict.score,
+          });
+
         const recScore = recommendationScore(
           calibratedProbability,
           edge,
@@ -2568,6 +2683,14 @@ function buildActualMarketPicks(
             ev.breakEvenProbability,
           expectedValue:
             ev.expectedValue,
+
+          valueGrade:
+            valueGrade.grade,
+          valueGradeScore:
+            valueGrade.score,
+          valueGradeReason:
+            valueGrade.reason,
+
           calibrationWeight:
             calibrated.modelWeight === null
               ? null
@@ -2621,6 +2744,12 @@ function buildActualMarketPicks(
         edge: null,
         breakEvenProbability: null,
         expectedValue: null,
+
+        valueGrade: "PASS",
+        valueGradeScore: 0,
+        valueGradeReason:
+          "실제 선택 배당 없음",
+
         calibrationWeight: null,
         signalConflictScore:
           signalConflict.score,
@@ -2693,6 +2822,17 @@ function buildActualMarketPicks(
           fallbackOdds
         );
 
+      const fallbackGrade =
+        evaluateValueGrade({
+          odds: fallbackOdds,
+          expectedValue:
+            fallbackEv.expectedValue,
+          edge,
+          confidence,
+          signalConflictScore:
+            signalConflict.score,
+        });
+
       result.push({
         key,
         market: label,
@@ -2708,6 +2848,14 @@ function buildActualMarketPicks(
           fallbackEv.breakEvenProbability,
         expectedValue:
           fallbackEv.expectedValue,
+
+        valueGrade:
+          fallbackGrade.grade,
+        valueGradeScore:
+          fallbackGrade.score,
+        valueGradeReason:
+          fallbackGrade.reason,
+
         calibrationWeight:
           calibrated.modelWeight === null
             ? null
@@ -3315,9 +3463,26 @@ export default function Home() {
     (pick) => pickValueStatus(pick).eligible
   );
 
+  const valueGradeRank = (
+    grade: MarketPick["valueGrade"]
+  ) =>
+    grade === "STRONG VALUE"
+      ? 4
+      : grade === "VALUE"
+        ? 3
+        : grade === "WATCH"
+          ? 2
+          : 1;
+
   const bestActualPick = eligibleMarketPicks.length
     ? [...eligibleMarketPicks].sort(
-        (a, b) => b.recommendationScore - a.recommendationScore
+        (a, b) =>
+          valueGradeRank(b.valueGrade) -
+            valueGradeRank(a.valueGrade) ||
+          b.valueGradeScore -
+            a.valueGradeScore ||
+          b.recommendationScore -
+            a.recommendationScore
       )[0]
     : null;
 
@@ -3413,7 +3578,7 @@ export default function Home() {
         .quickStat{background:#f8fafc;border:1px solid var(--ui-line);border-radius:9px;padding:6px 7px;min-width:0}.quickStat span{display:block;font-size:9px;color:var(--ui-muted);font-weight:800}.quickStat b{display:block;font-size:11px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         details.uiDetail{margin-top:7px;border:1px solid var(--ui-line);border-radius:10px;overflow:hidden;background:#fff}details.uiDetail>summary{cursor:pointer;padding:7px 9px;background:#f7f9fc;font-size:11px;font-weight:900;list-style:none}details.uiDetail>summary:after{content:"＋";float:right;color:var(--ui-blue)}details.uiDetail[open]>summary:after{content:"－"}.uiDetailBody{padding:8px}
         .notice{border-radius:10px!important;font-size:10px!important;line-height:1.4!important;padding:7px 9px!important}
-        @media(max-width:1250px){.quickStats{grid-template-columns:repeat(3,1fr)}.compactMarketHead,.compactMarketRow{grid-template-columns:minmax(65px,.8fr) minmax(68px,.8fr) 52px 52px 55px 44px 52px}}
+        @media(max-width:1250px){.quickStats{grid-template-columns:repeat(3,1fr)}.compactMarketHead,.compactMarketRow{grid-template-columns:minmax(62px,.8fr) minmax(65px,.8fr) 50px 50px 52px 52px 82px}}
         @media(max-width:980px){.layout{grid-template-columns:1fr!important}.quickStats{grid-template-columns:repeat(3,1fr)}}
       
         /* V9.2 polished dashboard */
@@ -3466,7 +3631,7 @@ export default function Home() {
         .dot.good{background:#0a9b53}.dot.neutral{background:#aeb8c6}.dot.bad{background:#df4242}
         .compactMarket{border-radius:11px!important}
         .compactMarketHead,.compactMarketRow{
-          grid-template-columns:minmax(74px,.9fr) minmax(76px,.9fr) 56px 56px 59px 49px 58px!important;
+          grid-template-columns:minmax(70px,.82fr) minmax(70px,.82fr) 54px 54px 55px 55px 88px!important;
           padding:6px 8px!important;min-height:30px
         }
         .compactMarketHead{font-size:8px!important}
@@ -4002,7 +4167,12 @@ export default function Home() {
               </div>
 
               <div className="bestBox">
-                <div className="label">현재 최고 가치픽</div>
+                <div className="label">
+                  현재 최고 가치픽
+                  {bestActualPick
+                    ? ` · ${bestActualPick.valueGrade}`
+                    : ""}
+                </div>
                 <div className="pickName">
                   {analysisFactors.hasRealData
                     ? (bestActualPick ? `${bestActualPick.market} ${bestActualPick.pick}` : actualMarketPicks.length ? "가치픽 없음" : bestPick?.[1])
@@ -4111,20 +4281,45 @@ export default function Home() {
               {actualMarketPicks.length ? (
                 <div className="compactMarket">
                   <div className="compactMarketHead">
-                    <div>유형</div><div>추천</div><div className="cmNum">보정</div><div className="cmNum">시장</div><div className="cmNum">엣지</div><div className="cmNum">EV</div><div className="cmNum">신뢰</div><div className="cmNum">점수</div>
+                    <div>유형</div><div>추천</div><div className="cmNum">보정</div><div className="cmNum">시장</div><div className="cmNum">엣지</div><div className="cmNum">EV</div><div className="cmNum">최종 등급</div>
                   </div>
                   {actualMarketPicks.map((pick) => {
                     const isBest = bestActualPick?.key === pick.key;
                     return (
-                      <div className={`compactMarketRow ${isBest ? "bestRow" : ""}`} key={pick.key} title={`${pick.detail} · 핸디는 항상 홈팀(왼쪽) 기준 · 원모델 ${pick.rawProbability.toFixed(1)}% · 보정 ${pick.probability.toFixed(1)}% · ${pickValueStatus(pick).label}`}>
+                      <div className={`compactMarketRow ${isBest ? "bestRow" : ""}`} key={pick.key} title={`${pick.detail} · 홈팀 기준 핸디 · 원모델 ${pick.rawProbability.toFixed(1)}% · 보정 ${pick.probability.toFixed(1)}% · EV ${pick.expectedValue === null ? "-" : pick.expectedValue.toFixed(1) + "%"} · ${pick.valueGrade} · ${pick.valueGradeReason}`}>
                         <div className="cmName">{pick.market}</div>
                         <div className="cmPick">{pick.pick}</div>
                         <div className="cmNum"><b>{pick.probability.toFixed(1)}%</b></div>
                         <div className="cmNum">{pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`}</div>
                         <div className={`cmNum ${pick.edge !== null && pick.edge >= 0 ? "cmPos" : "cmNeg"}`}>{pick.edge === null ? "-" : `${pick.edge >= 0 ? "+" : ""}${pick.edge.toFixed(1)}`}</div>
                         <div className={`cmNum ${pick.expectedValue !== null && pick.expectedValue >= 0 ? "cmPos" : "cmNeg"}`}>{pick.expectedValue === null ? "-" : `${pick.expectedValue >= 0 ? "+" : ""}${pick.expectedValue.toFixed(1)}%`}</div>
-                        <div className="cmNum"><span className="cmGrade">{pick.confidenceGrade}</span></div>
-                        <div className="cmNum"><b>{pick.recommendationScore.toFixed(1)}</b></div>
+                        <div
+                          className="cmNum"
+                          title={`${pick.valueGradeReason} · 신뢰 ${pick.confidenceGrade}(${pick.confidenceScore.toFixed(0)}) · 가치점수 ${pick.valueGradeScore.toFixed(1)}`}
+                        >
+                          <span
+                            className="cmGrade"
+                            style={{
+                              background:
+                                pick.valueGrade === "STRONG VALUE"
+                                  ? "#d9f7e6"
+                                  : pick.valueGrade === "VALUE"
+                                    ? "#e8f6ee"
+                                    : pick.valueGrade === "WATCH"
+                                      ? "#fff4d8"
+                                      : "#f3f4f6",
+                              color:
+                                pick.valueGrade === "STRONG VALUE" ||
+                                pick.valueGrade === "VALUE"
+                                  ? "#087a39"
+                                  : pick.valueGrade === "WATCH"
+                                    ? "#9a6200"
+                                    : "#667085",
+                            }}
+                          >
+                            {pick.valueGrade}
+                          </span>
+                        </div>
                       </div>
                     );
                   })}
@@ -4138,10 +4333,10 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V10.3 계산 추적 · 실제배당 EV · 홈팀 핸디 정산 · 신호충돌</summary>
+              <summary>V10.4 계산 추적 · 최종 가치등급 · EV · 홈팀 핸디 · 신호충돌</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
-                  <h3>V10.3 계산 추적 · EV + 홈팀 기준 정산</h3>
+                  <h3>V10.4 계산 추적 · 최종 가치등급</h3>
 
                   <div
                     className="notice"
@@ -4196,7 +4391,7 @@ export default function Home() {
                       <div style={{ minWidth: 620 }}>
                         <div style={{
                           display: "grid",
-                          gridTemplateColumns: "90px 62px 62px 62px 62px 62px 62px",
+                          gridTemplateColumns: "82px 56px 56px 56px 56px 56px 56px 92px",
                           gap: 6,
                           fontSize: 9,
                           fontWeight: 900,
@@ -4205,7 +4400,7 @@ export default function Home() {
                           background: "#f1f5f9",
                           borderRadius: 8,
                         }}>
-                          <div>마켓</div><div>원모델</div><div>시장</div><div>보정</div><div>손익분기</div><div>엣지</div><div>EV</div>
+                          <div>마켓</div><div>원모델</div><div>시장</div><div>보정</div><div>손익분기</div><div>엣지</div><div>EV</div><div>등급</div>
                         </div>
 
                         {actualMarketPicks.map((pick) => (
@@ -4213,7 +4408,7 @@ export default function Home() {
                             key={`trace-${pick.key}`}
                             style={{
                               display: "grid",
-                              gridTemplateColumns: "90px 62px 62px 62px 62px 62px 62px",
+                              gridTemplateColumns: "82px 56px 56px 56px 56px 56px 56px 92px",
                               gap: 6,
                               fontSize: 9,
                               padding: "5px 6px",
@@ -4236,6 +4431,12 @@ export default function Home() {
                               fontWeight: 800
                             }}>
                               {pick.expectedValue === null ? "-" : `${pick.expectedValue >= 0 ? "+" : ""}${pick.expectedValue.toFixed(1)}%`}
+                            </div>
+                            <div>
+                              <b>{pick.valueGrade}</b>
+                              <div style={{ color: "#64748b", fontSize: 8 }}>
+                                {pick.valueGradeScore.toFixed(1)}
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -4271,8 +4472,9 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "8px 0 0" }}>
-                    V10.3은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, 공정시장확률 대비 엣지와 실제 Betman 배당 EV를 별도로 계산합니다.
-                    EV = 보정확률 × 실제배당 - 1이며, EV가 0 이하이면 가치픽에서 제외하고 +3% 미만은 안전마진 부족으로 관망 처리합니다.
+                    V10.4는 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·배당구간을 함께 평가합니다.
+                    PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
+                    STRONG VALUE는 EV 8% 이상, 엣지 8%p 이상, 신뢰도 68 이상, 신호충돌 15 미만 및 정상 배당구간을 동시에 만족해야 합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
