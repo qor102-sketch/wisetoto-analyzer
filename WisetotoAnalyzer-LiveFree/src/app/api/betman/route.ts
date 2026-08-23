@@ -621,6 +621,77 @@ function isScheduleLikeRow(
   );
 }
 
+
+function expandCompSchedules(
+  raw: any
+) {
+  const comp =
+    raw?.compSchedules;
+
+  const keys =
+    Array.isArray(
+      comp?.keys
+    )
+      ? comp.keys
+      : [];
+
+  const datas =
+    Array.isArray(
+      comp?.datas
+    )
+      ? comp.datas
+      : [];
+
+  if (
+    !keys.length ||
+    !datas.length
+  ) {
+    return [];
+  }
+
+  const rows: AnyObj[] =
+    [];
+
+  for (
+    const values of datas
+  ) {
+    if (
+      !Array.isArray(
+        values
+      )
+    ) {
+      continue;
+    }
+
+    const row: AnyObj =
+      {};
+
+    for (
+      let i = 0;
+      i < keys.length;
+      i++
+    ) {
+      const key =
+        String(
+          keys[i] ??
+          ""
+        );
+
+      if (!key) {
+        continue;
+      }
+
+      row[key] =
+        values[i] ??
+        null;
+    }
+
+    rows.push(row);
+  }
+
+  return rows;
+}
+
 function collectAllScheduleRows(
   root: any
 ) {
@@ -865,13 +936,82 @@ export async function GET(
      * 이제는 Betman 원본 JSON 전체를 재귀 탐색해서
      * matchSeq + 홈/원정 + 배당/마켓 정보가 있는 모든 행을 수집합니다.
      */
+    /*
+     * gameInfoInq.do 의 실제 전체 발매표는
+     * raw.compSchedules.keys + raw.compSchedules.datas
+     * 형태로 압축되어 내려옵니다.
+     *
+     * keys 배열을 컬럼명으로 사용해 datas의 각 배열을
+     * 다시 객체(row)로 복원한 뒤, 기존 schedulesList 등에서
+     * 발견한 객체형 행과 합칩니다.
+     */
+    const expandedCompSchedules =
+      expandCompSchedules(
+        raw
+      );
+
     const collected =
       collectAllScheduleRows(
         raw
       );
 
+    const mergedRows =
+      [
+        ...expandedCompSchedules,
+        ...collected.rows,
+      ];
+
+    /*
+     * 같은 matchSeq가 compSchedules와 다른 배열에 동시에
+     * 존재할 수 있으므로 경기번호 기준으로 중복 제거합니다.
+     * matchSeq가 없는 경우에는 기존 필드 조합을 사용합니다.
+     */
+    const deduped =
+      new Map<
+        string,
+        AnyObj
+      >();
+
+    for (
+      const row of mergedRows
+    ) {
+      const matchSeq =
+        rowMatchSeq(row);
+
+      const key =
+        matchSeq !== null
+          ? `seq:${matchSeq}`
+          : [
+              rowHome(row),
+              rowAway(row),
+              row?.gameDate ??
+                "",
+              row?.betId ??
+                "",
+              row?.betTypId ??
+                "",
+              row?.handi ??
+                "",
+            ].join("|");
+
+      /*
+       * compSchedules 복원 행을 우선 보존합니다.
+       * 앞에서 먼저 들어오기 때문에 동일 key가 있으면 덮지 않습니다.
+       */
+      if (
+        !deduped.has(key)
+      ) {
+        deduped.set(
+          key,
+          row
+        );
+      }
+    }
+
     const schedules =
-      collected.rows;
+      Array.from(
+        deduped.values()
+      );
 
     const games =
       groupSchedules(
@@ -960,6 +1100,24 @@ export async function GET(
       rawScheduleCount:
         schedules.length,
 
+      compScheduleKeyCount:
+        Array.isArray(
+          raw?.compSchedules
+            ?.keys
+        )
+          ? raw.compSchedules
+              .keys.length
+          : 0,
+
+      compScheduleDataCount:
+        Array.isArray(
+          raw?.compSchedules
+            ?.datas
+        )
+          ? raw.compSchedules
+              .datas.length
+          : 0,
+
       sourceArrayCount:
         collected.arrays.length,
 
@@ -1044,7 +1202,7 @@ export async function GET(
 
       debug: {
         message:
-          "Betman 원본 JSON 전체에서 경기/배당 행을 재귀 수집한 뒤 경기별로 묶고 승패/핸디캡/UO 마켓으로 분류했습니다.",
+          "Betman gameInfoInq.do의 compSchedules 압축 데이터를 복원하고 기타 경기행을 병합한 뒤 경기별/게임유형별로 분류했습니다.",
 
         usage: [
           "/api/betman",
@@ -1059,7 +1217,8 @@ export async function GET(
           "언더오버 기준값은 수집된 경기행의 winHandi/loseHandi에서 읽습니다.",
           "같은 실제 경기에 여러 핸디캡/UO 기준값이 존재할 수 있으므로 배열로 보존합니다.",
           "배당은 Betman 원본에서 발견한 모든 경기행의 winAllot/drawAllot/loseAllot 값을 그대로 사용합니다.",
-          "schedulesList 하나만 보지 않고 원본 JSON의 모든 중첩 배열을 검사합니다.",
+          "전체 발매표의 핵심 데이터는 compSchedules.keys + compSchedules.datas를 복원해서 사용합니다.",
+          "schedulesList 등 객체형 경기행이 있으면 추가로 병합합니다.",
           "응답의 sourceArrays를 보면 실제로 어느 배열에서 몇 개의 경기행을 찾았는지 확인할 수 있습니다.",
         ],
       },
