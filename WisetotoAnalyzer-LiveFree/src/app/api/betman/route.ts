@@ -977,7 +977,7 @@ export async function GET(
           new Set(
             games
               .map(
-                (g) =>
+                (g: AnyObj) =>
                   g?.sportName ??
                   g?.sport ??
                   null
@@ -991,7 +991,7 @@ export async function GET(
           new Set(
             games
               .map(
-                (g) =>
+                (g: AnyObj) =>
                   g?.league ??
                   null
               )
@@ -1003,7 +1003,7 @@ export async function GET(
         games.reduce(
           (
             sum,
-            game
+            game: AnyObj
           ) =>
             sum +
             arr(
