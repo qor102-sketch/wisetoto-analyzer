@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V12_5_2_NAVER_CURRENT_SEASON_STATS_20260825
+// DEPLOY_MARKER_V12_8_NAVER_SEASON_BATTER_STATS_20260825
 // WISETOTO_MATCH_SELECTED_V1_20260823
 const BASE = "https://api.sportsapi.app/v2";
 
@@ -1604,6 +1604,7 @@ type NaverPregameResult = {
   matchedGame: any;
   candidates: NaverPregameCandidate[];
   previewAudit: NaverPreviewAudit | null;
+  batterStatsDiagnostic: NaverBatterStatsDiagnostic | null;
 };
 
 function normalizeNaverTeamName(value: unknown) {
@@ -2244,6 +2245,302 @@ function parseNaverPreviewLineups(payload: any): NaverParsedLineups | null {
   };
 }
 
+
+type NaverBatterStatsDiagnostic = {
+  season: string;
+  path: string;
+  status: number | null;
+  fetched: number;
+  lineupBatters: number;
+  playerIdResolved: number;
+  matched: number;
+  coverage: number;
+  matchById: number;
+  matchByNameTeam: number;
+  unmatched: Array<{
+    side: "home" | "away";
+    name: string;
+    playerId: string | null;
+    teamCode: string | null;
+  }>;
+  error: string | null;
+};
+
+function naverPlayerId(value: any): string | null {
+  const raw =
+    value?.pcode ??
+    value?.playerCode ??
+    value?.playerId ??
+    value?.playerID ??
+    value?.id ??
+    value?.player?.pcode ??
+    value?.player?.playerCode ??
+    value?.player?.playerId ??
+    value?.player?.id ??
+    null;
+
+  if (raw === null || raw === undefined) return null;
+  const text = String(raw).trim();
+  return text || null;
+}
+
+function naverPlayerName(value: any): string {
+  return String(
+    value?.name ??
+    value?.playerName ??
+    value?.playerNm ??
+    value?.displayName ??
+    value?.player?.name ??
+    ""
+  ).trim();
+}
+
+function naverTeamCode(value: any): string | null {
+  const raw =
+    value?.teamCode ??
+    value?.team?.code ??
+    value?.teamId ??
+    value?.team?.id ??
+    null;
+  if (raw === null || raw === undefined) return null;
+  const text = String(raw).trim();
+  return text || null;
+}
+
+function unwrapNaverResult(value: any) {
+  if (!value || typeof value !== "object") return value;
+  if (value?.result && typeof value.result === "object") return value.result;
+  if (value?.data && typeof value.data === "object") return value.data;
+  return value;
+}
+
+function naverPreviewData(value: any) {
+  const root = unwrapNaverPreviewPayload(value);
+  return root?.previewData ?? root;
+}
+
+function naverDeclaredBatters(
+  previewPayload: any,
+  side: "home" | "away"
+) {
+  const data = naverPreviewData(previewPayload);
+  const branch =
+    side === "home"
+      ? data?.homeTeamLineUp ?? data?.homeTeamLineup
+      : data?.awayTeamLineUp ?? data?.awayTeamLineup;
+
+  const full =
+    branch?.fullLineUp ??
+    branch?.fullLineup ??
+    branch?.startingLineUp ??
+    branch?.startingLineup ??
+    [];
+
+  if (!Array.isArray(full)) return [];
+
+  // Naver KBO preview fullLineUp[0] is the starting pitcher.
+  return full
+    .slice(1, 10)
+    .filter((player: any) => Boolean(naverPlayerName(player)));
+}
+
+function extractSeasonPlayerStats(payload: any): any[] {
+  const root = unwrapNaverResult(payload);
+  const candidates = [
+    root?.seasonPlayerStats,
+    root?.players,
+    root?.playerStats,
+    payload?.result?.seasonPlayerStats,
+    payload?.seasonPlayerStats,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate;
+  }
+
+  return [];
+}
+
+function normalizedPlayerName(value: unknown) {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKC")
+    .replace(/\s+/g, "")
+    .replace(/[^a-z0-9가-힣]/g, "");
+}
+
+function enrichPreviewWithSeasonBattingStats(
+  previewPayload: any,
+  seasonRows: any[],
+  homeTeamCode: string | null,
+  awayTeamCode: string | null
+) {
+  const root = unwrapNaverPreviewPayload(previewPayload);
+  const data = root?.previewData ?? root;
+
+  const homeBatters = naverDeclaredBatters(previewPayload, "home");
+  const awayBatters = naverDeclaredBatters(previewPayload, "away");
+
+  const idMap = new Map<string, any>();
+  const nameTeamMap = new Map<string, any>();
+  const nameOnlyMap = new Map<string, any[]>();
+
+  for (const row of seasonRows) {
+    const id = naverPlayerId(row);
+    const name = normalizedPlayerName(naverPlayerName(row));
+    const team = String(naverTeamCode(row) ?? "").toUpperCase();
+
+    if (id) idMap.set(id, row);
+    if (name && team) nameTeamMap.set(`${name}|${team}`, row);
+
+    if (name) {
+      const list = nameOnlyMap.get(name) ?? [];
+      list.push(row);
+      nameOnlyMap.set(name, list);
+    }
+  }
+
+  let playerIdResolved = 0;
+  let matched = 0;
+  let matchById = 0;
+  let matchByNameTeam = 0;
+  const unmatched: NaverBatterStatsDiagnostic["unmatched"] = [];
+
+  const attach = (
+    player: any,
+    side: "home" | "away",
+    expectedTeamCode: string | null
+  ) => {
+    const id = naverPlayerId(player);
+    const name = naverPlayerName(player);
+    const normalizedName = normalizedPlayerName(name);
+    const playerTeam =
+      String(
+        naverTeamCode(player) ??
+        expectedTeamCode ??
+        ""
+      ).toUpperCase();
+
+    if (id) playerIdResolved += 1;
+
+    let row: any = null;
+    let method: "ID" | "NAME_TEAM" | null = null;
+
+    if (id && idMap.has(id)) {
+      row = idMap.get(id);
+      method = "ID";
+    }
+
+    if (!row && normalizedName && playerTeam) {
+      row = nameTeamMap.get(`${normalizedName}|${playerTeam}`) ?? null;
+      if (row) method = "NAME_TEAM";
+    }
+
+    // If team code is absent in one source, accept name-only only when unique.
+    if (!row && normalizedName) {
+      const sameName = nameOnlyMap.get(normalizedName) ?? [];
+      if (sameName.length === 1) {
+        row = sameName[0];
+        method = "NAME_TEAM";
+      }
+    }
+
+    if (row) {
+      matched += 1;
+      if (method === "ID") matchById += 1;
+      else matchByNameTeam += 1;
+
+      // Preserve original player object and attach only pregame season cumulative row.
+      player.currentSeasonStats = {
+        ...(player?.currentSeasonStats && typeof player.currentSeasonStats === "object"
+          ? player.currentSeasonStats
+          : {}),
+        ...row,
+      };
+      player.seasonStatsSource = "NAVER_SEASON_PLAYERS";
+      player.seasonStatsMatch = method;
+      player.resolvedPlayerId =
+        naverPlayerId(row) ??
+        id ??
+        null;
+    } else {
+      unmatched.push({
+        side,
+        name,
+        playerId: id,
+        teamCode: playerTeam || null,
+      });
+    }
+  };
+
+  const homeBranch =
+    data?.homeTeamLineUp ?? data?.homeTeamLineup;
+  const awayBranch =
+    data?.awayTeamLineUp ?? data?.awayTeamLineup;
+
+  const homeFull =
+    homeBranch?.fullLineUp ??
+    homeBranch?.fullLineup ??
+    homeBranch?.startingLineUp ??
+    homeBranch?.startingLineup;
+
+  const awayFull =
+    awayBranch?.fullLineUp ??
+    awayBranch?.fullLineup ??
+    awayBranch?.startingLineUp ??
+    awayBranch?.startingLineup;
+
+  if (Array.isArray(homeFull)) {
+    homeFull.slice(1, 10).forEach((player: any) =>
+      attach(player, "home", homeTeamCode)
+    );
+  }
+
+  if (Array.isArray(awayFull)) {
+    awayFull.slice(1, 10).forEach((player: any) =>
+      attach(player, "away", awayTeamCode)
+    );
+  }
+
+  return {
+    root,
+    lineupBatters: homeBatters.length + awayBatters.length,
+    playerIdResolved,
+    matched,
+    matchById,
+    matchByNameTeam,
+    unmatched,
+  };
+}
+
+async function getNaverSeasonBatters(
+  season: string
+) {
+  const params =
+    new URLSearchParams({
+      playerType: "HITTER",
+      field: "HRA",
+      direction: "DESC",
+      pageSize: "500",
+      page: "1",
+    });
+
+  const path =
+    `/statistics/categories/kbo/seasons/${encodeURIComponent(season)}/players?${params.toString()}`;
+
+  const result =
+    await naverJson(path);
+
+  return {
+    ...result,
+    path,
+    rows:
+      result.ok
+        ? extractSeasonPlayerStats(result.data)
+        : [],
+  };
+}
+
 async function getNaverPregameLineups(args: {
   home: string;
   away: string;
@@ -2271,6 +2568,7 @@ async function getNaverPregameLineups(args: {
       matchedGame: null,
       candidates: [],
       previewAudit: null,
+      batterStatsDiagnostic: null,
     };
   }
 
@@ -2348,6 +2646,7 @@ async function getNaverPregameLineups(args: {
       candidates:
         candidateDiagnostics,
       previewAudit: null,
+      batterStatsDiagnostic: null,
     };
   }
 
@@ -2373,6 +2672,7 @@ async function getNaverPregameLineups(args: {
       candidates:
         candidateDiagnostics,
       previewAudit: null,
+      batterStatsDiagnostic: null,
     };
   }
 
@@ -2381,17 +2681,80 @@ async function getNaverPregameLineups(args: {
       preview.data
     );
 
+  const season =
+    String(
+      new Date(args.gameDateMs + 9 * 60 * 60 * 1000)
+        .getUTCFullYear()
+    );
+
+  const batterStats =
+    await getNaverSeasonBatters(
+      season
+    );
+
+  const enriched =
+    batterStats.ok
+      ? enrichPreviewWithSeasonBattingStats(
+          preview.data,
+          batterStats.rows,
+          matched.homeCode ?? null,
+          matched.awayCode ?? null
+        )
+      : {
+          root:
+            unwrapNaverPreviewPayload(preview.data),
+          lineupBatters:
+            naverDeclaredBatters(preview.data, "home").length +
+            naverDeclaredBatters(preview.data, "away").length,
+          playerIdResolved: 0,
+          matched: 0,
+          matchById: 0,
+          matchByNameTeam: 0,
+          unmatched: [
+            ...naverDeclaredBatters(preview.data, "home").map((player: any) => ({
+              side: "home" as const,
+              name: naverPlayerName(player),
+              playerId: naverPlayerId(player),
+              teamCode: matched.homeCode ?? null,
+            })),
+            ...naverDeclaredBatters(preview.data, "away").map((player: any) => ({
+              side: "away" as const,
+              name: naverPlayerName(player),
+              playerId: naverPlayerId(player),
+              teamCode: matched.awayCode ?? null,
+            })),
+          ],
+        };
+
   const parsedLineups =
     parseNaverPreviewLineups(
       preview.data
     );
+
+  /*
+   * Keep the explicit previewData branch so the client can use the real
+   * fullLineUp while also retaining normalized parser output.
+   */
+  const enrichedLineups = {
+    ...(parsedLineups ?? {}),
+    previewData:
+      enriched.root?.previewData ??
+      enriched.root,
+    provider: "NAVER_PREVIEW",
+    parsed: true,
+  };
+
+  const coverage =
+    enriched.lineupBatters > 0
+      ? enriched.matched / enriched.lineupBatters
+      : 0;
 
   return {
     ok: true,
     gameId:
       matched.gameId,
     lineups:
-      parsedLineups ?? unwrapNaverPreviewPayload(preview.data),
+      enrichedLineups,
     error: null,
     scheduleStatus:
       schedule.status,
@@ -2402,6 +2765,33 @@ async function getNaverPregameLineups(args: {
     candidates:
       candidateDiagnostics,
     previewAudit,
+    batterStatsDiagnostic: {
+      season,
+      path:
+        batterStats.path,
+      status:
+        batterStats.status,
+      fetched:
+        batterStats.rows.length,
+      lineupBatters:
+        enriched.lineupBatters,
+      playerIdResolved:
+        enriched.playerIdResolved,
+      matched:
+        enriched.matched,
+      coverage:
+        Number(
+          coverage.toFixed(4)
+        ),
+      matchById:
+        enriched.matchById,
+      matchByNameTeam:
+        enriched.matchByNameTeam,
+      unmatched:
+        enriched.unmatched.slice(0, 18),
+      error:
+        batterStats.error,
+    },
   };
 }
 
@@ -2476,6 +2866,7 @@ async function runSelectedMode(
           matchedGame: null,
           candidates: [],
           previewAudit: null,
+          batterStatsDiagnostic: null,
         };
 
   // V12.3: HTTP/endpoint success is not enough.
@@ -2594,6 +2985,8 @@ async function runSelectedMode(
         naverPregame.candidates,
       previewAudit:
         naverPregame.previewAudit,
+      batterStatsDiagnostic:
+        naverPregame.batterStatsDiagnostic,
     },
     statistics:null,
     h2h:null,
@@ -2643,6 +3036,8 @@ async function runSelectedMode(
           naverPregame.candidates,
         previewAudit:
           naverPregame.previewAudit,
+        batterStatsDiagnostic:
+          naverPregame.batterStatsDiagnostic,
         source:
           "https://api-gw.sports.naver.com",
         schedulePath:
