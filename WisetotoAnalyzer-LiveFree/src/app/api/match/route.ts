@@ -1584,6 +1584,16 @@ async function findSportsFixtureForBetman(
 const NAVER_SPORTS_BASE =
   "https://api-gw.sports.naver.com";
 
+type NaverPregameCandidate = {
+  gameId: string;
+  homeName: string | null;
+  awayName: string | null;
+  homeCode: string | null;
+  awayCode: string | null;
+  normalizedHome: string;
+  normalizedAway: string;
+};
+
 type NaverPregameResult = {
   ok: boolean;
   gameId: string | null;
@@ -1592,12 +1602,45 @@ type NaverPregameResult = {
   scheduleStatus: number | null;
   previewStatus: number | null;
   matchedGame: any;
+  candidates: NaverPregameCandidate[];
 };
 
 function normalizeNaverTeamName(value: unknown) {
-  return String(value ?? "")
-    .toLowerCase()
-    .replace(/\s+/g, "")
+  const raw =
+    String(value ?? "")
+      .toLowerCase()
+      .replace(/[.\-_()]/g, "")
+      .replace(/\s+/g, "");
+
+  const aliases: Array<
+    [RegExp, string]
+  > = [
+    [/^(nc|ncdinos|nc다이노스|엔씨|엔씨다이노스|다이노스)$/i, "nc"],
+    [/^(삼성|삼성라이온즈|samsung|samsunglions|라이온즈)$/i, "삼성"],
+    [/^(lg|lg트윈스|엘지|엘지트윈스|twins)$/i, "lg"],
+    [/^(kia|기아|기아타이거즈|타이거즈|kiatigers)$/i, "kia"],
+    [/^(kt|ktwiz|케이티|케이티위즈|wiz)$/i, "kt"],
+    [/^(한화|한화이글스|이글스|hanwha|hanwhaeagles)$/i, "한화"],
+    [/^(ssg|ssg랜더스|랜더스|landers)$/i, "ssg"],
+    [/^(롯데|롯데자이언츠|자이언츠|lotte|lottegiants)$/i, "롯데"],
+    [/^(두산|두산베어스|베어스|doosan|doosanbears)$/i, "두산"],
+    [/^(키움|키움히어로즈|히어로즈|kiwoom|kiwoomheroes)$/i, "키움"],
+  ];
+
+  for (
+    const [
+      pattern,
+      normalized,
+    ] of aliases
+  ) {
+    if (
+      pattern.test(raw)
+    ) {
+      return normalized;
+    }
+  }
+
+  return raw
     .replace(/다이노스|dinos/g, "nc")
     .replace(/라이온즈|lions/g, "삼성")
     .replace(/트윈스|twins/g, "lg")
@@ -1607,9 +1650,7 @@ function normalizeNaverTeamName(value: unknown) {
     .replace(/랜더스|landers/g, "ssg")
     .replace(/자이언츠|giants/g, "롯데")
     .replace(/베어스|bears/g, "두산")
-    .replace(/히어로즈|heroes/g, "키움")
-    .replace(/ncdinos/g, "nc")
-    .replace(/samsung/g, "삼성");
+    .replace(/히어로즈|heroes/g, "키움");
 }
 
 function kstDateString(ms: number) {
@@ -1686,6 +1727,26 @@ function collectNaverGameObjects(
         awayName === null
           ? null
           : String(awayName),
+      homeCode:
+        String(
+          value?.homeTeamCode ??
+          value?.homeTeam?.code ??
+          value?.home?.code ??
+          value?.homeTeamId ??
+          value?.homeTeam?.id ??
+          value?.home?.id ??
+          ""
+        ).trim() || null,
+      awayCode:
+        String(
+          value?.awayTeamCode ??
+          value?.awayTeam?.code ??
+          value?.away?.code ??
+          value?.awayTeamId ??
+          value?.awayTeam?.id ??
+          value?.away?.id ??
+          ""
+        ).trim() || null,
     });
   }
 
@@ -1792,6 +1853,7 @@ async function getNaverPregameLineups(args: {
         schedule.status,
       previewStatus: null,
       matchedGame: null,
+      candidates: [],
     };
   }
 
@@ -1805,6 +1867,33 @@ async function getNaverPregameLineups(args: {
     collectNaverGameObjects(
       schedule.data
     );
+
+  const candidateDiagnostics:
+    NaverPregameCandidate[] =
+      candidates.map(
+        (game) => ({
+          gameId:
+            game.gameId,
+          homeName:
+            game.homeName,
+          awayName:
+            game.awayName,
+          homeCode:
+            game.homeCode ??
+            null,
+          awayCode:
+            game.awayCode ??
+            null,
+          normalizedHome:
+            normalizeNaverTeamName(
+              game.homeName
+            ),
+          normalizedAway:
+            normalizeNaverTeamName(
+              game.awayName
+            ),
+        })
+      );
 
   const matched =
     candidates.find(
@@ -1839,6 +1928,8 @@ async function getNaverPregameLineups(args: {
         schedule.status,
       previewStatus: null,
       matchedGame: null,
+      candidates:
+        candidateDiagnostics,
     };
   }
 
@@ -1861,6 +1952,8 @@ async function getNaverPregameLineups(args: {
         preview.status,
       matchedGame:
         matched.raw,
+      candidates:
+        candidateDiagnostics,
     };
   }
 
@@ -1877,6 +1970,8 @@ async function getNaverPregameLineups(args: {
       preview.status,
     matchedGame:
       matched.raw,
+    candidates:
+      candidateDiagnostics,
   };
 }
 
@@ -1949,6 +2044,7 @@ async function runSelectedMode(
           scheduleStatus: null,
           previewStatus: null,
           matchedGame: null,
+          candidates: [],
         };
 
   const selectedLineups =
@@ -1988,6 +2084,8 @@ async function runSelectedMode(
         naverPregame.scheduleStatus,
       previewStatus:
         naverPregame.previewStatus,
+      candidates:
+        naverPregame.candidates,
     },
     statistics:null,
     h2h:null,
@@ -2033,6 +2131,8 @@ async function runSelectedMode(
           naverPregame.scheduleStatus,
         previewStatus:
           naverPregame.previewStatus,
+        candidates:
+          naverPregame.candidates,
         source:
           "https://api-gw.sports.naver.com",
         schedulePath:
