@@ -456,6 +456,78 @@ function isFutureNotStartedFixture(
   );
 }
 
+
+function safeTeamShape(value: any) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  return {
+    keys: Object.keys(value).slice(0, 20),
+    id:
+      value?.id ??
+      value?.teamId ??
+      value?.team?.id ??
+      null,
+    name:
+      value?.name ??
+      value?.teamName ??
+      value?.team?.name ??
+      null,
+  };
+}
+
+function safeFixtureTeamDebug(fixture: any) {
+  if (!fixture || typeof fixture !== "object") {
+    return null;
+  }
+
+  return {
+    fixtureKeys:
+      Object.keys(fixture).slice(0, 30),
+    home:
+      safeTeamShape(
+        fixture?.home ??
+        fixture?.homeTeam ??
+        fixture?.teams?.home ??
+        null
+      ),
+    away:
+      safeTeamShape(
+        fixture?.away ??
+        fixture?.awayTeam ??
+        fixture?.teams?.away ??
+        null
+      ),
+    participants:
+      Array.isArray(fixture?.participants)
+        ? fixture.participants
+            .slice(0, 4)
+            .map((item: any) => ({
+              keys:
+                item && typeof item === "object"
+                  ? Object.keys(item).slice(0, 20)
+                  : [],
+              id:
+                item?.id ??
+                item?.teamId ??
+                item?.team?.id ??
+                null,
+              name:
+                item?.name ??
+                item?.teamName ??
+                item?.team?.name ??
+                null,
+              side:
+                item?.side ??
+                item?.homeAway ??
+                item?.position ??
+                null,
+            }))
+        : [],
+  };
+}
+
 function summarizeFixture(
   fixture: AnyObj
 ) {
@@ -1487,7 +1559,14 @@ async function runSelectedMode(
     lineups:null,
     statistics:null,
     h2h:null,
-    debug:{ message:"사용자가 선택한 Betman 경기를 SportsAPI에서 매칭했습니다.", sportsApi:result.debug },
+    debug:{
+      message:"사용자가 선택한 Betman 경기를 SportsAPI에서 매칭했습니다.",
+      sportsApi:result.debug,
+      runtimeShape:{
+        selectedFixture:
+          safeFixtureTeamDebug(fixture),
+      },
+    },
   });
 }
 
@@ -1651,6 +1730,10 @@ async function runRealMode(
           checkedBetmanCount:
             i + 1,
           attempts,
+          runtimeShape:{
+            selectedFixture:
+              safeFixtureTeamDebug(fixture),
+          },
         },
       });
     }
