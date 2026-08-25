@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V12_1_NAVER_PREGAME_20260825
+// DEPLOY_MARKER_V12_1_1_NAVER_STATE_FIX_20260825
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -10272,9 +10272,9 @@ export default function Home() {
                         <div className="card">
                           데이터 소스
                           <b>
-                            {sportsDetail?.lineupsSource === "NAVER_PREVIEW"
+                            {matched?.lineupsSource === "NAVER_PREVIEW"
                               ? "NAVER PREVIEW"
-                              : sportsDetail?.lineupsSource === "SPORTSAPI"
+                              : matched?.lineupsSource === "SPORTSAPI"
                                 ? "SPORTSAPI 우선"
                                 : "미수신"}
                           </b>
@@ -10282,17 +10282,17 @@ export default function Home() {
 
                         <div className="card">
                           Naver gameId
-                          <b>{sportsDetail?.naverPregame?.gameId ?? "-"}</b>
+                          <b>{matched?.naverPregame?.gameId ?? "-"}</b>
                         </div>
 
                         <div className="card">
                           일정 API
-                          <b>{sportsDetail?.naverPregame?.scheduleStatus ?? "-"}</b>
+                          <b>{matched?.naverPregame?.scheduleStatus ?? "-"}</b>
                         </div>
 
                         <div className="card">
                           Preview API
-                          <b>{sportsDetail?.naverPregame?.previewStatus ?? "-"}</b>
+                          <b>{matched?.naverPregame?.previewStatus ?? "-"}</b>
                         </div>
                       </div>
 
@@ -10304,9 +10304,9 @@ export default function Home() {
                         최종점수·경기후 statistics는 이 경로에서 분석 입력으로 사용하지 않습니다.
                       </div>
 
-                      {sportsDetail?.naverPregame?.error && (
+                      {matched?.naverPregame?.error && (
                         <div className="notice" style={{ margin: "8px 0 0" }}>
-                          네이버 진단: {sportsDetail.naverPregame.error}
+                          네이버 진단: {matched.naverPregame.error}
                         </div>
                       )}
                     </div>
