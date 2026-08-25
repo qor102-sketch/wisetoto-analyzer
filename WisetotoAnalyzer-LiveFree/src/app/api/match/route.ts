@@ -1104,6 +1104,45 @@ function sportsCompatible(wanted: any, actual: any) {
 }
 
 const TEAM_SEARCH_ALIASES: Record<string, string[]> = {
+  // KBO
+  "lg": ["LG Twins", "LG Twins Baseball Club", "LG"],
+  "lg트윈스": ["LG Twins", "LG Twins Baseball Club", "LG"],
+  "엘지": ["LG Twins", "LG Twins Baseball Club", "LG"],
+  "엘지트윈스": ["LG Twins", "LG Twins Baseball Club", "LG"],
+
+  "nc": ["NC Dinos", "NC Dinos Baseball Club", "NC"],
+  "nc다이노스": ["NC Dinos", "NC Dinos Baseball Club", "NC"],
+  "엔씨": ["NC Dinos", "NC Dinos Baseball Club", "NC"],
+  "엔씨다이노스": ["NC Dinos", "NC Dinos Baseball Club", "NC"],
+
+  "두산": ["Doosan Bears", "Doosan", "Doosan Bears Baseball Club"],
+  "두산베어스": ["Doosan Bears", "Doosan", "Doosan Bears Baseball Club"],
+
+  "롯데": ["Lotte Giants", "Lotte", "Lotte Giants Baseball Club"],
+  "롯데자이언츠": ["Lotte Giants", "Lotte", "Lotte Giants Baseball Club"],
+
+  "삼성": ["Samsung Lions", "Samsung", "Samsung Lions Baseball Club"],
+  "삼성라이온즈": ["Samsung Lions", "Samsung", "Samsung Lions Baseball Club"],
+
+  "kt": ["KT Wiz", "KT Wiz Baseball Club", "KT"],
+  "kt위즈": ["KT Wiz", "KT Wiz Baseball Club", "KT"],
+  "케이티": ["KT Wiz", "KT Wiz Baseball Club", "KT"],
+  "케이티위즈": ["KT Wiz", "KT Wiz Baseball Club", "KT"],
+
+  "ssg": ["SSG Landers", "SSG Landers Baseball Club", "SSG"],
+  "ssg랜더스": ["SSG Landers", "SSG Landers Baseball Club", "SSG"],
+
+  "kia": ["KIA Tigers", "Kia Tigers", "KIA Tigers Baseball Club", "KIA"],
+  "kia타이거즈": ["KIA Tigers", "Kia Tigers", "KIA Tigers Baseball Club", "KIA"],
+  "기아": ["KIA Tigers", "Kia Tigers", "KIA Tigers Baseball Club", "KIA"],
+  "기아타이거즈": ["KIA Tigers", "Kia Tigers", "KIA Tigers Baseball Club", "KIA"],
+
+  "한화": ["Hanwha Eagles", "Hanwha", "Hanwha Eagles Baseball Club"],
+  "한화이글스": ["Hanwha Eagles", "Hanwha", "Hanwha Eagles Baseball Club"],
+
+  "키움": ["Kiwoom Heroes", "Kiwoom", "Kiwoom Heroes Baseball Club"],
+  "키움히어로즈": ["Kiwoom Heroes", "Kiwoom", "Kiwoom Heroes Baseball Club"],
+
   // K League
   "대전하나시티즌": ["Daejeon Hana Citizen", "Daejeon Citizen"],
   "강원": ["Gangwon FC", "Gangwon"],
@@ -1245,6 +1284,10 @@ async function findSportsFixtureForBetman(
 
   const homeAliases = teamAliases(home);
   const awayAliases = teamAliases(away);
+
+  // KBO의 LG / NC / KT / SSG / KIA 같은 약칭도
+  // teamAliases()에서 SportsAPI 영문 정식명으로 변환한 뒤 검색합니다.
+  // 홈/원정 방향과 경기시간 검증은 아래 fixtureMatchScore에서 그대로 유지됩니다.
 
   // 한국어 팀명만 검색하면 SportsAPI 검색 결과가 비어 있을 수 있으므로
   // 알려진 영문 표기가 있으면 영문 alias를 우선 검색한다.
