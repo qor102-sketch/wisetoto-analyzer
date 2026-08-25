@@ -312,6 +312,292 @@ const BACKTEST_BETMAN_GAMES: BetmanMatch[] = [
 });
 
 
+
+type BacktestValidationResult = {
+  homeScore: number;
+  awayScore: number;
+  firstHalfHomeScore: number | null;
+  firstHalfAwayScore: number | null;
+  sourceLabel: string;
+};
+
+const BACKTEST_VALIDATION_RESULTS: Record<
+  string,
+  BacktestValidationResult
+> = {
+  "backtest-20260822-1900-nc-samsung": {
+    homeScore: 6,
+    awayScore: 8,
+    firstHalfHomeScore: null,
+    firstHalfAwayScore: null,
+    sourceLabel:
+      "사용자 제공 최종 경기결과 · 예측 계산 완료 후 검증 전용",
+  },
+};
+
+function backtestValidationKey(
+  game: BetmanMatch | null | undefined
+) {
+  return String(
+    (game as any)?.gameKey ??
+    (game as any)?.key ??
+    ""
+  );
+}
+
+type BacktestMarketValidation = {
+  key: string;
+  market: string;
+  predictedPick: string;
+  actualLabel: string;
+  status:
+    | "HIT"
+    | "MISS"
+    | "PENDING";
+  note: string;
+};
+
+function normalizedPickToken(
+  value: unknown
+) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/홈팀/g, "홈")
+    .replace(/원정팀/g, "원정");
+}
+
+function validateBacktestMarket(
+  market: any,
+  pick: MarketPick,
+  truth: BacktestValidationResult
+): BacktestMarketValidation {
+  const betName =
+    String(
+      market?.betName ??
+      market?.displayName ??
+      market?.betTypeName ??
+      pick.market ??
+      ""
+    );
+
+  const type =
+    String(
+      market?.type ??
+      ""
+    ).toLowerCase();
+
+  const line =
+    marketNumber(market);
+
+  const isFirstHalf =
+    /전반|1st\s*half|first\s*half/i.test(
+      betName
+    );
+
+  if (
+    isFirstHalf &&
+    (
+      truth.firstHalfHomeScore === null ||
+      truth.firstHalfAwayScore === null
+    )
+  ) {
+    return {
+      key: pick.key,
+      market: pick.market,
+      predictedPick: pick.pick,
+      actualLabel: "검증 데이터 없음",
+      status: "PENDING",
+      note: "5이닝 실제 스코어 미입력",
+    };
+  }
+
+  const homeScore =
+    isFirstHalf
+      ? truth.firstHalfHomeScore!
+      : truth.homeScore;
+
+  const awayScore =
+    isFirstHalf
+      ? truth.firstHalfAwayScore!
+      : truth.awayScore;
+
+  let actualLabel = "";
+
+  const combined =
+    `${betName} ${String(
+      market?.betTypeName ??
+      ""
+    )}`;
+
+  if (
+    /SUM|홀짝|odd|even/i.test(
+      combined
+    )
+  ) {
+    actualLabel =
+      (homeScore + awayScore) % 2 === 0
+        ? "짝"
+        : "홀";
+  } else if (
+    type === "total" ||
+    /U\/O|언더|오버|over|under/i.test(
+      combined
+    )
+  ) {
+    if (line === null) {
+      return {
+        key: pick.key,
+        market: pick.market,
+        predictedPick: pick.pick,
+        actualLabel: "기준값 없음",
+        status: "PENDING",
+        note: "U/O line 미확인",
+      };
+    }
+
+    const total = homeScore + awayScore;
+
+    if (total > line) {
+      actualLabel = "OVER";
+    } else if (total < line) {
+      actualLabel = "UNDER";
+    } else {
+      return {
+        key: pick.key,
+        market: pick.market,
+        predictedPick: pick.pick,
+        actualLabel: `PUSH ${line}`,
+        status: "PENDING",
+        note: "정확히 기준점과 같음",
+      };
+    }
+  } else if (
+    /승1패/i.test(
+      combined
+    )
+  ) {
+    const margin =
+      homeScore -
+      awayScore;
+
+    actualLabel =
+      margin >= 2
+        ? "승"
+        : margin <= -2
+          ? "패"
+          : "1";
+  } else if (
+    type === "handicap" ||
+    /핸디|handicap/i.test(
+      combined
+    )
+  ) {
+    if (line === null) {
+      return {
+        key: pick.key,
+        market: pick.market,
+        predictedPick: pick.pick,
+        actualLabel: "기준값 없음",
+        status: "PENDING",
+        note: "핸디 line 미확인",
+      };
+    }
+
+    const outcome =
+      settleBetmanHomeHandicap(
+        homeScore,
+        awayScore,
+        line
+      );
+
+    actualLabel =
+      outcome === "home"
+        ? `홈 ${line >= 0 ? "+" : ""}${line}`
+        : outcome === "away"
+          ? `원정 ${line >= 0 ? "-" : "+"}${Math.abs(line)}`
+          : "무";
+  } else {
+    const outcome =
+      settleBetmanMoneyline(
+        homeScore,
+        awayScore
+      );
+
+    actualLabel =
+      outcome === "home"
+        ? "승"
+        : outcome === "away"
+          ? "패"
+          : "무";
+  }
+
+  const predicted =
+    normalizedPickToken(
+      pick.pick
+    );
+
+  const actual =
+    normalizedPickToken(
+      actualLabel
+    );
+
+  const looseHit =
+    predicted === actual ||
+    (
+      actual === "승" &&
+      /(^승$|홈승)/.test(predicted)
+    ) ||
+    (
+      actual === "패" &&
+      /(^패$|원정승)/.test(predicted)
+    ) ||
+    (
+      actual === "1" &&
+      predicted === "1"
+    ) ||
+    (
+      actual === "짝" &&
+      predicted.includes("짝")
+    ) ||
+    (
+      actual === "홀" &&
+      predicted.includes("홀")
+    ) ||
+    (
+      actual === "under" &&
+      predicted.includes("under")
+    ) ||
+    (
+      actual === "over" &&
+      predicted.includes("over")
+    ) ||
+    (
+      actual.startsWith("홈") &&
+      predicted.startsWith("홈")
+    ) ||
+    (
+      actual.startsWith("원정") &&
+      predicted.startsWith("원정")
+    );
+
+  return {
+    key: pick.key,
+    market: pick.market,
+    predictedPick: pick.pick,
+    actualLabel,
+    status:
+      looseHit
+        ? "HIT"
+        : "MISS",
+    note:
+      isFirstHalf
+        ? "5이닝 결과 검증"
+        : "최종 경기결과 검증",
+  };
+}
+
+
 const I = {
   축구: "⚽",
   야구: "⚾",
@@ -6939,6 +7225,9 @@ export default function Home() {
 
   const [backtestMode, setBacktestMode] =
     useState(false);
+
+  const [backtestResultRevealed, setBacktestResultRevealed] =
+    useState(false);
   const [betmanGames, setBetmanGames] = useState<BetmanMatch[]>([]);
   const [betmanDiagnostics, setBetmanDiagnostics] = useState<any>(null);
   const [selectedBetmanKey, setSelectedBetmanKey] = useState<string | null>(null);
@@ -7587,6 +7876,66 @@ export default function Home() {
       actualMarketPicks
     );
 
+  const backtestValidationTruth =
+    backtestMode
+      ? BACKTEST_VALIDATION_RESULTS[
+          backtestValidationKey(
+            selectedBetman
+          )
+        ] ??
+        null
+      : null;
+
+  const selectedValidationMarkets =
+    marketRows(
+      selectedBetman
+    );
+
+  const backtestValidationRows:
+    BacktestMarketValidation[] =
+      backtestValidationTruth
+        ? actualMarketPicks.map(
+            (pick) => {
+              const marketIndex =
+                selectedValidationMarkets.findIndex(
+                  (market: any, index: number) =>
+                    marketStableKey(
+                      market,
+                      index
+                    ) ===
+                    pick.key
+                );
+
+              const market =
+                marketIndex >= 0
+                  ? selectedValidationMarkets[
+                      marketIndex
+                    ]
+                  : null;
+
+              return validateBacktestMarket(
+                market,
+                pick,
+                backtestValidationTruth
+              );
+            }
+          )
+        : [];
+
+  const backtestValidatedRows =
+    backtestValidationRows.filter(
+      (row) =>
+        row.status !==
+        "PENDING"
+    );
+
+  const backtestHitCount =
+    backtestValidatedRows.filter(
+      (row) =>
+        row.status ===
+        "HIT"
+    ).length;
+
   const betmanRuntimeDebug =
     safeBetmanMarketRuntime(
       betman.matched
@@ -7885,6 +8234,7 @@ export default function Home() {
           3 * 60 * 60 * 1000;
 
     setBacktestMode(historical);
+    setBacktestResultRevealed(false);
     setSelectedBetmanKey(gameKey(game,index));
     setMatched(null);
     setBetman({ loading:false, matched:game, score:1, error:null });
@@ -8101,6 +8451,7 @@ export default function Home() {
             className={`btn ${backtestMode ? "primary" : "light"}`}
             onClick={() => {
               setBacktestMode((value) => !value);
+              setBacktestResultRevealed(false);
               setSelectedBetmanKey(null);
               setMatched(null);
               setBetman({
@@ -8813,10 +9164,10 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V11.3.4 계산 추적 · 과거 Form/H2H 복원 · 백테스트 LOCK · EV</summary>
+              <summary>V11.7 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
-                  <h3>V11.1 계산 추적 · 데이터 가용성 + λ 교정</h3>
+                  <h3>V11.7 계산 추적 · 데이터 가용성 + λ 교정</h3>
 
                   <div
                     className="notice"
@@ -8834,7 +9185,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.6 의사결정 규칙</b><br />
+                    <b>V11.7 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -8845,7 +9196,7 @@ export default function Home() {
 
                   {currentSport === "야구" && backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.6 백테스트 안전장치 · PRE 불확실성 보정</h3>
+                      <h3>V11.7 백테스트 안전장치 · PRE 불확실성 + 결과 분리 검증</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -8943,7 +9294,7 @@ export default function Home() {
 
                   {currentSport === "야구" && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.2 야구 데이터 가용성 · 선발투수 보정</h3>
+                      <h3>V11.7 야구 데이터 가용성 · 선발투수 보정</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -8979,7 +9330,7 @@ export default function Home() {
                           style={{ marginTop: 7 }}
                         >
                           <div className="card">
-                            V11.6 PRE 안정화
+                            V11.7 PRE 안정화
                             <b>
                               {analysisFactors.baseballPreModelApplied
                                 ? "적용"
@@ -9012,7 +9363,7 @@ export default function Home() {
                           </div>
 
                           <div className="card">
-                            V11.6 확률 페널티
+                            V11.7 확률 페널티
                             <b>
                               18~34%
                             </b>
@@ -9095,9 +9446,152 @@ export default function Home() {
                     </div>
                   )}
 
+                  {currentSport === "야구" &&
+                    backtestMode &&
+                    backtestValidationTruth && (
+                    <div className="section" style={{ marginTop: 0 }}>
+                      <h3>V11.7 백테스트 결과 검증기</h3>
+
+                      {!backtestResultRevealed ? (
+                        <>
+                          <div className="notice" style={{ margin: "0 0 8px" }}>
+                            예측 계산은 완료되었습니다. 실제 결과는 지금까지 분석 입력에 사용되지 않았습니다.
+                            아래 버튼을 누르면 별도 검증 레이어에서만 실제 결과를 공개하고 적중 여부를 비교합니다.
+                          </div>
+
+                          <button
+                            className="btn light"
+                            onClick={() =>
+                              setBacktestResultRevealed(
+                                true
+                              )
+                            }
+                          >
+                            🔒 예측 확정 · 실제 결과 검증 열기
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <div className="cards">
+                            <div className="card">
+                              실제 최종점수
+                              <b>
+                                {backtestValidationTruth.homeScore}
+                                {" : "}
+                                {backtestValidationTruth.awayScore}
+                              </b>
+                              <div className="small">
+                                검증 레이어 전용
+                              </div>
+                            </div>
+
+                            <div className="card">
+                              검증 가능
+                              <b>
+                                {backtestValidatedRows.length}개
+                              </b>
+                              <div className="small">
+                                전반은 실제 5이닝 스코어 없으면 제외
+                              </div>
+                            </div>
+
+                            <div className="card">
+                              적중
+                              <b>
+                                {backtestHitCount}
+                                {" / "}
+                                {backtestValidatedRows.length}
+                              </b>
+                              <div className="small">
+                                단일경기 성과 · 계수조정 근거로 단독 사용 금지
+                              </div>
+                            </div>
+
+                            <div className="card">
+                              단순 적중률
+                              <b>
+                                {backtestValidatedRows.length
+                                  ? `${(
+                                      (
+                                        backtestHitCount /
+                                        backtestValidatedRows.length
+                                      ) *
+                                      100
+                                    ).toFixed(1)}%`
+                                  : "-"}
+                              </b>
+                              <div className="small">
+                                EV 성능은 다경기 누적으로 평가
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ marginTop: 8 }}>
+                            {backtestValidationRows.map(
+                              (row) => (
+                                <div
+                                  key={`validation-${row.key}`}
+                                  style={{
+                                    display: "grid",
+                                    gridTemplateColumns:
+                                      "100px 1fr 1fr 74px",
+                                    gap: 8,
+                                    alignItems: "center",
+                                    padding: "6px 8px",
+                                    borderBottom:
+                                      "1px solid #e6edf5",
+                                    fontSize: 9,
+                                  }}
+                                >
+                                  <div>
+                                    <b>{row.market}</b>
+                                  </div>
+
+                                  <div>
+                                    예측{" "}
+                                    <b>{row.predictedPick}</b>
+                                  </div>
+
+                                  <div>
+                                    실제{" "}
+                                    <b>{row.actualLabel}</b>
+                                  </div>
+
+                                  <div
+                                    style={{
+                                      fontWeight: 900,
+                                      color:
+                                        row.status === "HIT"
+                                          ? "#078b46"
+                                          : row.status === "MISS"
+                                            ? "#d33d3d"
+                                            : "#7b8798",
+                                    }}
+                                  >
+                                    {row.status === "HIT"
+                                      ? "적중"
+                                      : row.status === "MISS"
+                                        ? "실패"
+                                        : "검증 보류"}
+                                  </div>
+                                </div>
+                              )
+                            )}
+                          </div>
+
+                          <div className="notice" style={{ margin: "8px 0 0" }}>
+                            {backtestValidationTruth.sourceLabel}
+                            {" · "}실제 결과는 이 검증 컴포넌트에서만 읽으며 buildAnalysis,
+                            Form, λ, MarketPick 확률 계산에는 전달하지 않습니다.
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
                   {currentSport === "야구" && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.2 분석 스냅샷 비교</h3>
+                      <h3>V11.7 분석 스냅샷 비교</h3>
 
                       <div className="cards">
                         {(["PRE", "STARTER", "LINEUP", "READY"] as const).map(
@@ -9212,7 +9706,7 @@ export default function Home() {
 
                   {currentSport === "야구" && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.2 Betman 마켓 연결 진단</h3>
+                      <h3>V11.7 Betman 마켓 연결 진단</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -9416,7 +9910,7 @@ export default function Home() {
                           background: "#f1f5f9",
                           borderRadius: 8,
                         }}>
-                          <div>마켓</div><div>원모델</div><div>시장</div><div>데이터보정</div><div>PRE보정</div><div>손익분기</div><div>엣지</div><div>EV</div><div>등급</div>
+                          <div>마켓</div><div>원모델</div><div>시장</div><div>데이터보정</div><div>PRE최종</div><div>손익분기</div><div>엣지</div><div>EV</div><div>등급</div>
                         </div>
 
                         {actualMarketPicks.map((pick) => (
@@ -9443,7 +9937,7 @@ export default function Home() {
                               <b>{pick.probability.toFixed(1)}%</b>
                               {pick.preUncertaintyApplied && (
                                 <div style={{ color: "#64748b", fontSize: 8 }}>
-                                  -{((pick.preUncertaintyWeight ?? 0) * 100).toFixed(0)}%
+                                  수축 {((pick.preUncertaintyWeight ?? 0) * 100).toFixed(0)}%
                                 </div>
                               )}
                             </div>
@@ -9500,14 +9994,14 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "8px 0 0" }}>
-                    V10.4는 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·배당구간을 함께 평가합니다.
+                    V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
                     STRONG VALUE는 EV 8% 이상, 엣지 8%p 이상, 신뢰도 68 이상, 신호충돌 15 미만 및 정상 배당구간을 동시에 만족해야 합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
               <div className="section">
-                <h3>V9 모델 보정 상태</h3>
+                <h3>V11.7 모델 보정 상태</h3>
                 <div className="cards">
                   <div className="card">
                     최근 표본
@@ -9526,7 +10020,7 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="notice" style={{ margin: "10px 0 0" }}>
-                  V9는 최근 경기에 시간가중치를 적용하고 홈팀은 홈경기, 원정팀은 원정경기를 우선 반영합니다.
+                  V11.7은 최근 경기에 시간가중치를 적용하고 홈팀은 홈경기, 원정팀은 원정경기를 우선 반영합니다.
                   장소 표본이 부족하면 전체 최근 성적과 섞고, 예상득점은 표본수에 따라 중립 사전값 쪽으로 수축해 과신을 줄입니다.
                   H2H는 보조지표로만 제한합니다.
                 </div>
@@ -9535,12 +10029,12 @@ export default function Home() {
 
             {actualMarketPicks.length > 0 && (
               <div className="section">
-                <h3>V9 지표 해석</h3>
+                <h3>V11.7 지표 해석</h3>
                 <div className="notice" style={{ margin: 0 }}>
                   원모델확률은 SportsAPI Form/H2H 및 최근 득실점에서 계산하고, 화면의 보정확률은 데이터 신뢰도에 따라 시장 사전값을 일부 혼합한 값입니다.
                   시장확률은 Betman 배당의 마진(오버라운드)을 제거한 공정 내재확률이고,
                   엣지는 모델확률 - 시장확률입니다.
-                  V9는 V8의 U/O·SUM 마켓 해석을 유지하면서 최근경기 시간가중치, 홈/원정 분리, 표본수 수축을 추가합니다.
+                  V11.7은 U/O·SUM 마켓 해석을 유지하면서 최근경기 시간가중치, 홈/원정 분리, 표본수 수축을 추가합니다.
                   전반 마켓은 전체경기 득점의 45% 근사치를 사용하므로 신뢰도를 크게 감점합니다.
                   음수 엣지, 시장비교 불가, 낮은 신뢰도 픽은 최고 추천에서 제외합니다.
                   추천점수는 비교용 지표이며 실제 적중률을 보장하는 수치는 아닙니다.
