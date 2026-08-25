@@ -4695,11 +4695,389 @@ function marketLabelStandalone(market: any) {
   return preferred || "기타";
 }
 
+type BacktestAudit = {
+  enabled: boolean;
+  cutoffMs: number | null;
+  removedHomeFixtures: number;
+  removedAwayFixtures: number;
+  keptHomeFixtures: number;
+  keptAwayFixtures: number;
+  h2hPolicy: string;
+  resultFieldsStripped: boolean;
+  statisticsBlocked: boolean;
+};
+
+function backtestFixtureAllowed(
+  fixture: any,
+  cutoffMs: number
+) {
+  const time = fixtureTimeMs(fixture);
+  return Number.isFinite(time) && time < cutoffMs;
+}
+
+function rebuildHistoricalForm(
+  team: RecentTeam | null | undefined,
+  fixtures: any[]
+): FormData {
+  let played = 0;
+  let wins = 0;
+  let draws = 0;
+  let losses = 0;
+  let scored = 0;
+  let conceded = 0;
+
+  for (const fixture of fixtures) {
+    const score = fixtureFinalScore(fixture);
+    if (!score) continue;
+
+    let own: number | null = null;
+    let opponent: number | null = null;
+
+    if (sameTeam(team, fixture, "home")) {
+      own = score.home;
+      opponent = score.away;
+    } else if (sameTeam(team, fixture, "away")) {
+      own = score.away;
+      opponent = score.home;
+    }
+
+    if (own === null || opponent === null) continue;
+
+    played += 1;
+    scored += own;
+    conceded += opponent;
+
+    if (own > opponent) wins += 1;
+    else if (own < opponent) losses += 1;
+    else draws += 1;
+  }
+
+  const formPercent =
+    played > 0
+      ? ((wins * 3 + draws) / (played * 3)) * 100
+      : 0;
+
+  return {
+    played,
+    wins,
+    draws,
+    losses,
+    scored,
+    conceded,
+    goalDifference: scored - conceded,
+    points: wins * 3 + draws,
+    formPercent: Number(formPercent.toFixed(1)),
+  };
+}
+
+function sanitizeRecentTeamForBacktest(
+  team: RecentTeam | null | undefined,
+  cutoffMs: number
+) {
+  if (!team) {
+    return {
+      team: null,
+      removed: 0,
+      kept: 0,
+    };
+  }
+
+  const original =
+    Array.isArray(team.fixtures)
+      ? team.fixtures
+      : [];
+
+  const fixtures =
+    original.filter(
+      (fixture: any) =>
+        backtestFixtureAllowed(
+          fixture,
+          cutoffMs
+        )
+    );
+
+  return {
+    team: {
+      ...team,
+      fixtures,
+      // 현재시점 aggregate Form은 절대 재사용하지 않음.
+      form:
+        rebuildHistoricalForm(
+          team,
+          fixtures
+        ),
+    } as RecentTeam,
+    removed:
+      original.length -
+      fixtures.length,
+    kept:
+      fixtures.length,
+  };
+}
+
+function sanitizeH2HForBacktest(
+  h2h: any,
+  cutoffMs: number,
+  homeName: string,
+  awayName: string
+) {
+  const fixtures =
+    Array.isArray(h2h?.fixtures)
+      ? h2h.fixtures
+      : Array.isArray(h2h?.matches)
+        ? h2h.matches
+        : Array.isArray(h2h?.response)
+          ? h2h.response
+          : [];
+
+  // 집계값만 제공되면 현재 경기/미래 경기 포함 여부를 검증할 수 없으므로 차단.
+  if (!fixtures.length) {
+    return {
+      h2h: null,
+      policy:
+        "원시 H2H 경기목록 없음 · aggregate H2H 차단",
+    };
+  }
+
+  const historical =
+    fixtures.filter(
+      (fixture: any) =>
+        backtestFixtureAllowed(
+          fixture,
+          cutoffMs
+        )
+    );
+
+  const normalizedHome =
+    normalizeTeamName(homeName);
+
+  const normalizedAway =
+    normalizeTeamName(awayName);
+
+  let homeWins = 0;
+  let awayWins = 0;
+  let draws = 0;
+
+  for (const fixture of historical) {
+    const score = fixtureFinalScore(fixture);
+    if (!score) continue;
+
+    const fixtureHome =
+      normalizeTeamName(
+        fixtureTeamName(
+          fixture,
+          "home"
+        )
+      );
+
+    const fixtureAway =
+      normalizeTeamName(
+        fixtureTeamName(
+          fixture,
+          "away"
+        )
+      );
+
+    const direct =
+      Boolean(fixtureHome) &&
+      Boolean(fixtureAway) &&
+      (
+        fixtureHome.includes(normalizedHome) ||
+        normalizedHome.includes(fixtureHome)
+      ) &&
+      (
+        fixtureAway.includes(normalizedAway) ||
+        normalizedAway.includes(fixtureAway)
+      );
+
+    const reverse =
+      Boolean(fixtureHome) &&
+      Boolean(fixtureAway) &&
+      (
+        fixtureHome.includes(normalizedAway) ||
+        normalizedAway.includes(fixtureHome)
+      ) &&
+      (
+        fixtureAway.includes(normalizedHome) ||
+        normalizedHome.includes(fixtureAway)
+      );
+
+    if (!direct && !reverse) continue;
+
+    if (score.home === score.away) {
+      draws += 1;
+      continue;
+    }
+
+    const selectedHomeWon =
+      direct
+        ? score.home > score.away
+        : score.away > score.home;
+
+    if (selectedHomeWon) homeWins += 1;
+    else awayWins += 1;
+  }
+
+  return {
+    h2h: {
+      homeWins,
+      awayWins,
+      draws,
+      fixtures: historical,
+    },
+    policy:
+      `cutoff 이전 H2H ${historical.length}경기만 재계산`,
+  };
+}
+
+function stripResultFieldsForBacktest(
+  fixture: any
+) {
+  if (!fixture || typeof fixture !== "object") {
+    return fixture;
+  }
+
+  const clone: any = { ...fixture };
+
+  for (const key of [
+    "homeScore",
+    "awayScore",
+    "score",
+    "scores",
+    "goals",
+    "result",
+    "winner",
+    "periods",
+  ]) {
+    if (key in clone) delete clone[key];
+  }
+
+  if (clone.home && typeof clone.home === "object") {
+    clone.home = { ...clone.home };
+    delete clone.home.score;
+    delete clone.home.goals;
+  }
+
+  if (clone.away && typeof clone.away === "object") {
+    clone.away = { ...clone.away };
+    delete clone.away.score;
+    delete clone.away.goals;
+  }
+
+  return clone;
+}
+
+function sanitizeMatchedForBacktest(
+  matched: any,
+  cutoffMs: number,
+  selectedGame:
+    | BetmanMatch
+    | null
+    | undefined
+) {
+  const home =
+    sanitizeRecentTeamForBacktest(
+      matched?.recentSummary?.home ?? null,
+      cutoffMs
+    );
+
+  const away =
+    sanitizeRecentTeamForBacktest(
+      matched?.recentSummary?.away ?? null,
+      cutoffMs
+    );
+
+  const h2h =
+    sanitizeH2HForBacktest(
+      matched?.h2h,
+      cutoffMs,
+      String(
+        selectedGame?.home ??
+        matched?.selectedFixture?.home ??
+        ""
+      ),
+      String(
+        selectedGame?.away ??
+        matched?.selectedFixture?.away ??
+        ""
+      )
+    );
+
+  return {
+    ...matched,
+    fixture:
+      stripResultFieldsForBacktest(
+        matched?.fixture
+      ),
+    detail:
+      stripResultFieldsForBacktest(
+        matched?.detail
+      ),
+    selectedFixture:
+      stripResultFieldsForBacktest(
+        matched?.selectedFixture
+      ),
+    recentSummary: {
+      home: home.team,
+      away: away.team,
+    },
+    h2h: h2h.h2h,
+    // 경기 후 팀/선수 통계는 leakage 위험이 있으므로 완전 차단.
+    statistics: null,
+    detailDebug: null,
+    backtestAudit: {
+      enabled: true,
+      cutoffMs,
+      removedHomeFixtures:
+        home.removed,
+      removedAwayFixtures:
+        away.removed,
+      keptHomeFixtures:
+        home.kept,
+      keptAwayFixtures:
+        away.kept,
+      h2hPolicy:
+        h2h.policy,
+      resultFieldsStripped: true,
+      statisticsBlocked: true,
+    } satisfies BacktestAudit,
+  };
+}
+
+function formatBacktestCutoff(
+  value: number | null | undefined
+) {
+  if (
+    value === null ||
+    value === undefined ||
+    !Number.isFinite(value)
+  ) {
+    return "-";
+  }
+
+  return new Intl.DateTimeFormat(
+    "ko-KR",
+    {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }
+  ).format(new Date(value));
+}
+
+
 export default function Home() {
   const [sport, setSport] = useState<Sport>("전체");
   const [status, setStatus] = useState("Betman 발매경기 불러오는 중…");
   const [loading, setLoading] = useState(false);
   const [matched, setMatched] = useState<any>(null);
+
+  const [backtestMode, setBacktestMode] =
+    useState(false);
   const [betmanGames, setBetmanGames] = useState<BetmanMatch[]>([]);
   const [betmanDiagnostics, setBetmanDiagnostics] = useState<any>(null);
   const [selectedBetmanKey, setSelectedBetmanKey] = useState<string | null>(null);
@@ -5197,6 +5575,11 @@ export default function Home() {
   const detail = matched?.detail ?? null;
   const h2h = matched?.h2h ?? null;
   const recentSummary: RecentSummary | null = matched?.recentSummary ?? null;
+
+  const backtestAudit:
+    BacktestAudit | null =
+      matched?.backtestAudit ??
+      null;
   const venue = detail?.venue ?? matched?.fixture?.venue ?? null;
 
   const currentSport = selectedFixture
@@ -5523,14 +5906,43 @@ export default function Home() {
   const hasRecent = Boolean((recentSummary?.home?.fixtures?.length ?? 0) || (recentSummary?.away?.fixtures?.length ?? 0));
 
   function chooseGame(game: BetmanMatch, index: number) {
+    const selectedTime =
+      gameTimeMs(game);
+
+    const historical =
+      Number.isFinite(selectedTime) &&
+      selectedTime <
+        Date.now() -
+          3 * 60 * 60 * 1000;
+
+    setBacktestMode(historical);
     setSelectedBetmanKey(gameKey(game,index));
     setMatched(null);
     setBetman({ loading:false, matched:game, score:1, error:null });
-    setStatus(`${game?.home ?? "-"} vs ${game?.away ?? "-"} 선택 · 분석 버튼을 누르세요`);
+    setStatus(
+      historical
+        ? `${game?.home ?? "-"} vs ${game?.away ?? "-"} 선택 · 백테스트 모드 자동 활성화`
+        : `${game?.home ?? "-"} vs ${game?.away ?? "-"} 선택 · 분석 버튼을 누르세요`
+    );
   }
 
   async function analyzeSelected() {
     if (loading || !selectedBetman) return;
+
+    const selectedStartMs =
+      gameTimeMs(
+        selectedBetman
+      );
+
+    const backtestCutoffMs =
+      backtestMode &&
+      Number.isFinite(
+        selectedStartMs
+      )
+        ? selectedStartMs -
+          60_000
+        : null;
+
     setLoading(true);
     setMatched(null);
     setBetman({ loading:false, matched:selectedBetman, score:1, error:null });
@@ -5553,7 +5965,7 @@ export default function Home() {
       const detailResponse = await fetch(`/api/match/${fixtureId}`, { cache:"no-store" });
       const detailData = await readApiResponse(detailResponse,"Fixture 상세 API");
       if (detailResponse.ok && detailData?.ok) {
-        const combined = {
+        const combinedRaw = {
           ...data,
           fixture: detailData?.fixture ?? data?.fixture,
           detail: detailData?.fixture ?? data?.detail,
@@ -5564,8 +5976,23 @@ export default function Home() {
           lineups: detailData?.lineups ?? null,
           detailDebug: detailData?.debug ?? null,
         };
+
+        const combined =
+          backtestCutoffMs !== null
+            ? sanitizeMatchedForBacktest(
+                combinedRaw,
+                backtestCutoffMs,
+                selectedBetman
+              )
+            : combinedRaw;
+
         setMatched(combined);
-        setStatus(`분석 완료 · ${combined?.selectedFixture?.home ?? selectedBetman?.home ?? "-"} vs ${combined?.selectedFixture?.away ?? selectedBetman?.away ?? "-"}`);
+
+        setStatus(
+          backtestCutoffMs !== null
+            ? `백테스트 분석 완료 · 기준 ${formatBacktestCutoff(backtestCutoffMs)} · 미래정보 차단`
+            : `분석 완료 · ${combined?.selectedFixture?.home ?? selectedBetman?.home ?? "-"} vs ${combined?.selectedFixture?.away ?? selectedBetman?.away ?? "-"}`
+        );
       } else {
         setStatus(`경기 매칭 완료 · Fixture #${fixtureId} · 상세 분석 데이터 일부 미수신`);
       }
@@ -5672,6 +6099,16 @@ export default function Home() {
         </div>
         <div className="bar">
           <button className="btn light" onClick={loadBetmanList} disabled={loading}>🔄 경기목록 새로고침</button>
+
+          <button
+            className={`btn ${backtestMode ? "primary" : "light"}`}
+            onClick={() => setBacktestMode((value) => !value)}
+            disabled={loading}
+            title="과거 경기 분석 시 경기 시작 이전 데이터만 사용합니다."
+          >
+            🧪 백테스트 {backtestMode ? "ON" : "OFF"}
+          </button>
+
           <button className="btn primary" onClick={analyzeSelected} disabled={loading || !selectedBetman}>
             {loading ? "⏳ 분석 중" : "📊 선택 경기 분석"}
           </button>
@@ -6355,7 +6792,7 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V11.2 계산 추적 · 스냅샷 · 마켓 연결 · 선발 λ · EV</summary>
+              <summary>V11.3 계산 추적 · 백테스트 LOCK · 스냅샷 · 선발 λ · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
                   <h3>V11.1 계산 추적 · 데이터 가용성 + λ 교정</h3>
@@ -6376,7 +6813,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.2 의사결정 규칙</b><br />
+                    <b>V11.3 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -6384,6 +6821,68 @@ export default function Home() {
                     <b>야구:</b> 승1패는 2점차 이상 승 / 1점차 이내(무승부 포함) / 2점차 이상 패,
                     전반은 5이닝 기준이며 전반 H/UO는 해당 전반 라인을 독립 계산합니다.
                   </div>
+
+                  {currentSport === "야구" && backtestMode && (
+                    <div className="section" style={{ marginTop: 0 }}>
+                      <h3>V11.3 백테스트 안전장치</h3>
+
+                      <div className="cards">
+                        <div className="card">
+                          분석 기준시각
+                          <b>
+                            {formatBacktestCutoff(
+                              backtestAudit?.cutoffMs ??
+                              (
+                                selectedBetman &&
+                                Number.isFinite(gameTimeMs(selectedBetman))
+                                  ? gameTimeMs(selectedBetman) - 60_000
+                                  : null
+                              )
+                            )}
+                          </b>
+                          <div className="small">
+                            경기 시작 1분 전 고정
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          최근경기 필터
+                          <b>
+                            홈 {backtestAudit?.keptHomeFixtures ?? "-"}경기
+                            {" / "}
+                            원정 {backtestAudit?.keptAwayFixtures ?? "-"}경기
+                          </b>
+                          <div className="small">
+                            차단 홈 {backtestAudit?.removedHomeFixtures ?? "-"}
+                            {" · "}원정 {backtestAudit?.removedAwayFixtures ?? "-"}
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          H2H 정책
+                          <b>{backtestAudit ? "미래정보 차단" : "분석 전"}</b>
+                          <div className="small">
+                            {backtestAudit?.h2hPolicy ?? "cutoff 적용 대기"}
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          사후정보 차단
+                          <b>{backtestAudit ? "LOCKED" : "대기"}</b>
+                          <div className="small">
+                            최종점수 제거 · 경기후 statistics 차단
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="notice" style={{ margin: "8px 0" }}>
+                        백테스트에서는 선택 경기의 실제 결과를 예측 입력으로 사용하지 않습니다.
+                        현재시점 aggregate Form도 버리고 기준시각 이전 fixture만으로 Form/득실을 다시 계산합니다.
+                        H2H가 경기목록 없이 집계값만 제공되면 미래정보 누출 위험 때문에 H2H를 사용하지 않습니다.
+                        선발/라인업은 해당 Fixture의 경기 전 정보로 유지하며 실제 결과 비교는 별도 검증 단계까지 잠급니다.
+                      </div>
+                    </div>
+                  )}
 
                   {currentSport === "야구" && (
                     <div className="section" style={{ marginTop: 0 }}>
