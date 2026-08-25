@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V11_8_2_3_NO_LINEUPS_RESULT_PATH_20260825
+// DEPLOY_MARKER_V12_5_NAVER_PREVIEW_PARSER_20260825
 // WISETOTO_MATCH_SELECTED_V1_20260823
 const BASE = "https://api.sportsapi.app/v2";
 
@@ -1850,11 +1850,13 @@ type NaverPreviewAudit = {
 function inspectNaverPreviewStructure(
   payload: any
 ): NaverPreviewAudit {
+  const auditPayload = unwrapNaverPreviewPayload(payload);
+
   const rootKeys =
-    payload &&
-    typeof payload === "object" &&
-    !Array.isArray(payload)
-      ? Object.keys(payload).slice(0, 80)
+    auditPayload &&
+    typeof auditPayload === "object" &&
+    !Array.isArray(auditPayload)
+      ? Object.keys(auditPayload).slice(0, 80)
       : [];
 
   const rows:
@@ -2072,8 +2074,8 @@ function inspectNaverPreviewStructure(
   };
 
   visit(
-    payload,
-    "preview",
+    auditPayload,
+    "preview.result",
     0
   );
 
@@ -2082,6 +2084,145 @@ function inspectNaverPreviewStructure(
     rowCount:
       rows.length,
     rows,
+  };
+}
+
+
+type NaverParsedPlayer = {
+  name: string;
+  playerName: string;
+  side: "home" | "away";
+  homeAway: "home" | "away";
+  position: string | null;
+  positionName: string | null;
+  role: string | null;
+  order: number | null;
+  battingOrder: number | null;
+  starter: boolean;
+  sourcePath: string;
+};
+
+type NaverParsedLineups = {
+  provider: "NAVER_PREVIEW";
+  parsed: true;
+  home: { starter: NaverParsedPlayer | null; lineup: NaverParsedPlayer[] };
+  away: { starter: NaverParsedPlayer | null; lineup: NaverParsedPlayer[] };
+  players: NaverParsedPlayer[];
+  sourceRootKeys: string[];
+};
+
+function unwrapNaverPreviewPayload(payload: any) {
+  // Naver gateway commonly wraps the useful payload as { code, success, result }.
+  // Only unwrap transport envelopes; never walk into score/result-statistics branches.
+  if (!payload || typeof payload !== "object") return payload;
+  if (payload.result && typeof payload.result === "object") return payload.result;
+  if (payload.data && typeof payload.data === "object") return payload.data;
+  return payload;
+}
+
+function naverSideFromText(value: unknown): "home" | "away" | null {
+  const text = String(value ?? "").toLowerCase();
+  if (/(^|[^a-z])(home|홈)([^a-z]|$)/i.test(text)) return "home";
+  if (/(^|[^a-z])(away|visitor|원정)([^a-z]|$)/i.test(text)) return "away";
+  return null;
+}
+
+function parseNaverPreviewLineups(payload: any): NaverParsedLineups | null {
+  const root = unwrapNaverPreviewPayload(payload);
+  if (!root || typeof root !== "object") return null;
+
+  const blockedKey = /score|winner|statistics|statistic|boxscore|final|gameresult|matchresult|resultscore|inning|runs|hits|errors|earned|pitchcount/i;
+  const playerContext = /lineup|line-up|line_up|starter|starting|pitcher|player|athlete|batter|batting|order|roster|entry|member/i;
+  const seen = new Set<any>();
+  const rows: NaverParsedPlayer[] = [];
+
+  const visit = (value: any, path: string, inheritedSide: "home" | "away" | null, depth = 0) => {
+    if (value == null || depth > 10) return;
+    if (Array.isArray(value)) {
+      value.slice(0, 60).forEach((item, index) => visit(item, `${path}[${index}]`, inheritedSide, depth + 1));
+      return;
+    }
+    if (typeof value !== "object" || seen.has(value)) return;
+    seen.add(value);
+
+    const side =
+      naverSideFromText(value?.homeAway ?? value?.side ?? value?.teamSide ?? value?.location) ??
+      naverSideFromText(path) ??
+      inheritedSide;
+
+    const name = String(
+      value?.playerName ?? value?.name ?? value?.memberName ?? value?.athleteName ??
+      value?.displayName ?? value?.shortName ?? value?.player?.name ??
+      value?.athlete?.name ?? value?.member?.name ?? ""
+    ).trim();
+    const position = String(
+      value?.positionName ?? value?.position ?? value?.pos ?? value?.player?.position ?? ""
+    ).trim() || null;
+    const role = String(
+      value?.role ?? value?.type ?? value?.designation ?? value?.status ?? ""
+    ).trim() || null;
+    const orderRaw = value?.battingOrder ?? value?.lineupOrder ?? value?.order ?? value?.slot ?? value?.batOrder ?? null;
+    const orderNum = Number(orderRaw);
+    const order = Number.isFinite(orderNum) && orderNum >= 0 && orderNum <= 20 ? orderNum : null;
+    const starterText = `${path} ${role ?? ""} ${position ?? ""} ${String(value?.starter ?? "")} ${String(value?.starting ?? "")}`.toLowerCase();
+    const isPitcher = /pitcher|투수|(^|\s)p(\s|$)|sp/.test(starterText);
+    const starter = Boolean(value?.starter === true || value?.starting === true || /starter|starting|probable|선발/.test(starterText) || (isPitcher && /lineup|entry/.test(path.toLowerCase())));
+    const keyText = Object.keys(value).join(" ").toLowerCase();
+    const hasPlayerSignal = playerContext.test(`${path} ${keyText}`) && Boolean(name) && Boolean(side);
+
+    if (hasPlayerSignal && side) {
+      rows.push({
+        name,
+        playerName: name,
+        side,
+        homeAway: side,
+        position,
+        positionName: position,
+        role,
+        order,
+        battingOrder: order,
+        starter,
+        sourcePath: path,
+      });
+    }
+
+    for (const [key, child] of Object.entries(value)) {
+      if (blockedKey.test(key) || !child || typeof child !== "object") continue;
+      const childSide = naverSideFromText(key) ?? side;
+      visit(child, `${path}.${key}`, childSide, depth + 1);
+    }
+  };
+
+  visit(root, "preview.result", null, 0);
+
+  const unique = new Map<string, NaverParsedPlayer>();
+  for (const row of rows) {
+    const key = `${row.side}|${normalizeNaverTeamName(row.name)}|${row.order ?? ""}|${row.position ?? ""}`;
+    const old = unique.get(key);
+    if (!old || (!old.starter && row.starter)) unique.set(key, row);
+  }
+  const players = [...unique.values()];
+  const bySide = (side: "home" | "away") => players.filter((p) => p.side === side);
+  const lineup = (side: "home" | "away") => bySide(side)
+    .filter((p) => p.order !== null || !/pitcher|투수/i.test(`${p.position ?? ""} ${p.role ?? ""}`))
+    .sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
+  const starterFor = (side: "home" | "away") =>
+    bySide(side).find((p) => p.starter && /pitcher|투수|(^|\s)p(\s|$)|sp/i.test(`${p.position ?? ""} ${p.role ?? ""} ${p.sourcePath}`)) ??
+    bySide(side).find((p) => p.starter) ?? null;
+
+  const homeLineup = lineup("home");
+  const awayLineup = lineup("away");
+  const homeStarter = starterFor("home");
+  const awayStarter = starterFor("away");
+  if (!players.length && !homeStarter && !awayStarter) return null;
+
+  return {
+    provider: "NAVER_PREVIEW",
+    parsed: true,
+    home: { starter: homeStarter, lineup: homeLineup },
+    away: { starter: awayStarter, lineup: awayLineup },
+    players,
+    sourceRootKeys: Object.keys(root).slice(0, 80),
   };
 }
 
@@ -2222,12 +2363,17 @@ async function getNaverPregameLineups(args: {
       preview.data
     );
 
+  const parsedLineups =
+    parseNaverPreviewLineups(
+      preview.data
+    );
+
   return {
     ok: true,
     gameId:
       matched.gameId,
     lineups:
-      preview.data,
+      parsedLineups ?? unwrapNaverPreviewPayload(preview.data),
     error: null,
     scheduleStatus:
       schedule.status,
