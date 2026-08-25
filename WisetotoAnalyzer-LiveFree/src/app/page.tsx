@@ -548,6 +548,171 @@ type BacktestMarketValidation = {
   note: string;
 };
 
+
+type BacktestPerformanceRecord = {
+  id: string;
+  fixtureKey: string;
+  fixtureId: number | null;
+  gameLabel: string;
+  gameDateMs: number | null;
+  capturedAt: number;
+
+  stage: string;
+  marketKey: string;
+  market: string;
+  predictedPick: string;
+  actualLabel: string;
+
+  probability: number;
+  odds: number | null;
+  expectedValue: number | null;
+  grade: string;
+
+  status:
+    | "HIT"
+    | "MISS";
+
+  realizedReturn: number | null;
+  brierScore: number;
+};
+
+type BacktestPerformanceSummary = {
+  count: number;
+  hitCount: number;
+  hitRate: number | null;
+  averageProbability: number | null;
+  averageExpectedValue: number | null;
+  roi: number | null;
+  averageBrier: number | null;
+};
+
+const BACKTEST_PERFORMANCE_STORAGE_KEY =
+  "wisetoto-backtest-performance-v11-9";
+
+function summarizeBacktestPerformance(
+  rows: BacktestPerformanceRecord[]
+): BacktestPerformanceSummary {
+  const count =
+    rows.length;
+
+  if (!count) {
+    return {
+      count: 0,
+      hitCount: 0,
+      hitRate: null,
+      averageProbability: null,
+      averageExpectedValue: null,
+      roi: null,
+      averageBrier: null,
+    };
+  }
+
+  const hitCount =
+    rows.filter(
+      (row) =>
+        row.status ===
+        "HIT"
+    ).length;
+
+  const probabilities =
+    rows
+      .map(
+        (row) =>
+          row.probability
+      )
+      .filter(
+        (value) =>
+          Number.isFinite(
+            value
+          )
+      );
+
+  const evValues =
+    rows
+      .map(
+        (row) =>
+          row.expectedValue
+      )
+      .filter(
+        (value): value is number =>
+          value !== null &&
+          Number.isFinite(
+            value
+          )
+      );
+
+  const returns =
+    rows
+      .map(
+        (row) =>
+          row.realizedReturn
+      )
+      .filter(
+        (value): value is number =>
+          value !== null &&
+          Number.isFinite(
+            value
+          )
+      );
+
+  const briers =
+    rows
+      .map(
+        (row) =>
+          row.brierScore
+      )
+      .filter(
+        (value) =>
+          Number.isFinite(
+            value
+          )
+      );
+
+  const avg = (
+    values: number[]
+  ) =>
+    values.length
+      ? values.reduce(
+          (sum, value) =>
+            sum + value,
+          0
+        ) /
+        values.length
+      : null;
+
+  return {
+    count,
+    hitCount,
+    hitRate:
+      (hitCount / count) *
+      100,
+    averageProbability:
+      avg(
+        probabilities
+      ),
+    averageExpectedValue:
+      avg(
+        evValues
+      ),
+    roi:
+      returns.length
+        ? (
+            returns.reduce(
+              (sum, value) =>
+                sum + value,
+              0
+            ) /
+            returns.length
+          ) *
+          100
+        : null,
+    averageBrier:
+      avg(
+        briers
+      ),
+  };
+}
+
 function normalizedPickToken(
   value: unknown
 ) {
@@ -7814,6 +7979,9 @@ export default function Home() {
 
   const [backtestResultRevealed, setBacktestResultRevealed] =
     useState(false);
+
+  const [backtestPerformanceRecords, setBacktestPerformanceRecords] =
+    useState<BacktestPerformanceRecord[]>([]);
   const [betmanGames, setBetmanGames] = useState<BetmanMatch[]>([]);
   const [betmanDiagnostics, setBetmanDiagnostics] = useState<any>(null);
   const [selectedBetmanKey, setSelectedBetmanKey] = useState<string | null>(null);
@@ -7826,6 +7994,41 @@ export default function Home() {
     score: number | null;
     error: string | null;
   }>({ loading: false, matched: null, score: null, error: null });
+
+  useEffect(() => {
+    try {
+      const raw =
+        window.localStorage.getItem(
+          BACKTEST_PERFORMANCE_STORAGE_KEY
+        );
+
+      if (!raw) {
+        return;
+      }
+
+      const parsed =
+        JSON.parse(
+          raw
+        );
+
+      if (
+        Array.isArray(
+          parsed
+        )
+      ) {
+        setBacktestPerformanceRecords(
+          parsed.filter(
+            (row) =>
+              row &&
+              typeof row === "object" &&
+              typeof row.id === "string"
+          )
+        );
+      }
+    } catch {
+      // 누적 성능판 저장소 오류는 예측 엔진과 완전히 분리.
+    }
+  }, []);
 
   function readableError(value: any, fallback: string) {
     if (!value) return fallback;
@@ -8529,6 +8732,314 @@ export default function Home() {
         row.status ===
         "HIT"
     ).length;
+
+  const currentBacktestPerformanceRows:
+    BacktestPerformanceRecord[] =
+      backtestValidationTruth &&
+      backtestResultRevealed
+        ? backtestValidatedRows
+            .map(
+              (row) => {
+                const pick =
+                  actualMarketPicks.find(
+                    (item) =>
+                      item.key ===
+                      row.key
+                  );
+
+                if (!pick) {
+                  return null;
+                }
+
+                const fixtureKey =
+                  String(
+                    matched?.fixtureId ??
+                    backtestValidationKey(
+                      selectedBetman
+                    ) ??
+                    selectedBetmanKey ??
+                    "unknown"
+                  );
+
+                const gameDateMs =
+                  selectedBetman
+                    ? gameTimeMs(
+                        selectedBetman
+                      )
+                    : NaN;
+
+                const probability =
+                  clamp(
+                    pick.probability,
+                    0,
+                    100
+                  );
+
+                const outcome =
+                  row.status ===
+                  "HIT"
+                    ? 1
+                    : 0;
+
+                const p =
+                  probability /
+                  100;
+
+                const realizedReturn =
+                  pick.odds !== null &&
+                  Number.isFinite(
+                    pick.odds
+                  ) &&
+                  pick.odds > 1
+                    ? row.status ===
+                        "HIT"
+                      ? pick.odds -
+                        1
+                      : -1
+                    : null;
+
+                const stage =
+                  analysisFactors.baseballAnalysisStage;
+
+                return {
+                  id:
+                    [
+                      fixtureKey,
+                      stage,
+                      pick.key,
+                    ].join("|"),
+                  fixtureKey,
+                  fixtureId:
+                    Number.isFinite(
+                      Number(
+                        matched?.fixtureId
+                      )
+                    )
+                      ? Number(
+                          matched?.fixtureId
+                        )
+                      : null,
+                  gameLabel:
+                    `${selectedBetman?.home ?? "-"} vs ${selectedBetman?.away ?? "-"}`,
+                  gameDateMs:
+                    Number.isFinite(
+                      gameDateMs
+                    )
+                      ? gameDateMs
+                      : null,
+                  capturedAt:
+                    Date.now(),
+
+                  stage,
+                  marketKey:
+                    pick.key,
+                  market:
+                    pick.market,
+                  predictedPick:
+                    pick.pick,
+                  actualLabel:
+                    row.actualLabel,
+
+                  probability,
+                  odds:
+                    pick.odds,
+                  expectedValue:
+                    pick.expectedValue,
+                  grade:
+                    pick.stageGradeLabel ??
+                    pick.valueGrade,
+
+                  status:
+                    row.status,
+
+                  realizedReturn,
+                  brierScore:
+                    Number(
+                      (
+                        (
+                          p -
+                          outcome
+                        ) **
+                        2
+                      ).toFixed(
+                        6
+                      )
+                    ),
+                } satisfies BacktestPerformanceRecord;
+              }
+            )
+            .filter(
+              (
+                row
+              ): row is BacktestPerformanceRecord =>
+                row !== null
+            )
+        : [];
+
+  const currentBacktestPerformanceSignature =
+    JSON.stringify(
+      currentBacktestPerformanceRows.map(
+        (row) => [
+          row.id,
+          row.status,
+          row.probability,
+          row.odds,
+          row.expectedValue,
+        ]
+      )
+    );
+
+  useEffect(() => {
+    if (
+      !backtestResultRevealed ||
+      !currentBacktestPerformanceRows.length
+    ) {
+      return;
+    }
+
+    setBacktestPerformanceRecords(
+      (previous) => {
+        const byId =
+          new Map<
+            string,
+            BacktestPerformanceRecord
+          >(
+            previous.map(
+              (row) => [
+                row.id,
+                row,
+              ]
+            )
+          );
+
+        for (
+          const row of currentBacktestPerformanceRows
+        ) {
+          byId.set(
+            row.id,
+            row
+          );
+        }
+
+        const next =
+          Array.from(
+            byId.values()
+          ).sort(
+            (a, b) =>
+              (
+                a.gameDateMs ??
+                a.capturedAt
+              ) -
+              (
+                b.gameDateMs ??
+                b.capturedAt
+              )
+          );
+
+        try {
+          window.localStorage.setItem(
+            BACKTEST_PERFORMANCE_STORAGE_KEY,
+            JSON.stringify(
+              next
+            )
+          );
+        } catch {
+          // 저장 실패가 분석에 영향을 주면 안 됨.
+        }
+
+        return next;
+      }
+    );
+  }, [
+    backtestResultRevealed,
+    currentBacktestPerformanceSignature,
+  ]);
+
+  const cumulativeBacktestSummary =
+    summarizeBacktestPerformance(
+      backtestPerformanceRecords
+    );
+
+  const cumulativeBacktestMarkets =
+    Array.from(
+      new Set(
+        backtestPerformanceRecords.map(
+          (row) =>
+            row.market
+        )
+      )
+    )
+      .map(
+        (market) => ({
+          market,
+          summary:
+            summarizeBacktestPerformance(
+              backtestPerformanceRecords.filter(
+                (row) =>
+                  row.market ===
+                  market
+              )
+            ),
+        })
+      )
+      .sort(
+        (a, b) =>
+          b.summary.count -
+          a.summary.count ||
+          a.market.localeCompare(
+            b.market
+          )
+      );
+
+  const cumulativeBacktestGrades =
+    Array.from(
+      new Set(
+        backtestPerformanceRecords.map(
+          (row) =>
+            row.grade
+        )
+      )
+    )
+      .map(
+        (grade) => ({
+          grade,
+          summary:
+            summarizeBacktestPerformance(
+              backtestPerformanceRecords.filter(
+                (row) =>
+                  row.grade ===
+                  grade
+              )
+            ),
+        })
+      )
+      .sort(
+        (a, b) =>
+          b.summary.count -
+          a.summary.count
+      );
+
+  const cumulativeBacktestGameCount =
+    new Set(
+      backtestPerformanceRecords.map(
+        (row) =>
+          row.fixtureKey
+      )
+    ).size;
+
+  function clearBacktestPerformance() {
+    setBacktestPerformanceRecords(
+      []
+    );
+
+    try {
+      window.localStorage.removeItem(
+        BACKTEST_PERFORMANCE_STORAGE_KEY
+      );
+    } catch {
+      // UI 기록 초기화 실패가 분석에 영향을 주면 안 됨.
+    }
+  }
 
   const betmanRuntimeDebug =
     safeBetmanMarketRuntime(
@@ -9749,7 +10260,7 @@ export default function Home() {
                 }}
               >
                 <b>백테스트 검증 준비 완료</b>
-                {" · "}아래 `V11.8.2.3 백테스트 결과 검증기`에서
+                {" · "}아래 `V11.9 백테스트 결과 검증기`에서
                 `예측 확정 · 실제 결과 검증 열기` 버튼을 누르면 결과를 공개할 수 있습니다.
               </div>
             )}
@@ -9819,7 +10330,7 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V11.8.2.3 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
+              <summary>V11.9 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
                   <h3>V11.7 계산 추적 · 데이터 가용성 + λ 교정</h3>
@@ -9840,7 +10351,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.8.2.3 의사결정 규칙</b><br />
+                    <b>V11.9 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -9851,7 +10362,7 @@ export default function Home() {
 
                   {currentSport === "야구" && backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.8.2.3 백테스트 안전장치 · 실제 SportsAPI 리소스 진단</h3>
+                      <h3>V11.9 백테스트 안전장치 · 실제 SportsAPI 리소스 진단</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -9950,7 +10461,7 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.8.2.3 SportsAPI 경기전 데이터 리소스 진단</h3>
+                      <h3>V11.9 SportsAPI 경기전 데이터 리소스 진단</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10160,7 +10671,7 @@ export default function Home() {
 
                   {currentSport === "야구" && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.8.2.3 야구 데이터 가용성 · 선발투수/라인업 복원</h3>
+                      <h3>V11.9 야구 데이터 가용성 · 선발투수/라인업 복원</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10324,7 +10835,7 @@ export default function Home() {
                           "0 2px 12px rgba(40,95,190,0.08)",
                       }}
                     >
-                      <h3>V11.8.2.3 백테스트 결과 검증기</h3>
+                      <h3>V11.9 백테스트 결과 검증기</h3>
 
                       <div
                         className="cards"
@@ -10513,6 +11024,299 @@ export default function Home() {
                             Form, λ, MarketPick 확률 계산에는 전달하지 않습니다.
                           </div>
                         </>
+                      )}
+                    </div>
+                  )}
+
+                  {currentSport === "야구" &&
+                    backtestMode && (
+                    <div
+                      className="section"
+                      style={{
+                        marginTop: 0,
+                        border:
+                          "1px solid #d8e2ef",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 8,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <h3 style={{ margin: 0 }}>
+                          V11.9 누적 백테스트 성능판
+                        </h3>
+
+                        <button
+                          className="btn light"
+                          onClick={
+                            clearBacktestPerformance
+                          }
+                          disabled={
+                            !backtestPerformanceRecords.length
+                          }
+                        >
+                          누적 기록 초기화
+                        </button>
+                      </div>
+
+                      <div className="cards" style={{ marginTop: 8 }}>
+                        <div className="card">
+                          누적 경기
+                          <b>
+                            {cumulativeBacktestGameCount}경기
+                          </b>
+                          <div className="small">
+                            같은 경기/단계/마켓은 최신 1건으로 갱신
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          검증 마켓
+                          <b>
+                            {cumulativeBacktestSummary.count}건
+                          </b>
+                          <div className="small">
+                            PENDING 제외
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          적중률
+                          <b>
+                            {cumulativeBacktestSummary.hitRate === null
+                              ? "-"
+                              : `${cumulativeBacktestSummary.hitRate.toFixed(1)}%`}
+                          </b>
+                          <div className="small">
+                            {cumulativeBacktestSummary.hitCount}
+                            {" / "}
+                            {cumulativeBacktestSummary.count}
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          실제 ROI
+                          <b>
+                            {cumulativeBacktestSummary.roi === null
+                              ? "-"
+                              : `${cumulativeBacktestSummary.roi >= 0 ? "+" : ""}${cumulativeBacktestSummary.roi.toFixed(1)}%`}
+                          </b>
+                          <div className="small">
+                            각 추천 1단위 동일 베팅 가정
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          평균 EV
+                          <b>
+                            {cumulativeBacktestSummary.averageExpectedValue === null
+                              ? "-"
+                              : `${cumulativeBacktestSummary.averageExpectedValue >= 0 ? "+" : ""}${cumulativeBacktestSummary.averageExpectedValue.toFixed(1)}%`}
+                          </b>
+                          <div className="small">
+                            예측 당시 EV
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          평균 Brier
+                          <b>
+                            {cumulativeBacktestSummary.averageBrier === null
+                              ? "-"
+                              : cumulativeBacktestSummary.averageBrier.toFixed(3)}
+                          </b>
+                          <div className="small">
+                            낮을수록 확률 calibration 우수
+                          </div>
+                        </div>
+                      </div>
+
+                      {backtestPerformanceRecords.length ? (
+                        <>
+                          <div
+                            style={{
+                              overflowX: "auto",
+                              marginTop: 10,
+                            }}
+                          >
+                            <div
+                              style={{
+                                minWidth: 610,
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns:
+                                    "120px 48px 64px 74px 64px 64px",
+                                  gap: 6,
+                                  padding: "6px 8px",
+                                  background: "#eef4fb",
+                                  borderRadius: "8px 8px 0 0",
+                                  fontSize: 9,
+                                  fontWeight: 900,
+                                }}
+                              >
+                                <div>마켓</div>
+                                <div>N</div>
+                                <div>적중률</div>
+                                <div>평균확률</div>
+                                <div>ROI</div>
+                                <div>Brier</div>
+                              </div>
+
+                              {cumulativeBacktestMarkets.map(
+                                ({
+                                  market,
+                                  summary,
+                                }) => (
+                                  <div
+                                    key={`cum-market-${market}`}
+                                    style={{
+                                      display: "grid",
+                                      gridTemplateColumns:
+                                        "120px 48px 64px 74px 64px 64px",
+                                      gap: 6,
+                                      padding: "6px 8px",
+                                      borderBottom:
+                                        "1px solid #e6edf5",
+                                      fontSize: 9,
+                                    }}
+                                  >
+                                    <div>
+                                      <b>{market}</b>
+                                    </div>
+                                    <div>
+                                      {summary.count}
+                                    </div>
+                                    <div>
+                                      {summary.hitRate === null
+                                        ? "-"
+                                        : `${summary.hitRate.toFixed(1)}%`}
+                                    </div>
+                                    <div>
+                                      {summary.averageProbability === null
+                                        ? "-"
+                                        : `${summary.averageProbability.toFixed(1)}%`}
+                                    </div>
+                                    <div
+                                      style={{
+                                        fontWeight: 800,
+                                        color:
+                                          summary.roi !== null &&
+                                          summary.roi >= 0
+                                            ? "#087a39"
+                                            : "#d33d3d",
+                                      }}
+                                    >
+                                      {summary.roi === null
+                                        ? "-"
+                                        : `${summary.roi >= 0 ? "+" : ""}${summary.roi.toFixed(1)}%`}
+                                    </div>
+                                    <div>
+                                      {summary.averageBrier === null
+                                        ? "-"
+                                        : summary.averageBrier.toFixed(3)}
+                                    </div>
+                                  </div>
+                                )
+                              )}
+                            </div>
+                          </div>
+
+                          <div
+                            style={{
+                              overflowX: "auto",
+                              marginTop: 10,
+                            }}
+                          >
+                            <div
+                              style={{
+                                minWidth: 520,
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns:
+                                    "120px 48px 64px 64px 64px",
+                                  gap: 6,
+                                  padding: "6px 8px",
+                                  background: "#f7f9fc",
+                                  borderRadius: "8px 8px 0 0",
+                                  fontSize: 9,
+                                  fontWeight: 900,
+                                }}
+                              >
+                                <div>등급</div>
+                                <div>N</div>
+                                <div>적중률</div>
+                                <div>평균 EV</div>
+                                <div>ROI</div>
+                              </div>
+
+                              {cumulativeBacktestGrades.map(
+                                ({
+                                  grade,
+                                  summary,
+                                }) => (
+                                  <div
+                                    key={`cum-grade-${grade}`}
+                                    style={{
+                                      display: "grid",
+                                      gridTemplateColumns:
+                                        "120px 48px 64px 64px 64px",
+                                      gap: 6,
+                                      padding: "6px 8px",
+                                      borderBottom:
+                                        "1px solid #e6edf5",
+                                      fontSize: 9,
+                                    }}
+                                  >
+                                    <div>
+                                      <b>{grade}</b>
+                                    </div>
+                                    <div>
+                                      {summary.count}
+                                    </div>
+                                    <div>
+                                      {summary.hitRate === null
+                                        ? "-"
+                                        : `${summary.hitRate.toFixed(1)}%`}
+                                    </div>
+                                    <div>
+                                      {summary.averageExpectedValue === null
+                                        ? "-"
+                                        : `${summary.averageExpectedValue >= 0 ? "+" : ""}${summary.averageExpectedValue.toFixed(1)}%`}
+                                    </div>
+                                    <div>
+                                      {summary.roi === null
+                                        ? "-"
+                                        : `${summary.roi >= 0 ? "+" : ""}${summary.roi.toFixed(1)}%`}
+                                    </div>
+                                  </div>
+                                )
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="notice" style={{ margin: "10px 0 0" }}>
+                            누적 결과는 브라우저 localStorage에만 저장되며 예측 엔진 입력에는 사용하지 않습니다.
+                            Brier Score는 각 추천 선택지를 이진 사건으로 보고 계산합니다.
+                            ROI는 검증 가능한 각 추천에 1단위를 동일하게 베팅했다고 가정합니다.
+                            표본이 적은 구간의 수치로 모델 계수를 즉시 조정하지 않습니다.
+                          </div>
+                        </>
+                      ) : (
+                        <div className="notice" style={{ margin: "10px 0 0" }}>
+                          아직 누적 검증 기록이 없습니다.
+                          과거 경기에서 `예측 확정 · 실제 결과 검증 열기`를 누르면 검증 가능한 마켓만 자동 누적됩니다.
+                        </div>
                       )}
                     </div>
                   )}
