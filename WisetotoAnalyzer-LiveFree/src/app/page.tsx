@@ -1951,6 +1951,279 @@ function applyBaseballStageGate(
 }
 
 
+
+function baseballPreUncertaintyWeight(
+  market: any,
+  factors: AnalysisFactors
+) {
+  if (
+    factors.baseballAnalysisStage !==
+    "PRE"
+  ) {
+    return 0;
+  }
+
+  const betName =
+    String(
+      market?.betName ??
+      market?.displayName ??
+      market?.betTypeName ??
+      ""
+    );
+
+  const type =
+    String(
+      market?.type ??
+      ""
+    ).toLowerCase();
+
+  const combined =
+    `${betName} ${String(
+      market?.betTypeName ??
+      ""
+    )}`;
+
+  const isFirstHalf =
+    /전반|1st\s*half|first\s*half/i.test(
+      combined
+    );
+
+  const isSum =
+    /SUM|홀짝|odd|even/i.test(
+      combined
+    );
+
+  const isWin1Lose =
+    /승1패|1점차/i.test(
+      combined
+    );
+
+  const isTotal =
+    type === "total" ||
+    /U\/O|언더|오버|over|under/i.test(
+      combined
+    );
+
+  const isHandicap =
+    type === "handicap" ||
+    /핸디|handicap/i.test(
+      combined
+    );
+
+  let base =
+    0.18;
+
+  if (isHandicap) {
+    base = 0.22;
+  }
+
+  if (isTotal) {
+    base = 0.28;
+  }
+
+  if (isWin1Lose) {
+    base = 0.30;
+  }
+
+  if (isSum) {
+    base = 0.32;
+  }
+
+  if (isFirstHalf) {
+    base =
+      Math.max(
+        base,
+        0.34
+      );
+  }
+
+  /*
+   * 데이터 완성도가 PRE 기본 30%보다 높아지면
+   * 같은 PRE 안에서도 페널티가 조금씩 줄어듭니다.
+   */
+  const incompleteness =
+    clamp(
+      (
+        100 -
+        factors.baseballDataCompleteness
+      ) /
+        70,
+      0,
+      1
+    );
+
+  return Number(
+    (
+      base *
+      (
+        0.65 +
+        incompleteness *
+          0.35
+      )
+    ).toFixed(2)
+  );
+}
+
+function applyBaseballPreUncertainty(
+  pick: MarketPick,
+  market: any,
+  factors: AnalysisFactors
+): MarketPick {
+  if (
+    factors.baseballAnalysisStage !==
+    "PRE"
+  ) {
+    return {
+      ...pick,
+      preUncertaintyApplied:
+        false,
+      preProbabilityBefore:
+        pick.probability,
+      preUncertaintyWeight:
+        0,
+      preUncertaintyTarget:
+        null,
+    };
+  }
+
+  const weight =
+    baseballPreUncertaintyWeight(
+      market,
+      factors
+    );
+
+  const target =
+    pick.marketProbability !== null &&
+    Number.isFinite(
+      pick.marketProbability
+    )
+      ? pick.marketProbability
+      : 50;
+
+  const before =
+    pick.probability;
+
+  const adjustedProbability =
+    Number(
+      clamp(
+        before *
+          (1 - weight) +
+        target *
+          weight,
+        1,
+        99
+      ).toFixed(1)
+    );
+
+  const edge =
+    pick.marketProbability === null
+      ? null
+      : Number(
+          (
+            adjustedProbability -
+            pick.marketProbability
+          ).toFixed(1)
+        );
+
+  const ev =
+    betExpectedValue(
+      adjustedProbability,
+      pick.odds
+    );
+
+  /*
+   * PRE는 선발 0/2·라인업 미발표 상태이므로
+   * 확률 수축과 별도로 confidence도 감점합니다.
+   */
+  const confidencePenalty =
+    6 +
+    weight *
+      24;
+
+  const confidence =
+    Number(
+      clamp(
+        pick.confidenceScore -
+          confidencePenalty,
+        28,
+        84
+      ).toFixed(1)
+    );
+
+  const valueGradeRaw =
+    evaluateValueGrade({
+      odds:
+        pick.odds,
+      expectedValue:
+        ev.expectedValue,
+      edge,
+      confidence,
+      decisionRiskScore:
+        pick.decisionRiskScore,
+      decisionRiskReason:
+        pick.decisionRiskReason,
+    });
+
+  const valueGrade =
+    applyBaseballStageGate(
+      valueGradeRaw,
+      factors
+    );
+
+  const recScore =
+    recommendationScore(
+      adjustedProbability,
+      edge,
+      confidence
+    );
+
+  return {
+    ...pick,
+    probability:
+      adjustedProbability,
+    edge,
+    breakEvenProbability:
+      ev.breakEvenProbability,
+    expectedValue:
+      ev.expectedValue,
+
+    valueGrade:
+      valueGrade.grade,
+    valueGradeScore:
+      valueGrade.score,
+    valueGradeReason:
+      `PRE 불확실성 ${(weight * 100).toFixed(0)}% 보정 · ${valueGrade.reason}`,
+    stageGradeLabel:
+      valueGrade.stageGradeLabel,
+
+    confidenceScore:
+      confidence,
+    confidenceGrade:
+      confidenceGrade(
+        confidence
+      ),
+    recommendationScore:
+      Number(
+        recScore.toFixed(1)
+      ),
+
+    preUncertaintyApplied:
+      true,
+    preProbabilityBefore:
+      before,
+    preUncertaintyWeight:
+      weight,
+    preUncertaintyTarget:
+      Number(
+        target.toFixed(1)
+      ),
+
+    detail:
+      `${pick.detail} · PRE 불확실성 ${(weight * 100).toFixed(0)}% → ${target.toFixed(1)}% 기준 수축`,
+  };
+}
+
+
 function baseballPreSampleStrength(input: {
   homePlayed: number;
   awayPlayed: number;
@@ -3482,6 +3755,12 @@ type MarketPick = {
   confidenceScore: number;
   confidenceGrade: string;
   recommendationScore: number;
+
+  preUncertaintyApplied?: boolean;
+  preProbabilityBefore?: number | null;
+  preUncertaintyWeight?: number;
+  preUncertaintyTarget?: number | null;
+
   detail: string;
 };
 
@@ -4100,12 +4379,14 @@ function buildSignalConflict(
 
   const label =
     score >= 60
-      ? "강한 신호 충돌"
+      ? "충돌 위험 매우 높음"
       : score >= 35
-        ? "신호 충돌 주의"
+        ? "충돌 위험 높음"
         : score >= 15
-          ? "경미한 충돌"
-          : "신호 일치";
+          ? "충돌 위험 보통"
+          : score > 0
+            ? "충돌 위험 낮음"
+            : "충돌 없음";
 
   return {
     score:
@@ -4547,7 +4828,7 @@ function evaluateValueGrade(input: {
     return {
       grade: "STRONG VALUE" as ValueGrade,
       score: Number(score.toFixed(1)),
-      reason: "EV·엣지·신뢰도·신호 일치 우수",
+      reason: "EV·엣지·신뢰도 우수 · 신호 충돌 낮음",
     };
   }
 
@@ -5351,6 +5632,37 @@ function buildActualMarketPicks(
         detail: "SportsAPI Form/H2H 기반",
       });
     }
+  }
+
+  if (
+    sport === "야구" &&
+    factors.baseballAnalysisStage ===
+      "PRE"
+  ) {
+    const marketByKey =
+      new Map(
+        game.markets.map(
+          (market: any, index: number) => [
+            marketStableKey(
+              market,
+              index
+            ),
+            market,
+          ]
+        )
+      );
+
+    return result.map(
+      (pick) =>
+        applyBaseballPreUncertainty(
+          pick,
+          marketByKey.get(
+            pick.key
+          ) ??
+          null,
+          factors
+        )
+    );
   }
 
   return result;
@@ -8429,7 +8741,7 @@ export default function Home() {
                           : "#07884a",
                   }}
                 >
-                  {currentSignalConflict.label}
+                  충돌 위험
                   {" · "}
                   {currentSignalConflict.score.toFixed(0)}
                 </div>
@@ -8449,12 +8761,12 @@ export default function Home() {
               {actualMarketPicks.length ? (
                 <div className="compactMarket">
                   <div className="compactMarketHead">
-                    <div>유형</div><div>추천</div><div className="cmNum">보정</div><div className="cmNum">시장</div><div className="cmNum">엣지</div><div className="cmNum">EV</div><div className="cmNum">최종 등급</div>
+                    <div>유형</div><div>추천</div><div className="cmNum">최종</div><div className="cmNum">시장</div><div className="cmNum">엣지</div><div className="cmNum">EV</div><div className="cmNum">최종 등급</div>
                   </div>
                   {actualMarketPicks.map((pick) => {
                     const isBest = bestActualPick?.key === pick.key;
                     return (
-                      <div className={`compactMarketRow ${isBest ? "bestRow" : ""}`} key={pick.key} title={`${pick.detail} · 홈팀 기준 핸디 · 원모델 ${pick.rawProbability.toFixed(1)}% · 보정 ${pick.probability.toFixed(1)}% · EV ${pick.expectedValue === null ? "-" : pick.expectedValue.toFixed(1) + "%"} · ${pick.valueGrade} · ${pick.valueGradeReason}`}>
+                      <div className={`compactMarketRow ${isBest ? "bestRow" : ""}`} key={pick.key} title={`${pick.detail} · 홈팀 기준 핸디 · 원모델 ${pick.rawProbability.toFixed(1)}% · 데이터보정 ${pick.preProbabilityBefore === null || pick.preProbabilityBefore === undefined ? pick.probability.toFixed(1) : pick.preProbabilityBefore.toFixed(1)}% · 최종 ${pick.probability.toFixed(1)}% · EV ${pick.expectedValue === null ? "-" : pick.expectedValue.toFixed(1) + "%"} · ${pick.valueGrade} · ${pick.valueGradeReason}`}>
                         <div className="cmName">{pick.market}</div>
                         <div className="cmPick">{pick.pick}</div>
                         <div className="cmNum"><b>{pick.probability.toFixed(1)}%</b></div>
@@ -8522,7 +8834,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.5 의사결정 규칙</b><br />
+                    <b>V11.6 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -8533,7 +8845,7 @@ export default function Home() {
 
                   {currentSport === "야구" && backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.5 백테스트 안전장치 · PRE 소표본 안정화</h3>
+                      <h3>V11.6 백테스트 안전장치 · PRE 불확실성 보정</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -8667,7 +8979,7 @@ export default function Home() {
                           style={{ marginTop: 7 }}
                         >
                           <div className="card">
-                            V11.5 PRE 안정화
+                            V11.6 PRE 안정화
                             <b>
                               {analysisFactors.baseballPreModelApplied
                                 ? "적용"
@@ -8696,6 +9008,16 @@ export default function Home() {
                             </b>
                             <div className="small">
                               점수총합은 유지 · 승패 방향만 약하게 보정
+                            </div>
+                          </div>
+
+                          <div className="card">
+                            V11.6 확률 페널티
+                            <b>
+                              18~34%
+                            </b>
+                            <div className="small">
+                              승패 18 · 핸디 22 · U/O 28 · 승1패 30 · SUM 32 · 전반 최대 34
                             </div>
                           </div>
 
@@ -8764,9 +9086,10 @@ export default function Home() {
                       {!analysisFactors.pitcherDataUsed && (
                         <div className="notice" style={{ margin: "8px 0" }}>
                           현재는 사전 분석 단계입니다. 선발/라인업이 없으면 임의 투수 수치를 만들지 않습니다.
-                          V11.5는 작은 최근 표본을 야구 중립 λ 쪽으로 추가 수축하고, Betman 공정 승패확률은 총득점을 바꾸지 않는 약한 방향 prior로만 사용합니다.
-                          VALUE 조건을 만족해도 PRE VALUE 후보로만 표시하며 최고 가치픽에는 올리지 않습니다.
-                          실제 선발 수치가 들어오면 PRE 전용 안정화보다 선발 보정 구조가 우선됩니다.
+                          V11.5의 소표본 λ 안정화에 더해 V11.6은 PRE 마켓확률을 시장 공정확률(없으면 50%) 쪽으로 추가 수축합니다.
+                          승패보다 승1패·U/O·SUM·전반 마켓에 더 큰 불확실성 페널티를 적용하고 confidence도 함께 낮춥니다.
+                          PRE에서는 VALUE 승격을 허용하지 않고 WATCH/PRE VALUE까지만 표시합니다.
+                          실제 선발·라인업이 들어오면 이 PRE 확률 페널티는 자동 해제됩니다.
                         </div>
                       )}
                     </div>
@@ -9084,7 +9407,7 @@ export default function Home() {
                       <div style={{ minWidth: 620 }}>
                         <div style={{
                           display: "grid",
-                          gridTemplateColumns: "82px 56px 56px 56px 56px 56px 56px 92px",
+                          gridTemplateColumns: "78px 52px 52px 58px 58px 54px 54px 54px 88px",
                           gap: 6,
                           fontSize: 9,
                           fontWeight: 900,
@@ -9093,7 +9416,7 @@ export default function Home() {
                           background: "#f1f5f9",
                           borderRadius: 8,
                         }}>
-                          <div>마켓</div><div>원모델</div><div>시장</div><div>보정</div><div>손익분기</div><div>엣지</div><div>EV</div><div>등급</div>
+                          <div>마켓</div><div>원모델</div><div>시장</div><div>데이터보정</div><div>PRE보정</div><div>손익분기</div><div>엣지</div><div>EV</div><div>등급</div>
                         </div>
 
                         {actualMarketPicks.map((pick) => (
@@ -9101,7 +9424,7 @@ export default function Home() {
                             key={`trace-${pick.key}`}
                             style={{
                               display: "grid",
-                              gridTemplateColumns: "82px 56px 56px 56px 56px 56px 56px 92px",
+                              gridTemplateColumns: "78px 52px 52px 58px 58px 54px 54px 54px 88px",
                               gap: 6,
                               fontSize: 9,
                               padding: "5px 6px",
@@ -9111,7 +9434,19 @@ export default function Home() {
                             <div><b>{pick.market}</b></div>
                             <div>{pick.rawProbability.toFixed(1)}%</div>
                             <div>{pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`}</div>
-                            <div><b>{pick.probability.toFixed(1)}%</b></div>
+                            <div>
+                              {pick.preProbabilityBefore === null || pick.preProbabilityBefore === undefined
+                                ? `${pick.probability.toFixed(1)}%`
+                                : `${pick.preProbabilityBefore.toFixed(1)}%`}
+                            </div>
+                            <div>
+                              <b>{pick.probability.toFixed(1)}%</b>
+                              {pick.preUncertaintyApplied && (
+                                <div style={{ color: "#64748b", fontSize: 8 }}>
+                                  -{((pick.preUncertaintyWeight ?? 0) * 100).toFixed(0)}%
+                                </div>
+                              )}
+                            </div>
                             <div>{pick.breakEvenProbability === null ? "-" : `${pick.breakEvenProbability.toFixed(1)}%`}</div>
                             <div style={{
                               color: pick.edge !== null && pick.edge >= 0 ? "#07884a" : "#d33d3d",
@@ -9151,7 +9486,7 @@ export default function Home() {
                           : "#f8fafc",
                     }}
                   >
-                    <b>신호 충돌 진단: {currentSignalConflict.label} · {currentSignalConflict.score.toFixed(0)}/100</b>
+                    <b>신호 충돌 진단: 충돌 위험 {currentSignalConflict.score.toFixed(0)}/100 · {currentSignalConflict.label}</b>
                     <br />
                     승패 시장 홈 {currentSignalConflict.marketHome === null ? "-" : `${currentSignalConflict.marketHome.toFixed(1)}%`}
                     {" · "}원정 {currentSignalConflict.marketAway === null ? "-" : `${currentSignalConflict.marketAway.toFixed(1)}%`}
