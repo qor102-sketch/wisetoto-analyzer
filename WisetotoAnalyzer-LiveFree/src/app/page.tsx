@@ -6474,9 +6474,6 @@ function safePregameStructureDiagnostic(
   const blockedKey =
     /score|result|winner|stat|statistics|boxscore|final|runsallowed|earnedrun|hitallowed|pitchcount|inningresult/i;
 
-  const interestingPath =
-    /lineup|starter|starting|pitcher|player|roster|batter|athlete|person|position|order|batting|startingnine|startingxi|home|away|team/i;
-
   const visit = (
     value: any,
     path: string,
@@ -6590,19 +6587,37 @@ function safePregameStructureDiagnostic(
         orderRaw
       );
 
-    const isCandidate =
-      interestingPath.test(
+    const playerPath =
+      /lineup|starter|starting|pitcher|player|roster|batter|athlete|person|position|order|batting/i.test(
         path
-      ) ||
-      Boolean(
-        candidateName
-      ) ||
-      Boolean(
-        role
-      ) ||
-      Boolean(
-        position
       );
+
+    const playerSignal =
+      Boolean(
+        value?.player ||
+        value?.athlete ||
+        value?.person ||
+        value?.playerId ||
+        value?.athleteId ||
+        value?.personId ||
+        value?.playerName ||
+        value?.athleteName ||
+        value?.personName ||
+        role ||
+        position ||
+        Number.isFinite(order)
+      );
+
+    const teamOnlyPath =
+      /(?:^|\.)(home|away|team|league|season|venue|fixture|recentSummary)(?:\.|\[|$)/i.test(
+        path
+      ) &&
+      !playerPath;
+
+    const isCandidate =
+      playerPath &&
+      playerSignal &&
+      !teamOnlyPath;
 
     if (
       isCandidate &&
@@ -6611,7 +6626,6 @@ function safePregameStructureDiagnostic(
         Number.isFinite(id) ||
         role ||
         position ||
-        side ||
         Number.isFinite(order)
       )
     ) {
@@ -8754,6 +8768,11 @@ export default function Home() {
     matched?.debug?.lineups ??
     null;
 
+  const sportsApiRuntimeDebug =
+    matched?.detailDebug?.selected?.sportsApiRuntime ??
+    matched?.debug?.sportsApiRuntime ??
+    null;
+
   const currentSignalConflict =
     buildSignalConflict(
       betman.matched,
@@ -9730,7 +9749,7 @@ export default function Home() {
                 }}
               >
                 <b>백테스트 검증 준비 완료</b>
-                {" · "}아래 `V11.8.1 백테스트 결과 검증기`에서
+                {" · "}아래 `V11.8.2.1 백테스트 결과 검증기`에서
                 `예측 확정 · 실제 결과 검증 열기` 버튼을 누르면 결과를 공개할 수 있습니다.
               </div>
             )}
@@ -9800,7 +9819,7 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V11.8.1 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
+              <summary>V11.8.2.1 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
                   <h3>V11.7 계산 추적 · 데이터 가용성 + λ 교정</h3>
@@ -9821,7 +9840,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.8.1 의사결정 규칙</b><br />
+                    <b>V11.8.2.1 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -9832,7 +9851,7 @@ export default function Home() {
 
                   {currentSport === "야구" && backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.8.1 백테스트 안전장치 · 공식 lineups 경기전 복원</h3>
+                      <h3>V11.8.2.1 백테스트 안전장치 · 실제 SportsAPI 리소스 진단</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -9931,9 +9950,53 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.8.1 과거 경기전 선발/라인업 복원 진단</h3>
+                      <h3>V11.8.2.1 SportsAPI 경기전 데이터 리소스 진단</h3>
 
                       <div className="cards">
+                        <div className="card">
+                          SportsAPI BASE
+                          <b>
+                            {sportsApiRuntimeDebug?.baseUrl ?? "-"}
+                          </b>
+                          <div className="small">
+                            현재 서버 실제 base URL
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          Fixture 상세 경로
+                          <b>
+                            {sportsApiRuntimeDebug?.fixtureDetailPath ?? "-"}
+                          </b>
+                          <div className="small">
+                            {sportsApiRuntimeDebug?.fixtureDetailUrl ?? "-"}
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          lineups 경로
+                          <b>
+                            {officialLineupsDebug?.status ?? "-"}
+                          </b>
+                          <div className="small">
+                            {sportsApiRuntimeDebug?.lineupsPath ??
+                              officialLineupsDebug?.path ??
+                              "-"}
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          Fixture 실제 key
+                          <b>
+                            {sportsApiRuntimeDebug?.selectedFixtureTopKeys?.length ?? 0}개
+                          </b>
+                          <div className="small">
+                            {(sportsApiRuntimeDebug?.selectedFixtureTopKeys ?? [])
+                              .slice(0, 10)
+                              .join(", ") || "-"}
+                          </div>
+                        </div>
+
                         <div className="card">
                           Fixture 상세 응답
                           <b>
@@ -9977,12 +10040,12 @@ export default function Home() {
                         </div>
 
                         <div className="card">
-                          선수/라인업 후보
+                          실제 선수 구조 후보
                           <b>
                             {pregameAudit?.candidateCount ?? 0}개
                           </b>
                           <div className="small">
-                            starter/player/roster/order 관련 path 탐색
+                            팀/리그/fixture 오탐 제거 후 player 구조만
                           </div>
                         </div>
 
@@ -10080,22 +10143,24 @@ export default function Home() {
                         </div>
                       ) : (
                         <div className="notice" style={{ margin: "8px 0 0" }}>
-                          현재 Fixture 상세 응답에서 안전하게 식별할 수 있는 선발/라인업 후보 path를 찾지 못했습니다.
-                          이 경우 SportsAPI의 별도 lineup/roster endpoint가 필요한지 확인해야 합니다.
+                          현재 수신된 Fixture/상세 데이터에서는 실제 선수 객체로 식별 가능한 path를 찾지 못했습니다.
+                          이 상태에서는 선발/라인업을 임의 복원하지 않으며, SportsAPI가 별도 선수/로스터 리소스를 제공하는지 실제 응답 기준으로 추가 확인해야 합니다.
                         </div>
                       )}
 
                       <div className="notice" style={{ margin: "8px 0 0" }}>
-                        이 진단은 과거 경기의 선발·라인업 복원을 위한 구조 확인용입니다.
+                        V11.8.2는 endpoint를 더 추측하지 않습니다.
+                        현재 서버가 실제 호출 중인 SportsAPI base/path와 Fixture의 실제 key 구조만 진단합니다.
                         score/result/winner/statistics/boxscore 등 경기 결과 관련 필드는 탐색 단계에서 제외하며,
-                        확인된 경기전 선수 정보만 다음 단계에서 STARTER/LINEUP/READY 입력으로 연결합니다.
+                        팀·리그·시즌·fixture 객체를 선수 후보로 오인하지 않도록 필터링했습니다.
+                        실제 player/starter/roster/lineup 구조가 확인된 경우에만 다음 단계에서 분석 엔진에 연결합니다.
                       </div>
                     </div>
                   )}
 
                   {currentSport === "야구" && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.8.1 야구 데이터 가용성 · 선발투수/라인업 복원</h3>
+                      <h3>V11.8.2.1 야구 데이터 가용성 · 선발투수/라인업 복원</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10259,7 +10324,7 @@ export default function Home() {
                           "0 2px 12px rgba(40,95,190,0.08)",
                       }}
                     >
-                      <h3>V11.8.1 백테스트 결과 검증기</h3>
+                      <h3>V11.8.2.1 백테스트 결과 검증기</h3>
 
                       <div
                         className="cards"
