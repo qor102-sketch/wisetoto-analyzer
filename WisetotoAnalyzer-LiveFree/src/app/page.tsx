@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V12_2_NAVER_TEAM_MATCH_20260825
+// DEPLOY_MARKER_V12_3_NAVER_PREVIEW_PRIORITY_FIX_20260825
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -10266,7 +10266,7 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V12.2 네이버스포츠 경기 매칭 + 선발/라인업 복원</h3>
+                      <h3>V12.3 네이버스포츠 경기전 데이터 실제 반영</h3>
 
                       <div className="cards">
                         <div className="card">
