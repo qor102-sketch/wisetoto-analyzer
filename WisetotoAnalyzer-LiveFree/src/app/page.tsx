@@ -920,25 +920,73 @@ function scoreNumber(...values: any[]) {
   return null;
 }
 
-function fixtureTeamId(fixture: any, side: "home" | "away") {
-  return Number(
-    fixture?.[side]?.id ??
-    fixture?.teams?.[side]?.id ??
-    fixture?.participants?.find?.((x: any) =>
-      String(x?.position ?? x?.type ?? "").toLowerCase() === side
-    )?.id
+function recentTeamId(
+  team: RecentTeam | null | undefined
+) {
+  const id = Number(
+    (team as any)?.teamId ??
+    (team as any)?.id ??
+    (team as any)?.team?.id ??
+    (team as any)?.club?.id ??
+    (team as any)?.participant?.id
   );
+  return Number.isFinite(id) && id > 0 ? id : null;
+}
+
+function recentTeamName(
+  team: RecentTeam | null | undefined
+) {
+  const name = String(
+    (team as any)?.teamName ??
+    (team as any)?.name ??
+    (team as any)?.team?.name ??
+    (team as any)?.club?.name ??
+    (team as any)?.participant?.name ??
+    ""
+  ).trim();
+  return name || null;
+}
+
+function fixtureParticipant(
+  fixture: any,
+  side: "home" | "away"
+) {
+  const participants = Array.isArray(fixture?.participants)
+    ? fixture.participants
+    : Array.isArray(fixture?.teams)
+      ? fixture.teams
+      : [];
+
+  const wanted = side === "home"
+    ? ["home", "host", "local", "1"]
+    : ["away", "visitor", "guest", "2"];
+
+  return participants.find((item: any) => {
+    const marker = String(
+      item?.position ?? item?.type ?? item?.side ??
+      item?.homeAway ?? item?.location ?? ""
+    ).toLowerCase().replace(/[^a-z0-9]/g, "");
+    return wanted.includes(marker);
+  }) ?? null;
+}
+
+function fixtureTeamId(fixture: any, side: "home" | "away") {
+  const participant = fixtureParticipant(fixture, side);
+  const sideTeam = side === "home" ? fixture?.homeTeam : fixture?.awayTeam;
+  const id = Number(
+    fixture?.[side]?.id ?? sideTeam?.id ?? fixture?.teams?.[side]?.id ??
+    fixture?.fixture?.[side]?.id ?? participant?.id ?? participant?.team?.id
+  );
+  return Number.isFinite(id) && id > 0 ? id : NaN;
 }
 
 function fixtureTeamName(fixture: any, side: "home" | "away") {
+  const participant = fixtureParticipant(fixture, side);
+  const sideTeam = side === "home" ? fixture?.homeTeam : fixture?.awayTeam;
   return String(
-    fixture?.[side]?.name ??
-    fixture?.teams?.[side]?.name ??
-    fixture?.participants?.find?.((x: any) =>
-      String(x?.position ?? x?.type ?? "").toLowerCase() === side
-    )?.name ??
-    ""
-  );
+    fixture?.[side]?.name ?? sideTeam?.name ?? fixture?.teams?.[side]?.name ??
+    fixture?.fixture?.[side]?.name ?? participant?.name ?? participant?.team?.name ?? ""
+  ).trim();
 }
 
 function fixtureFinalScore(fixture: any) {
@@ -976,24 +1024,17 @@ function sameTeam(
   fixture: any,
   side: "home" | "away"
 ) {
-  const teamId = Number(team?.teamId);
+  const teamId = recentTeamId(team);
   const candidateId = fixtureTeamId(fixture, side);
 
-  if (
-    Number.isFinite(teamId) &&
-    Number.isFinite(candidateId) &&
-    teamId > 0 &&
-    candidateId > 0
-  ) {
+  if (teamId !== null && Number.isFinite(candidateId) && candidateId > 0) {
     return teamId === candidateId;
   }
 
-  return (
-    teamSimilarity(
-      team?.teamName,
-      fixtureTeamName(fixture, side)
-    ) >= 0.72
-  );
+  return teamSimilarity(
+    recentTeamName(team),
+    fixtureTeamName(fixture, side)
+  ) >= 0.62;
 }
 
 function weightedAverageRows(
@@ -3185,6 +3226,24 @@ function stageRank(
         : 4;
 }
 
+function marketStableKey(
+  market: any,
+  index: number
+) {
+  const betName = String(
+    market?.betName ?? market?.displayName ?? market?.betTypeName ?? ""
+  );
+  const line = marketNumber(market);
+  const seq = Number(market?.matchSeq ?? market?.gameSeq ?? market?.seq);
+  if (Number.isFinite(seq) && seq > 0) return `seq:${seq}`;
+
+  const explicit = market?.betId ?? market?.betTypeId ?? null;
+  if (explicit !== null && explicit !== undefined && String(explicit) !== "") {
+    return `id:${String(explicit)}`;
+  }
+  return `${betName}|${line ?? ""}|${index}`;
+}
+
 function buildMarketConnectionDiagnostics(
   game: BetmanMatch | null | undefined,
   picks: MarketPick[]
@@ -3219,12 +3278,7 @@ function buildMarketConnectionDiagnostics(
           market
         );
 
-      const key =
-        String(
-          market?.betId ??
-          market?.betTypeId ??
-          `${betName}|${line ?? ""}|${index}`
-        );
+      const key = marketStableKey(market, index);
 
       const selections =
         Array.isArray(
@@ -3393,6 +3447,12 @@ function selectionIdentity(selection: any) {
   if (/^(패|원정|away)$/i.test(label) || label.includes("away")) return "away";
   if (/^(①|1)$/i.test(label)) return "draw";
 
+  if (side === "over") return "over";
+  if (side === "under") return "under";
+  if (side === "odd") return "odd";
+  if (side === "even") return "even";
+  if (side === "home") return "home";
+  if (side === "away") return "away";
   if (side === "win") return "home";
   if (side === "draw") return "draw";
   if (side === "lose") return "away";
@@ -4268,7 +4328,7 @@ function buildActualMarketPicks(
     const type = String(market?.type ?? "").toLowerCase();
     const line = marketNumber(market);
     const label = marketLabelStandalone(market);
-    const key = String(market?.betId ?? market?.betTypeId ?? `${betName}|${line ?? ""}|${index}`);
+    const key = marketStableKey(market, index);
     const marketFair = fairMarketProbabilities(market);
 
     const decisionRisk =
@@ -4951,6 +5011,8 @@ type BacktestAudit = {
   keptAwayFixtures: number;
   scoredHomeFixtures: number;
   scoredAwayFixtures: number;
+  matchedHomeFixtures: number;
+  matchedAwayFixtures: number;
   h2hPolicy: string;
   resultFieldsStripped: boolean;
   statisticsBlocked: boolean;
@@ -5046,14 +5108,22 @@ function sanitizeRecentTeamForBacktest(
         )
     );
 
+  const normalizedTeamId = recentTeamId(team);
+  const normalizedTeamName = recentTeamName(team);
+  const normalizedTeam = {
+    ...team,
+    teamId: normalizedTeamId ?? (team as any)?.teamId ?? null,
+    teamName: normalizedTeamName ?? (team as any)?.teamName ?? null,
+    fixtures,
+  } as RecentTeam;
+
   return {
     team: {
-      ...team,
-      fixtures,
+      ...normalizedTeam,
       // 현재시점 aggregate Form은 절대 재사용하지 않음.
       form:
         rebuildHistoricalForm(
-          team,
+          normalizedTeam,
           fixtures
         ),
     } as RecentTeam,
@@ -5064,10 +5134,7 @@ function sanitizeRecentTeamForBacktest(
       fixtures.length,
     scored:
       fixtures.filter(
-        (fixture: any) =>
-          fixtureFinalScore(
-            fixture
-          ) !== null
+        (fixture: any) => fixtureFinalScore(fixture) !== null
       ).length,
   };
 }
@@ -5391,6 +5458,10 @@ function sanitizeMatchedForBacktest(
         home.scored,
       scoredAwayFixtures:
         away.scored,
+      matchedHomeFixtures:
+        Number(home.team?.form?.played ?? 0),
+      matchedAwayFixtures:
+        Number(away.team?.form?.played ?? 0),
       h2hPolicy:
         h2h.policy,
       resultFieldsStripped: true,
@@ -7318,7 +7389,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.3.4 의사결정 규칙</b><br />
+                    <b>V11.3.6 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -7329,7 +7400,7 @@ export default function Home() {
 
                   {currentSport === "야구" && backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.3.4 백테스트 안전장치 · 과거 Form/H2H 복원</h3>
+                      <h3>V11.3.6 백테스트 안전장치 · Form 집계 + 8마켓 연결</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -7363,6 +7434,8 @@ export default function Home() {
                             <br />
                             점수해석 홈 {backtestAudit?.scoredHomeFixtures ?? "-"}
                             {" · "}원정 {backtestAudit?.scoredAwayFixtures ?? "-"}
+                            {" · "}Form집계 홈 {backtestAudit?.matchedHomeFixtures ?? "-"}
+                            {" / "}원정 {backtestAudit?.matchedAwayFixtures ?? "-"}
                           </div>
                         </div>
 
