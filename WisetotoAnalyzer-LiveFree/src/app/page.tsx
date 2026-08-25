@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V12_4_NAVER_PREVIEW_SCHEMA_20260825
+// DEPLOY_MARKER_V12_4_1_NAVER_RESULT_WRAPPER_FIX_20260825
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -10266,7 +10266,7 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V12.4 네이버 Preview JSON 구조 진단</h3>
+                      <h3>V12.4.1 네이버 Preview result-wrapper 구조 진단</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10422,7 +10422,7 @@ export default function Home() {
 
                           <div className="notice" style={{ margin: "8px 0 0" }}>
                             이 표는 네이버 Preview 응답의 구조만 진단합니다.
-                            score/result/winner/statistics/boxscore/final 계열은 탐색에서 제외하며,
+                            score/winner/statistics/boxscore/final-score 계열은 탐색에서 제외하며,
                             아직 이 path들을 선발/라인업 분석값으로 자동 연결하지 않습니다.
                           </div>
                         </div>
