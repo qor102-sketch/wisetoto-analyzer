@@ -5073,6 +5073,223 @@ function marketLabelStandalone(market: any) {
   return preferred || "기타";
 }
 
+
+type RecentFixtureShape = {
+  keys: string[];
+  topLevelIds: Array<{
+    key: string;
+    value: number;
+  }>;
+  topLevelNames: Array<{
+    key: string;
+    value: string;
+  }>;
+  nestedObjects: Array<{
+    path: string;
+    keys: string[];
+    id: number | null;
+    name: string | null;
+    marker: string | null;
+  }>;
+};
+
+function safeRecentFixtureShape(
+  fixture: any
+): RecentFixtureShape | null {
+  if (
+    !fixture ||
+    typeof fixture !== "object"
+  ) {
+    return null;
+  }
+
+  const result: RecentFixtureShape = {
+    keys:
+      Object.keys(fixture).slice(0, 40),
+    topLevelIds: [],
+    topLevelNames: [],
+    nestedObjects: [],
+  };
+
+  for (const [key, value] of Object.entries(fixture)) {
+    const normalized =
+      String(key)
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+
+    if (
+      /(^id$|teamid$|homeid$|awayid$|participantid$|competitorid$)/.test(
+        normalized
+      )
+    ) {
+      const number = Number(value);
+      if (Number.isFinite(number) && number > 0) {
+        result.topLevelIds.push({
+          key,
+          value: number,
+        });
+      }
+    }
+
+    if (
+      /(name$|teamname$|shortname$|displayname$)/.test(
+        normalized
+      ) &&
+      typeof value === "string"
+    ) {
+      result.topLevelNames.push({
+        key,
+        value: value.slice(0, 80),
+      });
+    }
+  }
+
+  const visit = (
+    value: any,
+    path: string,
+    depth = 0
+  ) => {
+    if (
+      value === null ||
+      value === undefined ||
+      depth > 4
+    ) {
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      value
+        .slice(0, 6)
+        .forEach(
+          (item, index) =>
+            visit(
+              item,
+              `${path}[${index}]`,
+              depth + 1
+            )
+        );
+      return;
+    }
+
+    if (typeof value !== "object") {
+      return;
+    }
+
+    const keys =
+      Object.keys(value).slice(0, 24);
+
+    const idCandidate =
+      Number(
+        value?.id ??
+        value?.teamId ??
+        value?.participantId ??
+        value?.competitorId
+      );
+
+    const nameCandidate =
+      String(
+        value?.name ??
+        value?.teamName ??
+        value?.shortName ??
+        value?.displayName ??
+        ""
+      ).trim();
+
+    const markerCandidate =
+      String(
+        value?.side ??
+        value?.position ??
+        value?.type ??
+        value?.homeAway ??
+        value?.location ??
+        value?.role ??
+        ""
+      ).trim();
+
+    const looksTeamRelated =
+      /home|away|team|participant|competitor|club|opponent/i.test(
+        path
+      ) ||
+      Number.isFinite(idCandidate) ||
+      Boolean(nameCandidate) ||
+      Boolean(markerCandidate);
+
+    if (looksTeamRelated) {
+      result.nestedObjects.push({
+        path,
+        keys,
+        id:
+          Number.isFinite(idCandidate) &&
+          idCandidate > 0
+            ? idCandidate
+            : null,
+        name:
+          nameCandidate ||
+          null,
+        marker:
+          markerCandidate ||
+          null,
+      });
+    }
+
+    for (const [key, child] of Object.entries(value)) {
+      // 결과/점수/승자/통계 경로는 진단에서 제외.
+      if (
+        /score|result|winner|goal|runs|points|period|stat/i.test(
+          key
+        )
+      ) {
+        continue;
+      }
+
+      if (
+        child &&
+        typeof child === "object"
+      ) {
+        visit(
+          child,
+          `${path}.${key}`,
+          depth + 1
+        );
+      }
+    }
+  };
+
+  for (const [key, value] of Object.entries(fixture)) {
+    if (
+      /score|result|winner|goal|runs|points|period|stat/i.test(
+        key
+      )
+    ) {
+      continue;
+    }
+
+    if (
+      value &&
+      typeof value === "object"
+    ) {
+      visit(
+        value,
+        key,
+        1
+      );
+    }
+  }
+
+  result.nestedObjects =
+    result.nestedObjects
+      .filter(
+        (item, index, array) =>
+          array.findIndex(
+            (other) =>
+              other.path === item.path
+          ) === index
+      )
+      .slice(0, 30);
+
+  return result;
+}
+
 type BacktestAudit = {
   enabled: boolean;
   cutoffMs: number | null;
@@ -5090,6 +5307,8 @@ type BacktestAudit = {
   selectedAwayTeamName: string | null;
   unmatchedHomeFixtures: number;
   unmatchedAwayFixtures: number;
+  homeRecentFixtureShape: RecentFixtureShape | null;
+  awayRecentFixtureShape: RecentFixtureShape | null;
   h2hPolicy: string;
   resultFieldsStripped: boolean;
   statisticsBlocked: boolean;
@@ -5989,6 +6208,16 @@ function sanitizeMatchedForBacktest(
         home.unmatched,
       unmatchedAwayFixtures:
         away.unmatched,
+      homeRecentFixtureShape:
+        safeRecentFixtureShape(
+          home.team?.fixtures?.[0] ??
+          null
+        ),
+      awayRecentFixtureShape:
+        safeRecentFixtureShape(
+          away.team?.fixtures?.[0] ??
+          null
+        ),
       h2hPolicy:
         h2h.policy,
       resultFieldsStripped: true,
@@ -7926,7 +8155,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.3.9 의사결정 규칙</b><br />
+                    <b>V11.4.0 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -7937,7 +8166,7 @@ export default function Home() {
 
                   {currentSport === "야구" && backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.3.9 백테스트 안전장치 · recent fixture 직접 Form 집계</h3>
+                      <h3>V11.4.0 백테스트 안전장치 · recent fixture RAW 구조 진단</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -8029,6 +8258,67 @@ export default function Home() {
                         현재시점 aggregate Form도 버리고 기준시각 이전 fixture만으로 Form/득실을 다시 계산합니다.
                         H2H가 경기목록 없이 집계값만 제공되면 미래정보 누출 위험 때문에 H2H를 사용하지 않습니다.
                         선발/라인업은 해당 Fixture의 경기 전 정보로 유지하며 실제 결과 비교는 별도 검증 단계까지 잠급니다.
+                      </div>
+                    </div>
+                  )}
+
+                  {currentSport === "야구" && backtestMode && (
+                    <div className="section" style={{ marginTop: 0 }}>
+                      <h3>V11.4.0 recent fixture 구조 진단</h3>
+
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns:
+                            "repeat(auto-fit,minmax(300px,1fr))",
+                          gap: 8,
+                        }}
+                      >
+                        <div className="notice" style={{ margin: 0 }}>
+                          <b>NC recent fixture 1개</b>
+                          <pre
+                            style={{
+                              margin: "6px 0 0",
+                              whiteSpace: "pre-wrap",
+                              wordBreak: "break-word",
+                              fontSize: 9,
+                              lineHeight: 1.45,
+                            }}
+                          >
+                            {JSON.stringify(
+                              backtestAudit?.homeRecentFixtureShape ??
+                              null,
+                              null,
+                              2
+                            )}
+                          </pre>
+                        </div>
+
+                        <div className="notice" style={{ margin: 0 }}>
+                          <b>Samsung recent fixture 1개</b>
+                          <pre
+                            style={{
+                              margin: "6px 0 0",
+                              whiteSpace: "pre-wrap",
+                              wordBreak: "break-word",
+                              fontSize: 9,
+                              lineHeight: 1.45,
+                            }}
+                          >
+                            {JSON.stringify(
+                              backtestAudit?.awayRecentFixtureShape ??
+                              null,
+                              null,
+                              2
+                            )}
+                          </pre>
+                        </div>
+                      </div>
+
+                      <div className="notice" style={{ margin: "8px 0" }}>
+                        이 진단에는 fixture key와 팀 식별 후보(id/name/side)만 표시합니다.
+                        score/result/winner/goals/statistics 경로는 의도적으로 제외했습니다.
+                        두 JSON에서 팀 ID가 실제 어느 path에 있는지 확인하면 다음 버전에서 Form 집계를 그 경로에 직접 연결할 수 있습니다.
                       </div>
                     </div>
                   )}
