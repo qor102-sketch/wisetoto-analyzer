@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V11_9_4_DEFENSIVE_STATUS_FIX_20260825
+// DEPLOY_MARKER_V12_0_REBUILT_FROM_STABLE_20260825
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -550,175 +550,106 @@ type BacktestMarketValidation = {
 };
 
 
-type BacktestPerformanceRecord = {
+type SimpleBacktestRecord = {
   id: string;
   fixtureKey: string;
-  fixtureId: number | null;
   gameLabel: string;
-  gameDateMs: number | null;
-  capturedAt: number;
-
-  stage: string;
-  marketKey: string;
   market: string;
-  predictedPick: string;
-  actualLabel: string;
-
+  pick: string;
   probability: number;
   odds: number | null;
   expectedValue: number | null;
   grade: string;
-
-  status:
-    | "HIT"
-    | "MISS"
-    | "PENDING";
-
+  hit: boolean;
   realizedReturn: number | null;
-  brierScore: number;
+  brier: number;
+  savedAt: number;
 };
 
-type BacktestPerformanceSummary = {
-  count: number;
-  hitCount: number;
+type SimpleBacktestSummary = {
+  games: number;
+  records: number;
+  hits: number;
   hitRate: number | null;
-  averageProbability: number | null;
-  averageExpectedValue: number | null;
   roi: number | null;
-  averageBrier: number | null;
+  avgEv: number | null;
+  avgBrier: number | null;
 };
 
-const BACKTEST_PERFORMANCE_STORAGE_KEY =
-  "wisetoto-backtest-performance-v11-9";
+const SIMPLE_BACKTEST_STORAGE_KEY =
+  "wisetoto-backtest-v12";
 
-function summarizeBacktestPerformance(
-  rows: BacktestPerformanceRecord[]
-): BacktestPerformanceSummary {
-  const settledRows =
-    settledRows.filter(
-      (row) =>
-        row.status === "HIT" ||
-        row.status === "MISS"
-    );
-
-  const count =
-    settledRows.length;
-
-  if (!count) {
+function simpleBacktestSummary(
+  rows: SimpleBacktestRecord[]
+): SimpleBacktestSummary {
+  if (!rows.length) {
     return {
-      count: 0,
-      hitCount: 0,
+      games: 0,
+      records: 0,
+      hits: 0,
       hitRate: null,
-      averageProbability: null,
-      averageExpectedValue: null,
       roi: null,
-      averageBrier: null,
+      avgEv: null,
+      avgBrier: null,
     };
   }
 
-  const hitCount =
-    settledRows.filter(
-      (row) =>
-        row.status ===
-        "HIT"
-    ).length;
+  const gameKeys =
+    new Set<string>();
 
-  const probabilities =
-    settledRows
-      .map(
-        (row) =>
-          row.probability
-      )
-      .filter(
-        (value) =>
-          Number.isFinite(
-            value
-          )
-      );
+  let hits = 0;
+  let returnSum = 0;
+  let returnCount = 0;
+  let evSum = 0;
+  let evCount = 0;
+  let brierSum = 0;
 
-  const evValues =
-    settledRows
-      .map(
-        (row) =>
-          row.expectedValue
-      )
-      .filter(
-        (value): value is number =>
-          value !== null &&
-          Number.isFinite(
-            value
-          )
-      );
+  for (const row of rows) {
+    gameKeys.add(row.fixtureKey);
 
-  const returns =
-    settledRows
-      .map(
-        (row) =>
-          row.realizedReturn
-      )
-      .filter(
-        (value): value is number =>
-          value !== null &&
-          Number.isFinite(
-            value
-          )
-      );
+    if (row.hit) {
+      hits += 1;
+    }
 
-  const briers =
-    settledRows
-      .map(
-        (row) =>
-          row.brierScore
-      )
-      .filter(
-        (value) =>
-          Number.isFinite(
-            value
-          )
-      );
+    if (
+      row.realizedReturn !== null &&
+      Number.isFinite(row.realizedReturn)
+    ) {
+      returnSum += row.realizedReturn;
+      returnCount += 1;
+    }
 
-  const avg = (
-    values: number[]
-  ) =>
-    values.length
-      ? values.reduce(
-          (sum, value) =>
-            sum + value,
-          0
-        ) /
-        values.length
-      : null;
+    if (
+      row.expectedValue !== null &&
+      Number.isFinite(row.expectedValue)
+    ) {
+      evSum += row.expectedValue;
+      evCount += 1;
+    }
+
+    brierSum += row.brier;
+  }
 
   return {
-    count,
-    hitCount,
+    games: gameKeys.size,
+    records: rows.length,
+    hits,
     hitRate:
-      (hitCount / count) *
-      100,
-    averageProbability:
-      avg(
-        probabilities
-      ),
-    averageExpectedValue:
-      avg(
-        evValues
-      ),
-    roi:
-      returns.length
-        ? (
-            returns.reduce(
-              (sum, value) =>
-                sum + value,
-              0
-            ) /
-            returns.length
-          ) *
-          100
+      rows.length
+        ? (hits / rows.length) * 100
         : null,
-    averageBrier:
-      avg(
-        briers
-      ),
+    roi:
+      returnCount
+        ? (returnSum / returnCount) * 100
+        : null,
+    avgEv:
+      evCount
+        ? evSum / evCount
+        : null,
+    avgBrier:
+      rows.length
+        ? brierSum / rows.length
+        : null,
   };
 }
 
@@ -7989,8 +7920,8 @@ export default function Home() {
   const [backtestResultRevealed, setBacktestResultRevealed] =
     useState(false);
 
-  const [backtestPerformanceRecords, setBacktestPerformanceRecords] =
-    useState<BacktestPerformanceRecord[]>([]);
+  const [simpleBacktestRecords, setSimpleBacktestRecords] =
+    useState<SimpleBacktestRecord[]>([]);
   const [betmanGames, setBetmanGames] = useState<BetmanMatch[]>([]);
   const [betmanDiagnostics, setBetmanDiagnostics] = useState<any>(null);
   const [selectedBetmanKey, setSelectedBetmanKey] = useState<string | null>(null);
@@ -8008,7 +7939,7 @@ export default function Home() {
     try {
       const raw =
         window.localStorage.getItem(
-          BACKTEST_PERFORMANCE_STORAGE_KEY
+          SIMPLE_BACKTEST_STORAGE_KEY
         );
 
       if (!raw) {
@@ -8016,26 +7947,15 @@ export default function Home() {
       }
 
       const parsed =
-        JSON.parse(
-          raw
-        );
+        JSON.parse(raw);
 
-      if (
-        Array.isArray(
-          parsed
-        )
-      ) {
-        setBacktestPerformanceRecords(
-          parsed.filter(
-            (row) =>
-              row &&
-              typeof row === "object" &&
-              typeof row.id === "string"
-          )
+      if (Array.isArray(parsed)) {
+        setSimpleBacktestRecords(
+          parsed as SimpleBacktestRecord[]
         );
       }
     } catch {
-      // 누적 성능판 저장소 오류는 예측 엔진과 완전히 분리.
+      // 누적 백테스트 저장 실패는 예측 엔진과 무관.
     }
   }, []);
 
@@ -8742,33 +8662,26 @@ export default function Home() {
         "HIT"
     ).length;
 
-  const currentBacktestPerformanceRows:
-    BacktestPerformanceRecord[] =
+  const simpleCurrentRecords:
+    SimpleBacktestRecord[] =
       [];
 
   if (
-    backtestValidationTruth &&
-    backtestResultRevealed
+    backtestResultRevealed &&
+    backtestValidationTruth
   ) {
-    for (
-      const row of backtestValidatedRows
-    ) {
+    for (const validation of backtestValidationRows) {
       if (
-        row.status ===
-        "PENDING"
+        validation.status !== "HIT" &&
+        validation.status !== "MISS"
       ) {
         continue;
       }
 
-      const settledStatus:
-        "HIT" | "MISS" =
-          row.status;
-
       const pick =
         actualMarketPicks.find(
           (item) =>
-            item.key ===
-            row.key
+            item.key === validation.key
         );
 
       if (!pick) {
@@ -8785,12 +8698,8 @@ export default function Home() {
           "unknown"
         );
 
-      const gameDateMs =
-        selectedBetman
-          ? gameTimeMs(
-              selectedBetman
-            )
-          : NaN;
+      const hit =
+        validation.status === "HIT";
 
       const probability =
         clamp(
@@ -8799,111 +8708,59 @@ export default function Home() {
           100
         );
 
-      const outcome =
-        settledStatus ===
-        "HIT"
-          ? 1
-          : 0;
-
       const p =
-        probability /
-        100;
+        probability / 100;
 
       const realizedReturn =
         pick.odds !== null &&
-        Number.isFinite(
-          pick.odds
-        ) &&
+        Number.isFinite(pick.odds) &&
         pick.odds > 1
-          ? settledStatus ===
-              "HIT"
-            ? pick.odds -
-              1
+          ? hit
+            ? pick.odds - 1
             : -1
           : null;
 
-      const stage =
-        analysisFactors.baseballAnalysisStage;
-
-      const performanceRow:
-        BacktestPerformanceRecord = {
-          id:
-            [
-              fixtureKey,
-              stage,
-              pick.key,
-            ].join("|"),
-          fixtureKey,
-          fixtureId:
-            Number.isFinite(
-              Number(
-                matched?.fixtureId
-              )
-            )
-              ? Number(
-                  matched?.fixtureId
-                )
-              : null,
-          gameLabel:
-            `${selectedBetman?.home ?? "-"} vs ${selectedBetman?.away ?? "-"}`,
-          gameDateMs:
-            Number.isFinite(
-              gameDateMs
-            )
-              ? gameDateMs
-              : null,
-          capturedAt:
-            Date.now(),
-
-          stage,
-          marketKey:
-            pick.key,
-          market:
-            pick.market,
-          predictedPick:
-            pick.pick,
-          actualLabel:
-            row.actualLabel,
-
-          probability,
-          odds:
-            pick.odds,
-          expectedValue:
-            pick.expectedValue,
-          grade:
-            pick.stageGradeLabel ??
-            pick.valueGrade,
-
-          status:
-            settledStatus,
-
-          realizedReturn,
-          brierScore:
-            Number(
+      simpleCurrentRecords.push({
+        id:
+          `${fixtureKey}|${analysisFactors.baseballAnalysisStage}|${pick.key}`,
+        fixtureKey,
+        gameLabel:
+          `${selectedBetman?.home ?? "-"} vs ${selectedBetman?.away ?? "-"}`,
+        market:
+          pick.market,
+        pick:
+          pick.pick,
+        probability,
+        odds:
+          pick.odds,
+        expectedValue:
+          pick.expectedValue,
+        grade:
+          pick.stageGradeLabel ??
+          pick.valueGrade,
+        hit,
+        realizedReturn,
+        brier:
+          Number(
+            (
               (
-                (
-                  p -
-                  outcome
-                ) **
-                2
-              ).toFixed(
-                6
-              )
-            ),
-        };
-
-      currentBacktestPerformanceRows.push(
-        performanceRow
-      );
+                p -
+                (hit ? 1 : 0)
+              ) ** 2
+            ).toFixed(6)
+          ),
+        savedAt:
+          Date.now(),
+      });
     }
   }
 
-  const currentBacktestPerformanceSignature =
+  const simpleCurrentSignature =
     JSON.stringify(
-      currentBacktestPerformanceRows.map(
+      simpleCurrentRecords.map(
         (row) => [
           row.id,
-          row.status,
+          row.hit,
           row.probability,
           row.odds,
           row.expectedValue,
@@ -8914,59 +8771,34 @@ export default function Home() {
   useEffect(() => {
     if (
       !backtestResultRevealed ||
-      !currentBacktestPerformanceRows.length
+      !simpleCurrentRecords.length
     ) {
       return;
     }
 
-    setBacktestPerformanceRecords(
+    setSimpleBacktestRecords(
       (previous) => {
         const byId =
-          new Map<
-            string,
-            BacktestPerformanceRecord
-          >(
-            previous.map(
-              (row) => [
-                row.id,
-                row,
-              ]
-            )
-          );
+          new Map<string, SimpleBacktestRecord>();
 
-        for (
-          const row of currentBacktestPerformanceRows
-        ) {
-          byId.set(
-            row.id,
-            row
-          );
+        for (const row of previous) {
+          byId.set(row.id, row);
+        }
+
+        for (const row of simpleCurrentRecords) {
+          byId.set(row.id, row);
         }
 
         const next =
-          Array.from(
-            byId.values()
-          ).sort(
-            (a, b) =>
-              (
-                a.gameDateMs ??
-                a.capturedAt
-              ) -
-              (
-                b.gameDateMs ??
-                b.capturedAt
-              )
-          );
+          Array.from(byId.values());
 
         try {
           window.localStorage.setItem(
-            BACKTEST_PERFORMANCE_STORAGE_KEY,
-            JSON.stringify(
-              next
-            )
+            SIMPLE_BACKTEST_STORAGE_KEY,
+            JSON.stringify(next)
           );
         } catch {
-          // 저장 실패가 분석에 영향을 주면 안 됨.
+          // 저장 실패는 분석과 분리.
         }
 
         return next;
@@ -8974,92 +8806,43 @@ export default function Home() {
     );
   }, [
     backtestResultRevealed,
-    currentBacktestPerformanceSignature,
+    simpleCurrentSignature,
   ]);
 
-  const cumulativeBacktestSummary =
-    summarizeBacktestPerformance(
-      backtestPerformanceRecords
+  const simpleSummary =
+    simpleBacktestSummary(
+      simpleBacktestRecords
     );
 
-  const cumulativeBacktestMarkets =
+  const simpleMarketSummaries =
     Array.from(
       new Set(
-        backtestPerformanceRecords.map(
-          (row) =>
-            row.market
+        simpleBacktestRecords.map(
+          (row) => row.market
         )
       )
-    )
-      .map(
-        (market) => ({
-          market,
-          summary:
-            summarizeBacktestPerformance(
-              backtestPerformanceRecords.filter(
-                (row) =>
-                  row.market ===
-                  market
-              )
-            ),
-        })
-      )
-      .sort(
-        (a, b) =>
-          b.summary.count -
-          a.summary.count ||
-          a.market.localeCompare(
-            b.market
-          )
-      );
-
-  const cumulativeBacktestGrades =
-    Array.from(
-      new Set(
-        backtestPerformanceRecords.map(
-          (row) =>
-            row.grade
-        )
-      )
-    )
-      .map(
-        (grade) => ({
-          grade,
-          summary:
-            summarizeBacktestPerformance(
-              backtestPerformanceRecords.filter(
-                (row) =>
-                  row.grade ===
-                  grade
-              )
-            ),
-        })
-      )
-      .sort(
-        (a, b) =>
-          b.summary.count -
-          a.summary.count
-      );
-
-  const cumulativeBacktestGameCount =
-    new Set(
-      backtestPerformanceRecords.map(
-        (row) =>
-          row.fixtureKey
-      )
-    ).size;
-
-  function clearBacktestPerformance() {
-    setBacktestPerformanceRecords(
-      []
+    ).map(
+      (market) => ({
+        market,
+        summary:
+          simpleBacktestSummary(
+            simpleBacktestRecords.filter(
+              (row) =>
+                row.market === market
+            )
+          ),
+      })
     );
+
+  function clearSimpleBacktest() {
+    setSimpleBacktestRecords([]);
 
     try {
       window.localStorage.removeItem(
-        BACKTEST_PERFORMANCE_STORAGE_KEY
+        SIMPLE_BACKTEST_STORAGE_KEY
       );
     } catch {
-      // UI 기록 초기화 실패가 분석에 영향을 주면 안 됨.
+      // UI 저장소 초기화 실패는 분석과 무관.
     }
   }
 
@@ -10282,7 +10065,7 @@ export default function Home() {
                 }}
               >
                 <b>백테스트 검증 준비 완료</b>
-                {" · "}아래 `V11.9.4 백테스트 결과 검증기`에서
+                {" · "}아래 `V12.0 백테스트 결과 검증기`에서
                 `예측 확정 · 실제 결과 검증 열기` 버튼을 누르면 결과를 공개할 수 있습니다.
               </div>
             )}
@@ -10352,7 +10135,7 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V11.9.4 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
+              <summary>V12.0 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
                   <h3>V11.7 계산 추적 · 데이터 가용성 + λ 교정</h3>
@@ -10373,7 +10156,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.9.4 의사결정 규칙</b><br />
+                    <b>V12.0 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -10384,7 +10167,7 @@ export default function Home() {
 
                   {currentSport === "야구" && backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.9.4 백테스트 안전장치 · 실제 SportsAPI 리소스 진단</h3>
+                      <h3>V12.0 백테스트 안전장치 · 실제 SportsAPI 리소스 진단</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10483,7 +10266,7 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.9.4 SportsAPI 경기전 데이터 리소스 진단</h3>
+                      <h3>V12.0 SportsAPI 경기전 데이터 리소스 진단</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10693,7 +10476,7 @@ export default function Home() {
 
                   {currentSport === "야구" && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.9.4 야구 데이터 가용성 · 선발투수/라인업 복원</h3>
+                      <h3>V12.0 야구 데이터 가용성 · 선발투수/라인업 복원</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10857,7 +10640,7 @@ export default function Home() {
                           "0 2px 12px rgba(40,95,190,0.08)",
                       }}
                     >
-                      <h3>V11.9.1 백테스트 결과 검증기</h3>
+                      <h3>V12.0 백테스트 결과 검증기</h3>
 
                       <div
                         className="cards"
@@ -11052,294 +10835,124 @@ export default function Home() {
 
                   {currentSport === "야구" &&
                     backtestMode && (
-                    <div
-                      className="section"
-                      style={{
-                        marginTop: 0,
-                        border:
-                          "1px solid #d8e2ef",
-                      }}
-                    >
+                    <div className="section" style={{ marginTop: 0 }}>
                       <div
                         style={{
                           display: "flex",
-                          alignItems: "center",
                           justifyContent: "space-between",
                           gap: 8,
+                          alignItems: "center",
                           flexWrap: "wrap",
                         }}
                       >
                         <h3 style={{ margin: 0 }}>
-                          V11.9.4 누적 백테스트 성능판
+                          V12.0 누적 백테스트 성능
                         </h3>
 
                         <button
                           className="btn light"
-                          onClick={
-                            clearBacktestPerformance
-                          }
-                          disabled={
-                            !backtestPerformanceRecords.length
-                          }
+                          onClick={clearSimpleBacktest}
+                          disabled={!simpleBacktestRecords.length}
                         >
-                          누적 기록 초기화
+                          누적 초기화
                         </button>
                       </div>
 
                       <div className="cards" style={{ marginTop: 8 }}>
                         <div className="card">
-                          누적 경기
-                          <b>
-                            {cumulativeBacktestGameCount}경기
-                          </b>
-                          <div className="small">
-                            같은 경기/단계/마켓은 최신 1건으로 갱신
-                          </div>
+                          경기
+                          <b>{simpleSummary.games}</b>
                         </div>
 
                         <div className="card">
                           검증 마켓
-                          <b>
-                            {cumulativeBacktestSummary.count}건
-                          </b>
-                          <div className="small">
-                            PENDING 제외
-                          </div>
+                          <b>{simpleSummary.records}</b>
                         </div>
 
                         <div className="card">
                           적중률
                           <b>
-                            {cumulativeBacktestSummary.hitRate === null
+                            {simpleSummary.hitRate === null
                               ? "-"
-                              : `${cumulativeBacktestSummary.hitRate.toFixed(1)}%`}
+                              : `${simpleSummary.hitRate.toFixed(1)}%`}
                           </b>
-                          <div className="small">
-                            {cumulativeBacktestSummary.hitCount}
-                            {" / "}
-                            {cumulativeBacktestSummary.count}
-                          </div>
                         </div>
 
                         <div className="card">
-                          실제 ROI
+                          ROI
                           <b>
-                            {cumulativeBacktestSummary.roi === null
+                            {simpleSummary.roi === null
                               ? "-"
-                              : `${cumulativeBacktestSummary.roi >= 0 ? "+" : ""}${cumulativeBacktestSummary.roi.toFixed(1)}%`}
+                              : `${simpleSummary.roi >= 0 ? "+" : ""}${simpleSummary.roi.toFixed(1)}%`}
                           </b>
-                          <div className="small">
-                            각 추천 1단위 동일 베팅 가정
-                          </div>
                         </div>
 
                         <div className="card">
                           평균 EV
                           <b>
-                            {cumulativeBacktestSummary.averageExpectedValue === null
+                            {simpleSummary.avgEv === null
                               ? "-"
-                              : `${cumulativeBacktestSummary.averageExpectedValue >= 0 ? "+" : ""}${cumulativeBacktestSummary.averageExpectedValue.toFixed(1)}%`}
+                              : `${simpleSummary.avgEv >= 0 ? "+" : ""}${simpleSummary.avgEv.toFixed(1)}%`}
                           </b>
-                          <div className="small">
-                            예측 당시 EV
-                          </div>
                         </div>
 
                         <div className="card">
-                          평균 Brier
+                          Brier
                           <b>
-                            {cumulativeBacktestSummary.averageBrier === null
+                            {simpleSummary.avgBrier === null
                               ? "-"
-                              : cumulativeBacktestSummary.averageBrier.toFixed(3)}
+                              : simpleSummary.avgBrier.toFixed(3)}
                           </b>
-                          <div className="small">
-                            낮을수록 확률 calibration 우수
-                          </div>
                         </div>
                       </div>
 
-                      {backtestPerformanceRecords.length ? (
-                        <>
-                          <div
-                            style={{
-                              overflowX: "auto",
-                              marginTop: 10,
-                            }}
-                          >
-                            <div
-                              style={{
-                                minWidth: 610,
-                              }}
-                            >
+                      {simpleMarketSummaries.length > 0 && (
+                        <div style={{ marginTop: 8 }}>
+                          {simpleMarketSummaries.map(
+                            ({ market, summary }) => (
                               <div
+                                key={`simple-market-${market}`}
                                 style={{
                                   display: "grid",
                                   gridTemplateColumns:
-                                    "120px 48px 64px 74px 64px 64px",
+                                    "120px 52px 70px 70px 70px",
                                   gap: 6,
                                   padding: "6px 8px",
-                                  background: "#eef4fb",
-                                  borderRadius: "8px 8px 0 0",
+                                  borderBottom:
+                                    "1px solid #e6edf5",
                                   fontSize: 9,
-                                  fontWeight: 900,
                                 }}
                               >
-                                <div>마켓</div>
-                                <div>N</div>
-                                <div>적중률</div>
-                                <div>평균확률</div>
-                                <div>ROI</div>
-                                <div>Brier</div>
+                                <div><b>{market}</b></div>
+                                <div>N {summary.records}</div>
+                                <div>
+                                  적중{" "}
+                                  {summary.hitRate === null
+                                    ? "-"
+                                    : `${summary.hitRate.toFixed(1)}%`}
+                                </div>
+                                <div>
+                                  ROI{" "}
+                                  {summary.roi === null
+                                    ? "-"
+                                    : `${summary.roi >= 0 ? "+" : ""}${summary.roi.toFixed(1)}%`}
+                                </div>
+                                <div>
+                                  Brier{" "}
+                                  {summary.avgBrier === null
+                                    ? "-"
+                                    : summary.avgBrier.toFixed(3)}
+                                </div>
                               </div>
-
-                              {cumulativeBacktestMarkets.map(
-                                ({
-                                  market,
-                                  summary,
-                                }) => (
-                                  <div
-                                    key={`cum-market-${market}`}
-                                    style={{
-                                      display: "grid",
-                                      gridTemplateColumns:
-                                        "120px 48px 64px 74px 64px 64px",
-                                      gap: 6,
-                                      padding: "6px 8px",
-                                      borderBottom:
-                                        "1px solid #e6edf5",
-                                      fontSize: 9,
-                                    }}
-                                  >
-                                    <div>
-                                      <b>{market}</b>
-                                    </div>
-                                    <div>
-                                      {summary.count}
-                                    </div>
-                                    <div>
-                                      {summary.hitRate === null
-                                        ? "-"
-                                        : `${summary.hitRate.toFixed(1)}%`}
-                                    </div>
-                                    <div>
-                                      {summary.averageProbability === null
-                                        ? "-"
-                                        : `${summary.averageProbability.toFixed(1)}%`}
-                                    </div>
-                                    <div
-                                      style={{
-                                        fontWeight: 800,
-                                        color:
-                                          summary.roi !== null &&
-                                          summary.roi >= 0
-                                            ? "#087a39"
-                                            : "#d33d3d",
-                                      }}
-                                    >
-                                      {summary.roi === null
-                                        ? "-"
-                                        : `${summary.roi >= 0 ? "+" : ""}${summary.roi.toFixed(1)}%`}
-                                    </div>
-                                    <div>
-                                      {summary.averageBrier === null
-                                        ? "-"
-                                        : summary.averageBrier.toFixed(3)}
-                                    </div>
-                                  </div>
-                                )
-                              )}
-                            </div>
-                          </div>
-
-                          <div
-                            style={{
-                              overflowX: "auto",
-                              marginTop: 10,
-                            }}
-                          >
-                            <div
-                              style={{
-                                minWidth: 520,
-                              }}
-                            >
-                              <div
-                                style={{
-                                  display: "grid",
-                                  gridTemplateColumns:
-                                    "120px 48px 64px 64px 64px",
-                                  gap: 6,
-                                  padding: "6px 8px",
-                                  background: "#f7f9fc",
-                                  borderRadius: "8px 8px 0 0",
-                                  fontSize: 9,
-                                  fontWeight: 900,
-                                }}
-                              >
-                                <div>등급</div>
-                                <div>N</div>
-                                <div>적중률</div>
-                                <div>평균 EV</div>
-                                <div>ROI</div>
-                              </div>
-
-                              {cumulativeBacktestGrades.map(
-                                ({
-                                  grade,
-                                  summary,
-                                }) => (
-                                  <div
-                                    key={`cum-grade-${grade}`}
-                                    style={{
-                                      display: "grid",
-                                      gridTemplateColumns:
-                                        "120px 48px 64px 64px 64px",
-                                      gap: 6,
-                                      padding: "6px 8px",
-                                      borderBottom:
-                                        "1px solid #e6edf5",
-                                      fontSize: 9,
-                                    }}
-                                  >
-                                    <div>
-                                      <b>{grade}</b>
-                                    </div>
-                                    <div>
-                                      {summary.count}
-                                    </div>
-                                    <div>
-                                      {summary.hitRate === null
-                                        ? "-"
-                                        : `${summary.hitRate.toFixed(1)}%`}
-                                    </div>
-                                    <div>
-                                      {summary.averageExpectedValue === null
-                                        ? "-"
-                                        : `${summary.averageExpectedValue >= 0 ? "+" : ""}${summary.averageExpectedValue.toFixed(1)}%`}
-                                    </div>
-                                    <div>
-                                      {summary.roi === null
-                                        ? "-"
-                                        : `${summary.roi >= 0 ? "+" : ""}${summary.roi.toFixed(1)}%`}
-                                    </div>
-                                  </div>
-                                )
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="notice" style={{ margin: "10px 0 0" }}>
-                            누적 결과는 브라우저 localStorage에만 저장되며 예측 엔진 입력에는 사용하지 않습니다.
-                            Brier Score는 각 추천 선택지를 이진 사건으로 보고 계산합니다.
-                            ROI는 검증 가능한 각 추천에 1단위를 동일하게 베팅했다고 가정합니다.
-                            표본이 적은 구간의 수치로 모델 계수를 즉시 조정하지 않습니다.
-                          </div>
-                        </>
-                      ) : (
-                        <div className="notice" style={{ margin: "10px 0 0" }}>
-                          아직 누적 검증 기록이 없습니다.
-                          과거 경기에서 `예측 확정 · 실제 결과 검증 열기`를 누르면 검증 가능한 마켓만 자동 누적됩니다.
+                            )
+                          )}
                         </div>
                       )}
+
+                      <div className="notice" style={{ margin: "8px 0 0" }}>
+                        실제 결과를 연 뒤 검증 가능한 HIT/MISS 마켓만 localStorage에 저장합니다.
+                        이 누적 기록은 예측 엔진 입력에 사용하지 않습니다.
+                      </div>
                     </div>
                   )}
 
