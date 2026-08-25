@@ -5061,8 +5061,12 @@ export default function Home() {
   }
 
   function primaryMatchSeq(
-    game: BetmanMatch
+    game: BetmanMatch | null | undefined
   ) {
+    if (!game) {
+      return null;
+    }
+
     const markets =
       marketRows(
         game
