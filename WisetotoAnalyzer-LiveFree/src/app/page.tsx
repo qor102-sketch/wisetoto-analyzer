@@ -707,6 +707,38 @@ function normalizeTeamName(value: unknown) {
     .replace(/[^a-z0-9가-힣]/g, "");
 }
 
+// V11.3.2: SportsAPI 매칭용 팀명 별칭.
+// 화면/Betman 원본 팀명은 유지하고, /api/match 요청에만 표준명을 사용합니다.
+const SPORTS_API_TEAM_ALIASES: Record<string, string> = {
+  // KBO
+  "lg": "LG Twins",
+  "lgtwins": "LG Twins",
+  "두산": "Doosan Bears",
+  "doosan": "Doosan Bears",
+  "키움": "Kiwoom Heroes",
+  "kiwoom": "Kiwoom Heroes",
+  "한화": "Hanwha Eagles",
+  "hanwha": "Hanwha Eagles",
+  "kia": "KIA Tigers",
+  "기아": "KIA Tigers",
+  "kt": "KT Wiz",
+  "ktwiz": "KT Wiz",
+  "ssg": "SSG Landers",
+  "ssglanders": "SSG Landers",
+  "롯데": "Lotte Giants",
+  "lotte": "Lotte Giants",
+  "nc": "NC Dinos",
+  "ncdinos": "NC Dinos",
+  "삼성": "Samsung Lions",
+  "samsung": "Samsung Lions",
+};
+
+function sportsApiTeamName(value: unknown) {
+  const raw = String(value ?? "").trim();
+  const normalized = normalizeTeamName(raw);
+  return SPORTS_API_TEAM_ALIASES[normalized] ?? raw;
+}
+
 function teamSimilarity(a: unknown, b: unknown) {
   const x = normalizeTeamName(a), y = normalizeTeamName(b);
   if (!x || !y) return 0;
@@ -6113,12 +6145,21 @@ export default function Home() {
     setBetman({ loading:false, matched:selectedBetman, score:1, error:null });
     setStatus(`${selectedBetman?.home ?? "-"} vs ${selectedBetman?.away ?? "-"} · SportsAPI 매칭 중…`);
     try {
+      const matchHome = sportsApiTeamName(selectedBetman?.home);
+      const matchAway = sportsApiTeamName(selectedBetman?.away);
+
       const params = new URLSearchParams({
         mode:"selected",
-        home:String(selectedBetman?.home ?? ""),
-        away:String(selectedBetman?.away ?? ""),
+        // SportsAPI 쪽에서는 영문/정식 팀명으로 검색해 과거 KBO fixture 매칭률을 높입니다.
+        home: matchHome,
+        away: matchAway,
+        // 원본명도 함께 전달합니다. 서버가 아직 사용하지 않아도 무해하며 진단에 활용할 수 있습니다.
+        originalHome:String(selectedBetman?.home ?? ""),
+        originalAway:String(selectedBetman?.away ?? ""),
         gameDateMs:String(gameTimeMs(selectedBetman)),
         sport:String((selectedBetman as any)?.sport ?? ""),
+        league:String((selectedBetman as any)?.league ?? ""),
+        backtest:backtestMode ? "1" : "0",
       });
       const response = await fetch(`/api/match?${params.toString()}`, { cache:"no-store" });
       const data = await readApiResponse(response,"선택 경기 매칭 API");
@@ -7633,4 +7674,4 @@ export default function Home() {
       </div>
     </main>
   );
-}
+ } 
