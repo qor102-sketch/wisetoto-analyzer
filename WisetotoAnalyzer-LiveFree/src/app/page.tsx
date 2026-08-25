@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V12_6_LINEUP_OFFENSE_20260825
+// DEPLOY_MARKER_V12_8_PLAYER_STATS_RESOLVER_20260825
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -165,6 +165,10 @@ type AnalysisFactors = {
   lineupAdjustmentHome: number;
   lineupAdjustmentAway: number;
   lineupDataUsed: boolean;
+  homeLineupPlayerIdCount: number;
+  awayLineupPlayerIdCount: number;
+  lineupStatsCoverage: number;
+  lineupValueGate: "BLOCK" | "LIMIT" | "OPEN";
 
   baseballFirstHalfHomeScore: number | null;
   baseballFirstHalfAwayScore: number | null;
@@ -2623,6 +2627,53 @@ function resolvePregameBatterStats(player: any, index: ReturnType<typeof buildPr
   return player;
 }
 
+
+function lineupPlayerId(
+  value: any
+): string | null {
+  const raw =
+    value?.resolvedPlayerId ??
+    value?.pcode ??
+    value?.playerCode ??
+    value?.playerId ??
+    value?.playerID ??
+    value?.id ??
+    value?.player?.pcode ??
+    value?.player?.playerCode ??
+    value?.player?.playerId ??
+    value?.player?.id ??
+    null;
+
+  if (
+    raw === null ||
+    raw === undefined
+  ) {
+    return null;
+  }
+
+  const text =
+    String(raw).trim();
+
+  return text || null;
+}
+
+function lineupPlayerIdCount(
+  lineups: any,
+  side: "home" | "away",
+  starterName: string | null
+) {
+  return lineupBatters(
+    lineups,
+    side,
+    starterName
+  ).filter(
+    (player: any) =>
+      Boolean(
+        lineupPlayerId(player)
+      )
+  ).length;
+}
+
 function lineupOffenseProfile(
   lineups: any,
   side: "home" | "away",
@@ -3623,6 +3674,44 @@ function buildAnalysis(
           reliability: 0,
           rawFactor: 1,
         };
+
+  const homeLineupPlayerIds =
+    sport === "야구"
+      ? lineupPlayerIdCount(
+          sportsDetail?.lineups,
+          "home",
+          homeStarter.name
+        )
+      : 0;
+
+  const awayLineupPlayerIds =
+    sport === "야구"
+      ? lineupPlayerIdCount(
+          sportsDetail?.lineups,
+          "away",
+          awayStarter.name
+        )
+      : 0;
+
+  const lineupStatsCoverage =
+    sport === "야구"
+      ? clamp(
+          (
+            homeLineupOffense.statsCount +
+            awayLineupOffense.statsCount
+          ) / 18,
+          0,
+          1
+        )
+      : 1;
+
+  const lineupValueGate:
+    "BLOCK" | "LIMIT" | "OPEN" =
+      lineupStatsCoverage >= 0.80
+        ? "OPEN"
+        : lineupStatsCoverage >= 0.50
+          ? "LIMIT"
+          : "BLOCK";
 
   /* V12.7 completeness: lineup publication and lineup-stat coverage are separate.
      READY may still mean the declared lineup is complete, but 100% is reserved for
@@ -4719,6 +4808,14 @@ function buildAnalysis(
           homeLineupOffense.statsCount > 0 ||
           awayLineupOffense.statsCount > 0
         ),
+      homeLineupPlayerIdCount:
+        homeLineupPlayerIds,
+      awayLineupPlayerIdCount:
+        awayLineupPlayerIds,
+      lineupStatsCoverage:
+        lineupStatsCoverage,
+      lineupValueGate:
+        lineupValueGate,
 
       baseballFirstHalfHomeScore:
         baseballFirstHalfHomeScore === null
@@ -5976,6 +6073,55 @@ function betmanHandicapRuleText(
   return `홈팀 기준 ${line >= 0 ? "+" : ""}${line}`;
 }
 
+
+
+function applyLineupStatsCoverageGate(
+  picks: MarketPick[],
+  sport: Exclude<Sport, "전체">,
+  factors: AnalysisFactors
+): MarketPick[] {
+  if (
+    sport !== "야구" ||
+    factors.lineupValueGate === "OPEN"
+  ) {
+    return picks;
+  }
+
+  const coveragePct =
+    factors.lineupStatsCoverage *
+    100;
+
+  return picks.map(
+    (pick) => {
+      if (
+        pick.valueGrade !== "VALUE" &&
+        pick.valueGrade !== "STRONG VALUE"
+      ) {
+        return pick;
+      }
+
+      const gateReason =
+        factors.lineupValueGate === "BLOCK"
+          ? `타격 Stats coverage ${coveragePct.toFixed(0)}% < 50% · VALUE 차단`
+          : `타격 Stats coverage ${coveragePct.toFixed(0)}% < 80% · VALUE 보류`;
+
+      return {
+        ...pick,
+        valueGrade:
+          "WATCH" as const,
+        valueGradeScore:
+          Math.min(
+            pick.valueGradeScore,
+            69
+          ),
+        valueGradeReason:
+          `${gateReason} · ${pick.valueGradeReason}`,
+        stageGradeLabel:
+          "COVERAGE WATCH",
+      };
+    }
+  );
+}
 
 function buildActualMarketPicks(
   game: BetmanMatch | null | undefined,
@@ -9022,13 +9168,20 @@ export default function Home() {
   const analysisFactors = analysis.factors;
   const betmanHandicap = chooseBetmanHandicap(betman.matched);
   const betmanTotal = chooseBetmanTotal(betman.matched);
-  const actualMarketPicks = buildActualMarketPicks(
+  const actualMarketPicksRaw = buildActualMarketPicks(
     betman.matched,
     currentSport,
     analysisFactors,
     recentSummary,
     h2h
   );
+
+  const actualMarketPicks =
+    applyLineupStatsCoverageGate(
+      actualMarketPicksRaw,
+      currentSport,
+      analysisFactors
+    );
 
   const marketConnectionDiagnostics =
     buildMarketConnectionDiagnostics(
@@ -10708,7 +10861,7 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V12.6 실제 선발타선 공격력 · 시즌 타격지표 calibration</h3>
+                      <h3>V12.8 Player-ID · 시즌 타격 Stats Resolver · Coverage Gate</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10867,7 +11020,7 @@ export default function Home() {
                             score/winner/statistics/boxscore/final-score 계열은 탐색에서 제외하며,
                             currentSeasonStats/seasonStats는 경기 전 시즌 누적 지표 후보로 탐색을 허용하며,
                             homeStarter/awayStarter는 명시된 side를 우선 고정하고 ERA/WHIP를 deep parser로 읽습니다.
-                            라인업 인원과 공격력은 fullLineUp/startingLineup 계열만 사용하며 pitcher/bullpen/candidate는 공격력 계산에서 제외합니다. 타격 시즌 Stats가 실제 수신된 선수만 공격력 보정에 사용합니다.
+                            라인업 인원과 공격력은 fullLineUp/startingLineup 계열만 사용하며 pitcher/bullpen/candidate는 공격력 계산에서 제외합니다. 타격 시즌 Stats가 실제 수신된 선수만 공격력 보정에 사용합니다. V12.8은 Naver 시즌 players API에서 pcode/playerId를 우선 매칭하고, Stats coverage 80% 미만에서는 VALUE 승격을 WATCH로 제한합니다.
                             경기 결과·boxscore·일반 statistics 계열은 계속 차단합니다.
                           </div>
                         </div>
@@ -11352,6 +11505,69 @@ export default function Home() {
                           </div>
                         </div>
                       </div>
+
+
+                      <div className="cards" style={{ marginTop: 7 }}>
+                        <div className="card">
+                          Player ID
+                          <b>
+                            홈 {analysisFactors.homeLineupPlayerIdCount}/9
+                            {" · "}
+                            원정 {analysisFactors.awayLineupPlayerIdCount}/9
+                          </b>
+                          <div className="small">
+                            pcode/playerId 우선 매칭
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          타격 Stats Coverage
+                          <b>
+                            {(analysisFactors.lineupStatsCoverage * 100).toFixed(0)}%
+                          </b>
+                          <div className="small">
+                            Stats{" "}
+                            {analysisFactors.homeLineupStatsCount +
+                              analysisFactors.awayLineupStatsCount}
+                            /18
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          VALUE Gate
+                          <b>
+                            {analysisFactors.lineupValueGate}
+                          </b>
+                          <div className="small">
+                            {analysisFactors.lineupValueGate === "OPEN"
+                              ? "80% 이상 · 정상 승격"
+                              : analysisFactors.lineupValueGate === "LIMIT"
+                                ? "50~79% · VALUE 보류"
+                                : "50% 미만 · VALUE 차단"}
+                          </div>
+                        </div>
+                      </div>
+
+                      {matched?.naverPregame?.batterStatsDiagnostic && (
+                        <div className="notice" style={{ marginTop: 7 }}>
+                          Naver 시즌 타격 Stats · HTTP{" "}
+                          {matched.naverPregame.batterStatsDiagnostic.status ?? "-"}
+                          {" · "}조회{" "}
+                          {matched.naverPregame.batterStatsDiagnostic.fetched ?? 0}명
+                          {" · "}라인업 매칭{" "}
+                          {matched.naverPregame.batterStatsDiagnostic.matched ?? 0}/
+                          {matched.naverPregame.batterStatsDiagnostic.lineupBatters ?? 18}
+                          {" · "}ID 매칭{" "}
+                          {matched.naverPregame.batterStatsDiagnostic.matchById ?? 0}
+                          {" · "}이름+팀{" "}
+                          {matched.naverPregame.batterStatsDiagnostic.matchByNameTeam ?? 0}
+                          {" · "}endpoint{" "}
+                          {matched.naverPregame.batterStatsDiagnostic.path ?? "-"}
+                          {matched.naverPregame.batterStatsDiagnostic.error
+                            ? ` · 오류 ${matched.naverPregame.batterStatsDiagnostic.error}`
+                            : ""}
+                        </div>
+                      )}
 
                       {!analysisFactors.pitcherDataUsed && (
                         <div className="notice" style={{ margin: "8px 0" }}>
