@@ -2151,6 +2151,9 @@ function objectName(value: any) {
     value?.person?.name,
     value?.pitcher?.name,
     value?.starter?.name,
+    value?.playerInfo?.name,
+    value?.playerInfo?.playerName,
+    value?.playerInfo?.displayName,
   ];
 
   for (const candidate of candidates) {
@@ -2261,7 +2264,7 @@ function starterFromLineups(
   teamName: string
 ): StarterInfo {
   /*
-   * V12.5.3: Preview가 homeStarter/awayStarter를 명시하면 side를 추론하지 않습니다.
+   * V12.5.4: Preview가 homeStarter/awayStarter를 명시하면 side를 추론하지 않습니다.
    * 이름 중복이나 bullpen/candidate 탐색이 반대편 선발을 덮어쓰는 문제를 차단합니다.
    */
   const directStarter = findBranchByKeyDeep(
@@ -2429,7 +2432,7 @@ function baseballDataAvailability(
   homeStarter: StarterInfo,
   awayStarter: StarterInfo
 ) {
-  /* V12.5.3: 전체 발견 선수 수가 아니라 실제 발표 lineup branch만 집계. */
+  /* V12.5.4: 전체 발견 선수 수가 아니라 실제 발표 lineup branch만 집계. */
   const lineupPlayerCount = collectDeclaredLineupNames(lineups).size;
 
   const starterCount =
@@ -10243,7 +10246,7 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V12.5.3 네이버 Preview parser · starter side + lineup 정확도</h3>
+                      <h3>V12.5.4 네이버 Preview parser · nested playerInfo starter fix</h3>
 
                       <div className="cards">
                         <div className="card">
