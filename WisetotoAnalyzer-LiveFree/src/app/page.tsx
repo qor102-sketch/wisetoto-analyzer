@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V11_9_2_NO_NULL_MAP_PERFORMANCE_ROWS_20260825
+// DEPLOY_MARKER_V11_9_4_DEFENSIVE_STATUS_FIX_20260825
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -571,7 +571,8 @@ type BacktestPerformanceRecord = {
 
   status:
     | "HIT"
-    | "MISS";
+    | "MISS"
+    | "PENDING";
 
   realizedReturn: number | null;
   brierScore: number;
@@ -593,8 +594,15 @@ const BACKTEST_PERFORMANCE_STORAGE_KEY =
 function summarizeBacktestPerformance(
   rows: BacktestPerformanceRecord[]
 ): BacktestPerformanceSummary {
+  const settledRows =
+    settledRows.filter(
+      (row) =>
+        row.status === "HIT" ||
+        row.status === "MISS"
+    );
+
   const count =
-    rows.length;
+    settledRows.length;
 
   if (!count) {
     return {
@@ -609,14 +617,14 @@ function summarizeBacktestPerformance(
   }
 
   const hitCount =
-    rows.filter(
+    settledRows.filter(
       (row) =>
         row.status ===
         "HIT"
     ).length;
 
   const probabilities =
-    rows
+    settledRows
       .map(
         (row) =>
           row.probability
@@ -629,7 +637,7 @@ function summarizeBacktestPerformance(
       );
 
   const evValues =
-    rows
+    settledRows
       .map(
         (row) =>
           row.expectedValue
@@ -643,7 +651,7 @@ function summarizeBacktestPerformance(
       );
 
   const returns =
-    rows
+    settledRows
       .map(
         (row) =>
           row.realizedReturn
@@ -657,7 +665,7 @@ function summarizeBacktestPerformance(
       );
 
   const briers =
-    rows
+    settledRows
       .map(
         (row) =>
           row.brierScore
@@ -8745,6 +8753,17 @@ export default function Home() {
     for (
       const row of backtestValidatedRows
     ) {
+      if (
+        row.status ===
+        "PENDING"
+      ) {
+        continue;
+      }
+
+      const settledStatus:
+        "HIT" | "MISS" =
+          row.status;
+
       const pick =
         actualMarketPicks.find(
           (item) =>
@@ -8781,7 +8800,7 @@ export default function Home() {
         );
 
       const outcome =
-        row.status ===
+        settledStatus ===
         "HIT"
           ? 1
           : 0;
@@ -8796,7 +8815,7 @@ export default function Home() {
           pick.odds
         ) &&
         pick.odds > 1
-          ? row.status ===
+          ? settledStatus ===
               "HIT"
             ? pick.odds -
               1
@@ -8856,7 +8875,7 @@ export default function Home() {
             pick.valueGrade,
 
           status:
-            row.status,
+            settledStatus,
 
           realizedReturn,
           brierScore:
@@ -10263,7 +10282,7 @@ export default function Home() {
                 }}
               >
                 <b>백테스트 검증 준비 완료</b>
-                {" · "}아래 `V11.9.2 백테스트 결과 검증기`에서
+                {" · "}아래 `V11.9.4 백테스트 결과 검증기`에서
                 `예측 확정 · 실제 결과 검증 열기` 버튼을 누르면 결과를 공개할 수 있습니다.
               </div>
             )}
@@ -10333,7 +10352,7 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V11.9.2 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
+              <summary>V11.9.4 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
                   <h3>V11.7 계산 추적 · 데이터 가용성 + λ 교정</h3>
@@ -10354,7 +10373,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.9.2 의사결정 규칙</b><br />
+                    <b>V11.9.4 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -10365,7 +10384,7 @@ export default function Home() {
 
                   {currentSport === "야구" && backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.9.2 백테스트 안전장치 · 실제 SportsAPI 리소스 진단</h3>
+                      <h3>V11.9.4 백테스트 안전장치 · 실제 SportsAPI 리소스 진단</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10464,7 +10483,7 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.9.2 SportsAPI 경기전 데이터 리소스 진단</h3>
+                      <h3>V11.9.4 SportsAPI 경기전 데이터 리소스 진단</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10674,7 +10693,7 @@ export default function Home() {
 
                   {currentSport === "야구" && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.9.2 야구 데이터 가용성 · 선발투수/라인업 복원</h3>
+                      <h3>V11.9.4 야구 데이터 가용성 · 선발투수/라인업 복원</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -11051,7 +11070,7 @@ export default function Home() {
                         }}
                       >
                         <h3 style={{ margin: 0 }}>
-                          V11.9.2 누적 백테스트 성능판
+                          V11.9.4 누적 백테스트 성능판
                         </h3>
 
                         <button
