@@ -2047,15 +2047,89 @@ async function runSelectedMode(
           candidates: [],
         };
 
+  // V12.3: HTTP/endpoint success is not enough.
+  // SportsAPI only gets priority when its payload contains an actual named player record.
+  const sportsApiLineupsUsable =
+    lineupsResult.ok &&
+    (() => {
+      const stack: any[] =
+        [lineupsResult.data];
+      const seen =
+        new Set<any>();
+
+      while (stack.length > 0) {
+        const value =
+          stack.pop();
+
+        if (
+          !value ||
+          typeof value !== "object" ||
+          seen.has(value)
+        ) {
+          continue;
+        }
+
+        seen.add(value);
+
+        if (Array.isArray(value)) {
+          stack.push(...value);
+          continue;
+        }
+
+        const keyText =
+          Object.keys(value)
+            .join(" ")
+            .toLowerCase();
+
+        const playerName =
+          String(
+            value?.playerName ??
+            value?.player?.name ??
+            value?.athlete?.name ??
+            (
+              /player|athlete|batter|pitcher|starter|roster|lineup/.test(
+                keyText
+              )
+                ? value?.name
+                : ""
+            ) ??
+            ""
+          ).trim();
+
+        if (
+          playerName &&
+          /player|athlete|batter|pitcher|starter|roster|lineup|position|batting|order/.test(
+            keyText
+          )
+        ) {
+          return true;
+        }
+
+        for (
+          const child of
+            Object.values(value)
+        ) {
+          if (
+            child &&
+            typeof child === "object"
+          ) {
+            stack.push(child);
+          }
+        }
+      }
+
+      return false;
+    })();
+
   const selectedLineups =
-    lineupsResult.ok
+    sportsApiLineupsUsable
       ? lineupsResult.data
       : naverPregame.ok
         ? naverPregame.lineups
         : null;
 
   const selectedLineupsSource =
-    lineupsResult.ok
+    sportsApiLineupsUsable
       ? "SPORTSAPI"
       : naverPregame.ok
         ? "NAVER_PREVIEW"
@@ -2073,6 +2147,7 @@ async function runSelectedMode(
       selectedLineups,
     lineupsSource:
       selectedLineupsSource,
+    sportsApiLineupsUsable,
     naverPregame: {
       ok:
         naverPregame.ok,
