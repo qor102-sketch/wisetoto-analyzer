@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V12_5_3_NAVER_STARTER_SIDE_LINEUP_ACCURACY_20260825
+// DEPLOY_MARKER_V12_6_LINEUP_OFFENSE_20260825
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -153,6 +153,19 @@ type AnalysisFactors = {
   pitcherDataUsed: boolean;
   pitcherAdjustmentHome: number;
   pitcherAdjustmentAway: number;
+
+  homeLineupBatterCount: number;
+  awayLineupBatterCount: number;
+  homeLineupStatsCount: number;
+  awayLineupStatsCount: number;
+  homeLineupOffenseIndex: number | null;
+  awayLineupOffenseIndex: number | null;
+  homeLineupReliability: number;
+  awayLineupReliability: number;
+  lineupAdjustmentHome: number;
+  lineupAdjustmentAway: number;
+  lineupDataUsed: boolean;
+
   baseballFirstHalfHomeScore: number | null;
   baseballFirstHalfAwayScore: number | null;
 
@@ -2432,6 +2445,250 @@ function applyPitcherAdjustment(
 }
 
 
+type BatterSeasonInfo = {
+  name: string | null;
+  avg: number | null;
+  obp: number | null;
+  slg: number | null;
+  ops: number | null;
+  plateAppearances: number | null;
+};
+
+type LineupOffenseProfile = {
+  batterCount: number;
+  statsCount: number;
+  offenseIndex: number | null;
+  reliability: number;
+  rawFactor: number;
+};
+
+function normalizeRateStat(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return null;
+  if (value > 1.5 && value <= 150) return value / 100;
+  return value;
+}
+
+function batterSeasonInfo(value: any): BatterSeasonInfo {
+  const stats =
+    value?.currentSeasonStats ??
+    value?.seasonStats ??
+    value?.stats ??
+    value;
+
+  const avg = normalizeRateStat(
+    findNumericStatDeep(stats, [
+      "avg", "battingaverage", "average", "타율"
+    ])
+  );
+
+  const obp = normalizeRateStat(
+    findNumericStatDeep(stats, [
+      "obp", "onbasepercentage", "onbasepct", "출루율"
+    ])
+  );
+
+  const slg = normalizeRateStat(
+    findNumericStatDeep(stats, [
+      "slg", "sluggingpercentage", "sluggingpct", "장타율"
+    ])
+  );
+
+  let ops = normalizeRateStat(
+    findNumericStatDeep(stats, [
+      "ops", "onbaseplusslugging", "출루율장타율"
+    ])
+  );
+
+  if (ops === null && obp !== null && slg !== null) {
+    ops = obp + slg;
+  }
+
+  const plateAppearances = findNumericStatDeep(stats, [
+    "plateappearances", "plateappearance", "pa", "타석"
+  ]);
+
+  return {
+    name: objectName(value),
+    avg,
+    obp,
+    slg,
+    ops,
+    plateAppearances:
+      plateAppearances === null
+        ? null
+        : clamp(plateAppearances, 0, 800),
+  };
+}
+
+function declaredTeamLineup(
+  lineups: any,
+  side: "home" | "away"
+) {
+  const teamBranch = findBranchByKeyDeep(
+    lineups,
+    side === "home"
+      ? ["homeTeamLineUp", "homeTeamLineup", "homeLineUp", "homeLineup"]
+      : ["awayTeamLineUp", "awayTeamLineup", "awayLineUp", "awayLineup"]
+  );
+
+  if (!teamBranch || typeof teamBranch !== "object") return [];
+
+  const fullLineup =
+    teamBranch?.fullLineUp ??
+    teamBranch?.fullLineup ??
+    teamBranch?.startingLineUp ??
+    teamBranch?.startingLineup ??
+    null;
+
+  return Array.isArray(fullLineup) ? fullLineup : [];
+}
+
+function lineupBatters(
+  lineups: any,
+  side: "home" | "away",
+  starterName: string | null
+) {
+  const lineup = declaredTeamLineup(lineups, side);
+  const normalizedStarter = normalizeTeamName(starterName ?? "");
+
+  return lineup
+    .filter((player: any, index: number) => {
+      const name = objectName(player);
+      const normalizedName = normalizeTeamName(name ?? "");
+      const position = String(
+        player?.position ??
+        player?.positionName ??
+        player?.pos ??
+        ""
+      ).trim().toLowerCase();
+
+      const pitcher =
+        index === 0 ||
+        position === "1" ||
+        /pitcher|투수/.test(position) ||
+        Boolean(
+          normalizedStarter &&
+          normalizedName === normalizedStarter
+        );
+
+      return Boolean(name) && !pitcher;
+    })
+    .slice(0, 9);
+}
+
+function lineupOffenseProfile(
+  lineups: any,
+  side: "home" | "away",
+  starterName: string | null
+): LineupOffenseProfile {
+  const batters = lineupBatters(lineups, side, starterName);
+  const infos = batters.map(batterSeasonInfo);
+
+  const usable = infos.filter(
+    (item) =>
+      item.ops !== null ||
+      (item.obp !== null && item.slg !== null) ||
+      item.avg !== null
+  );
+
+  if (!usable.length) {
+    return {
+      batterCount: batters.length,
+      statsCount: 0,
+      offenseIndex: null,
+      reliability: 0,
+      rawFactor: 1,
+    };
+  }
+
+  const factors = usable.map((item) => {
+    if (item.ops !== null) {
+      return clamp(item.ops / 0.720, 0.72, 1.30);
+    }
+
+    if (item.obp !== null && item.slg !== null) {
+      return clamp((item.obp + item.slg) / 0.720, 0.72, 1.30);
+    }
+
+    return clamp((item.avg ?? 0.255) / 0.255, 0.78, 1.22);
+  });
+
+  const rawFactor =
+    factors.reduce((sum, value) => sum + value, 0) /
+    factors.length;
+
+  const coverage = clamp(usable.length / 9, 0, 1);
+
+  const paValues = usable
+    .map((item) => item.plateAppearances)
+    .filter((value): value is number => value !== null);
+
+  const avgPa = paValues.length
+    ? paValues.reduce((sum, value) => sum + value, 0) / paValues.length
+    : null;
+
+  const sampleReliability =
+    avgPa === null
+      ? 0.55
+      : clamp(avgPa / 180, 0.20, 1);
+
+  const reliability = clamp(
+    coverage * sampleReliability,
+    0,
+    1
+  );
+
+  const offenseIndex =
+    1 + (rawFactor - 1) * reliability;
+
+  return {
+    batterCount: batters.length,
+    statsCount: usable.length,
+    offenseIndex: Number(offenseIndex.toFixed(4)),
+    reliability: Number(reliability.toFixed(4)),
+    rawFactor: Number(rawFactor.toFixed(4)),
+  };
+}
+
+function applyLineupAdjustment(
+  baseRuns: number,
+  profile: LineupOffenseProfile,
+  strengthMultiplier = 1
+) {
+  if (
+    profile.offenseIndex === null ||
+    profile.reliability <= 0 ||
+    profile.statsCount <= 0
+  ) {
+    return {
+      runs: baseRuns,
+      adjustment: 0,
+      used: false,
+    };
+  }
+
+  const effectiveWeight = clamp(
+    0.55 * strengthMultiplier,
+    0,
+    0.75
+  );
+
+  const multiplier = clamp(
+    1 + (profile.offenseIndex - 1) * effectiveWeight,
+    0.92,
+    1.08
+  );
+
+  const runs = baseRuns * multiplier;
+
+  return {
+    runs,
+    adjustment: Number((runs - baseRuns).toFixed(3)),
+    used: true,
+  };
+}
+
+
 type BaseballAnalysisStage =
   | "PRE"
   | "STARTER"
@@ -3286,8 +3543,40 @@ function buildAnalysis(
           completeness: 100,
         };
 
+  const homeLineupOffense =
+    sport === "야구"
+      ? lineupOffenseProfile(
+          sportsDetail?.lineups,
+          "home",
+          homeStarter.name
+        )
+      : {
+          batterCount: 0,
+          statsCount: 0,
+          offenseIndex: null,
+          reliability: 0,
+          rawFactor: 1,
+        };
+
+  const awayLineupOffense =
+    sport === "야구"
+      ? lineupOffenseProfile(
+          sportsDetail?.lineups,
+          "away",
+          awayStarter.name
+        )
+      : {
+          batterCount: 0,
+          statsCount: 0,
+          offenseIndex: null,
+          reliability: 0,
+          rawFactor: 1,
+        };
+
   let pitcherAdjustmentHome = 0;
   let pitcherAdjustmentAway = 0;
+  let lineupAdjustmentHome = 0;
+  let lineupAdjustmentAway = 0;
 
   let baseballFirstHalfHomeScore:
     | number
@@ -3467,16 +3756,48 @@ function buildAnalysis(
       pitcherAdjustmentHome = homePitcherAdjusted.adjustment;
       pitcherAdjustmentAway = awayPitcherAdjusted.adjustment;
 
-      const firstHome = applyPitcherAdjustment(
+      const homeLineupAdjusted =
+        applyLineupAdjustment(
+          expectedHomeScore,
+          homeLineupOffense,
+          1
+        );
+
+      const awayLineupAdjusted =
+        applyLineupAdjustment(
+          expectedAwayScore,
+          awayLineupOffense,
+          1
+        );
+
+      expectedHomeScore = homeLineupAdjusted.runs;
+      expectedAwayScore = awayLineupAdjusted.runs;
+
+      lineupAdjustmentHome = homeLineupAdjusted.adjustment;
+      lineupAdjustmentAway = awayLineupAdjusted.adjustment;
+
+      const firstHomePitcher = applyPitcherAdjustment(
         Math.max(0.10, baseHome * (5 / 9)),
         awayStarter,
         1.35
       );
 
-      const firstAway = applyPitcherAdjustment(
+      const firstAwayPitcher = applyPitcherAdjustment(
         Math.max(0.10, baseAway * (5 / 9)),
         homeStarter,
         1.35
+      );
+
+      const firstHome = applyLineupAdjustment(
+        firstHomePitcher.runs,
+        homeLineupOffense,
+        0.90
+      );
+
+      const firstAway = applyLineupAdjustment(
+        firstAwayPitcher.runs,
+        awayLineupOffense,
+        0.90
       );
 
       baseballFirstHalfHomeScore = firstHome.runs;
@@ -4311,6 +4632,31 @@ function buildAnalysis(
         ),
       pitcherAdjustmentHome,
       pitcherAdjustmentAway,
+
+      homeLineupBatterCount:
+        homeLineupOffense.batterCount,
+      awayLineupBatterCount:
+        awayLineupOffense.batterCount,
+      homeLineupStatsCount:
+        homeLineupOffense.statsCount,
+      awayLineupStatsCount:
+        awayLineupOffense.statsCount,
+      homeLineupOffenseIndex:
+        homeLineupOffense.offenseIndex,
+      awayLineupOffenseIndex:
+        awayLineupOffense.offenseIndex,
+      homeLineupReliability:
+        homeLineupOffense.reliability,
+      awayLineupReliability:
+        awayLineupOffense.reliability,
+      lineupAdjustmentHome,
+      lineupAdjustmentAway,
+      lineupDataUsed:
+        Boolean(
+          homeLineupOffense.statsCount > 0 ||
+          awayLineupOffense.statsCount > 0
+        ),
+
       baseballFirstHalfHomeScore:
         baseballFirstHalfHomeScore === null
           ? null
@@ -10299,7 +10645,7 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V12.5.5 선발 표본 신뢰도 · IP/G/GS calibration</h3>
+                      <h3>V12.6 실제 선발타선 공격력 · 시즌 타격지표 calibration</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10458,7 +10804,7 @@ export default function Home() {
                             score/winner/statistics/boxscore/final-score 계열은 탐색에서 제외하며,
                             currentSeasonStats/seasonStats는 경기 전 시즌 누적 지표 후보로 탐색을 허용하며,
                             homeStarter/awayStarter는 명시된 side를 우선 고정하고 ERA/WHIP를 deep parser로 읽습니다.
-                            라인업 인원은 fullLineUp/startingLineup 계열만 집계하며 bullpen/candidate는 제외합니다.
+                            라인업 인원과 공격력은 fullLineUp/startingLineup 계열만 사용하며 pitcher/bullpen/candidate는 공격력 계산에서 제외합니다. 타격 시즌 Stats가 실제 수신된 선수만 공격력 보정에 사용합니다.
                             경기 결과·boxscore·일반 statistics 계열은 계속 차단합니다.
                           </div>
                         </div>
@@ -10888,6 +11234,58 @@ export default function Home() {
                           </b>
                           <div className="small">
                             전반 승무패/H/UO 전용
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="cards" style={{ marginTop: 7 }}>
+                        <div className="card">
+                          홈 선발타선
+                          <b>
+                            {analysisFactors.homeLineupBatterCount}명
+                            {" · "}
+                            Stats {analysisFactors.homeLineupStatsCount}명
+                          </b>
+                          <div className="small">
+                            공격지수{" "}
+                            {analysisFactors.homeLineupOffenseIndex === null
+                              ? "-"
+                              : analysisFactors.homeLineupOffenseIndex.toFixed(3)}
+                            {" · "}신뢰{" "}
+                            {(analysisFactors.homeLineupReliability * 100).toFixed(0)}%
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          원정 선발타선
+                          <b>
+                            {analysisFactors.awayLineupBatterCount}명
+                            {" · "}
+                            Stats {analysisFactors.awayLineupStatsCount}명
+                          </b>
+                          <div className="small">
+                            공격지수{" "}
+                            {analysisFactors.awayLineupOffenseIndex === null
+                              ? "-"
+                              : analysisFactors.awayLineupOffenseIndex.toFixed(3)}
+                            {" · "}신뢰{" "}
+                            {(analysisFactors.awayLineupReliability * 100).toFixed(0)}%
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          타선 λ 보정량
+                          <b>
+                            홈 {analysisFactors.lineupAdjustmentHome >= 0 ? "+" : ""}
+                            {analysisFactors.lineupAdjustmentHome.toFixed(2)}
+                            {" / "}
+                            원정 {analysisFactors.lineupAdjustmentAway >= 0 ? "+" : ""}
+                            {analysisFactors.lineupAdjustmentAway.toFixed(2)}
+                          </b>
+                          <div className="small">
+                            {analysisFactors.lineupDataUsed
+                              ? "실제 시즌 타격지표 반영"
+                              : "타격 Stats 미수신 · 보정 0"}
                           </div>
                         </div>
                       </div>
