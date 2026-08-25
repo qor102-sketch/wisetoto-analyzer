@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V12_4_1_NAVER_RESULT_WRAPPER_FIX_20260825
+// DEPLOY_MARKER_V12_5_NAVER_PREVIEW_PARSER_20260825
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -2142,6 +2142,9 @@ function findNumericStatDeep(
 
 function objectName(value: any) {
   const candidates = [
+    value?.playerName,
+    value?.displayName,
+    value?.memberName,
     value?.name,
     value?.player?.name,
     value?.athlete?.name,
@@ -2163,6 +2166,7 @@ function looksLikeStartingPitcher(value: any) {
 
   const text = [
     value?.position,
+    value?.positionName,
     value?.role,
     value?.type,
     value?.status,
@@ -2400,7 +2404,11 @@ function baseballDataAvailability(
         value?.player ||
         value?.athlete ||
         value?.person ||
+        value?.playerName ||
+        value?.displayName ||
+        value?.memberName ||
         value?.position ||
+        value?.positionName ||
         value?.role ||
         value?.jersey ||
         value?.number ||
@@ -10266,7 +10274,7 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V12.4.1 네이버 Preview result-wrapper 구조 진단</h3>
+                      <h3>V12.5 네이버 Preview parser · 선발/라인업 연결</h3>
 
                       <div className="cards">
                         <div className="card">
