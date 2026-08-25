@@ -146,6 +146,16 @@ type AnalysisFactors = {
   pitcherAdjustmentAway: number;
   baseballFirstHalfHomeScore: number | null;
   baseballFirstHalfAwayScore: number | null;
+
+  baseballAnalysisStage:
+    | "PRE"
+    | "STARTER"
+    | "LINEUP"
+    | "READY";
+  baseballAnalysisStageLabel: string;
+  baseballLineupPlayerCount: number;
+  baseballStarterCount: number;
+  baseballDataCompleteness: number;
 };
 
 const I = {
@@ -1446,6 +1456,173 @@ function applyPitcherAdjustment(
 }
 
 
+type BaseballAnalysisStage =
+  | "PRE"
+  | "STARTER"
+  | "LINEUP"
+  | "READY";
+
+function baseballDataAvailability(
+  lineups: any,
+  homeStarter: StarterInfo,
+  awayStarter: StarterInfo
+) {
+  const objects =
+    collectObjectsDeep(
+      lineups
+    );
+
+  const playerNames =
+    new Set<string>();
+
+  for (const value of objects) {
+    const name =
+      objectName(
+        value
+      );
+
+    if (!name) {
+      continue;
+    }
+
+    const playerLike =
+      Boolean(
+        value?.player ||
+        value?.athlete ||
+        value?.person ||
+        value?.position ||
+        value?.role ||
+        value?.jersey ||
+        value?.number ||
+        looksLikeStartingPitcher(
+          value
+        )
+      );
+
+    if (playerLike) {
+      playerNames.add(
+        normalizeTeamName(
+          name
+        ) ||
+        name.toLowerCase()
+      );
+    }
+  }
+
+  const lineupPlayerCount =
+    playerNames.size;
+
+  const starterCount =
+    Number(
+      Boolean(
+        homeStarter.name
+      )
+    ) +
+    Number(
+      Boolean(
+        awayStarter.name
+      )
+    );
+
+  let stage:
+    BaseballAnalysisStage =
+      "PRE";
+
+  if (
+    lineupPlayerCount >= 16 &&
+    starterCount >= 2
+  ) {
+    stage = "READY";
+  } else if (
+    lineupPlayerCount >= 14
+  ) {
+    stage = "LINEUP";
+  } else if (
+    starterCount > 0
+  ) {
+    stage = "STARTER";
+  }
+
+  const label =
+    stage === "READY"
+      ? "경기 임박 · 분석 확정 단계"
+      : stage === "LINEUP"
+        ? "라인업 발표 · 최종 검증 전"
+        : stage === "STARTER"
+          ? "선발 발표 · 라인업 대기"
+          : "사전 분석 · 선발/라인업 미발표";
+
+  const completeness =
+    stage === "READY"
+      ? 100
+      : stage === "LINEUP"
+        ? 78
+        : stage === "STARTER"
+          ? 52
+          : 30;
+
+  return {
+    stage,
+    label,
+    lineupPlayerCount,
+    starterCount,
+    completeness,
+  };
+}
+
+function applyBaseballStageGate(
+  valueGrade: {
+    grade:
+      | "PASS"
+      | "WATCH"
+      | "VALUE"
+      | "STRONG VALUE";
+    score: number;
+    reason: string;
+  },
+  factors: AnalysisFactors
+) {
+  if (
+    factors.baseballAnalysisStage ===
+    "READY"
+  ) {
+    return {
+      ...valueGrade,
+      stageGradeLabel: null as string | null,
+    };
+  }
+
+  if (
+    valueGrade.grade !== "VALUE" &&
+    valueGrade.grade !== "STRONG VALUE"
+  ) {
+    return {
+      ...valueGrade,
+      stageGradeLabel: null as string | null,
+    };
+  }
+
+  const prefix =
+    factors.baseballAnalysisStage ===
+    "LINEUP"
+      ? "LINEUP VALUE"
+      : factors.baseballAnalysisStage ===
+          "STARTER"
+        ? "STARTER VALUE"
+        : "PRE VALUE";
+
+  return {
+    grade: "WATCH" as const,
+    score:
+      valueGrade.score,
+    reason:
+      `${prefix} · ${factors.baseballAnalysisStageLabel} · ${valueGrade.reason}`,
+    stageGradeLabel:
+      prefix,
+  };
+}
+
+
 function buildAnalysis(
   sport: Exclude<
     Sport,
@@ -1743,6 +1920,21 @@ function buildAnalysis(
           )
         )
       : { name: null, era: null, whip: null };
+
+  const baseballAvailability =
+    sport === "야구"
+      ? baseballDataAvailability(
+          sportsDetail?.lineups,
+          homeStarter,
+          awayStarter
+        )
+      : {
+          stage: "READY" as BaseballAnalysisStage,
+          label: "해당 없음",
+          lineupPlayerCount: 0,
+          starterCount: 0,
+          completeness: 100,
+        };
 
   let pitcherAdjustmentHome = 0;
   let pitcherAdjustmentAway = 0;
@@ -2646,6 +2838,17 @@ function buildAnalysis(
         baseballFirstHalfAwayScore === null
           ? null
           : Number(baseballFirstHalfAwayScore.toFixed(3)),
+
+      baseballAnalysisStage:
+        baseballAvailability.stage,
+      baseballAnalysisStageLabel:
+        baseballAvailability.label,
+      baseballLineupPlayerCount:
+        baseballAvailability.lineupPlayerCount,
+      baseballStarterCount:
+        baseballAvailability.starterCount,
+      baseballDataCompleteness:
+        baseballAvailability.completeness,
     } as AnalysisFactors,
   };
 }
@@ -2666,6 +2869,7 @@ type MarketPick = {
   valueGrade: "PASS" | "WATCH" | "VALUE" | "STRONG VALUE";
   valueGradeScore: number;
   valueGradeReason: string;
+  stageGradeLabel?: string | null;
 
   calibrationWeight: number | null;
   signalConflictScore: number;
@@ -4026,7 +4230,7 @@ function buildActualMarketPicks(
 
         const ev = betExpectedValue(calibratedProbability, safeOdds);
 
-        const valueGrade = evaluateValueGrade({
+        const baseValueGrade = evaluateValueGrade({
           odds: safeOdds,
           expectedValue: ev.expectedValue,
           edge,
@@ -4034,6 +4238,12 @@ function buildActualMarketPicks(
           decisionRiskScore: decisionRisk.score,
           decisionRiskReason: decisionRisk.reason,
         });
+
+        const valueGrade =
+          applyBaseballStageGate(
+            baseValueGrade,
+            factors
+          );
 
         const recScore =
           recommendationScore(calibratedProbability, edge, confidence);
@@ -4079,6 +4289,8 @@ function buildActualMarketPicks(
           valueGrade: valueGrade.grade,
           valueGradeScore: valueGrade.score,
           valueGradeReason: valueGrade.reason,
+          stageGradeLabel:
+            valueGrade.stageGradeLabel,
           calibrationWeight:
             calibrated.modelWeight === null
               ? null
@@ -5726,7 +5938,7 @@ export default function Home() {
                         <div className={`cmNum ${pick.expectedValue !== null && pick.expectedValue >= 0 ? "cmPos" : "cmNeg"}`}>{pick.expectedValue === null ? "-" : `${pick.expectedValue >= 0 ? "+" : ""}${pick.expectedValue.toFixed(1)}%`}</div>
                         <div
                           className="cmNum"
-                          title={`${pick.valueGradeReason} · 의사결정 위험 ${pick.decisionRiskScore.toFixed(0)} · ${pick.decisionRiskReason} · 신뢰 ${pick.confidenceGrade}(${pick.confidenceScore.toFixed(0)}) · 가치점수 ${pick.valueGradeScore.toFixed(1)}`}
+                          title={`${pick.valueGradeReason} · 단계 ${analysisFactors.baseballAnalysisStageLabel} · 의사결정 위험 ${pick.decisionRiskScore.toFixed(0)} · ${pick.decisionRiskReason} · 신뢰 ${pick.confidenceGrade}(${pick.confidenceScore.toFixed(0)}) · 가치점수 ${pick.valueGradeScore.toFixed(1)}`}
                         >
                           <span
                             className="cmGrade"
@@ -5748,7 +5960,7 @@ export default function Home() {
                                     : "#667085",
                             }}
                           >
-                            {pick.valueGrade}
+                            {pick.stageGradeLabel ?? pick.valueGrade}
                           </span>
                         </div>
                       </div>
@@ -5764,10 +5976,10 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V11 계산 추적 · 선발투수 λ · 야구 독립마켓 · EV</summary>
+              <summary>V11.1 계산 추적 · 데이터 단계 · 선발 λ · 야구 독립마켓 · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
-                  <h3>V11 계산 추적 · 선발투수 + 저신뢰 λ 교정</h3>
+                  <h3>V11.1 계산 추적 · 데이터 가용성 + λ 교정</h3>
 
                   <div
                     className="notice"
@@ -5785,7 +5997,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11 의사결정 규칙</b><br />
+                    <b>V11.1 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -5796,9 +6008,37 @@ export default function Home() {
 
                   {currentSport === "야구" && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11 선발투수 보정</h3>
+                      <h3>V11.1 야구 데이터 가용성 · 선발투수 보정</h3>
 
                       <div className="cards">
+                        <div className="card">
+                          분석 단계
+                          <b>{analysisFactors.baseballAnalysisStageLabel}</b>
+                        </div>
+
+                        <div className="card">
+                          데이터 완성도
+                          <b>{analysisFactors.baseballDataCompleteness}%</b>
+                          <div className="small">
+                            선발 {analysisFactors.baseballStarterCount}/2
+                            {" · "}라인업 감지 {analysisFactors.baseballLineupPlayerCount}명
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          추천 승격 규칙
+                          <b>
+                            {analysisFactors.baseballAnalysisStage === "READY"
+                              ? "VALUE 확정 가능"
+                              : "VALUE 후보만 표시"}
+                          </b>
+                          <div className="small">
+                            미발표 단계에서는 최고 가치픽 승격 제한
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="cards" style={{ marginTop: 7 }}>
                         <div className="card">
                           홈 선발
                           <b>{analysisFactors.homeStarterName ?? "데이터 미수신"}</b>
@@ -5848,10 +6088,9 @@ export default function Home() {
 
                       {!analysisFactors.pitcherDataUsed && (
                         <div className="notice" style={{ margin: "8px 0" }}>
-                          SportsAPI 상세 응답에서 선발투수 ERA/WHIP을 찾지 못했습니다.
-                          임의 수치를 만들지 않고 기존 팀 득실 모델을 유지합니다.
-                          실제 선발 수치가 들어오면 전체 경기 λ는 보수적으로,
-                          5이닝 λ는 더 강하게 자동 보정됩니다.
+                          현재는 사전 분석 단계입니다. 선발/라인업이 없으면 임의 수치를 만들지 않고 기존 팀 득실 모델을 유지합니다.
+                          VALUE 조건을 만족해도 PRE VALUE 후보로만 표시하고 최고 가치픽에는 올리지 않습니다.
+                          실제 선발 수치가 들어오면 전체 경기 λ는 보수적으로, 5이닝 λ는 더 강하게 자동 보정됩니다.
                         </div>
                       )}
                     </div>
