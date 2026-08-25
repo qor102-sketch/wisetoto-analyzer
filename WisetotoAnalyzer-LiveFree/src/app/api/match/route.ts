@@ -960,6 +960,56 @@ function selectTeams(
  * detail이 429여도
  * fixture 자체의 성공 결과는 유지합니다.
  */
+
+/**
+ * SportsAPI 공식 fixture lineups endpoint.
+ *
+ * GET /v2/fixtures/{id}/lineups
+ *
+ * 과거경기 백테스트에서는 이 데이터를 "경기 전 공개 정보" 후보로 사용합니다.
+ * statistics/events/result는 여기서 호출하지 않습니다.
+ */
+async function getFixtureLineups(
+  fixtureId: number,
+  key: string
+) {
+  try {
+    const result =
+      await api(
+        `/fixtures/${fixtureId}/lineups`,
+        key
+      );
+
+    return {
+      ok: true,
+      data:
+        result.data,
+      error: null,
+      status: null,
+      retryAfterMs: null,
+      rateLimit:
+        result.headers,
+    };
+  } catch (e: any) {
+    return {
+      ok: false,
+      data: null,
+      error:
+        e?.message ||
+        "lineups 조회 실패",
+      status:
+        e?.status ??
+        null,
+      retryAfterMs:
+        e?.retryAfterMs ??
+        null,
+      rateLimit:
+        e?.rateLimit ??
+        null,
+    };
+  }
+}
+
 async function getFixtureDetail(
   fixtureId: number,
   key: string
@@ -1548,6 +1598,22 @@ async function runSelectedMode(
   const fixture = result.fixture;
   const fixtureId = Number(fixture?.id);
 
+  const lineupsResult =
+    Number.isFinite(fixtureId)
+      ? await getFixtureLineups(
+          fixtureId,
+          key
+        )
+      : {
+          ok: false,
+          data: null,
+          error:
+            "fixtureId 없음",
+          status: null,
+          retryAfterMs: null,
+          rateLimit: null,
+        };
+
   return Response.json({
     ok:true,
     mode:"selected",
@@ -1556,12 +1622,51 @@ async function runSelectedMode(
     selectedFixture:summarizeFixture(fixture),
     fixture,
     detail:null,
-    lineups:null,
+    lineups:
+      lineupsResult.ok
+        ? lineupsResult.data
+        : null,
     statistics:null,
     h2h:null,
     debug:{
-      message:"사용자가 선택한 Betman 경기를 SportsAPI에서 매칭했습니다.",
+      message:
+        lineupsResult.ok
+          ? "선택 경기 매칭 + SportsAPI 공식 lineups 조회 완료"
+          : "선택 경기 매칭 완료 · lineups 미수신",
       sportsApi:result.debug,
+      lineups:{
+        ok:
+          lineupsResult.ok,
+        error:
+          lineupsResult.error,
+        status:
+          lineupsResult.status,
+        rateLimit:
+          lineupsResult.rateLimit,
+        dataType:
+          Array.isArray(
+            lineupsResult.data
+          )
+            ? "array"
+            : lineupsResult.data &&
+                typeof lineupsResult.data === "object"
+              ? "object"
+              : typeof lineupsResult.data,
+        topKeys:
+          lineupsResult.data &&
+          typeof lineupsResult.data === "object" &&
+          !Array.isArray(lineupsResult.data)
+            ? Object.keys(
+                lineupsResult.data
+              ).slice(0, 30)
+            : [],
+        arrayCount:
+          Array.isArray(
+            lineupsResult.data
+          )
+            ? lineupsResult.data.length
+            : null,
+      },
       runtimeShape:{
         selectedFixture:
           safeFixtureTeamDebug(fixture),
