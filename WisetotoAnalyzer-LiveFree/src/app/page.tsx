@@ -594,6 +594,7 @@ type SimpleBacktestRecord = {
   id: string;
   fixtureKey: string;
   gameLabel: string;
+  stage: "PRE" | "STARTER" | "LINEUP" | "READY";
   market: string;
   pick: string;
   probability: number;
@@ -8765,7 +8766,10 @@ export default function Home() {
 
       if (Array.isArray(parsed)) {
         setSimpleBacktestRecords(
-          parsed as SimpleBacktestRecord[]
+          parsed.map((row: any) => ({
+            ...row,
+            stage: row?.stage ?? String(row?.id ?? "").split("|")[1] ?? "READY",
+          })) as SimpleBacktestRecord[]
         );
       }
     } catch {
@@ -9491,88 +9495,69 @@ export default function Home() {
     backtestResultRevealed &&
     backtestValidationTruth
   ) {
-    for (const validation of backtestValidationRows) {
-      if (
-        validation.status !== "HIT" &&
-        validation.status !== "MISS"
-      ) {
-        continue;
-      }
-
-      const pick =
-        actualMarketPicks.find(
-          (item) =>
-            item.key === validation.key
+    // V13.1: 실제 결과가 공개되는 순간, 같은 Fixture에 보존된
+    // PRE/STARTER/LINEUP/READY 스냅샷을 모두 동일 truth로 검증한다.
+    const storedValidationSnapshots =
+      Object.values(baseballSnapshots)
+        .flat()
+        .filter((item) =>
+          item.fixtureKey === String(
+            matched?.fixtureId ??
+            primaryMatchSeq(betman.matched) ??
+            `${betman.matched?.home ?? ""}|${betman.matched?.away ?? ""}`
+          )
         );
+    const snapshotsForValidation =
+      storedValidationSnapshots.length
+        ? storedValidationSnapshots
+        : [{
+            stage: analysisFactors.baseballAnalysisStage,
+            markets: actualMarketPicks,
+          } as any];
 
-      if (!pick) {
-        continue;
-      }
+    for (const snapshot of snapshotsForValidation) {
+      for (const validation of backtestValidationRows) {
+        if (validation.status !== "HIT" && validation.status !== "MISS") continue;
 
-      const fixtureKey =
-        String(
+        const pick = snapshot.markets.find(
+          (item: any) => item.key === validation.key
+        );
+        if (!pick) continue;
+
+        const fixtureKey = String(
           matched?.fixtureId ??
-          backtestValidationKey(
-            selectedBetman
-          ) ??
+          backtestValidationKey(selectedBetman) ??
           selectedBetmanKey ??
           "unknown"
         );
+        const hit = validation.status === "HIT";
+        const probability = clamp(pick.probability, 0, 100);
+        const p = probability / 100;
+        const odds = pick.odds ?? null;
+        const expectedValue = pick.expectedValue ?? null;
+        const grade = pick.displayGrade ?? pick.stageGradeLabel ?? pick.grade ?? pick.valueGrade ?? "-";
+        const realizedReturn =
+          odds !== null && Number.isFinite(odds) && odds > 1
+            ? hit ? odds - 1 : -1
+            : null;
 
-      const hit =
-        validation.status === "HIT";
-
-      const probability =
-        clamp(
-          pick.probability,
-          0,
-          100
-        );
-
-      const p =
-        probability / 100;
-
-      const realizedReturn =
-        pick.odds !== null &&
-        Number.isFinite(pick.odds) &&
-        pick.odds > 1
-          ? hit
-            ? pick.odds - 1
-            : -1
-          : null;
-
-      simpleCurrentRecords.push({
-        id:
-          `${fixtureKey}|${analysisFactors.baseballAnalysisStage}|${pick.key}`,
-        fixtureKey,
-        gameLabel:
-          `${selectedBetman?.home ?? "-"} vs ${selectedBetman?.away ?? "-"}`,
-        market:
-          pick.market,
-        pick:
-          pick.pick,
-        probability,
-        odds:
-          pick.odds,
-        expectedValue:
-          pick.expectedValue,
-        grade:
-          pick.stageGradeLabel ??
-          pick.valueGrade,
-        hit,
-        realizedReturn,
-        brier:
-          Number(
-            (
-              (
-                p -
-                (hit ? 1 : 0)
-              ) ** 2
-            ).toFixed(6)
-          ),
-        savedAt:
-          Date.now(),
-      });
+        simpleCurrentRecords.push({
+          id: `${fixtureKey}|${snapshot.stage}|${pick.key}`,
+          fixtureKey,
+          gameLabel: `${selectedBetman?.home ?? "-"} vs ${selectedBetman?.away ?? "-"}`,
+          stage: snapshot.stage,
+          market: pick.market,
+          pick: pick.pick,
+          probability,
+          odds,
+          expectedValue,
+          grade,
+          hit,
+          realizedReturn,
+          brier: Number(((p - (hit ? 1 : 0)) ** 2).toFixed(6)),
+          savedAt: Date.now(),
+        });
+      }
     }
   }
 
@@ -9654,6 +9639,25 @@ export default function Home() {
           ),
       })
     );
+
+  const simpleStageSummaries =
+    (["PRE", "STARTER", "LINEUP", "READY"] as const).map(
+      (stage) => ({
+        stage,
+        summary: simpleBacktestSummary(
+          simpleBacktestRecords.filter((row) => row.stage === stage)
+        ),
+      })
+    );
+
+  const simpleGradeSummaries =
+    Array.from(new Set(simpleBacktestRecords.map((row) => row.grade)))
+      .map((grade) => ({
+        grade,
+        summary: simpleBacktestSummary(
+          simpleBacktestRecords.filter((row) => row.grade === grade)
+        ),
+      }));
 
   function clearSimpleBacktest() {
     setSimpleBacktestRecords([]);
@@ -12048,7 +12052,7 @@ export default function Home() {
                         }}
                       >
                         <h3 style={{ margin: 0 }}>
-                          V12.0 누적 백테스트 성능
+                          V13.1 단계별 백테스트 성능
                         </h3>
 
                         <button
@@ -12108,6 +12112,36 @@ export default function Home() {
                         </div>
                       </div>
 
+                      <div style={{ marginTop: 10 }}>
+                        <b style={{ fontSize: 10 }}>단계별 성능 · PRE → STARTER → LINEUP → READY</b>
+                        {simpleStageSummaries.map(({ stage, summary }) => (
+                          <div
+                            key={`simple-stage-${stage}`}
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "72px 52px 70px 70px 70px 70px",
+                              gap: 6,
+                              padding: "6px 8px",
+                              borderBottom: "1px solid #e6edf5",
+                              fontSize: 9,
+                            }}
+                          >
+                            <div><b>{stage}</b></div>
+                            <div>N {summary.records}</div>
+                            <div>적중 {summary.hitRate === null ? "-" : `${summary.hitRate.toFixed(1)}%`}</div>
+                            <div>ROI {summary.roi === null ? "-" : `${summary.roi >= 0 ? "+" : ""}${summary.roi.toFixed(1)}%`}</div>
+                            <div>EV {summary.avgEv === null ? "-" : `${summary.avgEv >= 0 ? "+" : ""}${summary.avgEv.toFixed(1)}%`}</div>
+                            <div>Brier {summary.avgBrier === null ? "-" : summary.avgBrier.toFixed(3)}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {simpleGradeSummaries.length > 0 && (
+                        <div className="notice" style={{ margin: "8px 0 0" }}>
+                          등급별 표본: {simpleGradeSummaries.map(({ grade, summary }) => `${grade} N${summary.records} · ROI ${summary.roi === null ? "-" : `${summary.roi >= 0 ? "+" : ""}${summary.roi.toFixed(1)}%`} · Brier ${summary.avgBrier === null ? "-" : summary.avgBrier.toFixed(3)}`).join(" / ")}
+                        </div>
+                      )}
+
                       {simpleMarketSummaries.length > 0 && (
                         <div style={{ marginTop: 8 }}>
                           {simpleMarketSummaries.map(
@@ -12152,8 +12186,8 @@ export default function Home() {
                       )}
 
                       <div className="notice" style={{ margin: "8px 0 0" }}>
-                        실제 결과를 연 뒤 검증 가능한 HIT/MISS 마켓만 localStorage에 저장합니다.
-                        이 누적 기록은 예측 엔진 입력에 사용하지 않습니다.
+                        실제 결과를 연 뒤 검증 가능한 HIT/MISS 마켓을 단계별로 localStorage에 저장합니다.
+                        V13.1은 PRE/STARTER/LINEUP/READY의 적중률·ROI·평균 EV·Brier를 분리 측정하며, 이 누적 기록은 예측 엔진 입력에 사용하지 않습니다.
                       </div>
                     </div>
                   )}
