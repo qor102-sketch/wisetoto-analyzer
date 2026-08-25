@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V12_3_NAVER_PREVIEW_PRIORITY_FIX_20260825
+// DEPLOY_MARKER_V12_4_NAVER_PREVIEW_SCHEMA_20260825
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -10266,7 +10266,7 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V12.3 네이버스포츠 경기전 데이터 실제 반영</h3>
+                      <h3>V12.4 네이버 Preview JSON 구조 진단</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10307,6 +10307,124 @@ export default function Home() {
                       {matched?.naverPregame?.error && (
                         <div className="notice" style={{ margin: "8px 0 0" }}>
                           네이버 진단: {matched.naverPregame.error}
+                        </div>
+                      )}
+
+                      {matched?.naverPregame?.previewAudit && (
+                        <div style={{ marginTop: 10 }}>
+                          <div
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 900,
+                              marginBottom: 6,
+                            }}
+                          >
+                            Preview JSON 구조 진단
+                          </div>
+
+                          <div className="cards">
+                            <div className="card">
+                              rootKeys
+                              <b>
+                                {matched.naverPregame.previewAudit.rootKeys?.length ?? 0}개
+                              </b>
+                              <div className="small">
+                                {(matched.naverPregame.previewAudit.rootKeys ?? [])
+                                  .slice(0, 12)
+                                  .join(", ") || "-"}
+                              </div>
+                            </div>
+
+                            <div className="card">
+                              발견 path
+                              <b>
+                                {matched.naverPregame.previewAudit.rowCount ?? 0}개
+                              </b>
+                              <div className="small">
+                                결과/점수/statistics 제외
+                              </div>
+                            </div>
+                          </div>
+
+                          {Array.isArray(
+                            matched.naverPregame.previewAudit.rows
+                          ) &&
+                            matched.naverPregame.previewAudit.rows.length > 0 && (
+                            <div
+                              style={{
+                                marginTop: 8,
+                                overflowX: "auto",
+                                border:
+                                  "1px solid #e3e9f2",
+                                borderRadius: 9,
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns:
+                                    "220px 60px 60px 130px 90px 90px 50px",
+                                  gap: 6,
+                                  padding: "6px 8px",
+                                  minWidth: 760,
+                                  background: "#f5f8fc",
+                                  fontSize: 9,
+                                  fontWeight: 900,
+                                }}
+                              >
+                                <div>path</div>
+                                <div>type</div>
+                                <div>length</div>
+                                <div>sample name</div>
+                                <div>role</div>
+                                <div>position</div>
+                                <div>order</div>
+                              </div>
+
+                              {matched.naverPregame.previewAudit.rows.map(
+                                (
+                                  row: any,
+                                  index: number
+                                ) => (
+                                  <div
+                                    key={`preview-audit-${row.path}-${index}`}
+                                    style={{
+                                      display: "grid",
+                                      gridTemplateColumns:
+                                        "220px 60px 60px 130px 90px 90px 50px",
+                                      gap: 6,
+                                      padding: "6px 8px",
+                                      minWidth: 760,
+                                      borderTop:
+                                        "1px solid #edf1f6",
+                                      fontSize: 9,
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        wordBreak:
+                                          "break-all",
+                                      }}
+                                    >
+                                      {row.path}
+                                    </div>
+                                    <div>{row.type ?? "-"}</div>
+                                    <div>{row.length ?? "-"}</div>
+                                    <div>{row.sampleName ?? "-"}</div>
+                                    <div>{row.sampleRole ?? "-"}</div>
+                                    <div>{row.samplePosition ?? "-"}</div>
+                                    <div>{row.sampleOrder ?? "-"}</div>
+                                  </div>
+                                )
+                              )}
+                            </div>
+                          )}
+
+                          <div className="notice" style={{ margin: "8px 0 0" }}>
+                            이 표는 네이버 Preview 응답의 구조만 진단합니다.
+                            score/result/winner/statistics/boxscore/final 계열은 탐색에서 제외하며,
+                            아직 이 path들을 선발/라인업 분석값으로 자동 연결하지 않습니다.
+                          </div>
                         </div>
                       )}
 
