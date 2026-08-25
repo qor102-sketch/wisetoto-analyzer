@@ -1,3 +1,4 @@
+// DEPLOY_MARKER_V11_8_2_3_NO_LINEUPS_RESULT_PATH_20260825
 // WISETOTO_MATCH_SELECTED_V1_20260823
 const BASE = "https://api.sportsapi.app/v2";
 
@@ -976,10 +977,19 @@ function sportsApiDiagnosticUrl(
   return `${BASE}${path}`;
 }
 
+type FixtureLineupsResult = {
+  ok: boolean;
+  data: any;
+  error: string | null;
+  status: number | null;
+  retryAfterMs: number | null;
+  rateLimit: any;
+};
+
 async function getFixtureLineups(
   fixtureId: number,
   key: string
-) {
+): Promise<FixtureLineupsResult> {
   try {
     const result =
       await api(
@@ -989,12 +999,6 @@ async function getFixtureLineups(
 
     return {
       ok: true,
-      path:
-        `/fixtures/${fixtureId}/lineups`,
-      url:
-        sportsApiDiagnosticUrl(
-          `/fixtures/${fixtureId}/lineups`
-        ),
       data:
         result.data,
       error: null,
@@ -1006,12 +1010,6 @@ async function getFixtureLineups(
   } catch (e: any) {
     return {
       ok: false,
-      path:
-        `/fixtures/${fixtureId}/lineups`,
-      url:
-        sportsApiDiagnosticUrl(
-          `/fixtures/${fixtureId}/lineups`
-        ),
       data: null,
       error:
         e?.message ||
@@ -1617,21 +1615,22 @@ async function runSelectedMode(
   const fixture = result.fixture;
   const fixtureId = Number(fixture?.id);
 
-  const lineupsResult =
-    Number.isFinite(fixtureId)
-      ? await getFixtureLineups(
-          fixtureId,
-          key
-        )
-      : {
-          ok: false,
-          data: null,
-          error:
-            "fixtureId 없음",
-          status: null,
-          retryAfterMs: null,
-          rateLimit: null,
-        };
+  const lineupsResult:
+    FixtureLineupsResult =
+      Number.isFinite(fixtureId)
+        ? await getFixtureLineups(
+            fixtureId,
+            key
+          )
+        : {
+            ok: false,
+            data: null,
+            error:
+              "fixtureId 없음",
+            status: null,
+            retryAfterMs: null,
+            rateLimit: null,
+          };
 
   return Response.json({
     ok:true,
@@ -1663,10 +1662,8 @@ async function runSelectedMode(
             `/fixtures/${fixtureId}`
           ),
         lineupsPath:
-          lineupsResult.path ??
           `/fixtures/${fixtureId}/lineups`,
         lineupsUrl:
-          lineupsResult.url ??
           sportsApiDiagnosticUrl(
             `/fixtures/${fixtureId}/lineups`
           ),
@@ -1686,11 +1683,11 @@ async function runSelectedMode(
         status:
           lineupsResult.status,
         path:
-          lineupsResult.path ??
-          null,
+          `/fixtures/${fixtureId}/lineups`,
         url:
-          lineupsResult.url ??
-          null,
+          sportsApiDiagnosticUrl(
+            `/fixtures/${fixtureId}/lineups`
+          ),
         rateLimit:
           lineupsResult.rateLimit,
         dataType:
