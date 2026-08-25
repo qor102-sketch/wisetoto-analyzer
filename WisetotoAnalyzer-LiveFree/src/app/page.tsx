@@ -5708,11 +5708,91 @@ export default function Home() {
         ? market.selections
         : [];
 
+    const marketText =
+      `${String(
+        market?.betName ??
+        ""
+      )} ${String(
+        market?.betTypeName ??
+        ""
+      )} ${String(
+        market?.displayName ??
+        ""
+      )}`.toLowerCase();
+
+    const isTotal =
+      market?.type === "total" ||
+      /u\/o|under|over|언더|오버/.test(
+        marketText
+      );
+
+    const isSum =
+      /sum|홀짝|홀\/짝/.test(
+        marketText
+      );
+
+    const wantedSides =
+      side === "draw"
+        ? ["draw"]
+        : isTotal
+          ? side === "win"
+            ? ["under", "win"]
+            : ["over", "lose"]
+          : isSum
+            ? side === "win"
+              ? ["odd", "win"]
+              : ["even", "lose"]
+            : side === "win"
+              ? ["win", "home"]
+              : ["lose", "away"];
+
     const found =
       selections.find(
-        (selection: any) =>
-          selection?.side ===
-          side
+        (selection: any) => {
+          const selectionSide =
+            String(
+              selection?.side ??
+              ""
+            ).toLowerCase();
+
+          if (
+            wantedSides.includes(
+              selectionSide
+            )
+          ) {
+            return true;
+          }
+
+          const label =
+            String(
+              selection?.label ??
+              ""
+            )
+              .trim()
+              .toLowerCase();
+
+          if (side === "draw") {
+            return /^(무|draw|1|①)$/.test(
+              label
+            );
+          }
+
+          if (isTotal) {
+            return side === "win"
+              ? /^(under|언더)$/.test(label)
+              : /^(over|오버)$/.test(label);
+          }
+
+          if (isSum) {
+            return side === "win"
+              ? /^(홀|odd)$/.test(label)
+              : /^(짝|even)$/.test(label);
+          }
+
+          return side === "win"
+            ? /^(승|home|홈)$/.test(label)
+            : /^(패|away|원정)$/.test(label);
+        }
       );
 
     const odds =
