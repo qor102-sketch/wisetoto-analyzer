@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V12_5_2_NAVER_CURRENT_SEASON_STATS_20260825
+// DEPLOY_MARKER_V12_5_3_NAVER_STARTER_SIDE_LINEUP_ACCURACY_20260825
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -2211,11 +2211,71 @@ function collectObjectsDeep(
   return out;
 }
 
+function findBranchByKeyDeep(
+  value: any,
+  wantedKeys: string[],
+  depth = 0
+): any | null {
+  if (!value || typeof value !== "object" || depth > 7) return null;
+
+  const wanted = new Set(
+    wantedKeys.map((key) => key.toLowerCase().replace(/[^a-z0-9]/g, ""))
+  );
+
+  for (const [rawKey, child] of Object.entries(value)) {
+    const key = rawKey.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (wanted.has(key) && child && typeof child === "object") return child;
+  }
+
+  for (const child of Object.values(value)) {
+    const found = findBranchByKeyDeep(child, wantedKeys, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+function starterInfoFromObject(value: any): StarterInfo {
+  if (!value || typeof value !== "object") {
+    return { name: null, era: null, whip: null };
+  }
+
+  const era = findNumericStatDeep(
+    value,
+    ["era", "earnedrunaverage", "평균자책", "평균자책점"]
+  );
+  const whip = findNumericStatDeep(
+    value,
+    ["whip", "walkshitsperinningpitched"]
+  );
+
+  return {
+    name: objectName(value),
+    era: era !== null ? clamp(era, 0.5, 12) : null,
+    whip: whip !== null ? clamp(whip, 0.5, 3) : null,
+  };
+}
+
 function starterFromLineups(
   lineups: any,
   side: "home" | "away",
   teamName: string
 ): StarterInfo {
+  /*
+   * V12.5.3: Preview가 homeStarter/awayStarter를 명시하면 side를 추론하지 않습니다.
+   * 이름 중복이나 bullpen/candidate 탐색이 반대편 선발을 덮어쓰는 문제를 차단합니다.
+   */
+  const directStarter = findBranchByKeyDeep(
+    lineups,
+    side === "home"
+      ? ["homeStarter", "homeStartingPitcher", "homeProbablePitcher"]
+      : ["awayStarter", "awayStartingPitcher", "awayProbablePitcher"]
+  );
+
+  if (directStarter) {
+    const direct = starterInfoFromObject(directStarter);
+    if (direct.name) return direct;
+  }
+
   const objects = collectObjectsDeep(lineups);
   const normalizedTeam = normalizeTeamName(teamName);
 
@@ -2225,84 +2285,38 @@ function starterFromLineups(
       if (!name) return { value, score: -999 };
 
       const teamText = normalizeTeamName(
-        String(
-          value?.team?.name ??
-          value?.teamName ??
-          value?.club?.name ??
-          ""
-        )
+        String(value?.team?.name ?? value?.teamName ?? value?.club?.name ?? "")
       );
-
       const sideText = String(
-        value?.side ??
-        value?.homeAway ??
-        value?.location ??
-        ""
+        value?.side ?? value?.homeAway ?? value?.location ?? ""
       ).toLowerCase();
 
       let score = 0;
-
       if (
-        teamText &&
-        normalizedTeam &&
-        (
-          teamText.includes(normalizedTeam) ||
-          normalizedTeam.includes(teamText)
-        )
-      ) {
-        score += 6;
-      }
+        teamText && normalizedTeam &&
+        (teamText.includes(normalizedTeam) || normalizedTeam.includes(teamText))
+      ) score += 6;
 
       if (
         sideText === side ||
         (side === "home" && /home|홈/.test(sideText)) ||
         (side === "away" && /away|원정/.test(sideText))
-      ) {
-        score += 4;
-      }
+      ) score += 4;
 
       if (looksLikeStartingPitcher(value)) score += 8;
-
-      const era = findNumericStatDeep(
-        value,
-        ["era", "earnedrunaverage", "평균자책", "평균자책점"]
-      );
-
-      const whip = findNumericStatDeep(
-        value,
-        ["whip", "walkshitsperinningpitched"]
-      );
-
+      const era = findNumericStatDeep(value, ["era", "earnedrunaverage", "평균자책", "평균자책점"]);
+      const whip = findNumericStatDeep(value, ["whip", "walkshitsperinningpitched"]);
       if (era !== null) score += 2;
       if (whip !== null) score += 2;
-
       return { value, score };
     })
     .sort((a, b) => b.score - a.score);
 
   const best = ranked[0];
-
-  if (!best || best.score < 8) {
-    return { name: null, era: null, whip: null };
-  }
-
-  const era = findNumericStatDeep(
-    best.value,
-    ["era", "earnedrunaverage", "평균자책", "평균자책점"]
-  );
-
-  const whip = findNumericStatDeep(
-    best.value,
-    ["whip", "walkshitsperinningpitched"]
-  );
-
-  return {
-    name: objectName(best.value),
-    era: era !== null ? clamp(era, 0.5, 12) : null,
-    whip: whip !== null ? clamp(whip, 0.5, 3) : null,
-  };
+  return !best || best.score < 8
+    ? { name: null, era: null, whip: null }
+    : starterInfoFromObject(best.value);
 }
-
 function pitcherRunFactor(starter: StarterInfo) {
   const eraFactor =
     starter.era === null
@@ -2376,90 +2390,56 @@ type BaseballAnalysisStage =
   | "LINEUP"
   | "READY";
 
+function collectDeclaredLineupNames(lineups: any) {
+  const names = new Set<string>();
+  const visited = new Set<any>();
+
+  const addPlayers = (value: any, depth = 0) => {
+    if (value === null || value === undefined || depth > 5) return;
+    if (Array.isArray(value)) {
+      value.forEach((item) => addPlayers(item, depth + 1));
+      return;
+    }
+    if (typeof value !== "object") return;
+    const name = objectName(value);
+    if (name) names.add(normalizeTeamName(name) || name.toLowerCase());
+    Object.values(value).forEach((child) => addPlayers(child, depth + 1));
+  };
+
+  const visit = (value: any, depth = 0) => {
+    if (!value || typeof value !== "object" || depth > 7 || visited.has(value)) return;
+    visited.add(value);
+    for (const [rawKey, child] of Object.entries(value)) {
+      const key = rawKey.toLowerCase().replace(/[^a-z0-9]/g, "");
+      /* bullpen/batterCandidate는 발표 라인업 인원으로 세지 않습니다. */
+      if (/^(fulllineup|startinglineup|startlineup|lineup|battingorder)$/.test(key)) {
+        addPlayers(child);
+        continue;
+      }
+      if (child && typeof child === "object") visit(child, depth + 1);
+    }
+  };
+
+  visit(lineups);
+  return names;
+}
+
 function baseballDataAvailability(
   lineups: any,
   homeStarter: StarterInfo,
   awayStarter: StarterInfo
 ) {
-  const objects =
-    collectObjectsDeep(
-      lineups
-    );
-
-  const playerNames =
-    new Set<string>();
-
-  for (const value of objects) {
-    const name =
-      objectName(
-        value
-      );
-
-    if (!name) {
-      continue;
-    }
-
-    const playerLike =
-      Boolean(
-        value?.player ||
-        value?.athlete ||
-        value?.person ||
-        value?.playerName ||
-        value?.displayName ||
-        value?.memberName ||
-        value?.position ||
-        value?.positionName ||
-        value?.role ||
-        value?.jersey ||
-        value?.number ||
-        looksLikeStartingPitcher(
-          value
-        )
-      );
-
-    if (playerLike) {
-      playerNames.add(
-        normalizeTeamName(
-          name
-        ) ||
-        name.toLowerCase()
-      );
-    }
-  }
-
-  const lineupPlayerCount =
-    playerNames.size;
+  /* V12.5.3: 전체 발견 선수 수가 아니라 실제 발표 lineup branch만 집계. */
+  const lineupPlayerCount = collectDeclaredLineupNames(lineups).size;
 
   const starterCount =
-    Number(
-      Boolean(
-        homeStarter.name
-      )
-    ) +
-    Number(
-      Boolean(
-        awayStarter.name
-      )
-    );
+    Number(Boolean(homeStarter.name)) +
+    Number(Boolean(awayStarter.name));
 
-  let stage:
-    BaseballAnalysisStage =
-      "PRE";
-
-  if (
-    lineupPlayerCount >= 16 &&
-    starterCount >= 2
-  ) {
-    stage = "READY";
-  } else if (
-    lineupPlayerCount >= 14
-  ) {
-    stage = "LINEUP";
-  } else if (
-    starterCount > 0
-  ) {
-    stage = "STARTER";
-  }
+  let stage: BaseballAnalysisStage = "PRE";
+  if (lineupPlayerCount >= 16 && starterCount >= 2) stage = "READY";
+  else if (lineupPlayerCount >= 14) stage = "LINEUP";
+  else if (starterCount > 0) stage = "STARTER";
 
   const label =
     stage === "READY"
@@ -2471,23 +2451,12 @@ function baseballDataAvailability(
           : "사전 분석 · 선발/라인업 미발표";
 
   const completeness =
-    stage === "READY"
-      ? 100
-      : stage === "LINEUP"
-        ? 78
-        : stage === "STARTER"
-          ? 52
-          : 30;
+    stage === "READY" ? 100 :
+    stage === "LINEUP" ? 78 :
+    stage === "STARTER" ? 52 : 30;
 
-  return {
-    stage,
-    label,
-    lineupPlayerCount,
-    starterCount,
-    completeness,
-  };
+  return { stage, label, lineupPlayerCount, starterCount, completeness };
 }
-
 function applyBaseballStageGate(
   valueGrade: {
     grade:
@@ -10274,7 +10243,7 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V12.5.2 네이버 Preview parser · currentSeasonStats 연결</h3>
+                      <h3>V12.5.3 네이버 Preview parser · starter side + lineup 정확도</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10432,7 +10401,8 @@ export default function Home() {
                             이 표는 네이버 Preview 응답의 구조만 진단합니다.
                             score/winner/statistics/boxscore/final-score 계열은 탐색에서 제외하며,
                             currentSeasonStats/seasonStats는 경기 전 시즌 누적 지표 후보로 탐색을 허용하며,
-                            선수 객체에 보존된 ERA/WHIP는 기존 선발투수 deep parser가 읽습니다.
+                            homeStarter/awayStarter는 명시된 side를 우선 고정하고 ERA/WHIP를 deep parser로 읽습니다.
+                            라인업 인원은 fullLineUp/startingLineup 계열만 집계하며 bullpen/candidate는 제외합니다.
                             경기 결과·boxscore·일반 statistics 계열은 계속 차단합니다.
                           </div>
                         </div>
