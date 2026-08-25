@@ -6387,6 +6387,381 @@ function safeRecentFixtureShape(
   return result;
 }
 
+
+type PregameStructureCandidate = {
+  path: string;
+  keys: string[];
+  id: number | null;
+  name: string | null;
+  role: string | null;
+  position: string | null;
+  side: string | null;
+  order: number | null;
+};
+
+type PregameStructureAudit = {
+  sourceKeys: string[];
+  fixtureKeys: string[];
+  directLineupsPresent: boolean;
+  directLineupsType: string;
+  directLineupsCount: number;
+  candidateCount: number;
+  candidates: PregameStructureCandidate[];
+};
+
+function safePregameStructureDiagnostic(
+  payload: any
+): PregameStructureAudit {
+  const source =
+    payload &&
+    typeof payload === "object"
+      ? payload
+      : {};
+
+  const fixture =
+    source?.fixture ??
+    source?.detail ??
+    source?.data ??
+    null;
+
+  const directLineups =
+    source?.lineups ??
+    fixture?.lineups ??
+    fixture?.lineup ??
+    null;
+
+  const audit: PregameStructureAudit = {
+    sourceKeys:
+      Object.keys(
+        source
+      ).slice(0, 50),
+    fixtureKeys:
+      fixture &&
+      typeof fixture === "object"
+        ? Object.keys(
+            fixture
+          ).slice(0, 60)
+        : [],
+    directLineupsPresent:
+      directLineups !== null &&
+      directLineups !== undefined,
+    directLineupsType:
+      Array.isArray(
+        directLineups
+      )
+        ? "array"
+        : directLineups &&
+            typeof directLineups === "object"
+          ? "object"
+          : typeof directLineups,
+    directLineupsCount:
+      Array.isArray(
+        directLineups
+      )
+        ? directLineups.length
+        : 0,
+    candidateCount: 0,
+    candidates: [],
+  };
+
+  const candidates:
+    PregameStructureCandidate[] =
+      [];
+
+  const seen =
+    new Set<string>();
+
+  const blockedKey =
+    /score|result|winner|stat|statistics|boxscore|final|runsallowed|earnedrun|hitallowed|pitchcount|inningresult/i;
+
+  const interestingPath =
+    /lineup|starter|starting|pitcher|player|roster|batter|athlete|person|position|order|batting|startingnine|startingxi|home|away|team/i;
+
+  const visit = (
+    value: any,
+    path: string,
+    depth = 0
+  ) => {
+    if (
+      value === null ||
+      value === undefined ||
+      depth > 7
+    ) {
+      return;
+    }
+
+    if (
+      Array.isArray(value)
+    ) {
+      value
+        .slice(0, 30)
+        .forEach(
+          (item, index) =>
+            visit(
+              item,
+              `${path}[${index}]`,
+              depth + 1
+            )
+        );
+      return;
+    }
+
+    if (
+      typeof value !== "object"
+    ) {
+      return;
+    }
+
+    const keys =
+      Object.keys(
+        value
+      ).filter(
+        (key) =>
+          !blockedKey.test(
+            key
+          )
+      );
+
+    const candidateName =
+      String(
+        value?.name ??
+        value?.playerName ??
+        value?.athleteName ??
+        value?.personName ??
+        value?.shortName ??
+        value?.displayName ??
+        value?.player?.name ??
+        value?.athlete?.name ??
+        value?.person?.name ??
+        ""
+      ).trim();
+
+    const idRaw =
+      value?.id ??
+      value?.playerId ??
+      value?.athleteId ??
+      value?.personId ??
+      value?.teamId ??
+      value?.player?.id ??
+      value?.athlete?.id ??
+      value?.person?.id;
+
+    const id =
+      Number(
+        idRaw
+      );
+
+    const role =
+      String(
+        value?.role ??
+        value?.type ??
+        value?.status ??
+        value?.designation ??
+        ""
+      ).trim();
+
+    const position =
+      String(
+        value?.position ??
+        value?.pos ??
+        value?.positionName ??
+        value?.player?.position ??
+        ""
+      ).trim();
+
+    const side =
+      String(
+        value?.side ??
+        value?.homeAway ??
+        value?.teamSide ??
+        value?.location ??
+        ""
+      ).trim();
+
+    const orderRaw =
+      value?.order ??
+      value?.battingOrder ??
+      value?.lineupOrder ??
+      value?.slot ??
+      null;
+
+    const order =
+      Number(
+        orderRaw
+      );
+
+    const isCandidate =
+      interestingPath.test(
+        path
+      ) ||
+      Boolean(
+        candidateName
+      ) ||
+      Boolean(
+        role
+      ) ||
+      Boolean(
+        position
+      );
+
+    if (
+      isCandidate &&
+      (
+        candidateName ||
+        Number.isFinite(id) ||
+        role ||
+        position ||
+        side ||
+        Number.isFinite(order)
+      )
+    ) {
+      const signature =
+        [
+          path,
+          candidateName,
+          Number.isFinite(id)
+            ? String(id)
+            : "",
+          role,
+          position,
+          side,
+          Number.isFinite(order)
+            ? String(order)
+            : "",
+        ].join("|");
+
+      if (
+        !seen.has(
+          signature
+        )
+      ) {
+        seen.add(
+          signature
+        );
+
+        candidates.push({
+          path,
+          keys:
+            keys.slice(
+              0,
+              24
+            ),
+          id:
+            Number.isFinite(id) &&
+            id > 0
+              ? id
+              : null,
+          name:
+            candidateName ||
+            null,
+          role:
+            role ||
+            null,
+          position:
+            position ||
+            null,
+          side:
+            side ||
+            null,
+          order:
+            Number.isFinite(order)
+              ? order
+              : null,
+        });
+      }
+    }
+
+    for (
+      const [
+        key,
+        child,
+      ] of Object.entries(
+        value
+      )
+    ) {
+      if (
+        blockedKey.test(
+          key
+        )
+      ) {
+        continue;
+      }
+
+      if (
+        child &&
+        typeof child === "object"
+      ) {
+        visit(
+          child,
+          path
+            ? `${path}.${key}`
+            : key,
+          depth + 1
+        );
+      }
+    }
+  };
+
+  visit(
+    source,
+    "detail",
+    0
+  );
+
+  const prioritized =
+    candidates
+      .sort(
+        (a, b) => {
+          const score = (
+            item:
+              PregameStructureCandidate
+          ) =>
+            (
+              /lineup|starter|starting|pitcher|roster|batting|order/i.test(
+                item.path
+              )
+                ? 10
+                : 0
+            ) +
+            (
+              /pitcher|starter|starting/i.test(
+                `${item.role ?? ""} ${item.position ?? ""}`
+              )
+                ? 6
+                : 0
+            ) +
+            (
+              item.order !== null
+                ? 4
+                : 0
+            ) +
+            (
+              item.name
+                ? 2
+                : 0
+            );
+
+          return (
+            score(b) -
+            score(a)
+          );
+        }
+      )
+      .slice(
+        0,
+        40
+      );
+
+  audit.candidateCount =
+    candidates.length;
+
+  audit.candidates =
+    prioritized;
+
+  return audit;
+}
+
+
 type BacktestAudit = {
   enabled: boolean;
   cutoffMs: number | null;
@@ -7332,6 +7707,12 @@ function sanitizeMatchedForBacktest(
     h2h: h2h.h2h,
     // 경기 후 팀/선수 통계는 leakage 위험이 있으므로 완전 차단.
     statistics: null,
+
+    // 경기전 선발/라인업 구조 진단은 결과값을 제거한 요약만 유지.
+    pregameAudit:
+      matched?.pregameAudit ??
+      null,
+
     detailDebug: null,
     backtestAudit: {
       enabled: true,
@@ -8357,6 +8738,17 @@ export default function Home() {
     );
   }, [snapshotSignature]);
 
+  const pregameAudit:
+    PregameStructureAudit | null =
+      backtestMode
+        ? matched?.pregameAudit ??
+          null
+        : null;
+
+  const pregameCandidateSummary =
+    pregameAudit?.candidates ??
+    [];
+
   const currentSignalConflict =
     buildSignalConflict(
       betman.matched,
@@ -8492,8 +8884,16 @@ export default function Home() {
       const detailResponse = await fetch(`/api/match/${fixtureId}`, { cache:"no-store" });
       const detailData = await readApiResponse(detailResponse,"Fixture 상세 API");
       if (detailResponse.ok && detailData?.ok) {
+        const pregameAudit =
+          backtestMode
+            ? safePregameStructureDiagnostic(
+                detailData
+              )
+            : null;
+
         const combinedRaw = {
           ...data,
+          pregameAudit,
           fixture: detailData?.fixture ?? data?.fixture,
           detail: detailData?.fixture ?? data?.detail,
           selectedFixture: detailData?.selectedFixture ?? data?.selectedFixture,
@@ -9313,7 +9713,7 @@ export default function Home() {
                 }}
               >
                 <b>백테스트 검증 준비 완료</b>
-                {" · "}아래 `V11.7.3 백테스트 결과 검증기`에서
+                {" · "}아래 `V11.8.0 백테스트 결과 검증기`에서
                 `예측 확정 · 실제 결과 검증 열기` 버튼을 누르면 결과를 공개할 수 있습니다.
               </div>
             )}
@@ -9383,7 +9783,7 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V11.7.3 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
+              <summary>V11.8.0 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
                   <h3>V11.7 계산 추적 · 데이터 가용성 + λ 교정</h3>
@@ -9404,7 +9804,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.7.3 의사결정 규칙</b><br />
+                    <b>V11.8.0 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -9415,7 +9815,7 @@ export default function Home() {
 
                   {currentSport === "야구" && backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.7.3 백테스트 안전장치 · PRE 불확실성 + 결과 분리 검증</h3>
+                      <h3>V11.8.0 백테스트 안전장치 · 경기전 선발/라인업 복원 진단</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -9511,9 +9911,158 @@ export default function Home() {
                     </div>
                   )}
 
+                  {currentSport === "야구" &&
+                    backtestMode && (
+                    <div className="section" style={{ marginTop: 0 }}>
+                      <h3>V11.8.0 과거 경기전 선발/라인업 구조 진단</h3>
+
+                      <div className="cards">
+                        <div className="card">
+                          Fixture 상세 응답
+                          <b>
+                            {pregameAudit
+                              ? "수신"
+                              : "미수신"}
+                          </b>
+                          <div className="small">
+                            결과/최종스탯 제외 진단
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          직접 lineups 필드
+                          <b>
+                            {pregameAudit?.directLineupsPresent
+                              ? "있음"
+                              : "없음"}
+                          </b>
+                          <div className="small">
+                            {pregameAudit
+                              ? `${pregameAudit.directLineupsType} · ${pregameAudit.directLineupsCount}개`
+                              : "-"}
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          선수/라인업 후보
+                          <b>
+                            {pregameAudit?.candidateCount ?? 0}개
+                          </b>
+                          <div className="small">
+                            starter/player/roster/order 관련 path 탐색
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          현재 분석 반영
+                          <b>
+                            {analysisFactors.baseballStarterCount}
+                            {"/2 · "}
+                            {analysisFactors.baseballLineupPlayerCount}
+                            {"명"}
+                          </b>
+                          <div className="small">
+                            아직 자동 복원 전
+                          </div>
+                        </div>
+                      </div>
+
+                      {pregameCandidateSummary.length > 0 ? (
+                        <div
+                          style={{
+                            marginTop: 8,
+                            overflowX: "auto",
+                            border:
+                              "1px solid #e3e9f2",
+                            borderRadius: 9,
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns:
+                                "minmax(180px,2fr) 72px minmax(110px,1fr) 72px 72px 48px",
+                              gap: 6,
+                              padding: "6px 8px",
+                              minWidth: 620,
+                              background:
+                                "#eef4fb",
+                              fontSize: 9,
+                              fontWeight: 900,
+                            }}
+                          >
+                            <div>path</div>
+                            <div>ID</div>
+                            <div>이름</div>
+                            <div>role</div>
+                            <div>position</div>
+                            <div>order</div>
+                          </div>
+
+                          {pregameCandidateSummary.map(
+                            (
+                              item,
+                              index
+                            ) => (
+                              <div
+                                key={`pregame-${item.path}-${index}`}
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns:
+                                    "minmax(180px,2fr) 72px minmax(110px,1fr) 72px 72px 48px",
+                                  gap: 6,
+                                  padding: "5px 8px",
+                                  minWidth: 620,
+                                  borderTop:
+                                    "1px solid #edf1f6",
+                                  fontSize: 9,
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    wordBreak:
+                                      "break-all",
+                                  }}
+                                >
+                                  {item.path}
+                                </div>
+                                <div>
+                                  {item.id ?? "-"}
+                                </div>
+                                <div>
+                                  {item.name ?? "-"}
+                                </div>
+                                <div>
+                                  {item.role ?? item.side ?? "-"}
+                                </div>
+                                <div>
+                                  {item.position ?? "-"}
+                                </div>
+                                <div>
+                                  {item.order ?? "-"}
+                                </div>
+                              </div>
+                            )
+                          )}
+                        </div>
+                      ) : (
+                        <div className="notice" style={{ margin: "8px 0 0" }}>
+                          현재 Fixture 상세 응답에서 안전하게 식별할 수 있는 선발/라인업 후보 path를 찾지 못했습니다.
+                          이 경우 SportsAPI의 별도 lineup/roster endpoint가 필요한지 확인해야 합니다.
+                        </div>
+                      )}
+
+                      <div className="notice" style={{ margin: "8px 0 0" }}>
+                        이 진단은 과거 경기의 선발·라인업 복원을 위한 구조 확인용입니다.
+                        score/result/winner/statistics/boxscore 등 경기 결과 관련 필드는 탐색 단계에서 제외하며,
+                        확인된 경기전 선수 정보만 다음 단계에서 STARTER/LINEUP/READY 입력으로 연결합니다.
+                      </div>
+                    </div>
+                  )}
+
                   {currentSport === "야구" && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.7 야구 데이터 가용성 · 선발투수 보정</h3>
+                      <h3>V11.8.0 야구 데이터 가용성 · 선발투수/라인업 복원</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -9677,7 +10226,7 @@ export default function Home() {
                           "0 2px 12px rgba(40,95,190,0.08)",
                       }}
                     >
-                      <h3>V11.7.3 백테스트 결과 검증기</h3>
+                      <h3>V11.8.0 백테스트 결과 검증기</h3>
 
                       <div
                         className="cards"
