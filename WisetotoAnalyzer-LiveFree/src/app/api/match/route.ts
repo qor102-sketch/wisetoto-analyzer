@@ -1580,6 +1580,306 @@ async function findSportsFixtureForBetman(
   };
 }
 
+
+const NAVER_SPORTS_BASE =
+  "https://api-gw.sports.naver.com";
+
+type NaverPregameResult = {
+  ok: boolean;
+  gameId: string | null;
+  lineups: any;
+  error: string | null;
+  scheduleStatus: number | null;
+  previewStatus: number | null;
+  matchedGame: any;
+};
+
+function normalizeNaverTeamName(value: unknown) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/다이노스|dinos/g, "nc")
+    .replace(/라이온즈|lions/g, "삼성")
+    .replace(/트윈스|twins/g, "lg")
+    .replace(/타이거즈|tigers/g, "kia")
+    .replace(/위즈|wiz/g, "kt")
+    .replace(/이글스|eagles/g, "한화")
+    .replace(/랜더스|landers/g, "ssg")
+    .replace(/자이언츠|giants/g, "롯데")
+    .replace(/베어스|bears/g, "두산")
+    .replace(/히어로즈|heroes/g, "키움")
+    .replace(/ncdinos/g, "nc")
+    .replace(/samsung/g, "삼성");
+}
+
+function kstDateString(ms: number) {
+  const date =
+    new Date(ms + 9 * 60 * 60 * 1000);
+
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function collectNaverGameObjects(
+  value: any,
+  out: any[] = [],
+  depth = 0
+) {
+  if (
+    value === null ||
+    value === undefined ||
+    depth > 8
+  ) {
+    return out;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectNaverGameObjects(
+        item,
+        out,
+        depth + 1
+      );
+    }
+    return out;
+  }
+
+  if (typeof value !== "object") {
+    return out;
+  }
+
+  const gameId =
+    value?.gameId ??
+    value?.id ??
+    value?.game?.gameId ??
+    null;
+
+  const homeName =
+    value?.homeTeamName ??
+    value?.homeTeam?.name ??
+    value?.home?.name ??
+    value?.homeName ??
+    null;
+
+  const awayName =
+    value?.awayTeamName ??
+    value?.awayTeam?.name ??
+    value?.away?.name ??
+    value?.awayName ??
+    null;
+
+  if (
+    gameId !== null &&
+    (homeName || awayName)
+  ) {
+    out.push({
+      raw: value,
+      gameId: String(gameId),
+      homeName:
+        homeName === null
+          ? null
+          : String(homeName),
+      awayName:
+        awayName === null
+          ? null
+          : String(awayName),
+    });
+  }
+
+  for (const child of Object.values(value)) {
+    if (
+      child &&
+      typeof child === "object"
+    ) {
+      collectNaverGameObjects(
+        child,
+        out,
+        depth + 1
+      );
+    }
+  }
+
+  return out;
+}
+
+async function naverJson(
+  path: string
+): Promise<{
+  ok: boolean;
+  status: number | null;
+  data: any;
+  error: string | null;
+}> {
+  try {
+    const response =
+      await fetch(
+        `${NAVER_SPORTS_BASE}${path}`,
+        {
+          cache: "no-store",
+          headers: {
+            accept: "application/json, text/plain, */*",
+            "user-agent":
+              "Mozilla/5.0 (compatible; WiseTotoAnalyzer/12.1)",
+            referer:
+              "https://m.sports.naver.com/",
+          },
+        }
+      );
+
+    const text =
+      await response.text();
+
+    let data: any = null;
+
+    try {
+      data =
+        text
+          ? JSON.parse(text)
+          : null;
+    } catch {
+      data = null;
+    }
+
+    return {
+      ok: response.ok && data !== null,
+      status: response.status,
+      data,
+      error:
+        response.ok
+          ? data === null
+            ? "JSON 응답 아님"
+            : null
+          : `Naver Sports HTTP ${response.status}`,
+    };
+  } catch (error: any) {
+    return {
+      ok: false,
+      status: null,
+      data: null,
+      error:
+        typeof error?.message === "string"
+          ? error.message
+          : "Naver Sports 요청 실패",
+    };
+  }
+}
+
+async function getNaverPregameLineups(args: {
+  home: string;
+  away: string;
+  gameDateMs: number;
+}): Promise<NaverPregameResult> {
+  const date =
+    kstDateString(args.gameDateMs);
+
+  const schedulePath =
+    `/schedule/games?upperCategoryId=kbaseball&categoryId=kbo&fromDate=${encodeURIComponent(date)}&toDate=${encodeURIComponent(date)}`;
+
+  const schedule =
+    await naverJson(schedulePath);
+
+  if (!schedule.ok) {
+    return {
+      ok: false,
+      gameId: null,
+      lineups: null,
+      error:
+        `네이버 일정 조회 실패: ${schedule.error ?? "unknown"}`,
+      scheduleStatus:
+        schedule.status,
+      previewStatus: null,
+      matchedGame: null,
+    };
+  }
+
+  const targetHome =
+    normalizeNaverTeamName(args.home);
+
+  const targetAway =
+    normalizeNaverTeamName(args.away);
+
+  const candidates =
+    collectNaverGameObjects(
+      schedule.data
+    );
+
+  const matched =
+    candidates.find(
+      (game) => {
+        const h =
+          normalizeNaverTeamName(
+            game.homeName
+          );
+
+        const a =
+          normalizeNaverTeamName(
+            game.awayName
+          );
+
+        return (
+          (h === targetHome &&
+            a === targetAway) ||
+          (h === targetAway &&
+            a === targetHome)
+        );
+      }
+    ) ?? null;
+
+  if (!matched) {
+    return {
+      ok: false,
+      gameId: null,
+      lineups: null,
+      error:
+        `네이버 일정에서 동일경기 매칭 실패 · 후보 ${candidates.length}개`,
+      scheduleStatus:
+        schedule.status,
+      previewStatus: null,
+      matchedGame: null,
+    };
+  }
+
+  const preview =
+    await naverJson(
+      `/schedule/games/${encodeURIComponent(matched.gameId)}/preview`
+    );
+
+  if (!preview.ok) {
+    return {
+      ok: false,
+      gameId:
+        matched.gameId,
+      lineups: null,
+      error:
+        `네이버 preview 조회 실패: ${preview.error ?? "unknown"}`,
+      scheduleStatus:
+        schedule.status,
+      previewStatus:
+        preview.status,
+      matchedGame:
+        matched.raw,
+    };
+  }
+
+  return {
+    ok: true,
+    gameId:
+      matched.gameId,
+    lineups:
+      preview.data,
+    error: null,
+    scheduleStatus:
+      schedule.status,
+    previewStatus:
+      preview.status,
+    matchedGame:
+      matched.raw,
+  };
+}
+
 async function runSelectedMode(
   req: Request,
   key: string
@@ -1632,6 +1932,39 @@ async function runSelectedMode(
             rateLimit: null,
           };
 
+  const naverPregame =
+    sport === "야구" &&
+    Number.isFinite(gameDateMs)
+      ? await getNaverPregameLineups({
+          home,
+          away,
+          gameDateMs,
+        })
+      : {
+          ok: false,
+          gameId: null,
+          lineups: null,
+          error:
+            "야구 또는 유효한 경기시각이 아님",
+          scheduleStatus: null,
+          previewStatus: null,
+          matchedGame: null,
+        };
+
+  const selectedLineups =
+    lineupsResult.ok
+      ? lineupsResult.data
+      : naverPregame.ok
+        ? naverPregame.lineups
+        : null;
+
+  const selectedLineupsSource =
+    lineupsResult.ok
+      ? "SPORTSAPI"
+      : naverPregame.ok
+        ? "NAVER_PREVIEW"
+        : "NONE";
+
   return Response.json({
     ok:true,
     mode:"selected",
@@ -1641,16 +1974,30 @@ async function runSelectedMode(
     fixture,
     detail:null,
     lineups:
-      lineupsResult.ok
-        ? lineupsResult.data
-        : null,
+      selectedLineups,
+    lineupsSource:
+      selectedLineupsSource,
+    naverPregame: {
+      ok:
+        naverPregame.ok,
+      gameId:
+        naverPregame.gameId,
+      error:
+        naverPregame.error,
+      scheduleStatus:
+        naverPregame.scheduleStatus,
+      previewStatus:
+        naverPregame.previewStatus,
+    },
     statistics:null,
     h2h:null,
     debug:{
       message:
-        lineupsResult.ok
+        selectedLineupsSource === "SPORTSAPI"
           ? "선택 경기 매칭 + SportsAPI 공식 lineups 조회 완료"
-          : "선택 경기 매칭 완료 · lineups 미수신",
+          : selectedLineupsSource === "NAVER_PREVIEW"
+            ? "선택 경기 매칭 + 네이버스포츠 경기전 preview 선발/라인업 복원"
+            : "선택 경기 매칭 완료 · 선발/라인업 미수신",
       sportsApi:result.debug,
       sportsApiRuntime:{
         baseUrl:
@@ -1675,8 +2022,34 @@ async function runSelectedMode(
               ).slice(0, 60)
             : [],
       },
+      naverPregame:{
+        ok:
+          naverPregame.ok,
+        gameId:
+          naverPregame.gameId,
+        error:
+          naverPregame.error,
+        scheduleStatus:
+          naverPregame.scheduleStatus,
+        previewStatus:
+          naverPregame.previewStatus,
+        source:
+          "https://api-gw.sports.naver.com",
+        schedulePath:
+          Number.isFinite(gameDateMs)
+            ? `/schedule/games?upperCategoryId=kbaseball&categoryId=kbo&fromDate=${kstDateString(gameDateMs)}&toDate=${kstDateString(gameDateMs)}`
+            : null,
+        previewPath:
+          naverPregame.gameId
+            ? `/schedule/games/${naverPregame.gameId}/preview`
+            : null,
+      },
       lineups:{
         ok:
+          selectedLineups !== null,
+        source:
+          selectedLineupsSource,
+        sportsApiOk:
           lineupsResult.ok,
         error:
           lineupsResult.error,
