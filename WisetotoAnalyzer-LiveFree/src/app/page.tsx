@@ -9749,7 +9749,7 @@ export default function Home() {
                 }}
               >
                 <b>백테스트 검증 준비 완료</b>
-                {" · "}아래 `V11.8.2.2 백테스트 결과 검증기`에서
+                {" · "}아래 `V11.8.2.3 백테스트 결과 검증기`에서
                 `예측 확정 · 실제 결과 검증 열기` 버튼을 누르면 결과를 공개할 수 있습니다.
               </div>
             )}
@@ -9819,7 +9819,7 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V11.8.2.2 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
+              <summary>V11.8.2.3 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
                   <h3>V11.7 계산 추적 · 데이터 가용성 + λ 교정</h3>
@@ -9840,7 +9840,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.8.2.2 의사결정 규칙</b><br />
+                    <b>V11.8.2.3 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -9851,7 +9851,7 @@ export default function Home() {
 
                   {currentSport === "야구" && backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.8.2.2 백테스트 안전장치 · 실제 SportsAPI 리소스 진단</h3>
+                      <h3>V11.8.2.3 백테스트 안전장치 · 실제 SportsAPI 리소스 진단</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -9950,7 +9950,7 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.8.2.2 SportsAPI 경기전 데이터 리소스 진단</h3>
+                      <h3>V11.8.2.3 SportsAPI 경기전 데이터 리소스 진단</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10160,7 +10160,7 @@ export default function Home() {
 
                   {currentSport === "야구" && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.8.2.2 야구 데이터 가용성 · 선발투수/라인업 복원</h3>
+                      <h3>V11.8.2.3 야구 데이터 가용성 · 선발투수/라인업 복원</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10324,7 +10324,7 @@ export default function Home() {
                           "0 2px 12px rgba(40,95,190,0.08)",
                       }}
                     >
-                      <h3>V11.8.2.2 백테스트 결과 검증기</h3>
+                      <h3>V11.8.2.3 백테스트 결과 검증기</h3>
 
                       <div
                         className="cards"
