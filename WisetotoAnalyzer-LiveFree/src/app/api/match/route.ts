@@ -969,6 +969,13 @@ function selectTeams(
  * 과거경기 백테스트에서는 이 데이터를 "경기 전 공개 정보" 후보로 사용합니다.
  * statistics/events/result는 여기서 호출하지 않습니다.
  */
+
+function sportsApiDiagnosticUrl(
+  path: string
+) {
+  return `${BASE}${path}`;
+}
+
 async function getFixtureLineups(
   fixtureId: number,
   key: string
@@ -982,10 +989,16 @@ async function getFixtureLineups(
 
     return {
       ok: true,
+      path:
+        `/fixtures/${fixtureId}/lineups`,
+      url:
+        sportsApiDiagnosticUrl(
+          `/fixtures/${fixtureId}/lineups`
+        ),
       data:
         result.data,
       error: null,
-      status: null,
+      status: 200,
       retryAfterMs: null,
       rateLimit:
         result.headers,
@@ -993,6 +1006,12 @@ async function getFixtureLineups(
   } catch (e: any) {
     return {
       ok: false,
+      path:
+        `/fixtures/${fixtureId}/lineups`,
+      url:
+        sportsApiDiagnosticUrl(
+          `/fixtures/${fixtureId}/lineups`
+        ),
       data: null,
       error:
         e?.message ||
@@ -1634,6 +1653,31 @@ async function runSelectedMode(
           ? "선택 경기 매칭 + SportsAPI 공식 lineups 조회 완료"
           : "선택 경기 매칭 완료 · lineups 미수신",
       sportsApi:result.debug,
+      sportsApiRuntime:{
+        baseUrl:
+          BASE,
+        fixtureDetailPath:
+          `/fixtures/${fixtureId}`,
+        fixtureDetailUrl:
+          sportsApiDiagnosticUrl(
+            `/fixtures/${fixtureId}`
+          ),
+        lineupsPath:
+          lineupsResult.path ??
+          `/fixtures/${fixtureId}/lineups`,
+        lineupsUrl:
+          lineupsResult.url ??
+          sportsApiDiagnosticUrl(
+            `/fixtures/${fixtureId}/lineups`
+          ),
+        selectedFixtureTopKeys:
+          fixture &&
+          typeof fixture === "object"
+            ? Object.keys(
+                fixture
+              ).slice(0, 60)
+            : [],
+      },
       lineups:{
         ok:
           lineupsResult.ok,
@@ -1641,6 +1685,12 @@ async function runSelectedMode(
           lineupsResult.error,
         status:
           lineupsResult.status,
+        path:
+          lineupsResult.path ??
+          null,
+        url:
+          lineupsResult.url ??
+          null,
         rateLimit:
           lineupsResult.rateLimit,
         dataType:
