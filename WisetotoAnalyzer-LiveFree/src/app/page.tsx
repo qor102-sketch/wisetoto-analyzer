@@ -1,3 +1,4 @@
+// DEPLOY_MARKER_V11_9_2_NO_NULL_MAP_PERFORMANCE_ROWS_20260825
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -8735,146 +8736,148 @@ export default function Home() {
 
   const currentBacktestPerformanceRows:
     BacktestPerformanceRecord[] =
-      backtestValidationTruth &&
-      backtestResultRevealed
-        ? backtestValidatedRows
-            .map(
-              (row) => {
-                const pick =
-                  actualMarketPicks.find(
-                    (item) =>
-                      item.key ===
-                      row.key
-                  );
+      [];
 
-                if (!pick) {
-                  return null;
-                }
+  if (
+    backtestValidationTruth &&
+    backtestResultRevealed
+  ) {
+    for (
+      const row of backtestValidatedRows
+    ) {
+      const pick =
+        actualMarketPicks.find(
+          (item) =>
+            item.key ===
+            row.key
+        );
 
-                const fixtureKey =
-                  String(
-                    matched?.fixtureId ??
-                    backtestValidationKey(
-                      selectedBetman
-                    ) ??
-                    selectedBetmanKey ??
-                    "unknown"
-                  );
+      if (!pick) {
+        continue;
+      }
 
-                const gameDateMs =
-                  selectedBetman
-                    ? gameTimeMs(
-                        selectedBetman
-                      )
-                    : NaN;
+      const fixtureKey =
+        String(
+          matched?.fixtureId ??
+          backtestValidationKey(
+            selectedBetman
+          ) ??
+          selectedBetmanKey ??
+          "unknown"
+        );
 
-                const probability =
-                  clamp(
-                    pick.probability,
-                    0,
-                    100
-                  );
-
-                const outcome =
-                  row.status ===
-                  "HIT"
-                    ? 1
-                    : 0;
-
-                const p =
-                  probability /
-                  100;
-
-                const realizedReturn =
-                  pick.odds !== null &&
-                  Number.isFinite(
-                    pick.odds
-                  ) &&
-                  pick.odds > 1
-                    ? row.status ===
-                        "HIT"
-                      ? pick.odds -
-                        1
-                      : -1
-                    : null;
-
-                const stage =
-                  analysisFactors.baseballAnalysisStage;
-
-                return {
-                  id:
-                    [
-                      fixtureKey,
-                      stage,
-                      pick.key,
-                    ].join("|"),
-                  fixtureKey,
-                  fixtureId:
-                    Number.isFinite(
-                      Number(
-                        matched?.fixtureId
-                      )
-                    )
-                      ? Number(
-                          matched?.fixtureId
-                        )
-                      : null,
-                  gameLabel:
-                    `${selectedBetman?.home ?? "-"} vs ${selectedBetman?.away ?? "-"}`,
-                  gameDateMs:
-                    Number.isFinite(
-                      gameDateMs
-                    )
-                      ? gameDateMs
-                      : null,
-                  capturedAt:
-                    Date.now(),
-
-                  stage,
-                  marketKey:
-                    pick.key,
-                  market:
-                    pick.market,
-                  predictedPick:
-                    pick.pick,
-                  actualLabel:
-                    row.actualLabel,
-
-                  probability,
-                  odds:
-                    pick.odds,
-                  expectedValue:
-                    pick.expectedValue,
-                  grade:
-                    pick.stageGradeLabel ??
-                    pick.valueGrade,
-
-                  status:
-                    row.status,
-
-                  realizedReturn,
-                  brierScore:
-                    Number(
-                      (
-                        (
-                          p -
-                          outcome
-                        ) **
-                        2
-                      ).toFixed(
-                        6
-                      )
-                    ),
-                } satisfies BacktestPerformanceRecord;
-              }
+      const gameDateMs =
+        selectedBetman
+          ? gameTimeMs(
+              selectedBetman
             )
-            .filter(
+          : NaN;
+
+      const probability =
+        clamp(
+          pick.probability,
+          0,
+          100
+        );
+
+      const outcome =
+        row.status ===
+        "HIT"
+          ? 1
+          : 0;
+
+      const p =
+        probability /
+        100;
+
+      const realizedReturn =
+        pick.odds !== null &&
+        Number.isFinite(
+          pick.odds
+        ) &&
+        pick.odds > 1
+          ? row.status ===
+              "HIT"
+            ? pick.odds -
+              1
+            : -1
+          : null;
+
+      const stage =
+        analysisFactors.baseballAnalysisStage;
+
+      const performanceRow:
+        BacktestPerformanceRecord = {
+          id:
+            [
+              fixtureKey,
+              stage,
+              pick.key,
+            ].join("|"),
+          fixtureKey,
+          fixtureId:
+            Number.isFinite(
+              Number(
+                matched?.fixtureId
+              )
+            )
+              ? Number(
+                  matched?.fixtureId
+                )
+              : null,
+          gameLabel:
+            `${selectedBetman?.home ?? "-"} vs ${selectedBetman?.away ?? "-"}`,
+          gameDateMs:
+            Number.isFinite(
+              gameDateMs
+            )
+              ? gameDateMs
+              : null,
+          capturedAt:
+            Date.now(),
+
+          stage,
+          marketKey:
+            pick.key,
+          market:
+            pick.market,
+          predictedPick:
+            pick.pick,
+          actualLabel:
+            row.actualLabel,
+
+          probability,
+          odds:
+            pick.odds,
+          expectedValue:
+            pick.expectedValue,
+          grade:
+            pick.stageGradeLabel ??
+            pick.valueGrade,
+
+          status:
+            row.status,
+
+          realizedReturn,
+          brierScore:
+            Number(
               (
-                row
-              ): row is BacktestPerformanceRecord =>
-                row !== null
-            )
-        : [];
+                (
+                  p -
+                  outcome
+                ) **
+                2
+              ).toFixed(
+                6
+              )
+            ),
+        };
+
+      currentBacktestPerformanceRows.push(
+        performanceRow
+      );
+    }
+  }
 
   const currentBacktestPerformanceSignature =
     JSON.stringify(
@@ -10260,7 +10263,7 @@ export default function Home() {
                 }}
               >
                 <b>백테스트 검증 준비 완료</b>
-                {" · "}아래 `V11.9 백테스트 결과 검증기`에서
+                {" · "}아래 `V11.9.2 백테스트 결과 검증기`에서
                 `예측 확정 · 실제 결과 검증 열기` 버튼을 누르면 결과를 공개할 수 있습니다.
               </div>
             )}
@@ -10330,7 +10333,7 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V11.9 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
+              <summary>V11.9.2 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
                   <h3>V11.7 계산 추적 · 데이터 가용성 + λ 교정</h3>
@@ -10351,7 +10354,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.9 의사결정 규칙</b><br />
+                    <b>V11.9.2 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -10362,7 +10365,7 @@ export default function Home() {
 
                   {currentSport === "야구" && backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.9 백테스트 안전장치 · 실제 SportsAPI 리소스 진단</h3>
+                      <h3>V11.9.2 백테스트 안전장치 · 실제 SportsAPI 리소스 진단</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10461,7 +10464,7 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.9 SportsAPI 경기전 데이터 리소스 진단</h3>
+                      <h3>V11.9.2 SportsAPI 경기전 데이터 리소스 진단</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10671,7 +10674,7 @@ export default function Home() {
 
                   {currentSport === "야구" && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.9 야구 데이터 가용성 · 선발투수/라인업 복원</h3>
+                      <h3>V11.9.2 야구 데이터 가용성 · 선발투수/라인업 복원</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10835,7 +10838,7 @@ export default function Home() {
                           "0 2px 12px rgba(40,95,190,0.08)",
                       }}
                     >
-                      <h3>V11.9 백테스트 결과 검증기</h3>
+                      <h3>V11.9.1 백테스트 결과 검증기</h3>
 
                       <div
                         className="cards"
@@ -11048,7 +11051,7 @@ export default function Home() {
                         }}
                       >
                         <h3 style={{ margin: 0 }}>
-                          V11.9 누적 백테스트 성능판
+                          V11.9.2 누적 백테스트 성능판
                         </h3>
 
                         <button
