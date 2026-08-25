@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V12_5_NAVER_PREVIEW_PARSER_20260825
+// DEPLOY_MARKER_V12_5_2_NAVER_CURRENT_SEASON_STATS_20260825
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -10274,7 +10274,7 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V12.5 네이버 Preview parser · 선발/라인업 연결</h3>
+                      <h3>V12.5.2 네이버 Preview parser · currentSeasonStats 연결</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10431,7 +10431,9 @@ export default function Home() {
                           <div className="notice" style={{ margin: "8px 0 0" }}>
                             이 표는 네이버 Preview 응답의 구조만 진단합니다.
                             score/winner/statistics/boxscore/final-score 계열은 탐색에서 제외하며,
-                            아직 이 path들을 선발/라인업 분석값으로 자동 연결하지 않습니다.
+                            currentSeasonStats/seasonStats는 경기 전 시즌 누적 지표 후보로 탐색을 허용하며,
+                            선수 객체에 보존된 ERA/WHIP는 기존 선발투수 deep parser가 읽습니다.
+                            경기 결과·boxscore·일반 statistics 계열은 계속 차단합니다.
                           </div>
                         </div>
                       )}
