@@ -3244,6 +3244,72 @@ function marketStableKey(
   return `${betName}|${line ?? ""}|${index}`;
 }
 
+
+function safeBetmanMarketRuntime(
+  game: BetmanMatch | null | undefined
+) {
+  const markets =
+    Array.isArray(game?.markets)
+      ? game!.markets!
+      : [];
+
+  const first =
+    markets[0] ??
+    null;
+
+  const selections =
+    Array.isArray(first?.selections)
+      ? first.selections
+      : [];
+
+  return {
+    marketKeys:
+      first && typeof first === "object"
+        ? Object.keys(first).slice(0, 24)
+        : [],
+    betName:
+      first?.betName ??
+      first?.displayName ??
+      first?.betTypeName ??
+      null,
+    type:
+      first?.type ??
+      first?.marketType ??
+      null,
+    line:
+      first?.line ??
+      first?.handicap ??
+      first?.point ??
+      null,
+    selections:
+      selections.slice(0, 5).map(
+        (selection: any) => ({
+          keys:
+            selection &&
+            typeof selection === "object"
+              ? Object.keys(selection).slice(0, 16)
+              : [],
+          side:
+            selection?.side ??
+            selection?.type ??
+            selection?.outcome ??
+            null,
+          label:
+            selection?.label ??
+            selection?.name ??
+            selection?.title ??
+            null,
+          odds:
+            Number.isFinite(
+              Number(selection?.odds)
+            )
+              ? Number(selection.odds)
+              : null,
+        })
+      ),
+  };
+}
+
 function buildMarketConnectionDiagnostics(
   game: BetmanMatch | null | undefined,
   picks: MarketPick[]
@@ -6152,6 +6218,16 @@ export default function Home() {
       actualMarketPicks
     );
 
+  const betmanRuntimeDebug =
+    safeBetmanMarketRuntime(
+      betman.matched
+    );
+
+  const sportsRuntimeDebug =
+    matched?.debug?.runtimeShape ??
+    matched?.detailDebug?.runtimeShape ??
+    null;
+
   const marketConnectionLinked =
     marketConnectionDiagnostics.filter(
       (item) =>
@@ -7389,7 +7465,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.3.6 의사결정 규칙</b><br />
+                    <b>V11.3.7 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -7400,7 +7476,7 @@ export default function Home() {
 
                   {currentSport === "야구" && backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.3.6 백테스트 안전장치 · Form 집계 + 8마켓 연결</h3>
+                      <h3>V11.3.7 백테스트 안전장치 · 런타임 구조 진단</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -7730,6 +7806,91 @@ export default function Home() {
                             </div>
                           </div>
                         ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {currentSport === "야구" && backtestMode && (
+                    <div className="section" style={{ marginTop: 0 }}>
+                      <h3>V11.3.7 런타임 구조 진단</h3>
+
+                      <div className="cards">
+                        <div className="card">
+                          SportsAPI 팀 구조
+                          <b>
+                            {sportsRuntimeDebug?.selectedFixture
+                              ? "수신"
+                              : "없음"}
+                          </b>
+                          <div className="small">
+                            결과점수/승패는 표시하지 않음
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          Betman 첫 마켓
+                          <b>
+                            {betmanRuntimeDebug.betName ?? "-"}
+                          </b>
+                          <div className="small">
+                            selection {betmanRuntimeDebug.selections.length}개
+                          </div>
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: 8,
+                          display: "grid",
+                          gridTemplateColumns:
+                            "repeat(auto-fit,minmax(280px,1fr))",
+                          gap: 8,
+                        }}
+                      >
+                        <div className="notice" style={{ margin: 0 }}>
+                          <b>SportsAPI 팀 객체</b>
+                          <pre
+                            style={{
+                              margin: "6px 0 0",
+                              whiteSpace: "pre-wrap",
+                              wordBreak: "break-word",
+                              fontSize: 9,
+                              lineHeight: 1.45,
+                            }}
+                          >
+                            {JSON.stringify(
+                              sportsRuntimeDebug?.selectedFixture ??
+                              null,
+                              null,
+                              2
+                            )}
+                          </pre>
+                        </div>
+
+                        <div className="notice" style={{ margin: 0 }}>
+                          <b>Betman 첫 마켓 객체</b>
+                          <pre
+                            style={{
+                              margin: "6px 0 0",
+                              whiteSpace: "pre-wrap",
+                              wordBreak: "break-word",
+                              fontSize: 9,
+                              lineHeight: 1.45,
+                            }}
+                          >
+                            {JSON.stringify(
+                              betmanRuntimeDebug,
+                              null,
+                              2
+                            )}
+                          </pre>
+                        </div>
+                      </div>
+
+                      <div className="notice" style={{ margin: "8px 0" }}>
+                        이 진단은 팀 식별 key와 마켓 selection key만 확인합니다.
+                        실제 경기 결과·최종점수·winner 값은 표시하거나 분석 입력에 사용하지 않습니다.
+                        다음 테스트에서 이 두 JSON만 보면 Form집계 0과 계산연결 0의 실제 구조 차이를 확정할 수 있습니다.
                       </div>
                     </div>
                   )}
