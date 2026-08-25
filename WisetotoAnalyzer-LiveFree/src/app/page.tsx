@@ -2293,6 +2293,72 @@ function soccerScoreGrid(homeLambda: number, awayLambda: number) {
   return rows;
 }
 
+function baseballScoreGrid(
+  homeLambda: number,
+  awayLambda: number
+) {
+  const rows: {
+    home: number;
+    away: number;
+    p: number;
+  }[] = [];
+  let total = 0;
+
+  for (let h = 0; h <= 20; h++) {
+    const hp = poissonPmf(homeLambda, h);
+    for (let a = 0; a <= 20; a++) {
+      const p = hp * poissonPmf(awayLambda, a);
+      rows.push({ home: h, away: a, p });
+      total += p;
+    }
+  }
+
+  if (total > 0) {
+    rows.forEach((row) => {
+      row.p /= total;
+    });
+  }
+
+  return rows;
+}
+
+function oppositeHandicapLine(line: number) {
+  const value = -line;
+  return `${value >= 0 ? "+" : ""}${value}`;
+}
+
+function homeHandicapLineText(line: number) {
+  return `${line >= 0 ? "+" : ""}${line}`;
+}
+
+function baseballPickDisplay(
+  best: { label: string; identity: string },
+  type: string,
+  line: number | null,
+  betName: string
+) {
+  if (type === "handicap" && line !== null) {
+    if (best.identity === "home") return `홈 ${homeHandicapLineText(line)}`;
+    if (best.identity === "away") return `원정 ${oppositeHandicapLine(line)}`;
+    return "무";
+  }
+
+  if (
+    type === "total" ||
+    /u\/o|언더|오버|under|over/i.test(betName)
+  ) {
+    if (best.identity === "over") return "OVER";
+    if (best.identity === "under") return "UNDER";
+  }
+
+  if (/sum|홀짝|홀\/짝/i.test(betName)) {
+    if (best.identity === "odd") return "홀";
+    if (best.identity === "even") return "짝";
+  }
+
+  return best.label;
+}
+
 function selectionLabel(selection: any) {
   return String(selection?.label ?? selection?.side ?? "").trim();
 }
@@ -2311,6 +2377,7 @@ function selectionIdentity(selection: any) {
   if (/^(승|홈|home)$/i.test(label) || label.includes("home")) return "home";
   if (/^(무|draw)$/i.test(label) || label.includes("draw")) return "draw";
   if (/^(패|원정|away)$/i.test(label) || label.includes("away")) return "away";
+  if (/^(①|1)$/i.test(label)) return "draw";
 
   if (side === "win") return "home";
   if (side === "draw") return "draw";
@@ -3380,6 +3447,233 @@ function buildActualMarketPicks(
           recommendationScore: Number(recScore.toFixed(1)),
           detail: `${periodText}${lineText}${pushText}`,
         });
+        continue;
+      }
+    }
+
+
+    if (sport === "야구" && canScoreModel) {
+      const combinedName =
+        `${betName} ${String(market?.betTypeName ?? "")}`;
+
+      const isWin1Lose =
+        /승\s*1\s*패|승1패/i.test(combinedName);
+      const isSumMarket =
+        /sum|홀짝|홀\/짝/i.test(combinedName);
+      const isTotalMarket =
+        type === "total" ||
+        /u\/o|언더|오버|under|over/i.test(combinedName);
+      const isHandicapMarket =
+        type === "handicap" ||
+        /핸디|handicap/i.test(combinedName);
+
+      // 공식 야구 전반 = 5이닝 종료.
+      const periodFactor = isFirstHalf ? 5 / 9 : 1;
+
+      const grid = baseballScoreGrid(
+        Math.max(0.10, expectedHome! * periodFactor),
+        Math.max(0.10, expectedAway! * periodFactor)
+      );
+
+      let home = 0, draw = 0, away = 0;
+      let homeWide = 0, closeOne = 0, awayWide = 0;
+      let over = 0, under = 0, push = 0;
+      let odd = 0, even = 0;
+
+      for (const row of grid) {
+        const margin = row.home - row.away;
+        const outcome = settleBetmanMoneyline(row.home, row.away);
+
+        if (outcome === "home") home += row.p;
+        else if (outcome === "away") away += row.p;
+        else draw += row.p;
+
+        if (margin >= 2) homeWide += row.p;
+        else if (margin <= -2) awayWide += row.p;
+        else closeOne += row.p;
+
+        if (isTotalMarket && line !== null) {
+          const total = row.home + row.away;
+          if (total > line) over += row.p;
+          else if (total < line) under += row.p;
+          else push += row.p;
+        }
+
+        if ((row.home + row.away) % 2 === 0) even += row.p;
+        else odd += row.p;
+      }
+
+      let probs: Record<string, number> = {};
+      let baseballPush = 0;
+
+      if (isHandicapMarket) {
+        let handicapHome = 0, handicapDraw = 0, handicapAway = 0;
+
+        if (line !== null) {
+          for (const row of grid) {
+            const outcome = settleBetmanHomeHandicap(row.home, row.away, line);
+            if (outcome === "home") handicapHome += row.p;
+            else if (outcome === "away") handicapAway += row.p;
+            else handicapDraw += row.p;
+          }
+        }
+
+        const hasDrawSelection =
+          selections.some(
+            (selection: any) =>
+              selectionIdentity(selection) === "draw"
+          );
+
+        if (hasDrawSelection) {
+          probs = {
+            home: handicapHome * 100,
+            draw: handicapDraw * 100,
+            away: handicapAway * 100,
+          };
+        } else {
+          const decided = handicapHome + handicapAway;
+          probs = {
+            home: decided > 0 ? (handicapHome / decided) * 100 : 50,
+            away: decided > 0 ? (handicapAway / decided) * 100 : 50,
+          };
+          baseballPush = handicapDraw;
+        }
+      } else if (isTotalMarket) {
+        const decided = over + under;
+        probs = {
+          over: decided > 0 ? (over / decided) * 100 : 50,
+          under: decided > 0 ? (under / decided) * 100 : 50,
+        };
+        baseballPush = push;
+      } else if (isSumMarket) {
+        probs = { odd: odd * 100, even: even * 100 };
+      } else if (isWin1Lose) {
+        probs = {
+          home: homeWide * 100,
+          draw: closeOne * 100,
+          away: awayWide * 100,
+        };
+      } else if (isFirstHalf) {
+        probs = { home: home * 100, draw: draw * 100, away: away * 100 };
+      } else {
+        const decided = home + away;
+        probs = {
+          home: decided > 0 ? (home / decided) * 100 : 50,
+          away: decided > 0 ? (away / decided) * 100 : 50,
+        };
+        baseballPush = draw;
+      }
+
+      const best = bestSelection(market, probs);
+
+      if (best) {
+        const odds = Number(best.selection?.odds);
+        const safeOdds =
+          Number.isFinite(odds) && odds > 1 ? odds : null;
+
+        const fair = marketFair.probabilities[best.identity];
+        const marketProbability =
+          Number.isFinite(fair) ? Number(fair.toFixed(1)) : null;
+
+        const confidence = marketConfidence(
+          factors,
+          recentSummary,
+          h2h,
+          market,
+          marketFair.overround,
+          {
+            ...signalConflict,
+            score: decisionRisk.score,
+            confidencePenalty: Number(
+              clamp(decisionRisk.score * 0.28, 0, 24).toFixed(1)
+            ),
+            label: decisionRisk.reason,
+          }
+        );
+
+        const calibrated = calibrateModelProbability(
+          best.probability,
+          marketProbability,
+          confidence
+        );
+
+        const calibratedProbability =
+          Number(calibrated.probability.toFixed(1));
+
+        const edge =
+          marketProbability === null
+            ? null
+            : Number((calibratedProbability - marketProbability).toFixed(1));
+
+        const ev = betExpectedValue(calibratedProbability, safeOdds);
+
+        const valueGrade = evaluateValueGrade({
+          odds: safeOdds,
+          expectedValue: ev.expectedValue,
+          edge,
+          confidence,
+          decisionRiskScore: decisionRisk.score,
+          decisionRiskReason: decisionRisk.reason,
+        });
+
+        const recScore =
+          recommendationScore(calibratedProbability, edge, confidence);
+
+        const periodText =
+          isFirstHalf ? "야구 전반 5이닝" : "야구 최종";
+
+        const lineText =
+          line !== null
+            ? isHandicapMarket
+              ? ` · 홈팀 기준 H ${homeHandicapLineText(line)}`
+              : isTotalMarket
+                ? ` · U/O ${line}`
+                : ""
+            : "";
+
+        const ruleText =
+          isWin1Lose
+            ? " · 승1패=2점차+/1점차이내/2점차+패"
+            : "";
+
+        const pushText =
+          baseballPush > 0.001
+            ? ` · 미결정/적중무효 ${(baseballPush * 100).toFixed(1)}% 제외`
+            : "";
+
+        result.push({
+          key,
+          market: label,
+          pick: baseballPickDisplay(
+            best,
+            isHandicapMarket ? "handicap" : isTotalMarket ? "total" : type,
+            line,
+            combinedName
+          ),
+          rawProbability: Number(best.probability.toFixed(1)),
+          probability: calibratedProbability,
+          odds: safeOdds,
+          marketProbability,
+          edge,
+          breakEvenProbability: ev.breakEvenProbability,
+          expectedValue: ev.expectedValue,
+          valueGrade: valueGrade.grade,
+          valueGradeScore: valueGrade.score,
+          valueGradeReason: valueGrade.reason,
+          calibrationWeight:
+            calibrated.modelWeight === null
+              ? null
+              : Number(calibrated.modelWeight.toFixed(2)),
+          signalConflictScore: signalConflict.score,
+          signalConflictLabel: signalConflict.label,
+          decisionRiskScore: decisionRisk.score,
+          decisionRiskReason: decisionRisk.reason,
+          confidenceScore: Number(confidence.toFixed(1)),
+          confidenceGrade: confidenceGrade(confidence),
+          recommendationScore: Number(recScore.toFixed(1)),
+          detail: `${periodText}${lineText}${ruleText}${pushText}`,
+        });
+
         continue;
       }
     }
@@ -5045,7 +5339,7 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V10.8 계산 추적 · 시장 prior λ · 마켓별 위험 · EV</summary>
+              <summary>V10.9 계산 추적 · 야구 독립마켓 · 시장 prior λ · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
                   <h3>V10.8 계산 추적 · 저신뢰 λ 교정</h3>
@@ -5066,10 +5360,13 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V10.8 의사결정 규칙</b><br />
+                    <b>V10.9 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
+                    <br />
+                    <b>야구:</b> 승1패는 2점차 이상 승 / 1점차 이내(무승부 포함) / 2점차 이상 패,
+                    전반은 5이닝 기준이며 전반 H/UO는 해당 전반 라인을 독립 계산합니다.
                   </div>
 
                   <div className="section" style={{ marginTop: 0 }}>
