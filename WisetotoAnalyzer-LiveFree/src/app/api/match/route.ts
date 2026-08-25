@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V12_5_NAVER_PREVIEW_PARSER_20260825
+// DEPLOY_MARKER_V12_5_2_NAVER_CURRENT_SEASON_STATS_20260825
 // WISETOTO_MATCH_SELECTED_V1_20260823
 const BASE = "https://api.sportsapi.app/v2";
 
@@ -1867,10 +1867,15 @@ function inspectNaverPreviewStructure(
     new Set<any>();
 
   const interestingKey =
-    /lineup|lineup|starter|starting|pitcher|player|athlete|batter|batting|order|position|home|away|roster|entry|member/i;
+    /lineup|line-up|line_up|starter|starting|pitcher|player|athlete|batter|batting|order|position|home|away|roster|entry|member|currentseasonstats|seasonstats/i;
 
-  const blockedKey =
-    /score|winner|statistics|statistic|boxscore|finalscore|gameresult|matchresult|resultscore|record|inning|runs|hits|errors|earned|whip|era|pitchcount/i;
+  // V12.5.2: currentSeasonStats는 경기 전 시즌 누적 투수지표 후보이므로
+  // generic statistics 차단 규칙과 분리합니다. 경기 결과/이닝/boxscore 계열은 계속 차단합니다.
+  const isBlockedKey = (key: string) => {
+    const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (normalized === "currentseasonstats" || normalized === "seasonstats") return false;
+    return /score|winner|statistics|statistic|boxscore|finalscore|gameresult|matchresult|resultscore|record|inning|runs|hits|errors|pitchcount/i.test(key);
+  };
 
   const pushRow = (
     path: string,
@@ -1909,7 +1914,7 @@ function inspectNaverPreviewStructure(
       Object.keys(value)
         .filter(
           (key) =>
-            !blockedKey.test(key)
+            !isBlockedKey(key)
         )
         .slice(0, 40);
 
@@ -2035,7 +2040,7 @@ function inspectNaverPreviewStructure(
       keys.filter(
         (key) =>
           interestingKey.test(key) &&
-          !blockedKey.test(key)
+          !isBlockedKey(key)
       );
 
     if (
@@ -2055,7 +2060,7 @@ function inspectNaverPreviewStructure(
       ] of Object.entries(value)
     ) {
       if (
-        blockedKey.test(key)
+        isBlockedKey(key)
       ) {
         continue;
       }
@@ -2100,6 +2105,7 @@ type NaverParsedPlayer = {
   battingOrder: number | null;
   starter: boolean;
   sourcePath: string;
+  currentSeasonStats?: any;
 };
 
 type NaverParsedLineups = {
@@ -2131,7 +2137,11 @@ function parseNaverPreviewLineups(payload: any): NaverParsedLineups | null {
   const root = unwrapNaverPreviewPayload(payload);
   if (!root || typeof root !== "object") return null;
 
-  const blockedKey = /score|winner|statistics|statistic|boxscore|final|gameresult|matchresult|resultscore|inning|runs|hits|errors|earned|pitchcount/i;
+  const isBlockedKey = (key: string) => {
+    const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (normalized === "currentseasonstats" || normalized === "seasonstats") return false;
+    return /score|winner|statistics|statistic|boxscore|final|gameresult|matchresult|resultscore|inning|runs|hits|errors|pitchcount/i.test(key);
+  };
   const playerContext = /lineup|line-up|line_up|starter|starting|pitcher|player|athlete|batter|batting|order|roster|entry|member/i;
   const seen = new Set<any>();
   const rows: NaverParsedPlayer[] = [];
@@ -2183,11 +2193,19 @@ function parseNaverPreviewLineups(payload: any): NaverParsedLineups | null {
         battingOrder: order,
         starter,
         sourcePath: path,
+        // 원본 시즌 누적 지표를 보존해 클라이언트의 ERA/WHIP deep parser가
+        // 실제 키 구조를 그대로 읽을 수 있게 합니다.
+        currentSeasonStats:
+          value?.currentSeasonStats ??
+          value?.seasonStats ??
+          value?.player?.currentSeasonStats ??
+          value?.athlete?.currentSeasonStats ??
+          null,
       });
     }
 
     for (const [key, child] of Object.entries(value)) {
-      if (blockedKey.test(key) || !child || typeof child !== "object") continue;
+      if (isBlockedKey(key) || !child || typeof child !== "object") continue;
       const childSide = naverSideFromText(key) ?? side;
       visit(child, `${path}.${key}`, childSide, depth + 1);
     }
