@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V12_8_PLAYER_STATS_RESOLVER_20260825
+// DEPLOY_MARKER_V12_9_STARTER_BAYESIAN_20260825
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -150,6 +150,12 @@ type AnalysisFactors = {
   awayStarterGamesStarted: number | null;
   homeStarterSampleReliability: number;
   awayStarterSampleReliability: number;
+  homeStarterPosteriorEra: number | null;
+  awayStarterPosteriorEra: number | null;
+  homeStarterPosteriorWhip: number | null;
+  awayStarterPosteriorWhip: number | null;
+  homeStarterEquivalentInnings: number | null;
+  awayStarterEquivalentInnings: number | null;
   pitcherDataUsed: boolean;
   pitcherAdjustmentHome: number;
   pitcherAdjustmentAway: number;
@@ -2363,51 +2369,186 @@ function starterFromLineups(
     ? { name: null, era: null, whip: null, inningsPitched: null, games: null, gamesStarted: null }
     : starterInfoFromObject(best.value);
 }
-function starterSampleReliability(starter: StarterInfo) {
-  // V12.5.5: ERA/WHIP 소표본 과보정을 막는다. IP를 최우선으로 사용하고,
-  // IP가 없을 때만 GS/G를 보조 표본으로 사용한다. 표본 정보 자체가 없으면
-  // 기존보다 보수적인 55% 신뢰도로 제한한다.
-  if (starter.inningsPitched !== null) {
-    return clamp(starter.inningsPitched / 45, 0.18, 1);
+function starterEquivalentInnings(
+  starter: StarterInfo
+) {
+  if (
+    starter.inningsPitched !== null &&
+    starter.inningsPitched >= 0
+  ) {
+    return starter.inningsPitched;
   }
-  if (starter.gamesStarted !== null) {
-    return clamp(starter.gamesStarted / 8, 0.22, 1);
+
+  /*
+   * IP가 없는 공급자 응답만 GS/G로 보조 추정한다.
+   * 선발 1경기 ≈ 5.2IP, 전체 경기만 있으면 보수적으로 2IP 상당.
+   */
+  if (
+    starter.gamesStarted !== null &&
+    starter.gamesStarted > 0
+  ) {
+    return starter.gamesStarted * 5.2;
   }
-  if (starter.games !== null) {
-    return clamp(starter.games / 12, 0.20, 0.85);
+
+  if (
+    starter.games !== null &&
+    starter.games > 0
+  ) {
+    return starter.games * 2;
   }
-  return 0.55;
+
+  return null;
 }
 
-function pitcherRunFactor(starter: StarterInfo) {
-  const eraFactor =
-    starter.era === null
-      ? null
-      : clamp(starter.era / 4.50, 0.70, 1.35);
+function starterSampleReliability(
+  starter: StarterInfo
+) {
+  const equivalentInnings =
+    starterEquivalentInnings(starter);
 
-  const whipFactor =
-    starter.whip === null
-      ? null
-      : clamp(starter.whip / 1.35, 0.75, 1.30);
-
-  if (eraFactor === null && whipFactor === null) {
-    return { factor: 1, weight: 0 };
+  if (
+    equivalentInnings !== null
+  ) {
+    /*
+     * Empirical-Bayes prior strength = 30 innings.
+     * 1.5IP -> 약 5%, 30IP -> 50%, 60IP -> 67%, 90IP -> 75%.
+     */
+    return clamp(
+      equivalentInnings /
+        (equivalentInnings + 30),
+      0.03,
+      0.90
+    );
   }
 
-  const factor =
-    eraFactor !== null && whipFactor !== null
-      ? eraFactor * 0.70 + whipFactor * 0.30
-      : eraFactor ?? whipFactor ?? 1;
+  /*
+   * ERA/WHIP는 있는데 표본량 필드가 없을 때도
+   * 완전 신뢰하지 않고 25%만 허용.
+   */
+  if (
+    starter.era !== null ||
+    starter.whip !== null
+  ) {
+    return 0.25;
+  }
 
-  const sampleReliability = starterSampleReliability(starter);
+  return 0;
+}
+
+function starterBayesianPosterior(
+  starter: StarterInfo
+) {
+  const reliability =
+    starterSampleReliability(
+      starter
+    );
+
+  const priorEra = 4.50;
+  const priorWhip = 1.35;
+
+  const posteriorEra =
+    starter.era === null
+      ? null
+      : priorEra +
+        (
+          starter.era -
+          priorEra
+        ) *
+          reliability;
+
+  const posteriorWhip =
+    starter.whip === null
+      ? null
+      : priorWhip +
+        (
+          starter.whip -
+          priorWhip
+        ) *
+          reliability;
+
+  return {
+    reliability,
+    equivalentInnings:
+      starterEquivalentInnings(
+        starter
+      ),
+    era:
+      posteriorEra === null
+        ? null
+        : Number(
+            posteriorEra.toFixed(3)
+          ),
+    whip:
+      posteriorWhip === null
+        ? null
+        : Number(
+            posteriorWhip.toFixed(3)
+          ),
+  };
+}
+
+function pitcherRunFactor(
+  starter: StarterInfo
+) {
+  const posterior =
+    starterBayesianPosterior(
+      starter
+    );
+
+  const eraFactor =
+    posterior.era === null
+      ? null
+      : clamp(
+          posterior.era / 4.50,
+          0.78,
+          1.25
+        );
+
+  const whipFactor =
+    posterior.whip === null
+      ? null
+      : clamp(
+          posterior.whip / 1.35,
+          0.82,
+          1.20
+        );
+
+  if (
+    eraFactor === null &&
+    whipFactor === null
+  ) {
+    return {
+      factor: 1,
+      weight: 0,
+      sampleReliability:
+        posterior.reliability,
+      posterior,
+    };
+  }
+
+  /*
+   * 표본 수축은 posterior 생성 시 이미 한 번만 적용한다.
+   * 여기서는 ERA/WHIP 데이터 완성도에 따른 구조적 가중치만 적용한다.
+   */
+  const factor =
+    eraFactor !== null &&
+    whipFactor !== null
+      ? eraFactor * 0.70 +
+        whipFactor * 0.30
+      : eraFactor ??
+        whipFactor ??
+        1;
 
   return {
     factor,
     weight:
-      (eraFactor !== null && whipFactor !== null
+      eraFactor !== null &&
+      whipFactor !== null
         ? 0.36
-        : 0.24) * sampleReliability,
-    sampleReliability,
+        : 0.24,
+    sampleReliability:
+      posterior.reliability,
+    posterior,
   };
 }
 
@@ -4773,8 +4914,22 @@ function buildAnalysis(
       awayStarterGames: awayStarter.games,
       homeStarterGamesStarted: homeStarter.gamesStarted,
       awayStarterGamesStarted: awayStarter.gamesStarted,
-      homeStarterSampleReliability: starterSampleReliability(homeStarter),
-      awayStarterSampleReliability: starterSampleReliability(awayStarter),
+      homeStarterSampleReliability:
+        starterSampleReliability(homeStarter),
+      awayStarterSampleReliability:
+        starterSampleReliability(awayStarter),
+      homeStarterPosteriorEra:
+        starterBayesianPosterior(homeStarter).era,
+      awayStarterPosteriorEra:
+        starterBayesianPosterior(awayStarter).era,
+      homeStarterPosteriorWhip:
+        starterBayesianPosterior(homeStarter).whip,
+      awayStarterPosteriorWhip:
+        starterBayesianPosterior(awayStarter).whip,
+      homeStarterEquivalentInnings:
+        starterBayesianPosterior(homeStarter).equivalentInnings,
+      awayStarterEquivalentInnings:
+        starterBayesianPosterior(awayStarter).equivalentInnings,
       pitcherDataUsed:
         Boolean(
           homeStarter.era !== null ||
@@ -10861,7 +11016,7 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V12.8 Player-ID · 시즌 타격 Stats Resolver · Coverage Gate</h3>
+                      <h3>V12.9 선발 Bayesian Shrinkage · 타격 Stats Resolver · Coverage Gate</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -11020,7 +11175,7 @@ export default function Home() {
                             score/winner/statistics/boxscore/final-score 계열은 탐색에서 제외하며,
                             currentSeasonStats/seasonStats는 경기 전 시즌 누적 지표 후보로 탐색을 허용하며,
                             homeStarter/awayStarter는 명시된 side를 우선 고정하고 ERA/WHIP를 deep parser로 읽습니다.
-                            라인업 인원과 공격력은 fullLineUp/startingLineup 계열만 사용하며 pitcher/bullpen/candidate는 공격력 계산에서 제외합니다. 타격 시즌 Stats가 실제 수신된 선수만 공격력 보정에 사용합니다. V12.8은 Naver 시즌 players API에서 pcode/playerId를 우선 매칭하고, Stats coverage 80% 미만에서는 VALUE 승격을 WATCH로 제한합니다.
+                            라인업 인원과 공격력은 fullLineUp/startingLineup 계열만 사용하며 pitcher/bullpen/candidate는 공격력 계산에서 제외합니다. 타격 시즌 Stats가 실제 수신된 선수만 공격력 보정에 사용합니다. V12.9는 선발 ERA/WHIP를 리그 중립 ERA 4.50 / WHIP 1.35에 표본량(IP 우선, 없으면 GS/G 등가IP)으로 Bayesian 수축한 뒤 λ에 반영합니다. Naver 시즌 players API는 pcode/playerId를 우선 매칭하고, Stats coverage 80% 미만에서는 VALUE 승격을 WATCH로 제한합니다.
                             경기 결과·boxscore·일반 statistics 계열은 계속 차단합니다.
                           </div>
                         </div>
@@ -11206,7 +11361,13 @@ export default function Home() {
                             {"명"}
                           </b>
                           <div className="small">
-                            아직 자동 복원 전
+                            {analysisFactors.baseballStarterCount >= 2 &&
+                            analysisFactors.baseballLineupPlayerCount >= 18
+                              ? "자동 복원 완료 · 분석 엔진 반영"
+                              : analysisFactors.baseballStarterCount > 0 ||
+                                  analysisFactors.baseballLineupPlayerCount > 0
+                                ? "부분 복원 · 추가 데이터 대기"
+                                : "자동 복원 전"}
                           </div>
                         </div>
                       </div>
@@ -11436,8 +11597,25 @@ export default function Home() {
                           </b>
                           <div className="small">
                             {analysisFactors.pitcherDataUsed
-                              ? `ERA/WHIP 반영 · 표본신뢰 홈 ${(analysisFactors.homeStarterSampleReliability * 100).toFixed(0)}% / 원정 ${(analysisFactors.awayStarterSampleReliability * 100).toFixed(0)}%`
+                              ? `Bayesian 수축 · 표본신뢰 홈 ${(analysisFactors.homeStarterSampleReliability * 100).toFixed(0)}% / 원정 ${(analysisFactors.awayStarterSampleReliability * 100).toFixed(0)}%`
                               : "선발 수치 미수신 · 보정 0"}
+                            {analysisFactors.pitcherDataUsed && (
+                              <>
+                                <br />
+                                Posterior ERA{" "}
+                                {analysisFactors.homeStarterPosteriorEra?.toFixed(2) ?? "-"}
+                                {" / "}
+                                {analysisFactors.awayStarterPosteriorEra?.toFixed(2) ?? "-"}
+                                {" · "}WHIP{" "}
+                                {analysisFactors.homeStarterPosteriorWhip?.toFixed(2) ?? "-"}
+                                {" / "}
+                                {analysisFactors.awayStarterPosteriorWhip?.toFixed(2) ?? "-"}
+                                {" · "}등가IP{" "}
+                                {analysisFactors.homeStarterEquivalentInnings?.toFixed(1) ?? "-"}
+                                {" / "}
+                                {analysisFactors.awayStarterEquivalentInnings?.toFixed(1) ?? "-"}
+                              </>
+                            )}
                           </div>
                         </div>
 
