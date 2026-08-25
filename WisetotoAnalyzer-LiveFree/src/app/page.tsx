@@ -5079,6 +5079,10 @@ type BacktestAudit = {
   scoredAwayFixtures: number;
   matchedHomeFixtures: number;
   matchedAwayFixtures: number;
+  selectedHomeTeamId: number | null;
+  selectedAwayTeamId: number | null;
+  selectedHomeTeamName: string | null;
+  selectedAwayTeamName: string | null;
   h2hPolicy: string;
   resultFieldsStripped: boolean;
   statisticsBlocked: boolean;
@@ -5149,7 +5153,11 @@ function rebuildHistoricalForm(
 
 function sanitizeRecentTeamForBacktest(
   team: RecentTeam | null | undefined,
-  cutoffMs: number
+  cutoffMs: number,
+  selectedIdentity?: {
+    id: number | null;
+    name: string | null;
+  }
 ) {
   if (!team) {
     return {
@@ -5174,12 +5182,74 @@ function sanitizeRecentTeamForBacktest(
         )
     );
 
-  const normalizedTeamId = recentTeamId(team);
-  const normalizedTeamName = recentTeamName(team);
+  const sourceTeamId =
+    recentTeamId(team);
+
+  const sourceTeamName =
+    recentTeamName(team);
+
+  const selectedTeamId =
+    selectedIdentity?.id !== null &&
+    selectedIdentity?.id !== undefined &&
+    Number.isFinite(
+      selectedIdentity.id
+    ) &&
+    selectedIdentity.id > 0
+      ? selectedIdentity.id
+      : null;
+
+  const selectedTeamName =
+    String(
+      selectedIdentity?.name ??
+      ""
+    ).trim() ||
+    null;
+
+  // 백테스트에서는 선택 Fixture의 실제 SportsAPI team id/name을
+  // 최근경기 집계 기준 identity로 우선 사용합니다.
+  // 선택 경기의 점수/승패는 사용하지 않고 팀 식별자만 사용합니다.
+  const normalizedTeamId =
+    selectedTeamId ??
+    sourceTeamId;
+
+  const normalizedTeamName =
+    selectedTeamName ??
+    sourceTeamName;
+
   const normalizedTeam = {
     ...team,
-    teamId: normalizedTeamId ?? (team as any)?.teamId ?? null,
-    teamName: normalizedTeamName ?? (team as any)?.teamName ?? null,
+    teamId:
+      normalizedTeamId ??
+      (team as any)?.teamId ??
+      null,
+    teamName:
+      normalizedTeamName ??
+      (team as any)?.teamName ??
+      null,
+    id:
+      normalizedTeamId ??
+      (team as any)?.id ??
+      null,
+    name:
+      normalizedTeamName ??
+      (team as any)?.name ??
+      null,
+    team: {
+      ...(
+        (team as any)?.team &&
+        typeof (team as any).team === "object"
+          ? (team as any).team
+          : {}
+      ),
+      id:
+        normalizedTeamId ??
+        (team as any)?.team?.id ??
+        null,
+      name:
+        normalizedTeamName ??
+        (team as any)?.team?.name ??
+        null,
+    },
     fixtures,
   } as RecentTeam;
 
@@ -5431,16 +5501,105 @@ function sanitizeMatchedForBacktest(
     | null
     | undefined
 ) {
+  const selectedFixtureSource =
+    matched?.fixture ??
+    matched?.detail ??
+    null;
+
+  const selectedHomeIdRaw =
+    fixtureTeamId(
+      selectedFixtureSource,
+      "home"
+    );
+
+  const selectedAwayIdRaw =
+    fixtureTeamId(
+      selectedFixtureSource,
+      "away"
+    );
+
+  const selectedHomeId =
+    Number.isFinite(
+      selectedHomeIdRaw
+    ) &&
+    selectedHomeIdRaw > 0
+      ? selectedHomeIdRaw
+      : (
+          Number.isFinite(
+            Number(
+              matched?.selectedFixture?.homeId
+            )
+          )
+            ? Number(
+                matched?.selectedFixture?.homeId
+              )
+            : null
+        );
+
+  const selectedAwayId =
+    Number.isFinite(
+      selectedAwayIdRaw
+    ) &&
+    selectedAwayIdRaw > 0
+      ? selectedAwayIdRaw
+      : (
+          Number.isFinite(
+            Number(
+              matched?.selectedFixture?.awayId
+            )
+          )
+            ? Number(
+                matched?.selectedFixture?.awayId
+              )
+            : null
+        );
+
+  const selectedHomeName =
+    fixtureTeamName(
+      selectedFixtureSource,
+      "home"
+    ) ||
+    String(
+      matched?.selectedFixture?.home ??
+      selectedGame?.home ??
+      ""
+    ).trim() ||
+    null;
+
+  const selectedAwayName =
+    fixtureTeamName(
+      selectedFixtureSource,
+      "away"
+    ) ||
+    String(
+      matched?.selectedFixture?.away ??
+      selectedGame?.away ??
+      ""
+    ).trim() ||
+    null;
+
   const home =
     sanitizeRecentTeamForBacktest(
       matched?.recentSummary?.home ?? null,
-      cutoffMs
+      cutoffMs,
+      {
+        id:
+          selectedHomeId,
+        name:
+          selectedHomeName,
+      }
     );
 
   const away =
     sanitizeRecentTeamForBacktest(
       matched?.recentSummary?.away ?? null,
-      cutoffMs
+      cutoffMs,
+      {
+        id:
+          selectedAwayId,
+        name:
+          selectedAwayName,
+      }
     );
 
   const h2hSource =
@@ -5528,6 +5687,14 @@ function sanitizeMatchedForBacktest(
         Number(home.team?.form?.played ?? 0),
       matchedAwayFixtures:
         Number(away.team?.form?.played ?? 0),
+      selectedHomeTeamId:
+        selectedHomeId,
+      selectedAwayTeamId:
+        selectedAwayId,
+      selectedHomeTeamName:
+        selectedHomeName,
+      selectedAwayTeamName:
+        selectedAwayName,
       h2hPolicy:
         h2h.policy,
       resultFieldsStripped: true,
@@ -7465,7 +7632,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.3.7 의사결정 규칙</b><br />
+                    <b>V11.3.8 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -7476,7 +7643,7 @@ export default function Home() {
 
                   {currentSport === "야구" && backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.3.7 백테스트 안전장치 · 런타임 구조 진단</h3>
+                      <h3>V11.3.8 백테스트 안전장치 · Fixture ID 기반 Form 연결</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -7528,6 +7695,33 @@ export default function Home() {
                           <b>{backtestAudit ? "LOCKED" : "대기"}</b>
                           <div className="small">
                             최종점수 제거 · 경기후 statistics 차단
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          Form 기준 팀 ID
+                          <b>
+                            {backtestAudit?.selectedHomeTeamId ?? "-"}
+                            {" / "}
+                            {backtestAudit?.selectedAwayTeamId ?? "-"}
+                          </b>
+                          <div className="small">
+                            {backtestAudit?.selectedHomeTeamName ?? "-"}
+                            {" / "}
+                            {backtestAudit?.selectedAwayTeamName ?? "-"}
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          분석 엔진
+                          <b>
+                            {analysisFactors.hasRealData
+                              ? "활성"
+                              : "대기"}
+                          </b>
+                          <div className="small">
+                            MarketPick {actualMarketPicks.length}/
+                            {marketConnectionDiagnostics.length}
                           </div>
                         </div>
                       </div>
@@ -7806,91 +8000,6 @@ export default function Home() {
                             </div>
                           </div>
                         ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {currentSport === "야구" && backtestMode && (
-                    <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.3.7 런타임 구조 진단</h3>
-
-                      <div className="cards">
-                        <div className="card">
-                          SportsAPI 팀 구조
-                          <b>
-                            {sportsRuntimeDebug?.selectedFixture
-                              ? "수신"
-                              : "없음"}
-                          </b>
-                          <div className="small">
-                            결과점수/승패는 표시하지 않음
-                          </div>
-                        </div>
-
-                        <div className="card">
-                          Betman 첫 마켓
-                          <b>
-                            {betmanRuntimeDebug.betName ?? "-"}
-                          </b>
-                          <div className="small">
-                            selection {betmanRuntimeDebug.selections.length}개
-                          </div>
-                        </div>
-                      </div>
-
-                      <div
-                        style={{
-                          marginTop: 8,
-                          display: "grid",
-                          gridTemplateColumns:
-                            "repeat(auto-fit,minmax(280px,1fr))",
-                          gap: 8,
-                        }}
-                      >
-                        <div className="notice" style={{ margin: 0 }}>
-                          <b>SportsAPI 팀 객체</b>
-                          <pre
-                            style={{
-                              margin: "6px 0 0",
-                              whiteSpace: "pre-wrap",
-                              wordBreak: "break-word",
-                              fontSize: 9,
-                              lineHeight: 1.45,
-                            }}
-                          >
-                            {JSON.stringify(
-                              sportsRuntimeDebug?.selectedFixture ??
-                              null,
-                              null,
-                              2
-                            )}
-                          </pre>
-                        </div>
-
-                        <div className="notice" style={{ margin: 0 }}>
-                          <b>Betman 첫 마켓 객체</b>
-                          <pre
-                            style={{
-                              margin: "6px 0 0",
-                              whiteSpace: "pre-wrap",
-                              wordBreak: "break-word",
-                              fontSize: 9,
-                              lineHeight: 1.45,
-                            }}
-                          >
-                            {JSON.stringify(
-                              betmanRuntimeDebug,
-                              null,
-                              2
-                            )}
-                          </pre>
-                        </div>
-                      </div>
-
-                      <div className="notice" style={{ margin: "8px 0" }}>
-                        이 진단은 팀 식별 key와 마켓 selection key만 확인합니다.
-                        실제 경기 결과·최종점수·winner 값은 표시하거나 분석 입력에 사용하지 않습니다.
-                        다음 테스트에서 이 두 JSON만 보면 Form집계 0과 계산연결 0의 실제 구조 차이를 확정할 수 있습니다.
                       </div>
                     </div>
                   )}
