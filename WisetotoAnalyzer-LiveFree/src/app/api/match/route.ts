@@ -1603,6 +1603,7 @@ type NaverPregameResult = {
   previewStatus: number | null;
   matchedGame: any;
   candidates: NaverPregameCandidate[];
+  previewAudit: NaverPreviewAudit | null;
 };
 
 function normalizeNaverTeamName(value: unknown) {
@@ -1828,6 +1829,262 @@ async function naverJson(
   }
 }
 
+
+type NaverPreviewStructureRow = {
+  path: string;
+  type: "object" | "array";
+  keys: string[];
+  length: number | null;
+  sampleName: string | null;
+  sampleRole: string | null;
+  samplePosition: string | null;
+  sampleOrder: number | null;
+};
+
+type NaverPreviewAudit = {
+  rootKeys: string[];
+  rowCount: number;
+  rows: NaverPreviewStructureRow[];
+};
+
+function inspectNaverPreviewStructure(
+  payload: any
+): NaverPreviewAudit {
+  const rootKeys =
+    payload &&
+    typeof payload === "object" &&
+    !Array.isArray(payload)
+      ? Object.keys(payload).slice(0, 80)
+      : [];
+
+  const rows:
+    NaverPreviewStructureRow[] =
+      [];
+
+  const seen =
+    new Set<any>();
+
+  const interestingKey =
+    /lineup|lineup|starter|starting|pitcher|player|athlete|batter|batting|order|position|home|away|roster|entry|member/i;
+
+  const blockedKey =
+    /score|result|winner|statistics|statistic|boxscore|final|record|inning|runs|hits|errors|earned|whip|era|pitchcount/i;
+
+  const pushRow = (
+    path: string,
+    value: any
+  ) => {
+    if (
+      rows.length >= 120
+    ) {
+      return;
+    }
+
+    if (
+      Array.isArray(value)
+    ) {
+      rows.push({
+        path,
+        type: "array",
+        keys: [],
+        length: value.length,
+        sampleName: null,
+        sampleRole: null,
+        samplePosition: null,
+        sampleOrder: null,
+      });
+      return;
+    }
+
+    if (
+      !value ||
+      typeof value !== "object"
+    ) {
+      return;
+    }
+
+    const keys =
+      Object.keys(value)
+        .filter(
+          (key) =>
+            !blockedKey.test(key)
+        )
+        .slice(0, 40);
+
+    const sampleName =
+      String(
+        value?.playerName ??
+        value?.name ??
+        value?.player?.name ??
+        value?.athlete?.name ??
+        value?.memberName ??
+        ""
+      ).trim() || null;
+
+    const sampleRole =
+      String(
+        value?.role ??
+        value?.type ??
+        value?.designation ??
+        ""
+      ).trim() || null;
+
+    const samplePosition =
+      String(
+        value?.position ??
+        value?.positionName ??
+        value?.pos ??
+        ""
+      ).trim() || null;
+
+    const orderRaw =
+      value?.order ??
+      value?.battingOrder ??
+      value?.lineupOrder ??
+      value?.slot ??
+      null;
+
+    const order =
+      Number(orderRaw);
+
+    rows.push({
+      path,
+      type: "object",
+      keys,
+      length: null,
+      sampleName,
+      sampleRole,
+      samplePosition,
+      sampleOrder:
+        Number.isFinite(order)
+          ? order
+          : null,
+    });
+  };
+
+  const visit = (
+    value: any,
+    path: string,
+    depth = 0
+  ) => {
+    if (
+      value === null ||
+      value === undefined ||
+      depth > 9 ||
+      rows.length >= 120
+    ) {
+      return;
+    }
+
+    if (
+      typeof value === "object" &&
+      seen.has(value)
+    ) {
+      return;
+    }
+
+    if (
+      value &&
+      typeof value === "object"
+    ) {
+      seen.add(value);
+    }
+
+    if (
+      Array.isArray(value)
+    ) {
+      if (
+        interestingKey.test(path)
+      ) {
+        pushRow(
+          path,
+          value
+        );
+      }
+
+      for (
+        let index = 0;
+        index < Math.min(
+          value.length,
+          5
+        );
+        index += 1
+      ) {
+        visit(
+          value[index],
+          `${path}[${index}]`,
+          depth + 1
+        );
+      }
+
+      return;
+    }
+
+    if (
+      typeof value !== "object"
+    ) {
+      return;
+    }
+
+    const keys =
+      Object.keys(value);
+
+    const safeInterestingKeys =
+      keys.filter(
+        (key) =>
+          interestingKey.test(key) &&
+          !blockedKey.test(key)
+      );
+
+    if (
+      interestingKey.test(path) ||
+      safeInterestingKeys.length > 0
+    ) {
+      pushRow(
+        path,
+        value
+      );
+    }
+
+    for (
+      const [
+        key,
+        child,
+      ] of Object.entries(value)
+    ) {
+      if (
+        blockedKey.test(key)
+      ) {
+        continue;
+      }
+
+      if (
+        child &&
+        typeof child === "object"
+      ) {
+        visit(
+          child,
+          `${path}.${key}`,
+          depth + 1
+        );
+      }
+    }
+  };
+
+  visit(
+    payload,
+    "preview",
+    0
+  );
+
+  return {
+    rootKeys,
+    rowCount:
+      rows.length,
+    rows,
+  };
+}
+
 async function getNaverPregameLineups(args: {
   home: string;
   away: string;
@@ -1854,6 +2111,7 @@ async function getNaverPregameLineups(args: {
       previewStatus: null,
       matchedGame: null,
       candidates: [],
+      previewAudit: null,
     };
   }
 
@@ -1930,6 +2188,7 @@ async function getNaverPregameLineups(args: {
       matchedGame: null,
       candidates:
         candidateDiagnostics,
+      previewAudit: null,
     };
   }
 
@@ -1954,8 +2213,14 @@ async function getNaverPregameLineups(args: {
         matched.raw,
       candidates:
         candidateDiagnostics,
+      previewAudit: null,
     };
   }
+
+  const previewAudit =
+    inspectNaverPreviewStructure(
+      preview.data
+    );
 
   return {
     ok: true,
@@ -1972,6 +2237,7 @@ async function getNaverPregameLineups(args: {
       matched.raw,
     candidates:
       candidateDiagnostics,
+    previewAudit,
   };
 }
 
@@ -2045,6 +2311,7 @@ async function runSelectedMode(
           previewStatus: null,
           matchedGame: null,
           candidates: [],
+          previewAudit: null,
         };
 
   // V12.3: HTTP/endpoint success is not enough.
@@ -2161,6 +2428,8 @@ async function runSelectedMode(
         naverPregame.previewStatus,
       candidates:
         naverPregame.candidates,
+      previewAudit:
+        naverPregame.previewAudit,
     },
     statistics:null,
     h2h:null,
@@ -2208,6 +2477,8 @@ async function runSelectedMode(
           naverPregame.previewStatus,
         candidates:
           naverPregame.candidates,
+        previewAudit:
+          naverPregame.previewAudit,
         source:
           "https://api-gw.sports.naver.com",
         schedulePath:
