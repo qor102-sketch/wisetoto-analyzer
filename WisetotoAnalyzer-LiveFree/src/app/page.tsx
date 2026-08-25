@@ -345,6 +345,141 @@ function backtestValidationKey(
   );
 }
 
+
+function resolveBacktestValidationResult(
+  game: BetmanMatch | null | undefined,
+  matched: any
+) {
+  if (!game) {
+    return {
+      truth: null as BacktestValidationResult | null,
+      matchedBy: "선택 경기 없음",
+    };
+  }
+
+  const directKey =
+    backtestValidationKey(
+      game
+    );
+
+  if (
+    directKey &&
+    BACKTEST_VALIDATION_RESULTS[
+      directKey
+    ]
+  ) {
+    return {
+      truth:
+        BACKTEST_VALIDATION_RESULTS[
+          directKey
+        ],
+      matchedBy:
+        `gameKey:${directKey}`,
+    };
+  }
+
+  const fixtureId =
+    Number(
+      matched?.fixtureId ??
+      matched?.selectedFixture?.id ??
+      matched?.selectedFixture?.fixtureId ??
+      matched?.fixture?.id ??
+      matched?.detail?.id
+    );
+
+  const matchSeqs =
+    Array.isArray(
+      (game as any)?.markets
+    )
+      ? (game as any).markets
+          .map(
+            (market: any) =>
+              Number(
+                market?.matchSeq
+              )
+          )
+          .filter(
+            (value: number) =>
+              Number.isFinite(value)
+          )
+      : [];
+
+  const homeName =
+    normalizeTeamName(
+      (game as any)?.home
+    );
+
+  const awayName =
+    normalizeTeamName(
+      (game as any)?.away
+    );
+
+  const gameTime =
+    Number(
+      gameTimeMs(
+        game
+      )
+    );
+
+  /*
+   * 현재 등록된 수동 검증 truth의 fallback.
+   * 특정 문자열 key 하나에만 의존하지 않고
+   * fixture / Betman seq / 팀 / 시간으로도 확인합니다.
+   */
+  const isNcSamsung =
+    (
+      (
+        Number.isFinite(fixtureId) &&
+        fixtureId === 203006
+      ) ||
+      matchSeqs.includes(
+        5567
+      )
+    ) &&
+    (
+      (
+        homeName.includes("nc") ||
+        homeName.includes("ncdinos")
+      ) &&
+      (
+        awayName.includes("삼성") ||
+        awayName.includes("samsung")
+      )
+    ) &&
+    (
+      !Number.isFinite(gameTime) ||
+      Math.abs(
+        gameTime -
+        new Date(
+          "2026-08-22T19:00:00+09:00"
+        ).getTime()
+      ) <=
+        6 * 60 * 60 * 1000
+    );
+
+  if (
+    isNcSamsung
+  ) {
+    return {
+      truth:
+        BACKTEST_VALIDATION_RESULTS[
+          "backtest-20260822-1900-nc-samsung"
+        ],
+      matchedBy:
+        Number.isFinite(fixtureId) &&
+        fixtureId === 203006
+          ? "fixtureId:203006"
+          : "Betman matchSeq:5567",
+    };
+  }
+
+  return {
+    truth: null,
+    matchedBy:
+      "등록된 검증 결과 없음",
+  };
+}
+
 type BacktestMarketValidation = {
   key: string;
   market: string;
@@ -7876,16 +8011,21 @@ export default function Home() {
       actualMarketPicks
     );
 
+  const backtestValidationResolved =
+    backtestMode
+      ? resolveBacktestValidationResult(
+          selectedBetman,
+          matched
+        )
+      : {
+          truth:
+            null as BacktestValidationResult | null,
+          matchedBy:
+            "백테스트 OFF",
+        };
+
   const backtestValidationTruth =
-    backtestMode &&
-    selectedBetman
-      ? BACKTEST_VALIDATION_RESULTS[
-          backtestValidationKey(
-            selectedBetman
-          )
-        ] ??
-        null
-      : null;
+    backtestValidationResolved.truth;
 
   const selectedValidationMarkets =
     selectedBetman
@@ -9102,6 +9242,26 @@ export default function Home() {
               </div>
             </div>
 
+            {currentSport === "야구" &&
+              backtestMode &&
+              backtestValidationTruth &&
+              !backtestResultRevealed && (
+              <div
+                className="notice"
+                style={{
+                  margin: "0 0 10px",
+                  border:
+                    "1px solid #8fb6ff",
+                  background:
+                    "#f4f8ff",
+                }}
+              >
+                <b>백테스트 검증 준비 완료</b>
+                {" · "}아래 `V11.7.2 백테스트 결과 검증기`에서
+                `예측 확정 · 실제 결과 검증 열기` 버튼을 누르면 결과를 공개할 수 있습니다.
+              </div>
+            )}
+
             <div className="analysisTitleRow">
               <h3>게임유형별 분석 요약</h3>
               <div className="legend">
@@ -9167,7 +9327,7 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V11.7.1 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
+              <summary>V11.7.2 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
                   <h3>V11.7 계산 추적 · 데이터 가용성 + λ 교정</h3>
@@ -9188,7 +9348,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.7.1 의사결정 규칙</b><br />
+                    <b>V11.7.2 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -9199,7 +9359,7 @@ export default function Home() {
 
                   {currentSport === "야구" && backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.7 백테스트 안전장치 · PRE 불확실성 + 결과 분리 검증</h3>
+                      <h3>V11.7.2 백테스트 안전장치 · PRE 불확실성 + 결과 분리 검증</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -9450,12 +9610,54 @@ export default function Home() {
                   )}
 
                   {currentSport === "야구" &&
-                    backtestMode &&
-                    backtestValidationTruth && (
-                    <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.7.1 백테스트 결과 검증기</h3>
+                    backtestMode && (
+                    <div
+                      className="section"
+                      style={{
+                        marginTop: 0,
+                        border:
+                          "2px solid #8fb6ff",
+                        boxShadow:
+                          "0 2px 12px rgba(40,95,190,0.08)",
+                      }}
+                    >
+                      <h3>V11.7.2 백테스트 결과 검증기</h3>
 
-                      {!backtestResultRevealed ? (
+                      <div
+                        className="cards"
+                        style={{ marginBottom: 8 }}
+                      >
+                        <div className="card">
+                          결과 연결 상태
+                          <b>
+                            {backtestValidationTruth
+                              ? "연결 완료"
+                              : "미연결"}
+                          </b>
+                          <div className="small">
+                            {backtestValidationResolved.matchedBy}
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          예측 잠금
+                          <b>
+                            {actualMarketPicks.length
+                              ? "완료"
+                              : "대기"}
+                          </b>
+                          <div className="small">
+                            MarketPick {actualMarketPicks.length}/8
+                          </div>
+                        </div>
+                      </div>
+
+                      {!backtestValidationTruth ? (
+                        <div className="notice" style={{ margin: 0 }}>
+                          이 경기의 실제 결과 검증 데이터가 아직 등록되지 않았습니다.
+                          예측은 정상적으로 사용할 수 있으며, 결과 데이터가 등록되기 전에는 검증 버튼을 표시하지 않습니다.
+                        </div>
+                      ) : !backtestResultRevealed ? (
                         <>
                           <div className="notice" style={{ margin: "0 0 8px" }}>
                             예측 계산은 완료되었습니다. 실제 결과는 지금까지 분석 입력에 사용되지 않았습니다.
@@ -9463,15 +9665,35 @@ export default function Home() {
                           </div>
 
                           <button
-                            className="btn light"
+                            className="btn primary"
+                            style={{
+                              width: "100%",
+                              minHeight: 44,
+                              fontSize: 13,
+                              fontWeight: 900,
+                              marginTop: 4,
+                            }}
                             onClick={() =>
                               setBacktestResultRevealed(
                                 true
                               )
                             }
+                            disabled={
+                              !actualMarketPicks.length
+                            }
                           >
                             🔒 예측 확정 · 실제 결과 검증 열기
                           </button>
+
+                          <div
+                            className="small"
+                            style={{
+                              marginTop: 6,
+                              textAlign: "center",
+                            }}
+                          >
+                            실제 결과는 이 버튼을 누른 뒤 검증 레이어에서만 공개됩니다.
+                          </div>
                         </>
                       ) : (
                         <>
