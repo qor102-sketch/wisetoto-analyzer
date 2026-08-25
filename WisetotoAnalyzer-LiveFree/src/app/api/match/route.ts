@@ -662,19 +662,20 @@ async function discoverTeams(
 }
 
 /**
- * 팀별 upcoming fixture는
- * page=0 딱 한 번만 조회합니다.
+ * 팀별 fixture는 page=0 딱 한 번만 조회합니다.
+ * SportsAPI 공식 규격: type=recent | upcoming.
  */
-async function getUpcoming(
+async function getTeamFixtures(
   teamId: number,
-  key: string
+  key: string,
+  type: "recent" | "upcoming" = "upcoming"
 ) {
   const debug: AnyObj[] = [];
 
   try {
     const result =
       await api(
-        `/teams/${teamId}/fixtures?type=upcoming&page=0`,
+        `/teams/${teamId}/fixtures?type=${type}&page=0`,
         key
       );
 
@@ -729,6 +730,13 @@ async function getUpcoming(
       debug,
     };
   }
+}
+
+async function getUpcoming(
+  teamId: number,
+  key: string
+) {
+  return getTeamFixtures(teamId, key, "upcoming");
 }
 
 function uniqueFixtures(
@@ -1355,8 +1363,18 @@ async function findSportsFixtureForBetman(
     if (!Number.isFinite(teamId) || checkedTeamIds.has(teamId)) continue;
     checkedTeamIds.add(teamId);
 
-    const upcoming = await getUpcoming(teamId, key);
-    const fixtures = upcoming.fixtures.filter(isFutureNotStartedFixture);
+    // selected 모드는 Betman 경기시각을 기준으로 과거/미래 fixture 소스를 분리한다.
+    // 과거 백테스트에서는 결과/점수/winner를 매칭 점수에 사용하지 않는다.
+    const isPastSelectedGame =
+      Number.isFinite(betmanTime) && betmanTime < Date.now();
+    const fixtureType: "recent" | "upcoming" =
+      isPastSelectedGame ? "recent" : "upcoming";
+
+    const teamFixtures = await getTeamFixtures(teamId, key, fixtureType);
+    const fixtures =
+      fixtureType === "upcoming"
+        ? teamFixtures.fixtures.filter(isFutureNotStartedFixture)
+        : teamFixtures.fixtures;
 
     let bestFixture: AnyObj | null = null;
     let bestScore = 0;
@@ -1379,7 +1397,8 @@ async function findSportsFixtureForBetman(
     }
 
     debug.push({
-      stage: "upcoming",
+      stage: fixtureType,
+      fixtureType,
       side: plan.side,
       teamId,
       teamName: chosen.team?.name ?? null,
@@ -1390,7 +1409,7 @@ async function findSportsFixtureForBetman(
           ? Number(bestTimeDiffMinutes.toFixed(1))
           : null,
       bestFixture: bestFixture ? summarizeFixture(bestFixture) : null,
-      apiDebug: upcoming.debug,
+      apiDebug: teamFixtures.debug,
     });
 
     // 양 팀 이름 + 종목 + 시작시간을 함께 만족해야 확정한다.
