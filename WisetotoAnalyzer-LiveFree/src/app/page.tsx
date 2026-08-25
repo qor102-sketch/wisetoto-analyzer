@@ -132,6 +132,15 @@ type AnalysisFactors = {
 
   preMarketHomeScore: number | null;
   preMarketAwayScore: number | null;
+  postShrinkHomeScore: number | null;
+  postShrinkAwayScore: number | null;
+  postStarterHomeScore: number | null;
+  postStarterAwayScore: number | null;
+  postLineupHomeScore: number | null;
+  postLineupAwayScore: number | null;
+  marketAdjustmentHome: number;
+  marketAdjustmentAway: number;
+  lambdaTraceOk: boolean;
   marketMarginPrior: number | null;
   marketPriorWeight: number;
   venueCoverage: number;
@@ -3730,6 +3739,16 @@ function buildAnalysis(
     | number
     | null = null;
 
+  let postShrinkHomeScore: number | null = null;
+  let postShrinkAwayScore: number | null = null;
+  let postStarterHomeScore: number | null = null;
+  let postStarterAwayScore: number | null = null;
+  let postLineupHomeScore: number | null = null;
+  let postLineupAwayScore: number | null = null;
+  let marketAdjustmentHome = 0;
+  let marketAdjustmentAway = 0;
+  let lambdaTraceOk = true;
+
   let marketMarginPrior:
     | number
     | null = null;
@@ -4027,6 +4046,9 @@ function buildAnalysis(
     if (sport === "농구") expectedHomeScore += 1.0;
     if (sport === "배구") expectedHomeScore += 0.03;
 
+    postShrinkHomeScore = expectedHomeScore;
+    postShrinkAwayScore = expectedAwayScore;
+
     if (sport === "야구") {
       const baseHome = expectedHomeScore;
       const baseAway = expectedAwayScore;
@@ -4049,6 +4071,9 @@ function buildAnalysis(
       pitcherAdjustmentHome = homePitcherAdjusted.adjustment;
       pitcherAdjustmentAway = awayPitcherAdjusted.adjustment;
 
+      postStarterHomeScore = expectedHomeScore;
+      postStarterAwayScore = expectedAwayScore;
+
       const homeLineupAdjusted =
         applyLineupAdjustment(
           expectedHomeScore,
@@ -4068,6 +4093,13 @@ function buildAnalysis(
 
       lineupAdjustmentHome = homeLineupAdjusted.adjustment;
       lineupAdjustmentAway = awayLineupAdjusted.adjustment;
+
+      postLineupHomeScore = expectedHomeScore;
+      postLineupAwayScore = expectedAwayScore;
+
+      // V13.0: 모든 야구 단계에서 시장 prior 직전 λ를 보존.
+      preMarketHomeScore = expectedHomeScore;
+      preMarketAwayScore = expectedAwayScore;
 
       const firstHomePitcher = applyPitcherAdjustment(
         Math.max(0.10, baseHome * (5 / 9)),
@@ -4229,6 +4261,35 @@ function buildAnalysis(
         expectedHomeScore * (5 / 9);
       baseballFirstHalfAwayScore =
         expectedAwayScore * (5 / 9);
+    }
+
+    marketAdjustmentHome =
+      preMarketHomeScore === null ? 0 : expectedHomeScore - preMarketHomeScore;
+    marketAdjustmentAway =
+      preMarketAwayScore === null ? 0 : expectedAwayScore - preMarketAwayScore;
+
+    const traceEps = 0.005;
+    const tracedHome =
+      preMarketHomeScore === null ? expectedHomeScore : preMarketHomeScore + marketAdjustmentHome;
+    const tracedAway =
+      preMarketAwayScore === null ? expectedAwayScore : preMarketAwayScore + marketAdjustmentAway;
+
+    lambdaTraceOk =
+      Number.isFinite(expectedHomeScore) &&
+      Number.isFinite(expectedAwayScore) &&
+      Math.abs(tracedHome - expectedHomeScore) < traceEps &&
+      Math.abs(tracedAway - expectedAwayScore) < traceEps;
+
+    if (!lambdaTraceOk) {
+      console.error("[V13.0] lambda trace mismatch", {
+        rawExpectedHomeScore, rawExpectedAwayScore,
+        postShrinkHomeScore, postShrinkAwayScore,
+        postStarterHomeScore, postStarterAwayScore,
+        postLineupHomeScore, postLineupAwayScore,
+        preMarketHomeScore, preMarketAwayScore,
+        marketAdjustmentHome, marketAdjustmentAway,
+        expectedHomeScore, expectedAwayScore,
+      });
     }
 
     expectedTotal =
@@ -4892,6 +4953,16 @@ function buildAnalysis(
                 3
               )
             ),
+
+      postShrinkHomeScore: postShrinkHomeScore === null ? null : Number(postShrinkHomeScore.toFixed(3)),
+      postShrinkAwayScore: postShrinkAwayScore === null ? null : Number(postShrinkAwayScore.toFixed(3)),
+      postStarterHomeScore: postStarterHomeScore === null ? null : Number(postStarterHomeScore.toFixed(3)),
+      postStarterAwayScore: postStarterAwayScore === null ? null : Number(postStarterAwayScore.toFixed(3)),
+      postLineupHomeScore: postLineupHomeScore === null ? null : Number(postLineupHomeScore.toFixed(3)),
+      postLineupAwayScore: postLineupAwayScore === null ? null : Number(postLineupAwayScore.toFixed(3)),
+      marketAdjustmentHome: Number(marketAdjustmentHome.toFixed(3)),
+      marketAdjustmentAway: Number(marketAdjustmentAway.toFixed(3)),
+      lambdaTraceOk,
 
       marketMarginPrior,
       marketPriorWeight,
@@ -11016,7 +11087,7 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V12.9 선발 Bayesian Shrinkage · 타격 Stats Resolver · Coverage Gate</h3>
+                      <h3>V13.0 λ 계산 추적 정합성 · Bayesian Starter · Coverage Gate</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -12330,12 +12401,32 @@ export default function Home() {
 
                     <div className="cards" style={{ marginTop: 7 }}>
                       <div className="card">
-                        독립모델 λ
+                        중립수축 후 λ
+                        <b>{analysisFactors.postShrinkHomeScore?.toFixed(2) ?? "-"} : {analysisFactors.postShrinkAwayScore?.toFixed(2) ?? "-"}</b>
+                        <div className="small">표본강도 {analysisFactors.scoreShrinkage === null ? "-" : `${Math.round(analysisFactors.scoreShrinkage * 100)}%`}</div>
+                      </div>
+                      <div className="card">
+                        선발 보정 후 λ
+                        <b>{analysisFactors.postStarterHomeScore?.toFixed(2) ?? "-"} : {analysisFactors.postStarterAwayScore?.toFixed(2) ?? "-"}</b>
+                        <div className="small">Δ {analysisFactors.pitcherAdjustmentHome >= 0 ? "+" : ""}{analysisFactors.pitcherAdjustmentHome.toFixed(2)} / {analysisFactors.pitcherAdjustmentAway >= 0 ? "+" : ""}{analysisFactors.pitcherAdjustmentAway.toFixed(2)}</div>
+                      </div>
+                      <div className="card">
+                        타선 보정 후 λ
+                        <b>{analysisFactors.postLineupHomeScore?.toFixed(2) ?? "-"} : {analysisFactors.postLineupAwayScore?.toFixed(2) ?? "-"}</b>
+                        <div className="small">Δ {analysisFactors.lineupAdjustmentHome >= 0 ? "+" : ""}{analysisFactors.lineupAdjustmentHome.toFixed(2)} / {analysisFactors.lineupAdjustmentAway >= 0 ? "+" : ""}{analysisFactors.lineupAdjustmentAway.toFixed(2)}</div>
+                      </div>
+                      <div className="card">
+                        시장 prior 직전 λ
                         <b>{analysisFactors.preMarketHomeScore?.toFixed(2) ?? "-"} : {analysisFactors.preMarketAwayScore?.toFixed(2) ?? "-"}</b>
+                      </div>
+                      <div className="card">
+                        시장 prior 변화
+                        <b>{analysisFactors.scoreGuardApplied ? `${analysisFactors.marketAdjustmentHome >= 0 ? "+" : ""}${analysisFactors.marketAdjustmentHome.toFixed(2)} / ${analysisFactors.marketAdjustmentAway >= 0 ? "+" : ""}${analysisFactors.marketAdjustmentAway.toFixed(2)}` : "미적용 · λ 변화 0.00"}</b>
                       </div>
                       <div className="card">
                         최종 예상득점
                         <b>{analysisFactors.expectedHomeScore?.toFixed(2) ?? "-"} : {analysisFactors.expectedAwayScore?.toFixed(2) ?? "-"}</b>
+                        <div className="small">TRACE {analysisFactors.lambdaTraceOk ? "OK" : "MISMATCH"}</div>
                       </div>
                       <div className="card">
                         중립 사전값
