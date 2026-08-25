@@ -158,6 +158,153 @@ type AnalysisFactors = {
   baseballDataCompleteness: number;
 };
 
+
+const BACKTEST_BETMAN_GAMES: BetmanMatch[] = [
+  {
+    key: "backtest|2026-08-22|19:00|KBO|NC|Samsung",
+    gameKey: "backtest-20260822-1900-nc-samsung",
+    gameDate: "2026-08-22T19:00:00+09:00",
+    gameDateMs: new Date("2026-08-22T19:00:00+09:00").getTime(),
+    gameDateStr: "08.22(토) 19:00",
+    sport: "야구",
+    sportName: "KBO",
+    league: "KBO",
+    home: "NC",
+    away: "삼성",
+    stadium: null,
+    markets: [
+      {
+        matchSeq: 5567,
+        type: "moneyline",
+        betName: "승패",
+        betTypeName: "승패",
+        displayName: "승패",
+        line: 0,
+        selections: [
+          { side: "win", label: "승", odds: 2.07 },
+          { side: "lose", label: "패", odds: 1.53 },
+        ],
+      },
+      {
+        matchSeq: 5568,
+        type: "other",
+        betName: "승1패",
+        betTypeName: "승1패",
+        displayName: "승1패",
+        line: 0,
+        selections: [
+          { side: "win", label: "승", odds: 3.00 },
+          { side: "draw", label: "1", odds: 3.50 },
+          { side: "lose", label: "패", odds: 1.89 },
+        ],
+      },
+      {
+        matchSeq: 5569,
+        type: "handicap",
+        betName: "H +2.5",
+        betTypeName: "핸디캡",
+        displayName: "H +2.5",
+        line: 2.5,
+        homeBased: true,
+        selections: [
+          { side: "win", label: "승", odds: 1.40, line: 2.5 },
+          { side: "lose", label: "패", odds: 2.37, line: -2.5 },
+        ],
+      },
+      {
+        matchSeq: 5570,
+        type: "total",
+        betName: "U/O 10.5",
+        betTypeName: "U/O",
+        displayName: "U/O 10.5",
+        line: 10.5,
+        selections: [
+          { side: "under", label: "UNDER", odds: 2.04 },
+          { side: "over", label: "OVER", odds: 1.55 },
+        ],
+      },
+      {
+        matchSeq: 5571,
+        type: "other",
+        betName: "SUM",
+        betTypeName: "SUM",
+        displayName: "SUM",
+        line: 0,
+        selections: [
+          { side: "odd", label: "홀", odds: 1.61 },
+          { side: "even", label: "짝", odds: 2.04 },
+        ],
+      },
+      {
+        matchSeq: 5572,
+        type: "moneyline",
+        betName: "전반 승무패",
+        betTypeName: "전반 승무패",
+        displayName: "전반 승무패",
+        line: 0,
+        selections: [
+          { side: "win", label: "승", odds: 2.30 },
+          { side: "draw", label: "무", odds: 6.80 },
+          { side: "lose", label: "패", odds: 1.76 },
+        ],
+      },
+      {
+        matchSeq: 5573,
+        type: "handicap",
+        betName: "전반 H +1.5",
+        betTypeName: "전반 핸디캡",
+        displayName: "전반 H +1.5",
+        line: 1.5,
+        homeBased: true,
+        selections: [
+          { side: "win", label: "승", odds: 1.42, line: 1.5 },
+          { side: "lose", label: "패", odds: 2.31, line: -1.5 },
+        ],
+      },
+      {
+        matchSeq: 5574,
+        type: "total",
+        betName: "전반 U/O 6.5",
+        betTypeName: "전반 U/O",
+        displayName: "전반 U/O 6.5",
+        line: 6.5,
+        selections: [
+          { side: "under", label: "UNDER", odds: 1.64 },
+          { side: "over", label: "OVER", odds: 1.90 },
+        ],
+      },
+    ],
+    backtestManual: true,
+    backtestSource: "사용자 제공 경기전 Betman 배당 · 실제 결과 미포함",
+  },
+].map((game: any) => {
+  const markets = Array.isArray(game.markets) ? game.markets : [];
+  return {
+    ...game,
+    moneyline: markets.filter(
+      (market: any) =>
+        market.type === "moneyline" &&
+        !/전반/.test(String(market.betName ?? ""))
+    ),
+    handicaps: markets.filter(
+      (market: any) =>
+        market.type === "handicap" &&
+        !/전반/.test(String(market.betName ?? ""))
+    ),
+    totals: markets.filter(
+      (market: any) =>
+        market.type === "total" &&
+        !/전반/.test(String(market.betName ?? ""))
+    ),
+    otherMarkets: markets.filter(
+      (market: any) =>
+        market.type === "other" ||
+        /전반/.test(String(market.betName ?? ""))
+    ),
+  };
+});
+
+
 const I = {
   축구: "⚽",
   야구: "⚾",
@@ -5531,19 +5678,33 @@ export default function Home() {
 
   useEffect(() => { loadBetmanList(); }, []);
 
-  const filteredGames = useMemo(() => betmanGames.filter((game) =>
-    sport === "전체" || koreanSport(String((game as any)?.sport ?? "")) === sport
-  ), [betmanGames, sport]);
+  const visibleBetmanGames = useMemo(
+    () =>
+      backtestMode
+        ? BACKTEST_BETMAN_GAMES
+        : betmanGames,
+    [backtestMode, betmanGames]
+  );
+
+  const filteredGames = useMemo(
+    () =>
+      visibleBetmanGames.filter(
+        (game) =>
+          sport === "전체" ||
+          koreanSport(String((game as any)?.sport ?? "")) === sport
+      ),
+    [visibleBetmanGames, sport]
+  );
 
   const uiMarketRowCount = useMemo(
     () =>
-      betmanGames.reduce(
+      visibleBetmanGames.reduce(
         (sum, game) =>
           sum +
           marketRows(game).length,
         0
       ),
-    [betmanGames]
+    [visibleBetmanGames]
   );
 
   const uiSportCounts = useMemo(() => {
@@ -5554,7 +5715,7 @@ export default function Home() {
       배구: { games: 0, markets: 0 },
     };
 
-    for (const game of betmanGames) {
+    for (const game of visibleBetmanGames) {
       const key = koreanSport(
         String((game as any)?.sport ?? "")
       );
@@ -5564,12 +5725,16 @@ export default function Home() {
     }
 
     return counts;
-  }, [betmanGames]);
+  }, [visibleBetmanGames]);
 
   const selectedBetman = useMemo(() => {
     if (!selectedBetmanKey) return null;
-    return betmanGames.find((game,index) => gameKey(game,index) === selectedBetmanKey) ?? null;
-  }, [betmanGames, selectedBetmanKey]);
+    return (
+      visibleBetmanGames.find(
+        (game,index) => gameKey(game,index) === selectedBetmanKey
+      ) ?? null
+    );
+  }, [visibleBetmanGames, selectedBetmanKey]);
 
   const selectedFixture = matched?.selectedFixture ?? null;
   const detail = matched?.detail ?? null;
@@ -6102,7 +6267,17 @@ export default function Home() {
 
           <button
             className={`btn ${backtestMode ? "primary" : "light"}`}
-            onClick={() => setBacktestMode((value) => !value)}
+            onClick={() => {
+              setBacktestMode((value) => !value);
+              setSelectedBetmanKey(null);
+              setMatched(null);
+              setBetman({
+                loading: false,
+                matched: null,
+                score: null,
+                error: null,
+              });
+            }}
             disabled={loading}
             title="과거 경기 분석 시 경기 시작 이전 데이터만 사용합니다."
           >
@@ -6160,7 +6335,7 @@ export default function Home() {
                   margin: 0,
                 }}
               >
-                실전 발매 경기
+                {backtestMode ? "백테스트 과거경기" : "실전 발매 경기"}
               </h3>
 
               <div
@@ -6169,7 +6344,9 @@ export default function Home() {
                   marginTop: 5,
                 }}
               >
-                경기번호 · 시간 · 리그 · 게임유형 · Betman 실제 배당 · 전체 목록 스크롤
+                {backtestMode
+                  ? "경기 전 Betman 배당만 저장 · 실제 경기결과는 데이터에 포함하지 않음"
+                  : "경기번호 · 시간 · 리그 · 게임유형 · Betman 실제 배당 · 전체 목록 스크롤"}
               </div>
 
               <div
@@ -6198,7 +6375,7 @@ export default function Home() {
             </span>
           </div>
 
-          {betmanDiagnostics && (
+          {!backtestMode && betmanDiagnostics && (
             <div
               style={{
                 margin:
@@ -6240,7 +6417,19 @@ export default function Home() {
                 margin: 14,
               }}
             >
-              현재 Betman API가 반환한 데이터 중 이 종목의 미시작 배당 경기가 없습니다.
+              {backtestMode
+                ? "현재 저장된 백테스트 과거경기 중 이 종목의 경기가 없습니다."
+                : "현재 Betman API가 반환한 데이터 중 이 종목의 미시작 배당 경기가 없습니다."}
+            </div>
+          )}
+
+          {backtestMode && (
+            <div className="notice" style={{ margin: "0 14px 10px" }}>
+              <b>백테스트 데이터 소스</b>
+              {" · "}현재 샘플 1경기:
+              2026.08.22 19:00 KBO NC vs 삼성
+              {" · "}경기번호 5567~5574
+              {" · "}사용자 제공 경기 전 배당만 저장되어 있으며 최종점수/승패결과는 포함하지 않았습니다.
             </div>
           )}
 
@@ -6792,7 +6981,7 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V11.3 계산 추적 · 백테스트 LOCK · 스냅샷 · 선발 λ · EV</summary>
+              <summary>V11.3.1 계산 추적 · 과거경기 소스 · 백테스트 LOCK · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
                   <h3>V11.1 계산 추적 · 데이터 가용성 + λ 교정</h3>
@@ -6813,7 +7002,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.3 의사결정 규칙</b><br />
+                    <b>V11.3.1 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
