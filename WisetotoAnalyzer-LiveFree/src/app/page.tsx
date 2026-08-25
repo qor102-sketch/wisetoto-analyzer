@@ -134,6 +134,18 @@ type AnalysisFactors = {
   marketMarginPrior: number | null;
   marketPriorWeight: number;
   venueCoverage: number;
+
+  homeStarterName: string | null;
+  awayStarterName: string | null;
+  homeStarterEra: number | null;
+  awayStarterEra: number | null;
+  homeStarterWhip: number | null;
+  awayStarterWhip: number | null;
+  pitcherDataUsed: boolean;
+  pitcherAdjustmentHome: number;
+  pitcherAdjustmentAway: number;
+  baseballFirstHalfHomeScore: number | null;
+  baseballFirstHalfAwayScore: number | null;
 };
 
 const I = {
@@ -1152,6 +1164,288 @@ function robustRecentMetric(input: {
 }
 
 
+type StarterInfo = {
+  name: string | null;
+  era: number | null;
+  whip: number | null;
+};
+
+function normalizeStatKey(value: unknown) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]/g, "");
+}
+
+function finiteStat(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function findNumericStatDeep(
+  value: any,
+  keys: string[],
+  depth = 0
+): number | null {
+  if (value === null || value === undefined || depth > 6) return null;
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findNumericStatDeep(item, keys, depth + 1);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+
+  if (typeof value !== "object") return null;
+
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    const key = normalizeStatKey(rawKey);
+    if (
+      keys.some(
+        (candidate) =>
+          key === candidate ||
+          key.includes(candidate)
+      )
+    ) {
+      const number = finiteStat(rawValue);
+      if (number !== null) return number;
+    }
+  }
+
+  for (const rawValue of Object.values(value)) {
+    const found = findNumericStatDeep(rawValue, keys, depth + 1);
+    if (found !== null) return found;
+  }
+
+  return null;
+}
+
+function objectName(value: any) {
+  const candidates = [
+    value?.name,
+    value?.player?.name,
+    value?.athlete?.name,
+    value?.person?.name,
+    value?.pitcher?.name,
+    value?.starter?.name,
+  ];
+
+  for (const candidate of candidates) {
+    const name = String(candidate ?? "").trim();
+    if (name) return name;
+  }
+
+  return null;
+}
+
+function looksLikeStartingPitcher(value: any) {
+  if (!value || typeof value !== "object") return false;
+
+  const text = [
+    value?.position,
+    value?.role,
+    value?.type,
+    value?.status,
+    value?.player?.position,
+    value?.player?.role,
+    value?.pitcher?.role,
+    value?.starter,
+    value?.starting,
+    value?.probable,
+  ]
+    .map((item) => String(item ?? "").toLowerCase())
+    .join(" ");
+
+  const explicitStarter = /starter|starting|probable|선발/.test(text);
+  const pitcher = /pitcher|투수|(^|\s)p(\s|$)|sp/.test(text);
+
+  return explicitStarter || (pitcher && !/relief|bullpen|불펜|rp/.test(text));
+}
+
+function collectObjectsDeep(
+  value: any,
+  out: any[] = [],
+  depth = 0
+) {
+  if (value === null || value === undefined || depth > 7) return out;
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectObjectsDeep(item, out, depth + 1);
+    }
+    return out;
+  }
+
+  if (typeof value !== "object") return out;
+
+  out.push(value);
+
+  for (const child of Object.values(value)) {
+    collectObjectsDeep(child, out, depth + 1);
+  }
+
+  return out;
+}
+
+function starterFromLineups(
+  lineups: any,
+  side: "home" | "away",
+  teamName: string
+): StarterInfo {
+  const objects = collectObjectsDeep(lineups);
+  const normalizedTeam = normalizeTeamName(teamName);
+
+  const ranked = objects
+    .map((value) => {
+      const name = objectName(value);
+      if (!name) return { value, score: -999 };
+
+      const teamText = normalizeTeamName(
+        String(
+          value?.team?.name ??
+          value?.teamName ??
+          value?.club?.name ??
+          ""
+        )
+      );
+
+      const sideText = String(
+        value?.side ??
+        value?.homeAway ??
+        value?.location ??
+        ""
+      ).toLowerCase();
+
+      let score = 0;
+
+      if (
+        teamText &&
+        normalizedTeam &&
+        (
+          teamText.includes(normalizedTeam) ||
+          normalizedTeam.includes(teamText)
+        )
+      ) {
+        score += 6;
+      }
+
+      if (
+        sideText === side ||
+        (side === "home" && /home|홈/.test(sideText)) ||
+        (side === "away" && /away|원정/.test(sideText))
+      ) {
+        score += 4;
+      }
+
+      if (looksLikeStartingPitcher(value)) score += 8;
+
+      const era = findNumericStatDeep(
+        value,
+        ["era", "earnedrunaverage", "평균자책", "평균자책점"]
+      );
+
+      const whip = findNumericStatDeep(
+        value,
+        ["whip", "walkshitsperinningpitched"]
+      );
+
+      if (era !== null) score += 2;
+      if (whip !== null) score += 2;
+
+      return { value, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const best = ranked[0];
+
+  if (!best || best.score < 8) {
+    return { name: null, era: null, whip: null };
+  }
+
+  const era = findNumericStatDeep(
+    best.value,
+    ["era", "earnedrunaverage", "평균자책", "평균자책점"]
+  );
+
+  const whip = findNumericStatDeep(
+    best.value,
+    ["whip", "walkshitsperinningpitched"]
+  );
+
+  return {
+    name: objectName(best.value),
+    era: era !== null ? clamp(era, 0.5, 12) : null,
+    whip: whip !== null ? clamp(whip, 0.5, 3) : null,
+  };
+}
+
+function pitcherRunFactor(starter: StarterInfo) {
+  const eraFactor =
+    starter.era === null
+      ? null
+      : clamp(starter.era / 4.50, 0.70, 1.35);
+
+  const whipFactor =
+    starter.whip === null
+      ? null
+      : clamp(starter.whip / 1.35, 0.75, 1.30);
+
+  if (eraFactor === null && whipFactor === null) {
+    return { factor: 1, weight: 0 };
+  }
+
+  const factor =
+    eraFactor !== null && whipFactor !== null
+      ? eraFactor * 0.70 + whipFactor * 0.30
+      : eraFactor ?? whipFactor ?? 1;
+
+  return {
+    factor,
+    weight:
+      eraFactor !== null && whipFactor !== null
+        ? 0.36
+        : 0.24,
+  };
+}
+
+function applyPitcherAdjustment(
+  baseRuns: number,
+  opponentStarter: StarterInfo,
+  strengthMultiplier = 1
+) {
+  const quality = pitcherRunFactor(opponentStarter);
+
+  if (quality.weight <= 0) {
+    return {
+      runs: baseRuns,
+      adjustment: 0,
+      used: false,
+    };
+  }
+
+  const weight = clamp(
+    quality.weight * strengthMultiplier,
+    0,
+    0.52
+  );
+
+  const multiplier =
+    1 + (quality.factor - 1) * weight;
+
+  const runs = clamp(
+    baseRuns * multiplier,
+    Math.max(0.20, baseRuns * 0.78),
+    baseRuns * 1.22
+  );
+
+  return {
+    runs,
+    adjustment: Number((runs - baseRuns).toFixed(3)),
+    used: true,
+  };
+}
+
+
 function buildAnalysis(
   sport: Exclude<
     Sport,
@@ -1162,7 +1456,8 @@ function buildAnalysis(
     | RecentSummary
     | null
     | undefined,
-  betmanMatch: BetmanMatch | null | undefined
+  betmanMatch: BetmanMatch | null | undefined,
+  sportsDetail?: any
 ) {
   const homeFormData =
     recentSummary
@@ -1421,6 +1716,45 @@ function buildAnalysis(
   let venueCoverage =
     0;
 
+  const homeStarter =
+    sport === "야구"
+      ? starterFromLineups(
+          sportsDetail?.lineups,
+          "home",
+          String(
+            sportsDetail?.selectedFixture?.home ??
+            sportsDetail?.fixture?.home?.name ??
+            betmanMatch?.home ??
+            ""
+          )
+        )
+      : { name: null, era: null, whip: null };
+
+  const awayStarter =
+    sport === "야구"
+      ? starterFromLineups(
+          sportsDetail?.lineups,
+          "away",
+          String(
+            sportsDetail?.selectedFixture?.away ??
+            sportsDetail?.fixture?.away?.name ??
+            betmanMatch?.away ??
+            ""
+          )
+        )
+      : { name: null, era: null, whip: null };
+
+  let pitcherAdjustmentHome = 0;
+  let pitcherAdjustmentAway = 0;
+
+  let baseballFirstHalfHomeScore:
+    | number
+    | null = null;
+
+  let baseballFirstHalfAwayScore:
+    | number
+    | null = null;
+
   let rawExpectedHomeScore:
     | number
     | null = null;
@@ -1511,6 +1845,44 @@ function buildAnalysis(
     if (sport === "농구") expectedHomeScore += 1.0;
     if (sport === "배구") expectedHomeScore += 0.03;
 
+    if (sport === "야구") {
+      const baseHome = expectedHomeScore;
+      const baseAway = expectedAwayScore;
+
+      const homePitcherAdjusted = applyPitcherAdjustment(
+        baseHome,
+        awayStarter,
+        1
+      );
+
+      const awayPitcherAdjusted = applyPitcherAdjustment(
+        baseAway,
+        homeStarter,
+        1
+      );
+
+      expectedHomeScore = homePitcherAdjusted.runs;
+      expectedAwayScore = awayPitcherAdjusted.runs;
+
+      pitcherAdjustmentHome = homePitcherAdjusted.adjustment;
+      pitcherAdjustmentAway = awayPitcherAdjusted.adjustment;
+
+      const firstHome = applyPitcherAdjustment(
+        Math.max(0.10, baseHome * (5 / 9)),
+        awayStarter,
+        1.35
+      );
+
+      const firstAway = applyPitcherAdjustment(
+        Math.max(0.10, baseAway * (5 / 9)),
+        homeStarter,
+        1.35
+      );
+
+      baseballFirstHalfHomeScore = firstHome.runs;
+      baseballFirstHalfAwayScore = firstAway.runs;
+    }
+
     if (sport === "축구") {
       venueCoverage =
         clamp(
@@ -1565,6 +1937,19 @@ function buildAnalysis(
 
       marketMarginPrior =
         blended.marketMarginPrior;
+    }
+
+    if (
+      sport === "야구" &&
+      (
+        baseballFirstHalfHomeScore === null ||
+        baseballFirstHalfAwayScore === null
+      )
+    ) {
+      baseballFirstHalfHomeScore =
+        expectedHomeScore * (5 / 9);
+      baseballFirstHalfAwayScore =
+        expectedAwayScore * (5 / 9);
     }
 
     expectedTotal =
@@ -2237,6 +2622,30 @@ function buildAnalysis(
             2
           )
         ),
+
+      homeStarterName: homeStarter.name,
+      awayStarterName: awayStarter.name,
+      homeStarterEra: homeStarter.era,
+      awayStarterEra: awayStarter.era,
+      homeStarterWhip: homeStarter.whip,
+      awayStarterWhip: awayStarter.whip,
+      pitcherDataUsed:
+        Boolean(
+          homeStarter.era !== null ||
+          homeStarter.whip !== null ||
+          awayStarter.era !== null ||
+          awayStarter.whip !== null
+        ),
+      pitcherAdjustmentHome,
+      pitcherAdjustmentAway,
+      baseballFirstHalfHomeScore:
+        baseballFirstHalfHomeScore === null
+          ? null
+          : Number(baseballFirstHalfHomeScore.toFixed(3)),
+      baseballFirstHalfAwayScore:
+        baseballFirstHalfAwayScore === null
+          ? null
+          : Number(baseballFirstHalfAwayScore.toFixed(3)),
     } as AnalysisFactors,
   };
 }
@@ -3468,11 +3877,21 @@ function buildActualMarketPicks(
         /핸디|handicap/i.test(combinedName);
 
       // 공식 야구 전반 = 5이닝 종료.
-      const periodFactor = isFirstHalf ? 5 / 9 : 1;
+      const periodHome =
+        isFirstHalf
+          ? factors.baseballFirstHalfHomeScore ??
+            expectedHome! * (5 / 9)
+          : expectedHome!;
+
+      const periodAway =
+        isFirstHalf
+          ? factors.baseballFirstHalfAwayScore ??
+            expectedAway! * (5 / 9)
+          : expectedAway!;
 
       const grid = baseballScoreGrid(
-        Math.max(0.10, expectedHome! * periodFactor),
-        Math.max(0.10, expectedAway! * periodFactor)
+        Math.max(0.10, periodHome),
+        Math.max(0.10, periodAway)
       );
 
       let home = 0, draw = 0, away = 0;
@@ -4429,7 +4848,13 @@ export default function Home() {
     venue: String((selectedBetman as any)?.stadium ?? "-"),
   };
 
-  const analysis = buildAnalysis(currentSport, h2h, recentSummary, betman.matched);
+  const analysis = buildAnalysis(
+    currentSport,
+    h2h,
+    recentSummary,
+    betman.matched,
+    matched
+  );
   const analysisFactors = analysis.factors;
   const betmanHandicap = chooseBetmanHandicap(betman.matched);
   const betmanTotal = chooseBetmanTotal(betman.matched);
@@ -5339,10 +5764,10 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V10.9 계산 추적 · 야구 독립마켓 · 시장 prior λ · EV</summary>
+              <summary>V11 계산 추적 · 선발투수 λ · 야구 독립마켓 · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
-                  <h3>V10.8 계산 추적 · 저신뢰 λ 교정</h3>
+                  <h3>V11 계산 추적 · 선발투수 + 저신뢰 λ 교정</h3>
 
                   <div
                     className="notice"
@@ -5360,7 +5785,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V10.9 의사결정 규칙</b><br />
+                    <b>V11 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -5368,6 +5793,69 @@ export default function Home() {
                     <b>야구:</b> 승1패는 2점차 이상 승 / 1점차 이내(무승부 포함) / 2점차 이상 패,
                     전반은 5이닝 기준이며 전반 H/UO는 해당 전반 라인을 독립 계산합니다.
                   </div>
+
+                  {currentSport === "야구" && (
+                    <div className="section" style={{ marginTop: 0 }}>
+                      <h3>V11 선발투수 보정</h3>
+
+                      <div className="cards">
+                        <div className="card">
+                          홈 선발
+                          <b>{analysisFactors.homeStarterName ?? "데이터 미수신"}</b>
+                          <div className="small">
+                            ERA {analysisFactors.homeStarterEra?.toFixed(2) ?? "-"}
+                            {" · "}WHIP {analysisFactors.homeStarterWhip?.toFixed(2) ?? "-"}
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          원정 선발
+                          <b>{analysisFactors.awayStarterName ?? "데이터 미수신"}</b>
+                          <div className="small">
+                            ERA {analysisFactors.awayStarterEra?.toFixed(2) ?? "-"}
+                            {" · "}WHIP {analysisFactors.awayStarterWhip?.toFixed(2) ?? "-"}
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          선발 보정량
+                          <b>
+                            홈 {analysisFactors.pitcherAdjustmentHome >= 0 ? "+" : ""}
+                            {analysisFactors.pitcherAdjustmentHome.toFixed(2)}
+                            {" / "}
+                            원정 {analysisFactors.pitcherAdjustmentAway >= 0 ? "+" : ""}
+                            {analysisFactors.pitcherAdjustmentAway.toFixed(2)}
+                          </b>
+                          <div className="small">
+                            {analysisFactors.pitcherDataUsed
+                              ? "실제 ERA/WHIP 반영"
+                              : "선발 수치 미수신 · 보정 0"}
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          전반 5이닝 λ
+                          <b>
+                            {analysisFactors.baseballFirstHalfHomeScore?.toFixed(2) ?? "-"}
+                            {" : "}
+                            {analysisFactors.baseballFirstHalfAwayScore?.toFixed(2) ?? "-"}
+                          </b>
+                          <div className="small">
+                            전반 승무패/H/UO 전용
+                          </div>
+                        </div>
+                      </div>
+
+                      {!analysisFactors.pitcherDataUsed && (
+                        <div className="notice" style={{ margin: "8px 0" }}>
+                          SportsAPI 상세 응답에서 선발투수 ERA/WHIP을 찾지 못했습니다.
+                          임의 수치를 만들지 않고 기존 팀 득실 모델을 유지합니다.
+                          실제 선발 수치가 들어오면 전체 경기 λ는 보수적으로,
+                          5이닝 λ는 더 강하게 자동 보정됩니다.
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="section" style={{ marginTop: 0 }}>
                     <h3>예상득점 계산 진단</h3>
