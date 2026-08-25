@@ -1868,7 +1868,7 @@ function inspectNaverPreviewStructure(
     /lineup|lineup|starter|starting|pitcher|player|athlete|batter|batting|order|position|home|away|roster|entry|member/i;
 
   const blockedKey =
-    /score|result|winner|statistics|statistic|boxscore|final|record|inning|runs|hits|errors|earned|whip|era|pitchcount/i;
+    /score|winner|statistics|statistic|boxscore|finalscore|gameresult|matchresult|resultscore|record|inning|runs|hits|errors|earned|whip|era|pitchcount/i;
 
   const pushRow = (
     path: string,
