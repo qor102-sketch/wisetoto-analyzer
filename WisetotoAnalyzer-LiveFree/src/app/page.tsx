@@ -2576,13 +2576,61 @@ function lineupBatters(
     .slice(0, 9);
 }
 
+/* V12.7: fullLineUp player objects often omit season stats. Resolve a batter's
+   pre-game season stats from other NAVER preview branches by stable player id
+   first, then exact normalized player name. Result/boxscore/statistics branches
+   are never consulted here. */
+function playerIdentity(value: any) {
+  const candidates = [
+    value?.playerId, value?.playerID, value?.id, value?.memberId,
+    value?.player?.id, value?.playerInfo?.playerId, value?.playerInfo?.id,
+    value?.athlete?.id, value?.person?.id
+  ];
+  for (const candidate of candidates) {
+    const id = String(candidate ?? "").trim();
+    if (id) return id;
+  }
+  return null;
+}
+
+function hasPregameBatterSeasonStats(value: any) {
+  if (!value || typeof value !== "object") return false;
+  const stats = value?.currentSeasonStats ?? value?.seasonStats ?? null;
+  if (!stats || typeof stats !== "object") return false;
+  const info = batterSeasonInfo(value);
+  return info.ops !== null || (info.obp !== null && info.slg !== null) || info.avg !== null;
+}
+
+function buildPregameBatterStatsIndex(lineups: any) {
+  const byId = new Map<string, any>();
+  const byName = new Map<string, any>();
+  for (const obj of collectObjectsDeep(lineups)) {
+    if (!hasPregameBatterSeasonStats(obj)) continue;
+    const id = playerIdentity(obj);
+    const name = normalizeTeamName(objectName(obj) ?? "");
+    if (id && !byId.has(id)) byId.set(id, obj);
+    if (name && !byName.has(name)) byName.set(name, obj);
+  }
+  return { byId, byName };
+}
+
+function resolvePregameBatterStats(player: any, index: ReturnType<typeof buildPregameBatterStatsIndex>) {
+  if (hasPregameBatterSeasonStats(player)) return player;
+  const id = playerIdentity(player);
+  if (id && index.byId.has(id)) return index.byId.get(id);
+  const name = normalizeTeamName(objectName(player) ?? "");
+  if (name && index.byName.has(name)) return index.byName.get(name);
+  return player;
+}
+
 function lineupOffenseProfile(
   lineups: any,
   side: "home" | "away",
   starterName: string | null
 ): LineupOffenseProfile {
   const batters = lineupBatters(lineups, side, starterName);
-  const infos = batters.map(batterSeasonInfo);
+  const statsIndex = buildPregameBatterStatsIndex(lineups);
+  const infos = batters.map((player) => batterSeasonInfo(resolvePregameBatterStats(player, statsIndex)));
 
   const usable = infos.filter(
     (item) =>
@@ -3528,14 +3576,17 @@ function buildAnalysis(
         )
       : { name: null, era: null, whip: null, inningsPitched: null, games: null, gamesStarted: null };
 
-  const baseballAvailability =
+  const baseballAvailabilityBase =
     sport === "야구"
       ? baseballDataAvailability(
           sportsDetail?.lineups,
           homeStarter,
           awayStarter
         )
-      : {
+      : null;
+
+  const baseballAvailability =
+    baseballAvailabilityBase ?? {
           stage: "READY" as BaseballAnalysisStage,
           label: "해당 없음",
           lineupPlayerCount: 0,
@@ -3572,6 +3623,18 @@ function buildAnalysis(
           reliability: 0,
           rawFactor: 1,
         };
+
+  /* V12.7 completeness: lineup publication and lineup-stat coverage are separate.
+     READY may still mean the declared lineup is complete, but 100% is reserved for
+     meaningful season-stat coverage (>=7/9 on both teams). */
+  if (sport === "야구" && baseballAvailability.stage === "READY") {
+    const minStats = Math.min(homeLineupOffense.statsCount, awayLineupOffense.statsCount);
+    const statCoverage = clamp(minStats / 9, 0, 1);
+    baseballAvailability.completeness = Math.round(82 + 18 * statCoverage);
+    if (minStats < 7) {
+      baseballAvailability.label = "경기 임박 · 라인업 확정 · 타격 Stats 보강 대기";
+    }
+  }
 
   let pitcherAdjustmentHome = 0;
   let pitcherAdjustmentAway = 0;
