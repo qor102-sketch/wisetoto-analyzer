@@ -2884,6 +2884,160 @@ type MarketPick = {
   detail: string;
 };
 
+type BaseballSnapshotMarket = {
+  key: string;
+  market: string;
+  pick: string;
+  probability: number;
+  marketProbability: number | null;
+  edge: number | null;
+  expectedValue: number | null;
+  odds: number | null;
+  grade: MarketPick["valueGrade"];
+  displayGrade: string;
+};
+
+type BaseballAnalysisSnapshot = {
+  fixtureKey: string;
+  stage:
+    | "PRE"
+    | "STARTER"
+    | "LINEUP"
+    | "READY";
+  stageLabel: string;
+  capturedAt: number;
+  completeness: number;
+  expectedHomeScore: number | null;
+  expectedAwayScore: number | null;
+  starterCount: number;
+  lineupPlayerCount: number;
+  pitcherDataUsed: boolean;
+  markets: BaseballSnapshotMarket[];
+};
+
+type MarketConnectionDiagnostic = {
+  key: string;
+  label: string;
+  line: number | null;
+  selectionCount: number;
+  usableOddsCount: number;
+  pickConnected: boolean;
+  selectedOdds: number | null;
+  status: string;
+};
+
+function stageRank(
+  stage: BaseballAnalysisSnapshot["stage"]
+) {
+  return stage === "PRE"
+    ? 1
+    : stage === "STARTER"
+      ? 2
+      : stage === "LINEUP"
+        ? 3
+        : 4;
+}
+
+function buildMarketConnectionDiagnostics(
+  game: BetmanMatch | null | undefined,
+  picks: MarketPick[]
+): MarketConnectionDiagnostic[] {
+  const markets =
+    Array.isArray(game?.markets)
+      ? game!.markets!
+      : [];
+
+  const pickMap =
+    new Map(
+      picks.map(
+        (pick) => [
+          pick.key,
+          pick,
+        ]
+      )
+    );
+
+  return markets.map(
+    (market: any, index: number) => {
+      const betName =
+        String(
+          market?.betName ??
+          market?.displayName ??
+          market?.betTypeName ??
+          `마켓 ${index + 1}`
+        );
+
+      const line =
+        marketNumber(
+          market
+        );
+
+      const key =
+        String(
+          market?.betId ??
+          market?.betTypeId ??
+          `${betName}|${line ?? ""}|${index}`
+        );
+
+      const selections =
+        Array.isArray(
+          market?.selections
+        )
+          ? market.selections
+          : [];
+
+      const usableOddsCount =
+        selections.filter(
+          (selection: any) => {
+            const odds =
+              Number(
+                selection?.odds
+              );
+
+            return (
+              Number.isFinite(
+                odds
+              ) &&
+              odds > 1
+            );
+          }
+        ).length;
+
+      const pick =
+        pickMap.get(
+          key
+        ) ??
+        null;
+
+      return {
+        key,
+        label:
+          marketLabelStandalone(
+            market
+          ),
+        line,
+        selectionCount:
+          selections.length,
+        usableOddsCount,
+        pickConnected:
+          Boolean(
+            pick
+          ),
+        selectedOdds:
+          pick?.odds ??
+          null,
+        status:
+          usableOddsCount === 0
+            ? "원본 배당 없음"
+            : pick
+              ? "계산 연결"
+              : "배당 있음 · 계산 미연결",
+      };
+    }
+  );
+}
+
+
 function poissonPmf(lambda: number, k: number) {
   if (!Number.isFinite(lambda) || lambda < 0 || k < 0) return 0;
   let factorial = 1;
@@ -4549,6 +4703,9 @@ export default function Home() {
   const [betmanGames, setBetmanGames] = useState<BetmanMatch[]>([]);
   const [betmanDiagnostics, setBetmanDiagnostics] = useState<any>(null);
   const [selectedBetmanKey, setSelectedBetmanKey] = useState<string | null>(null);
+
+  const [baseballSnapshots, setBaseballSnapshots] =
+    useState<Record<string, BaseballAnalysisSnapshot[]>>({});
   const [betman, setBetman] = useState<{
     loading: boolean;
     matched: BetmanMatch | null;
@@ -5077,6 +5234,224 @@ export default function Home() {
     recentSummary,
     h2h
   );
+
+  const marketConnectionDiagnostics =
+    buildMarketConnectionDiagnostics(
+      betman.matched,
+      actualMarketPicks
+    );
+
+  const marketConnectionLinked =
+    marketConnectionDiagnostics.filter(
+      (item) =>
+        item.pickConnected
+    ).length;
+
+  const marketConnectionWithOdds =
+    marketConnectionDiagnostics.filter(
+      (item) =>
+        item.usableOddsCount > 0
+    ).length;
+
+  const baseballSnapshotKey =
+    currentSport === "야구"
+      ? String(
+          matched?.fixtureId ??
+          primaryMatchSeq(
+            betman.matched
+          ) ??
+          `${betman.matched?.home ?? ""}|${betman.matched?.away ?? ""}`
+        )
+      : "";
+
+  const currentBaseballSnapshots =
+    baseballSnapshotKey
+      ? baseballSnapshots[
+          baseballSnapshotKey
+        ] ?? []
+      : [];
+
+  const snapshotSignature =
+    currentSport === "야구"
+      ? JSON.stringify({
+          key:
+            baseballSnapshotKey,
+          stage:
+            analysisFactors.baseballAnalysisStage,
+          completeness:
+            analysisFactors.baseballDataCompleteness,
+          home:
+            analysisFactors.expectedHomeScore,
+          away:
+            analysisFactors.expectedAwayScore,
+          starter:
+            analysisFactors.baseballStarterCount,
+          lineup:
+            analysisFactors.baseballLineupPlayerCount,
+          markets:
+            actualMarketPicks.map(
+              (pick) => [
+                pick.key,
+                pick.probability,
+                pick.expectedValue,
+                pick.stageGradeLabel ??
+                  pick.valueGrade,
+              ]
+            ),
+        })
+      : "";
+
+  useEffect(() => {
+    if (
+      currentSport !== "야구" ||
+      !baseballSnapshotKey ||
+      !analysisFactors.hasRealData ||
+      !actualMarketPicks.length
+    ) {
+      return;
+    }
+
+    const snapshot:
+      BaseballAnalysisSnapshot = {
+      fixtureKey:
+        baseballSnapshotKey,
+      stage:
+        analysisFactors.baseballAnalysisStage,
+      stageLabel:
+        analysisFactors.baseballAnalysisStageLabel,
+      capturedAt:
+        Date.now(),
+      completeness:
+        analysisFactors.baseballDataCompleteness,
+      expectedHomeScore:
+        analysisFactors.expectedHomeScore,
+      expectedAwayScore:
+        analysisFactors.expectedAwayScore,
+      starterCount:
+        analysisFactors.baseballStarterCount,
+      lineupPlayerCount:
+        analysisFactors.baseballLineupPlayerCount,
+      pitcherDataUsed:
+        analysisFactors.pitcherDataUsed,
+      markets:
+        actualMarketPicks.map(
+          (pick) => ({
+            key:
+              pick.key,
+            market:
+              pick.market,
+            pick:
+              pick.pick,
+            probability:
+              pick.probability,
+            marketProbability:
+              pick.marketProbability,
+            edge:
+              pick.edge,
+            expectedValue:
+              pick.expectedValue,
+            odds:
+              pick.odds,
+            grade:
+              pick.valueGrade,
+            displayGrade:
+              pick.stageGradeLabel ??
+              pick.valueGrade,
+          })
+        ),
+    };
+
+    setBaseballSnapshots(
+      (previous) => {
+        const existing =
+          previous[
+            baseballSnapshotKey
+          ] ?? [];
+
+        const sameStage =
+          existing.find(
+            (item) =>
+              item.stage ===
+              snapshot.stage
+          );
+
+        const sameContent =
+          sameStage &&
+          JSON.stringify({
+            home:
+              sameStage.expectedHomeScore,
+            away:
+              sameStage.expectedAwayScore,
+            completeness:
+              sameStage.completeness,
+            starter:
+              sameStage.starterCount,
+            lineup:
+              sameStage.lineupPlayerCount,
+            markets:
+              sameStage.markets.map(
+                (item) => [
+                  item.key,
+                  item.probability,
+                  item.expectedValue,
+                  item.displayGrade,
+                ]
+              ),
+          }) ===
+            JSON.stringify({
+              home:
+                snapshot.expectedHomeScore,
+              away:
+                snapshot.expectedAwayScore,
+              completeness:
+                snapshot.completeness,
+              starter:
+                snapshot.starterCount,
+              lineup:
+                snapshot.lineupPlayerCount,
+              markets:
+                snapshot.markets.map(
+                  (item) => [
+                    item.key,
+                    item.probability,
+                    item.expectedValue,
+                    item.displayGrade,
+                  ]
+                ),
+            });
+
+        if (sameContent) {
+          return previous;
+        }
+
+        const next =
+          existing
+            .filter(
+              (item) =>
+                item.stage !==
+                snapshot.stage
+            )
+            .concat(
+              snapshot
+            )
+            .sort(
+              (a, b) =>
+                stageRank(
+                  a.stage
+                ) -
+                stageRank(
+                  b.stage
+                )
+            );
+
+        return {
+          ...previous,
+          [baseballSnapshotKey]:
+            next,
+        };
+      }
+    );
+  }, [snapshotSignature]);
 
   const currentSignalConflict =
     buildSignalConflict(
@@ -5976,7 +6351,7 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V11.1 계산 추적 · 데이터 단계 · 선발 λ · 야구 독립마켓 · EV</summary>
+              <summary>V11.2 계산 추적 · 스냅샷 · 마켓 연결 · 선발 λ · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
                   <h3>V11.1 계산 추적 · 데이터 가용성 + λ 교정</h3>
@@ -5997,7 +6372,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.1 의사결정 규칙</b><br />
+                    <b>V11.2 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -6008,7 +6383,7 @@ export default function Home() {
 
                   {currentSport === "야구" && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.1 야구 데이터 가용성 · 선발투수 보정</h3>
+                      <h3>V11.2 야구 데이터 가용성 · 선발투수 보정</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -6093,6 +6468,185 @@ export default function Home() {
                           실제 선발 수치가 들어오면 전체 경기 λ는 보수적으로, 5이닝 λ는 더 강하게 자동 보정됩니다.
                         </div>
                       )}
+                    </div>
+                  )}
+
+                  {currentSport === "야구" && (
+                    <div className="section" style={{ marginTop: 0 }}>
+                      <h3>V11.2 분석 스냅샷 비교</h3>
+
+                      <div className="cards">
+                        {(["PRE", "STARTER", "LINEUP", "READY"] as const).map(
+                          (stage) => {
+                            const snapshot =
+                              currentBaseballSnapshots.find(
+                                (item) =>
+                                  item.stage === stage
+                              );
+
+                            return (
+                              <div className="card" key={stage}>
+                                {stage}
+                                <b>
+                                  {snapshot
+                                    ? `${snapshot.expectedHomeScore?.toFixed(2) ?? "-"} : ${snapshot.expectedAwayScore?.toFixed(2) ?? "-"}`
+                                    : "대기"}
+                                </b>
+                                <div className="small">
+                                  {snapshot
+                                    ? `완성도 ${snapshot.completeness}% · 선발 ${snapshot.starterCount}/2 · 라인업 ${snapshot.lineupPlayerCount}명`
+                                    : "해당 단계 분석 전"}
+                                </div>
+                              </div>
+                            );
+                          }
+                        )}
+                      </div>
+
+                      {currentBaseballSnapshots.length > 0 && (
+                        <div style={{ overflowX: "auto", marginTop: 8 }}>
+                          <div
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns:
+                                "100px 72px 72px 72px 72px",
+                              gap: 0,
+                              minWidth: 388,
+                              fontSize: 9,
+                              fontWeight: 800,
+                              background: "#eef4fb",
+                              padding: "6px 8px",
+                              borderRadius: "8px 8px 0 0",
+                            }}
+                          >
+                            <div>마켓</div>
+                            <div>PRE</div>
+                            <div>STARTER</div>
+                            <div>LINEUP</div>
+                            <div>READY</div>
+                          </div>
+
+                          {actualMarketPicks.map((pick) => (
+                            <div
+                              key={`snapshot-${pick.key}`}
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns:
+                                  "100px 72px 72px 72px 72px",
+                                gap: 0,
+                                minWidth: 388,
+                                fontSize: 9,
+                                padding: "6px 8px",
+                                borderBottom: "1px solid #e6edf5",
+                              }}
+                            >
+                              <div>
+                                <b>{pick.market}</b>
+                                <div className="small">{pick.pick}</div>
+                              </div>
+
+                              {(["PRE", "STARTER", "LINEUP", "READY"] as const).map(
+                                (stage) => {
+                                  const market =
+                                    currentBaseballSnapshots
+                                      .find(
+                                        (snapshot) =>
+                                          snapshot.stage === stage
+                                      )
+                                      ?.markets.find(
+                                        (item) =>
+                                          item.key === pick.key
+                                      );
+
+                                  return (
+                                    <div key={`${pick.key}-${stage}`}>
+                                      {market
+                                        ? `${market.probability.toFixed(1)}%`
+                                        : "-"}
+                                      <div className="small">
+                                        {market?.expectedValue === null ||
+                                        market?.expectedValue === undefined
+                                          ? "-"
+                                          : `EV ${market.expectedValue >= 0 ? "+" : ""}${market.expectedValue.toFixed(1)}%`}
+                                      </div>
+                                    </div>
+                                  );
+                                }
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="notice" style={{ margin: "8px 0" }}>
+                        같은 Fixture의 단계별 최신 분석 1개씩을 보관합니다.
+                        선발/라인업 발표 후 다시 분석하면 PRE → STARTER → LINEUP → READY의
+                        예상득점·확률·EV 변화가 같은 표에서 비교됩니다.
+                      </div>
+                    </div>
+                  )}
+
+                  {currentSport === "야구" && (
+                    <div className="section" style={{ marginTop: 0 }}>
+                      <h3>V11.2 Betman 마켓 연결 진단</h3>
+
+                      <div className="cards">
+                        <div className="card">
+                          원본 마켓
+                          <b>{marketConnectionDiagnostics.length}개</b>
+                        </div>
+                        <div className="card">
+                          실제 배당 보유
+                          <b>{marketConnectionWithOdds}개</b>
+                        </div>
+                        <div className="card">
+                          계산 연결
+                          <b>{marketConnectionLinked}개</b>
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: 8 }}>
+                        {marketConnectionDiagnostics.map((item) => (
+                          <div
+                            key={`connection-${item.key}`}
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "1fr 70px 100px",
+                              gap: 8,
+                              alignItems: "center",
+                              padding: "6px 8px",
+                              borderBottom: "1px solid #e6edf5",
+                              fontSize: 9,
+                            }}
+                          >
+                            <div>
+                              <b>{item.label}</b>
+                              <div className="small">
+                                선택 {item.selectionCount} · 유효배당 {item.usableOddsCount}
+                                {item.line === null ? "" : ` · 기준 ${item.line}`}
+                              </div>
+                            </div>
+                            <div>
+                              {item.selectedOdds === null
+                                ? "배당 -"
+                                : `배당 ${item.selectedOdds.toFixed(2)}`}
+                            </div>
+                            <div
+                              style={{
+                                fontWeight: 800,
+                                color:
+                                  item.pickConnected
+                                    ? "#078b46"
+                                    : item.usableOddsCount > 0
+                                      ? "#c87900"
+                                      : "#7b8798",
+                              }}
+                            >
+                              {item.status}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 
