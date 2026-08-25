@@ -847,10 +847,76 @@ function fixtureTimeMs(fixture: any) {
 }
 
 function scoreNumber(...values: any[]) {
+  const visit = (
+    value: any,
+    depth = 0
+  ): number | null => {
+    if (
+      value === null ||
+      value === undefined ||
+      depth > 4
+    ) {
+      return null;
+    }
+
+    if (
+      typeof value === "number" ||
+      typeof value === "string"
+    ) {
+      const n = Number(value);
+
+      return (
+        Number.isFinite(n) &&
+        n >= 0
+      )
+        ? n
+        : null;
+    }
+
+    if (
+      typeof value !== "object"
+    ) {
+      return null;
+    }
+
+    const preferredKeys = [
+      "current",
+      "display",
+      "final",
+      "fullTime",
+      "fulltime",
+      "value",
+      "score",
+      "runs",
+      "points",
+      "total",
+    ];
+
+    for (const key of preferredKeys) {
+      if (key in value) {
+        const found =
+          visit(
+            value[key],
+            depth + 1
+          );
+
+        if (found !== null) {
+          return found;
+        }
+      }
+    }
+
+    return null;
+  };
+
   for (const value of values) {
-    const n = Number(value);
-    if (Number.isFinite(n) && n >= 0) return n;
+    const found = visit(value);
+
+    if (found !== null) {
+      return found;
+    }
   }
+
   return null;
 }
 
@@ -877,6 +943,7 @@ function fixtureTeamName(fixture: any, side: "home" | "away") {
 
 function fixtureFinalScore(fixture: any) {
   const home = scoreNumber(
+    fixture?.homeScore?.current,
     fixture?.homeScore,
     fixture?.score?.home,
     fixture?.scores?.home,
@@ -889,6 +956,7 @@ function fixtureFinalScore(fixture: any) {
   );
 
   const away = scoreNumber(
+    fixture?.awayScore?.current,
     fixture?.awayScore,
     fixture?.score?.away,
     fixture?.scores?.away,
@@ -4881,6 +4949,8 @@ type BacktestAudit = {
   removedAwayFixtures: number;
   keptHomeFixtures: number;
   keptAwayFixtures: number;
+  scoredHomeFixtures: number;
+  scoredAwayFixtures: number;
   h2hPolicy: string;
   resultFieldsStripped: boolean;
   statisticsBlocked: boolean;
@@ -4958,6 +5028,7 @@ function sanitizeRecentTeamForBacktest(
       team: null,
       removed: 0,
       kept: 0,
+      scored: 0,
     };
   }
 
@@ -4991,7 +5062,80 @@ function sanitizeRecentTeamForBacktest(
       fixtures.length,
     kept:
       fixtures.length,
+    scored:
+      fixtures.filter(
+        (fixture: any) =>
+          fixtureFinalScore(
+            fixture
+          ) !== null
+      ).length,
   };
+}
+
+function backtestH2HFixtureCandidates(
+  homeRecent:
+    | RecentTeam
+    | null
+    | undefined,
+  awayRecent:
+    | RecentTeam
+    | null
+    | undefined
+) {
+  const map =
+    new Map<string, any>();
+
+  const add =
+    (fixture: any) => {
+      const id =
+        fixture?.id ??
+        fixture?.fixture?.id ??
+        null;
+
+      const time =
+        fixtureTimeMs(
+          fixture
+        );
+
+      const key =
+        id !== null &&
+        id !== undefined
+          ? `id:${id}`
+          : `time:${time}|${fixtureTeamName(
+              fixture,
+              "home"
+            )}|${fixtureTeamName(
+              fixture,
+              "away"
+            )}`;
+
+      if (!map.has(key)) {
+        map.set(
+          key,
+          fixture
+        );
+      }
+    };
+
+  for (
+    const fixture of
+      homeRecent?.fixtures ??
+      []
+  ) {
+    add(fixture);
+  }
+
+  for (
+    const fixture of
+      awayRecent?.fixtures ??
+      []
+  ) {
+    add(fixture);
+  }
+
+  return [
+    ...map.values(),
+  ];
 }
 
 function sanitizeH2HForBacktest(
@@ -5166,9 +5310,37 @@ function sanitizeMatchedForBacktest(
       cutoffMs
     );
 
+  const h2hSource =
+    (
+      Array.isArray(
+        matched?.h2h?.fixtures
+      ) &&
+      matched.h2h.fixtures.length
+    ) ||
+    (
+      Array.isArray(
+        matched?.h2h?.matches
+      ) &&
+      matched.h2h.matches.length
+    ) ||
+    (
+      Array.isArray(
+        matched?.h2h?.response
+      ) &&
+      matched.h2h.response.length
+    )
+      ? matched.h2h
+      : {
+          fixtures:
+            backtestH2HFixtureCandidates(
+              home.team,
+              away.team
+            ),
+        };
+
   const h2h =
     sanitizeH2HForBacktest(
-      matched?.h2h,
+      h2hSource,
       cutoffMs,
       String(
         selectedGame?.home ??
@@ -5215,6 +5387,10 @@ function sanitizeMatchedForBacktest(
         home.kept,
       keptAwayFixtures:
         away.kept,
+      scoredHomeFixtures:
+        home.scored,
+      scoredAwayFixtures:
+        away.scored,
       h2hPolicy:
         h2h.policy,
       resultFieldsStripped: true,
@@ -6176,11 +6352,30 @@ export default function Home() {
           fixture: detailData?.fixture ?? data?.fixture,
           detail: detailData?.fixture ?? data?.detail,
           selectedFixture: detailData?.selectedFixture ?? data?.selectedFixture,
-          h2h: detailData?.h2h ?? null,
-          recentSummary: detailData?.recentSummary ?? null,
-          statistics: detailData?.statistics ?? null,
-          lineups: detailData?.lineups ?? null,
-          detailDebug: detailData?.debug ?? null,
+          h2h:
+            detailData?.h2h ??
+            data?.h2h ??
+            null,
+          recentSummary:
+            detailData?.recentSummary ??
+            data?.recentSummary ??
+            null,
+          statistics:
+            detailData?.statistics ??
+            data?.statistics ??
+            null,
+          lineups:
+            detailData?.lineups ??
+            data?.lineups ??
+            null,
+          detailDebug: {
+            detail:
+              detailData?.debug ??
+              null,
+            selected:
+              data?.debug ??
+              null,
+          },
         };
 
         const combined =
@@ -7022,7 +7217,7 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V11.3.1 계산 추적 · 과거경기 소스 · 백테스트 LOCK · EV</summary>
+              <summary>V11.3.4 계산 추적 · 과거 Form/H2H 복원 · 백테스트 LOCK · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
                   <h3>V11.1 계산 추적 · 데이터 가용성 + λ 교정</h3>
@@ -7043,7 +7238,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.3.1 의사결정 규칙</b><br />
+                    <b>V11.3.4 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -7054,7 +7249,7 @@ export default function Home() {
 
                   {currentSport === "야구" && backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.3 백테스트 안전장치</h3>
+                      <h3>V11.3.4 백테스트 안전장치 · 과거 Form/H2H 복원</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -7085,6 +7280,9 @@ export default function Home() {
                           <div className="small">
                             차단 홈 {backtestAudit?.removedHomeFixtures ?? "-"}
                             {" · "}원정 {backtestAudit?.removedAwayFixtures ?? "-"}
+                            <br />
+                            점수해석 홈 {backtestAudit?.scoredHomeFixtures ?? "-"}
+                            {" · "}원정 {backtestAudit?.scoredAwayFixtures ?? "-"}
                           </div>
                         </div>
 
@@ -7674,4 +7872,4 @@ export default function Home() {
       </div>
     </main>
   );
- } 
+}
