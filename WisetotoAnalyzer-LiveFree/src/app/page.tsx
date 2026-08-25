@@ -8749,6 +8749,11 @@ export default function Home() {
     pregameAudit?.candidates ??
     [];
 
+  const officialLineupsDebug =
+    matched?.detailDebug?.selected?.lineups ??
+    matched?.debug?.lineups ??
+    null;
+
   const currentSignalConflict =
     buildSignalConflict(
       betman.matched,
@@ -8886,9 +8891,21 @@ export default function Home() {
       if (detailResponse.ok && detailData?.ok) {
         const pregameAudit =
           backtestMode
-            ? safePregameStructureDiagnostic(
-                detailData
-              )
+            ? safePregameStructureDiagnostic({
+                ...detailData,
+                fixture:
+                  detailData?.fixture ??
+                  data?.fixture ??
+                  null,
+                lineups:
+                  detailData?.lineups ??
+                  data?.lineups ??
+                  null,
+                selectedFixture:
+                  detailData?.selectedFixture ??
+                  data?.selectedFixture ??
+                  null,
+              })
             : null;
 
         const combinedRaw = {
@@ -9713,7 +9730,7 @@ export default function Home() {
                 }}
               >
                 <b>백테스트 검증 준비 완료</b>
-                {" · "}아래 `V11.8.0 백테스트 결과 검증기`에서
+                {" · "}아래 `V11.8.1 백테스트 결과 검증기`에서
                 `예측 확정 · 실제 결과 검증 열기` 버튼을 누르면 결과를 공개할 수 있습니다.
               </div>
             )}
@@ -9783,7 +9800,7 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V11.8.0 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
+              <summary>V11.8.1 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
                   <h3>V11.7 계산 추적 · 데이터 가용성 + λ 교정</h3>
@@ -9804,7 +9821,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.8.0 의사결정 규칙</b><br />
+                    <b>V11.8.1 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -9815,7 +9832,7 @@ export default function Home() {
 
                   {currentSport === "야구" && backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.8.0 백테스트 안전장치 · 경기전 선발/라인업 복원 진단</h3>
+                      <h3>V11.8.1 백테스트 안전장치 · 공식 lineups 경기전 복원</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -9914,7 +9931,7 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.8.0 과거 경기전 선발/라인업 구조 진단</h3>
+                      <h3>V11.8.1 과거 경기전 선발/라인업 복원 진단</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -9926,6 +9943,22 @@ export default function Home() {
                           </b>
                           <div className="small">
                             결과/최종스탯 제외 진단
+                          </div>
+                        </div>
+
+                        <div className="card">
+                          공식 /fixtures/:id/lineups
+                          <b>
+                            {officialLineupsDebug?.ok
+                              ? "조회 성공"
+                              : officialLineupsDebug
+                                ? "조회 실패"
+                                : "상태 없음"}
+                          </b>
+                          <div className="small">
+                            {officialLineupsDebug?.ok
+                              ? `type ${officialLineupsDebug.dataType ?? "-"} · ${officialLineupsDebug.arrayCount ?? "-"}`
+                              : officialLineupsDebug?.error ?? "-"}
                           </div>
                         </div>
 
@@ -10062,7 +10095,7 @@ export default function Home() {
 
                   {currentSport === "야구" && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.8.0 야구 데이터 가용성 · 선발투수/라인업 복원</h3>
+                      <h3>V11.8.1 야구 데이터 가용성 · 선발투수/라인업 복원</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10226,7 +10259,7 @@ export default function Home() {
                           "0 2px 12px rgba(40,95,190,0.08)",
                       }}
                     >
-                      <h3>V11.8.0 백테스트 결과 검증기</h3>
+                      <h3>V11.8.1 백테스트 결과 검증기</h3>
 
                       <div
                         className="cards"
