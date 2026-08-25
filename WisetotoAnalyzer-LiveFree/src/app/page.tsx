@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V12_0_REBUILT_FROM_STABLE_20260825
+// DEPLOY_MARKER_V12_1_NAVER_PREGAME_20260825
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -10260,6 +10260,55 @@ export default function Home() {
                         H2H가 경기목록 없이 집계값만 제공되면 미래정보 누출 위험 때문에 H2H를 사용하지 않습니다.
                         선발/라인업은 해당 Fixture의 경기 전 정보로 유지하며 실제 결과 비교는 별도 검증 단계까지 잠급니다.
                       </div>
+                    </div>
+                  )}
+
+                  {currentSport === "야구" &&
+                    backtestMode && (
+                    <div className="section" style={{ marginTop: 0 }}>
+                      <h3>V12.1 네이버스포츠 경기전 선발/라인업 복원</h3>
+
+                      <div className="cards">
+                        <div className="card">
+                          데이터 소스
+                          <b>
+                            {sportsDetail?.lineupsSource === "NAVER_PREVIEW"
+                              ? "NAVER PREVIEW"
+                              : sportsDetail?.lineupsSource === "SPORTSAPI"
+                                ? "SPORTSAPI 우선"
+                                : "미수신"}
+                          </b>
+                        </div>
+
+                        <div className="card">
+                          Naver gameId
+                          <b>{sportsDetail?.naverPregame?.gameId ?? "-"}</b>
+                        </div>
+
+                        <div className="card">
+                          일정 API
+                          <b>{sportsDetail?.naverPregame?.scheduleStatus ?? "-"}</b>
+                        </div>
+
+                        <div className="card">
+                          Preview API
+                          <b>{sportsDetail?.naverPregame?.previewStatus ?? "-"}</b>
+                        </div>
+                      </div>
+
+                      <div className="notice" style={{ margin: "8px 0 0" }}>
+                        네이버스포츠 일정에서 날짜·양팀을 매칭한 뒤 경기별 preview의
+                        경기전 선발/라인업만 보조 입력으로 사용합니다.
+                        SportsAPI lineups가 있으면 SportsAPI를 우선하고,
+                        없을 때만 NAVER PREVIEW를 사용합니다.
+                        최종점수·경기후 statistics는 이 경로에서 분석 입력으로 사용하지 않습니다.
+                      </div>
+
+                      {sportsDetail?.naverPregame?.error && (
+                        <div className="notice" style={{ margin: "8px 0 0" }}>
+                          네이버 진단: {sportsDetail.naverPregame.error}
+                        </div>
+                      )}
                     </div>
                   )}
 
