@@ -156,6 +156,13 @@ type AnalysisFactors = {
   baseballLineupPlayerCount: number;
   baseballStarterCount: number;
   baseballDataCompleteness: number;
+
+  baseballPreModelApplied: boolean;
+  baseballPreSampleStrength: number;
+  baseballPreMarketWeight: number;
+  baseballPreMarketMargin: number | null;
+  baseballPreRecentSample: number;
+  baseballPreVenueSample: number;
 };
 
 
@@ -1944,6 +1951,148 @@ function applyBaseballStageGate(
 }
 
 
+function baseballPreSampleStrength(input: {
+  homePlayed: number;
+  awayPlayed: number;
+  homeVenuePlayed: number;
+  awayVenuePlayed: number;
+}) {
+  const homeSample =
+    clamp(
+      input.homePlayed,
+      0,
+      5
+    );
+
+  const awaySample =
+    clamp(
+      input.awayPlayed,
+      0,
+      5
+    );
+
+  const venueSample =
+    clamp(
+      input.homeVenuePlayed +
+      input.awayVenuePlayed,
+      0,
+      6
+    );
+
+  /*
+   * PRE 단계는 선발/라인업이 없으므로 표본이 작을수록
+   * neutral prior 쪽으로 더 강하게 수축합니다.
+   * 3경기씩 있어도 raw 최근값을 50% 안팎만 신뢰하고,
+   * 5경기 + 장소표본이 충분해야 최대 58%까지 허용합니다.
+   */
+  return clamp(
+    0.22 +
+      (homeSample / 5) * 0.14 +
+      (awaySample / 5) * 0.14 +
+      (venueSample / 6) * 0.08,
+    0.22,
+    0.58
+  );
+}
+
+function baseballPreMarketMarginBlend(input: {
+  homeScore: number;
+  awayScore: number;
+  marketHome: number | null;
+  marketAway: number | null;
+  sampleStrength: number;
+}) {
+  const {
+    homeScore,
+    awayScore,
+    marketHome,
+    marketAway,
+    sampleStrength,
+  } = input;
+
+  if (
+    marketHome === null ||
+    marketAway === null
+  ) {
+    return {
+      homeScore,
+      awayScore,
+      applied: false,
+      weight: 0,
+      marketMargin: null as number | null,
+    };
+  }
+
+  const fairDiff =
+    marketHome -
+    marketAway;
+
+  /*
+   * 시장확률을 점수로 복사하지 않고 방향 prior만 만듭니다.
+   * KBO PRE 단계에서 최대 ±1.6점으로 제한합니다.
+   */
+  const marketMargin =
+    clamp(
+      (fairDiff / 100) * 2.2,
+      -1.6,
+      1.6
+    );
+
+  const modelMargin =
+    homeScore -
+    awayScore;
+
+  /*
+   * 표본이 약할수록 시장 방향을 조금 더 참고하지만
+   * 22%를 넘지 않아 독립모델을 덮지 않습니다.
+   */
+  const weight =
+    clamp(
+      0.10 +
+      (1 - sampleStrength) * 0.18,
+      0.10,
+      0.22
+    );
+
+  const total =
+    Math.max(
+      4,
+      homeScore +
+      awayScore
+    );
+
+  const blendedMargin =
+    modelMargin *
+      (1 - weight) +
+    marketMargin *
+      weight;
+
+  return {
+    homeScore:
+      Math.max(
+        1.5,
+        total / 2 +
+        blendedMargin / 2
+      ),
+    awayScore:
+      Math.max(
+        1.5,
+        total / 2 -
+        blendedMargin / 2
+      ),
+    applied: true,
+    weight:
+      Number(
+        weight.toFixed(2)
+      ),
+    marketMargin:
+      Number(
+        marketMargin.toFixed(3)
+      ),
+  };
+}
+
+
 function buildAnalysis(
   sport: Exclude<
     Sport,
@@ -2268,6 +2417,25 @@ function buildAnalysis(
     | number
     | null = null;
 
+  let baseballPreModelApplied =
+    false;
+
+  let baseballPreSampleStrengthValue =
+    0;
+
+  let baseballPreMarketWeight =
+    0;
+
+  let baseballPreMarketMargin:
+    | number
+    | null = null;
+
+  let baseballPreRecentSample =
+    0;
+
+  let baseballPreVenueSample =
+    0;
+
   let rawExpectedHomeScore:
     | number
     | null = null;
@@ -2315,8 +2483,8 @@ function buildAnalysis(
         awayWeighted.venuePlayed
       );
 
-    // 최근 전체 표본 70% + 홈/원정 분리 표본 30%.
-    const sampleStrength =
+    // 기본 종목용 표본 강도.
+    let sampleStrength =
       clamp(
         0.35 +
         (recentSample / 10) * 0.33 +
@@ -2324,6 +2492,45 @@ function buildAnalysis(
         0.35,
         0.82
       );
+
+    /*
+     * 야구 PRE에서는 선발/라인업 미확정 리스크를 별도로 반영.
+     * 작은 최근표본이 λ를 과하게 흔들지 않게 더 강하게 prior로 수축.
+     */
+    if (
+      sport === "야구" &&
+      baseballAvailability.stage === "PRE"
+    ) {
+      sampleStrength =
+        baseballPreSampleStrength({
+          homePlayed:
+            homeWeighted.played,
+          awayPlayed:
+            awayWeighted.played,
+          homeVenuePlayed:
+            homeWeighted.venuePlayed,
+          awayVenuePlayed:
+            awayWeighted.venuePlayed,
+        });
+
+      baseballPreModelApplied =
+        true;
+
+      baseballPreSampleStrengthValue =
+        Number(
+          sampleStrength.toFixed(
+            2
+          )
+        );
+
+      baseballPreRecentSample =
+        homeWeighted.played +
+        awayWeighted.played;
+
+      baseballPreVenueSample =
+        homeWeighted.venuePlayed +
+        awayWeighted.venuePlayed;
+    }
 
     scoreShrinkage =
       sampleStrength;
@@ -2394,6 +2601,71 @@ function buildAnalysis(
 
       baseballFirstHalfHomeScore = firstHome.runs;
       baseballFirstHalfAwayScore = firstAway.runs;
+    }
+
+    if (
+      sport === "야구" &&
+      baseballAvailability.stage === "PRE" &&
+      expectedHomeScore !== null &&
+      expectedAwayScore !== null
+    ) {
+      preMarketHomeScore =
+        expectedHomeScore;
+
+      preMarketAwayScore =
+        expectedAwayScore;
+
+      const preMarketBlend =
+        baseballPreMarketMarginBlend({
+          homeScore:
+            expectedHomeScore,
+          awayScore:
+            expectedAwayScore,
+          marketHome:
+            moneylineFair.home,
+          marketAway:
+            moneylineFair.away,
+          sampleStrength:
+            baseballPreSampleStrengthValue ||
+            scoreShrinkage ||
+            0.35,
+        });
+
+      expectedHomeScore =
+        preMarketBlend.homeScore;
+
+      expectedAwayScore =
+        preMarketBlend.awayScore;
+
+      baseballPreMarketWeight =
+        preMarketBlend.weight;
+
+      baseballPreMarketMargin =
+        preMarketBlend.marketMargin;
+
+      marketPriorWeight =
+        preMarketBlend.weight;
+
+      marketMarginPrior =
+        preMarketBlend.marketMargin;
+
+      scoreGuardApplied =
+        preMarketBlend.applied;
+
+      scoreGuardStrength =
+        preMarketBlend.weight;
+
+      /*
+       * PRE 5이닝 λ도 안정화된 전체 λ를 기준으로 재생성.
+       * 선발 정보가 없는 단계이므로 별도 투수 임의값은 넣지 않음.
+       */
+      baseballFirstHalfHomeScore =
+        expectedHomeScore *
+        (5 / 9);
+
+      baseballFirstHalfAwayScore =
+        expectedAwayScore *
+        (5 / 9);
     }
 
     if (sport === "축구") {
@@ -3170,6 +3442,14 @@ function buildAnalysis(
         baseballAvailability.starterCount,
       baseballDataCompleteness:
         baseballAvailability.completeness,
+
+      baseballPreModelApplied,
+      baseballPreSampleStrength:
+        baseballPreSampleStrengthValue,
+      baseballPreMarketWeight,
+      baseballPreMarketMargin,
+      baseballPreRecentSample,
+      baseballPreVenueSample,
     } as AnalysisFactors,
   };
 }
@@ -8242,7 +8522,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.4.1 의사결정 규칙</b><br />
+                    <b>V11.5 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -8253,7 +8533,7 @@ export default function Home() {
 
                   {currentSport === "야구" && backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.4.1 백테스트 안전장치 · flat recent fixture Form 연결</h3>
+                      <h3>V11.5 백테스트 안전장치 · PRE 소표본 안정화</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -8381,6 +8661,58 @@ export default function Home() {
                         </div>
                       </div>
 
+                      {analysisFactors.baseballAnalysisStage === "PRE" && (
+                        <div
+                          className="cards"
+                          style={{ marginTop: 7 }}
+                        >
+                          <div className="card">
+                            V11.5 PRE 안정화
+                            <b>
+                              {analysisFactors.baseballPreModelApplied
+                                ? "적용"
+                                : "대기"}
+                            </b>
+                            <div className="small">
+                              최근 표본 {analysisFactors.baseballPreRecentSample}
+                              {" · "}장소 표본 {analysisFactors.baseballPreVenueSample}
+                            </div>
+                          </div>
+
+                          <div className="card">
+                            최근값 신뢰비중
+                            <b>
+                              {(analysisFactors.baseballPreSampleStrength * 100).toFixed(0)}%
+                            </b>
+                            <div className="small">
+                              나머지는 야구 중립 λ로 수축
+                            </div>
+                          </div>
+
+                          <div className="card">
+                            시장 방향 prior
+                            <b>
+                              {(analysisFactors.baseballPreMarketWeight * 100).toFixed(0)}%
+                            </b>
+                            <div className="small">
+                              점수총합은 유지 · 승패 방향만 약하게 보정
+                            </div>
+                          </div>
+
+                          <div className="card">
+                            시장 margin λ
+                            <b>
+                              {analysisFactors.baseballPreMarketMargin === null
+                                ? "-"
+                                : `${analysisFactors.baseballPreMarketMargin >= 0 ? "+" : ""}${analysisFactors.baseballPreMarketMargin.toFixed(2)}`}
+                            </b>
+                            <div className="small">
+                              최대 ±1.60점 제한
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       <div className="cards" style={{ marginTop: 7 }}>
                         <div className="card">
                           홈 선발
@@ -8431,9 +8763,10 @@ export default function Home() {
 
                       {!analysisFactors.pitcherDataUsed && (
                         <div className="notice" style={{ margin: "8px 0" }}>
-                          현재는 사전 분석 단계입니다. 선발/라인업이 없으면 임의 수치를 만들지 않고 기존 팀 득실 모델을 유지합니다.
-                          VALUE 조건을 만족해도 PRE VALUE 후보로만 표시하고 최고 가치픽에는 올리지 않습니다.
-                          실제 선발 수치가 들어오면 전체 경기 λ는 보수적으로, 5이닝 λ는 더 강하게 자동 보정됩니다.
+                          현재는 사전 분석 단계입니다. 선발/라인업이 없으면 임의 투수 수치를 만들지 않습니다.
+                          V11.5는 작은 최근 표본을 야구 중립 λ 쪽으로 추가 수축하고, Betman 공정 승패확률은 총득점을 바꾸지 않는 약한 방향 prior로만 사용합니다.
+                          VALUE 조건을 만족해도 PRE VALUE 후보로만 표시하며 최고 가치픽에는 올리지 않습니다.
+                          실제 선발 수치가 들어오면 PRE 전용 안정화보다 선발 보정 구조가 우선됩니다.
                         </div>
                       )}
                     </div>
