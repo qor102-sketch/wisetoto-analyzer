@@ -142,6 +142,14 @@ type AnalysisFactors = {
   awayStarterEra: number | null;
   homeStarterWhip: number | null;
   awayStarterWhip: number | null;
+  homeStarterInningsPitched: number | null;
+  awayStarterInningsPitched: number | null;
+  homeStarterGames: number | null;
+  awayStarterGames: number | null;
+  homeStarterGamesStarted: number | null;
+  awayStarterGamesStarted: number | null;
+  homeStarterSampleReliability: number;
+  awayStarterSampleReliability: number;
   pitcherDataUsed: boolean;
   pitcherAdjustmentHome: number;
   pitcherAdjustmentAway: number;
@@ -2088,6 +2096,9 @@ type StarterInfo = {
   name: string | null;
   era: number | null;
   whip: number | null;
+  inningsPitched: number | null;
+  games: number | null;
+  gamesStarted: number | null;
 };
 
 function normalizeStatKey(value: unknown) {
@@ -2239,7 +2250,7 @@ function findBranchByKeyDeep(
 
 function starterInfoFromObject(value: any): StarterInfo {
   if (!value || typeof value !== "object") {
-    return { name: null, era: null, whip: null };
+    return { name: null, era: null, whip: null, inningsPitched: null, games: null, gamesStarted: null };
   }
 
   const era = findNumericStatDeep(
@@ -2250,11 +2261,26 @@ function starterInfoFromObject(value: any): StarterInfo {
     value,
     ["whip", "walkshitsperinningpitched"]
   );
+  const inningsPitched = findNumericStatDeep(
+    value,
+    ["inningspitched", "inningpitched", "innings", "ip", "투구이닝", "이닝"]
+  );
+  const gamesStarted = findNumericStatDeep(
+    value,
+    ["gamesstarted", "gamestarted", "starts", "startgames", "gs", "선발경기", "선발"]
+  );
+  const games = findNumericStatDeep(
+    value,
+    ["gamesplayed", "games", "gamecount", "appearances", "g", "경기수", "경기"]
+  );
 
   return {
     name: objectName(value),
     era: era !== null ? clamp(era, 0.5, 12) : null,
     whip: whip !== null ? clamp(whip, 0.5, 3) : null,
+    inningsPitched: inningsPitched !== null ? clamp(inningsPitched, 0, 300) : null,
+    games: games !== null ? clamp(games, 0, 100) : null,
+    gamesStarted: gamesStarted !== null ? clamp(gamesStarted, 0, 100) : null,
   };
 }
 
@@ -2317,9 +2343,25 @@ function starterFromLineups(
 
   const best = ranked[0];
   return !best || best.score < 8
-    ? { name: null, era: null, whip: null }
+    ? { name: null, era: null, whip: null, inningsPitched: null, games: null, gamesStarted: null }
     : starterInfoFromObject(best.value);
 }
+function starterSampleReliability(starter: StarterInfo) {
+  // V12.5.5: ERA/WHIP 소표본 과보정을 막는다. IP를 최우선으로 사용하고,
+  // IP가 없을 때만 GS/G를 보조 표본으로 사용한다. 표본 정보 자체가 없으면
+  // 기존보다 보수적인 55% 신뢰도로 제한한다.
+  if (starter.inningsPitched !== null) {
+    return clamp(starter.inningsPitched / 45, 0.18, 1);
+  }
+  if (starter.gamesStarted !== null) {
+    return clamp(starter.gamesStarted / 8, 0.22, 1);
+  }
+  if (starter.games !== null) {
+    return clamp(starter.games / 12, 0.20, 0.85);
+  }
+  return 0.55;
+}
+
 function pitcherRunFactor(starter: StarterInfo) {
   const eraFactor =
     starter.era === null
@@ -2340,12 +2382,15 @@ function pitcherRunFactor(starter: StarterInfo) {
       ? eraFactor * 0.70 + whipFactor * 0.30
       : eraFactor ?? whipFactor ?? 1;
 
+  const sampleReliability = starterSampleReliability(starter);
+
   return {
     factor,
     weight:
-      eraFactor !== null && whipFactor !== null
+      (eraFactor !== null && whipFactor !== null
         ? 0.36
-        : 0.24,
+        : 0.24) * sampleReliability,
+    sampleReliability,
   };
 }
 
@@ -3210,7 +3255,7 @@ function buildAnalysis(
             ""
           )
         )
-      : { name: null, era: null, whip: null };
+      : { name: null, era: null, whip: null, inningsPitched: null, games: null, gamesStarted: null };
 
   const awayStarter =
     sport === "야구"
@@ -3224,7 +3269,7 @@ function buildAnalysis(
             ""
           )
         )
-      : { name: null, era: null, whip: null };
+      : { name: null, era: null, whip: null, inningsPitched: null, games: null, gamesStarted: null };
 
   const baseballAvailability =
     sport === "야구"
@@ -4249,6 +4294,14 @@ function buildAnalysis(
       awayStarterEra: awayStarter.era,
       homeStarterWhip: homeStarter.whip,
       awayStarterWhip: awayStarter.whip,
+      homeStarterInningsPitched: homeStarter.inningsPitched,
+      awayStarterInningsPitched: awayStarter.inningsPitched,
+      homeStarterGames: homeStarter.games,
+      awayStarterGames: awayStarter.games,
+      homeStarterGamesStarted: homeStarter.gamesStarted,
+      awayStarterGamesStarted: awayStarter.gamesStarted,
+      homeStarterSampleReliability: starterSampleReliability(homeStarter),
+      awayStarterSampleReliability: starterSampleReliability(awayStarter),
       pitcherDataUsed:
         Boolean(
           homeStarter.era !== null ||
@@ -10246,7 +10299,7 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V12.5.4 네이버 Preview parser · nested playerInfo starter fix</h3>
+                      <h3>V12.5.5 선발 표본 신뢰도 · IP/G/GS calibration</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10792,6 +10845,9 @@ export default function Home() {
                           <div className="small">
                             ERA {analysisFactors.homeStarterEra?.toFixed(2) ?? "-"}
                             {" · "}WHIP {analysisFactors.homeStarterWhip?.toFixed(2) ?? "-"}
+                            {" · "}IP {analysisFactors.homeStarterInningsPitched?.toFixed(1) ?? "-"}
+                            {" · "}GS {analysisFactors.homeStarterGamesStarted?.toFixed(0) ?? "-"}
+                            {" · "}G {analysisFactors.homeStarterGames?.toFixed(0) ?? "-"}
                           </div>
                         </div>
 
@@ -10801,6 +10857,9 @@ export default function Home() {
                           <div className="small">
                             ERA {analysisFactors.awayStarterEra?.toFixed(2) ?? "-"}
                             {" · "}WHIP {analysisFactors.awayStarterWhip?.toFixed(2) ?? "-"}
+                            {" · "}IP {analysisFactors.awayStarterInningsPitched?.toFixed(1) ?? "-"}
+                            {" · "}GS {analysisFactors.awayStarterGamesStarted?.toFixed(0) ?? "-"}
+                            {" · "}G {analysisFactors.awayStarterGames?.toFixed(0) ?? "-"}
                           </div>
                         </div>
 
@@ -10815,7 +10874,7 @@ export default function Home() {
                           </b>
                           <div className="small">
                             {analysisFactors.pitcherDataUsed
-                              ? "실제 ERA/WHIP 반영"
+                              ? `ERA/WHIP 반영 · 표본신뢰 홈 ${(analysisFactors.homeStarterSampleReliability * 100).toFixed(0)}% / 원정 ${(analysisFactors.awayStarterSampleReliability * 100).toFixed(0)}%`
                               : "선발 수치 미수신 · 보정 0"}
                           </div>
                         </div>
