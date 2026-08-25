@@ -1085,10 +1085,15 @@ function buildWeightedRecentProfile(
     const score = fixtureFinalScore(fixture);
     if (!score) return;
 
-    let venue: "home" | "away" | null = null;
-    if (sameTeam(team, fixture, "home")) venue = "home";
-    else if (sameTeam(team, fixture, "away")) venue = "away";
-    if (!venue) return;
+    const venue =
+      fixtureTeamSideForBacktest(
+        fixture,
+        team
+      );
+
+    if (!venue) {
+      return;
+    }
 
     const row = {
       scored: venue === "home" ? score.home : score.away,
@@ -5083,6 +5088,8 @@ type BacktestAudit = {
   selectedAwayTeamId: number | null;
   selectedHomeTeamName: string | null;
   selectedAwayTeamName: string | null;
+  unmatchedHomeFixtures: number;
+  unmatchedAwayFixtures: number;
   h2hPolicy: string;
   resultFieldsStripped: boolean;
   statisticsBlocked: boolean;
@@ -5094,6 +5101,272 @@ function backtestFixtureAllowed(
 ) {
   const time = fixtureTimeMs(fixture);
   return Number.isFinite(time) && time < cutoffMs;
+}
+
+
+function collectIdentityDeep(
+  value: any,
+  depth = 0,
+  ids = new Set<number>(),
+  names = new Set<string>()
+) {
+  if (
+    value === null ||
+    value === undefined ||
+    depth > 5
+  ) {
+    return {
+      ids,
+      names,
+    };
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectIdentityDeep(
+        item,
+        depth + 1,
+        ids,
+        names
+      );
+    }
+
+    return {
+      ids,
+      names,
+    };
+  }
+
+  if (
+    typeof value !== "object"
+  ) {
+    return {
+      ids,
+      names,
+    };
+  }
+
+  for (const [
+    key,
+    rawValue,
+  ] of Object.entries(value)) {
+    const normalizedKey =
+      String(key)
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+
+    if (
+      [
+        "id",
+        "teamid",
+        "participantid",
+        "competitorid",
+      ].includes(
+        normalizedKey
+      )
+    ) {
+      const id =
+        Number(
+          rawValue
+        );
+
+      if (
+        Number.isFinite(id) &&
+        id > 0
+      ) {
+        ids.add(id);
+      }
+    }
+
+    if (
+      [
+        "name",
+        "teamname",
+        "shortname",
+        "displayname",
+      ].includes(
+        normalizedKey
+      )
+    ) {
+      const name =
+        String(
+          rawValue ??
+          ""
+        ).trim();
+
+      if (name) {
+        names.add(
+          name
+        );
+      }
+    }
+
+    if (
+      rawValue &&
+      typeof rawValue === "object"
+    ) {
+      collectIdentityDeep(
+        rawValue,
+        depth + 1,
+        ids,
+        names
+      );
+    }
+  }
+
+  return {
+    ids,
+    names,
+  };
+}
+
+function fixtureSideContainer(
+  fixture: any,
+  side: "home" | "away"
+) {
+  const sideTeam =
+    side === "home"
+      ? fixture?.homeTeam
+      : fixture?.awayTeam;
+
+  const participant =
+    fixtureParticipant(
+      fixture,
+      side
+    );
+
+  return [
+    fixture?.[side],
+    sideTeam,
+    fixture?.teams?.[side],
+    fixture?.fixture?.[side],
+    fixture?.competitors?.[side],
+    fixture?.participants?.[side],
+    participant,
+  ].filter(Boolean);
+}
+
+function fixtureSideMatchesIdentity(
+  fixture: any,
+  side: "home" | "away",
+  identity: {
+    id: number | null;
+    name: string | null;
+  }
+) {
+  const containers =
+    fixtureSideContainer(
+      fixture,
+      side
+    );
+
+  for (
+    const container of containers
+  ) {
+    const collected =
+      collectIdentityDeep(
+        container
+      );
+
+    if (
+      identity.id !== null &&
+      collected.ids.has(
+        identity.id
+      )
+    ) {
+      return true;
+    }
+
+    if (
+      identity.name
+    ) {
+      for (
+        const candidateName of
+          collected.names
+      ) {
+        if (
+          teamSimilarity(
+            identity.name,
+            candidateName
+          ) >= 0.62
+        ) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+function fixtureTeamSideForBacktest(
+  fixture: any,
+  team:
+    | RecentTeam
+    | null
+    | undefined
+): "home" | "away" | null {
+  const identity = {
+    id:
+      recentTeamId(
+        team
+      ),
+    name:
+      recentTeamName(
+        team
+      ),
+  };
+
+  const homeMatch =
+    fixtureSideMatchesIdentity(
+      fixture,
+      "home",
+      identity
+    );
+
+  const awayMatch =
+    fixtureSideMatchesIdentity(
+      fixture,
+      "away",
+      identity
+    );
+
+  if (
+    homeMatch &&
+    !awayMatch
+  ) {
+    return "home";
+  }
+
+  if (
+    awayMatch &&
+    !homeMatch
+  ) {
+    return "away";
+  }
+
+  // 기존 helper를 최종 fallback으로 유지.
+  if (
+    sameTeam(
+      team,
+      fixture,
+      "home"
+    )
+  ) {
+    return "home";
+  }
+
+  if (
+    sameTeam(
+      team,
+      fixture,
+      "away"
+    )
+  ) {
+    return "away";
+  }
+
+  return null;
 }
 
 function rebuildHistoricalForm(
@@ -5111,18 +5384,25 @@ function rebuildHistoricalForm(
     const score = fixtureFinalScore(fixture);
     if (!score) continue;
 
-    let own: number | null = null;
-    let opponent: number | null = null;
+    const side =
+      fixtureTeamSideForBacktest(
+        fixture,
+        team
+      );
 
-    if (sameTeam(team, fixture, "home")) {
-      own = score.home;
-      opponent = score.away;
-    } else if (sameTeam(team, fixture, "away")) {
-      own = score.away;
-      opponent = score.home;
+    if (!side) {
+      continue;
     }
 
-    if (own === null || opponent === null) continue;
+    const own =
+      side === "home"
+        ? score.home
+        : score.away;
+
+    const opponent =
+      side === "home"
+        ? score.away
+        : score.home;
 
     played += 1;
     scored += own;
@@ -5165,6 +5445,7 @@ function sanitizeRecentTeamForBacktest(
       removed: 0,
       kept: 0,
       scored: 0,
+      unmatched: 0,
     };
   }
 
@@ -5271,6 +5552,15 @@ function sanitizeRecentTeamForBacktest(
     scored:
       fixtures.filter(
         (fixture: any) => fixtureFinalScore(fixture) !== null
+      ).length,
+    unmatched:
+      fixtures.filter(
+        (fixture: any) =>
+          fixtureFinalScore(fixture) !== null &&
+          fixtureTeamSideForBacktest(
+            fixture,
+            normalizedTeam
+          ) === null
       ).length,
   };
 }
@@ -5695,6 +5985,10 @@ function sanitizeMatchedForBacktest(
         selectedHomeName,
       selectedAwayTeamName:
         selectedAwayName,
+      unmatchedHomeFixtures:
+        home.unmatched,
+      unmatchedAwayFixtures:
+        away.unmatched,
       h2hPolicy:
         h2h.policy,
       resultFieldsStripped: true,
@@ -7632,7 +7926,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.3.8 의사결정 규칙</b><br />
+                    <b>V11.3.9 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -7643,7 +7937,7 @@ export default function Home() {
 
                   {currentSport === "야구" && backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.3.8 백테스트 안전장치 · Fixture ID 기반 Form 연결</h3>
+                      <h3>V11.3.9 백테스트 안전장치 · recent fixture 직접 Form 집계</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -7709,6 +8003,10 @@ export default function Home() {
                             {backtestAudit?.selectedHomeTeamName ?? "-"}
                             {" / "}
                             {backtestAudit?.selectedAwayTeamName ?? "-"}
+                            {" · 미식별 "}
+                            {backtestAudit?.unmatchedHomeFixtures ?? "-"}
+                            {"/"}
+                            {backtestAudit?.unmatchedAwayFixtures ?? "-"}
                           </div>
                         </div>
 
