@@ -973,19 +973,47 @@ function fixtureParticipant(
 function fixtureTeamId(fixture: any, side: "home" | "away") {
   const participant = fixtureParticipant(fixture, side);
   const sideTeam = side === "home" ? fixture?.homeTeam : fixture?.awayTeam;
+
+  const flatId =
+    side === "home"
+      ? fixture?.homeId
+      : fixture?.awayId;
+
   const id = Number(
-    fixture?.[side]?.id ?? sideTeam?.id ?? fixture?.teams?.[side]?.id ??
-    fixture?.fixture?.[side]?.id ?? participant?.id ?? participant?.team?.id
+    flatId ??
+    fixture?.[side]?.id ??
+    sideTeam?.id ??
+    fixture?.teams?.[side]?.id ??
+    fixture?.fixture?.[side]?.id ??
+    participant?.id ??
+    participant?.team?.id
   );
+
   return Number.isFinite(id) && id > 0 ? id : NaN;
 }
 
 function fixtureTeamName(fixture: any, side: "home" | "away") {
   const participant = fixtureParticipant(fixture, side);
   const sideTeam = side === "home" ? fixture?.homeTeam : fixture?.awayTeam;
+
+  const flatName =
+    side === "home"
+      ? fixture?.home
+      : fixture?.away;
+
   return String(
-    fixture?.[side]?.name ?? sideTeam?.name ?? fixture?.teams?.[side]?.name ??
-    fixture?.fixture?.[side]?.name ?? participant?.name ?? participant?.team?.name ?? ""
+    (
+      typeof flatName === "string"
+        ? flatName
+        : null
+    ) ??
+    fixture?.[side]?.name ??
+    sideTeam?.name ??
+    fixture?.teams?.[side]?.name ??
+    fixture?.fixture?.[side]?.name ??
+    participant?.name ??
+    participant?.team?.name ??
+    ""
   ).trim();
 }
 
@@ -5536,6 +5564,66 @@ function fixtureTeamSideForBacktest(
       ),
   };
 
+  const flatHomeId =
+    Number(
+      fixture?.homeId
+    );
+
+  const flatAwayId =
+    Number(
+      fixture?.awayId
+    );
+
+  if (
+    identity.id !== null &&
+    Number.isFinite(flatHomeId) &&
+    flatHomeId > 0 &&
+    flatHomeId === identity.id
+  ) {
+    return "home";
+  }
+
+  if (
+    identity.id !== null &&
+    Number.isFinite(flatAwayId) &&
+    flatAwayId > 0 &&
+    flatAwayId === identity.id
+  ) {
+    return "away";
+  }
+
+  const flatHomeName =
+    typeof fixture?.home === "string"
+      ? fixture.home
+      : "";
+
+  const flatAwayName =
+    typeof fixture?.away === "string"
+      ? fixture.away
+      : "";
+
+  if (
+    identity.name &&
+    flatHomeName &&
+    teamSimilarity(
+      identity.name,
+      flatHomeName
+    ) >= 0.62
+  ) {
+    return "home";
+  }
+
+  if (
+    identity.name &&
+    flatAwayName &&
+    teamSimilarity(
+      identity.name,
+      flatAwayName
+    ) >= 0.62
+  ) {
+    return "away";
+  }
+
   const homeMatch =
     fixtureSideMatchesIdentity(
       fixture,
@@ -5564,7 +5652,6 @@ function fixtureTeamSideForBacktest(
     return "away";
   }
 
-  // 기존 helper를 최종 fallback으로 유지.
   if (
     sameTeam(
       team,
@@ -8155,7 +8242,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.4.0 의사결정 규칙</b><br />
+                    <b>V11.4.1 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -8166,7 +8253,7 @@ export default function Home() {
 
                   {currentSport === "야구" && backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.4.0 백테스트 안전장치 · recent fixture RAW 구조 진단</h3>
+                      <h3>V11.4.1 백테스트 안전장치 · flat recent fixture Form 연결</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -8258,67 +8345,6 @@ export default function Home() {
                         현재시점 aggregate Form도 버리고 기준시각 이전 fixture만으로 Form/득실을 다시 계산합니다.
                         H2H가 경기목록 없이 집계값만 제공되면 미래정보 누출 위험 때문에 H2H를 사용하지 않습니다.
                         선발/라인업은 해당 Fixture의 경기 전 정보로 유지하며 실제 결과 비교는 별도 검증 단계까지 잠급니다.
-                      </div>
-                    </div>
-                  )}
-
-                  {currentSport === "야구" && backtestMode && (
-                    <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.4.0 recent fixture 구조 진단</h3>
-
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns:
-                            "repeat(auto-fit,minmax(300px,1fr))",
-                          gap: 8,
-                        }}
-                      >
-                        <div className="notice" style={{ margin: 0 }}>
-                          <b>NC recent fixture 1개</b>
-                          <pre
-                            style={{
-                              margin: "6px 0 0",
-                              whiteSpace: "pre-wrap",
-                              wordBreak: "break-word",
-                              fontSize: 9,
-                              lineHeight: 1.45,
-                            }}
-                          >
-                            {JSON.stringify(
-                              backtestAudit?.homeRecentFixtureShape ??
-                              null,
-                              null,
-                              2
-                            )}
-                          </pre>
-                        </div>
-
-                        <div className="notice" style={{ margin: 0 }}>
-                          <b>Samsung recent fixture 1개</b>
-                          <pre
-                            style={{
-                              margin: "6px 0 0",
-                              whiteSpace: "pre-wrap",
-                              wordBreak: "break-word",
-                              fontSize: 9,
-                              lineHeight: 1.45,
-                            }}
-                          >
-                            {JSON.stringify(
-                              backtestAudit?.awayRecentFixtureShape ??
-                              null,
-                              null,
-                              2
-                            )}
-                          </pre>
-                        </div>
-                      </div>
-
-                      <div className="notice" style={{ margin: "8px 0" }}>
-                        이 진단에는 fixture key와 팀 식별 후보(id/name/side)만 표시합니다.
-                        score/result/winner/goals/statistics 경로는 의도적으로 제외했습니다.
-                        두 JSON에서 팀 ID가 실제 어느 path에 있는지 확인하면 다음 버전에서 Form 집계를 그 경로에 직접 연결할 수 있습니다.
                       </div>
                     </div>
                   )}
