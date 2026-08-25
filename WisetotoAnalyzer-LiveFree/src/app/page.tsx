@@ -7877,7 +7877,8 @@ export default function Home() {
     );
 
   const backtestValidationTruth =
-    backtestMode
+    backtestMode &&
+    selectedBetman
       ? BACKTEST_VALIDATION_RESULTS[
           backtestValidationKey(
             selectedBetman
@@ -7887,9 +7888,11 @@ export default function Home() {
       : null;
 
   const selectedValidationMarkets =
-    marketRows(
-      selectedBetman
-    );
+    selectedBetman
+      ? marketRows(
+          selectedBetman
+        )
+      : [];
 
   const backtestValidationRows:
     BacktestMarketValidation[] =
@@ -9164,7 +9167,7 @@ export default function Home() {
             </div>
 
             <details className="uiDetail">
-              <summary>V11.7 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
+              <summary>V11.7.1 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
                   <h3>V11.7 계산 추적 · 데이터 가용성 + λ 교정</h3>
@@ -9185,7 +9188,7 @@ export default function Home() {
                   </div>
 
                   <div className="notice" style={{ margin: "0 0 8px", background: "#fff8e8" }}>
-                    <b>V11.7 의사결정 규칙</b><br />
+                    <b>V11.7.1 의사결정 규칙</b><br />
                     승무패·핸디는 시장/H2H 방향 충돌과 홈·원정 장소표본 부족을 위험점수에 반영합니다.
                     U/O·SUM에는 승패 방향충돌을 직접 적용하지 않습니다.
                     위험점수 35 이상 또는 EV 35% 이상 / 엣지 20%p 이상 극단값은 VALUE로 올리지 않고 WATCH로 격리합니다.
@@ -9450,7 +9453,7 @@ export default function Home() {
                     backtestMode &&
                     backtestValidationTruth && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V11.7 백테스트 결과 검증기</h3>
+                      <h3>V11.7.1 백테스트 결과 검증기</h3>
 
                       {!backtestResultRevealed ? (
                         <>
