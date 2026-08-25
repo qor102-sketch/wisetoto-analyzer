@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V12_1_1_NAVER_STATE_FIX_20260825
+// DEPLOY_MARKER_V12_2_NAVER_TEAM_MATCH_20260825
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -10266,7 +10266,7 @@ export default function Home() {
                   {currentSport === "야구" &&
                     backtestMode && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V12.1 네이버스포츠 경기전 선발/라인업 복원</h3>
+                      <h3>V12.2 네이버스포츠 경기 매칭 + 선발/라인업 복원</h3>
 
                       <div className="cards">
                         <div className="card">
@@ -10307,6 +10307,73 @@ export default function Home() {
                       {matched?.naverPregame?.error && (
                         <div className="notice" style={{ margin: "8px 0 0" }}>
                           네이버 진단: {matched.naverPregame.error}
+                        </div>
+                      )}
+
+                      {Array.isArray(
+                        matched?.naverPregame?.candidates
+                      ) &&
+                        matched.naverPregame.candidates.length > 0 && (
+                        <div
+                          style={{
+                            marginTop: 8,
+                            overflowX: "auto",
+                            border:
+                              "1px solid #e3e9f2",
+                            borderRadius: 9,
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns:
+                                "100px 110px 80px 110px 80px 90px 90px",
+                              gap: 6,
+                              padding: "6px 8px",
+                              minWidth: 700,
+                              background: "#eef4fb",
+                              fontSize: 9,
+                              fontWeight: 900,
+                            }}
+                          >
+                            <div>gameId</div>
+                            <div>홈 원본</div>
+                            <div>홈 코드</div>
+                            <div>원정 원본</div>
+                            <div>원정 코드</div>
+                            <div>홈 정규화</div>
+                            <div>원정 정규화</div>
+                          </div>
+
+                          {matched.naverPregame.candidates.map(
+                            (
+                              game: any,
+                              index: number
+                            ) => (
+                              <div
+                                key={`naver-candidate-${game.gameId}-${index}`}
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns:
+                                    "100px 110px 80px 110px 80px 90px 90px",
+                                  gap: 6,
+                                  padding: "6px 8px",
+                                  minWidth: 700,
+                                  borderTop:
+                                    "1px solid #edf1f6",
+                                  fontSize: 9,
+                                }}
+                              >
+                                <div><b>{game.gameId ?? "-"}</b></div>
+                                <div>{game.homeName ?? "-"}</div>
+                                <div>{game.homeCode ?? "-"}</div>
+                                <div>{game.awayName ?? "-"}</div>
+                                <div>{game.awayCode ?? "-"}</div>
+                                <div>{game.normalizedHome ?? "-"}</div>
+                                <div>{game.normalizedAway ?? "-"}</div>
+                              </div>
+                            )
+                          )}
                         </div>
                       )}
                     </div>
