@@ -1292,6 +1292,53 @@ const TEAM_SEARCH_ALIASES: Record<string, string[]> = {
   "키움": ["Kiwoom Heroes", "Kiwoom", "Kiwoom Heroes Baseball Club"],
   "키움히어로즈": ["Kiwoom Heroes", "Kiwoom", "Kiwoom Heroes Baseball Club"],
 
+  // NPB
+  "지바롯데마린스": ["Chiba Lotte Marines", "Lotte Marines", "Chiba Lotte", "Marines"],
+  "chibalottemarines": ["Chiba Lotte Marines", "Lotte Marines", "Chiba Lotte", "Marines"],
+  "소프트뱅크호크스": ["Fukuoka SoftBank Hawks", "SoftBank Hawks", "Softbank Hawks", "Fukuoka Softbank Hawks", "Hawks"],
+  "fuku오카소프트뱅크호크스": ["Fukuoka SoftBank Hawks", "SoftBank Hawks", "Softbank Hawks", "Fukuoka Softbank Hawks", "Hawks"],
+  "fukuokasoftbankhawks": ["Fukuoka SoftBank Hawks", "SoftBank Hawks", "Softbank Hawks", "Fukuoka Softbank Hawks", "Hawks"],
+  "softbankhawks": ["Fukuoka SoftBank Hawks", "SoftBank Hawks", "Softbank Hawks", "Fukuoka Softbank Hawks", "Hawks"],
+
+  "닛폰햄파이터스": ["Hokkaido Nippon-Ham Fighters", "Nippon Ham Fighters", "Nippon-Ham Fighters", "Fighters"],
+  "홋카이도닛폰햄파이터스": ["Hokkaido Nippon-Ham Fighters", "Nippon Ham Fighters", "Nippon-Ham Fighters", "Fighters"],
+  "hokkaidonipponhamfighters": ["Hokkaido Nippon-Ham Fighters", "Nippon Ham Fighters", "Nippon-Ham Fighters", "Fighters"],
+  "nipponhamfighters": ["Hokkaido Nippon-Ham Fighters", "Nippon Ham Fighters", "Nippon-Ham Fighters", "Fighters"],
+
+  "라쿠텐골든이글스": ["Tohoku Rakuten Golden Eagles", "Rakuten Golden Eagles", "Rakuten Eagles", "Golden Eagles"],
+  "도호쿠라쿠텐골든이글스": ["Tohoku Rakuten Golden Eagles", "Rakuten Golden Eagles", "Rakuten Eagles", "Golden Eagles"],
+  "tohokurakutengoldeneagles": ["Tohoku Rakuten Golden Eagles", "Rakuten Golden Eagles", "Rakuten Eagles", "Golden Eagles"],
+  "rakutengoldeneagles": ["Tohoku Rakuten Golden Eagles", "Rakuten Golden Eagles", "Rakuten Eagles", "Golden Eagles"],
+
+  "세이부라이온즈": ["Saitama Seibu Lions", "Seibu Lions", "Lions"],
+  "사이타마세이부라이온즈": ["Saitama Seibu Lions", "Seibu Lions", "Lions"],
+  "saitamaseibulions": ["Saitama Seibu Lions", "Seibu Lions", "Lions"],
+  "seibulions": ["Saitama Seibu Lions", "Seibu Lions", "Lions"],
+
+  "오릭스버팔로즈": ["Orix Buffaloes", "ORIX Buffaloes", "Buffaloes"],
+  "orixbuffaloes": ["Orix Buffaloes", "ORIX Buffaloes", "Buffaloes"],
+
+  "요미우리자이언츠": ["Yomiuri Giants", "Giants"],
+  "yomiurigiants": ["Yomiuri Giants", "Giants"],
+
+  "한신타이거즈": ["Hanshin Tigers", "Tigers"],
+  "hanshintigers": ["Hanshin Tigers", "Tigers"],
+
+  "히로시마도요카프": ["Hiroshima Toyo Carp", "Hiroshima Carp", "Carp"],
+  "hiroshimatoyocarp": ["Hiroshima Toyo Carp", "Hiroshima Carp", "Carp"],
+
+  "주니치드래곤즈": ["Chunichi Dragons", "Dragons"],
+  "chunichidragons": ["Chunichi Dragons", "Dragons"],
+
+  "야쿠르트스왈로즈": ["Tokyo Yakult Swallows", "Yakult Swallows", "Swallows"],
+  "도쿄야쿠르트스왈로즈": ["Tokyo Yakult Swallows", "Yakult Swallows", "Swallows"],
+  "tokyoyakultswallows": ["Tokyo Yakult Swallows", "Yakult Swallows", "Swallows"],
+
+  "요코하마dena베이스타스": ["Yokohama DeNA BayStars", "Yokohama BayStars", "DeNA BayStars", "BayStars"],
+  "요코하마디엔에이베이스타스": ["Yokohama DeNA BayStars", "Yokohama BayStars", "DeNA BayStars", "BayStars"],
+  "yokohamadenabaystars": ["Yokohama DeNA BayStars", "Yokohama BayStars", "DeNA BayStars", "BayStars"],
+
+
   // K League
   "대전하나시티즌": ["Daejeon Hana Citizen", "Daejeon Citizen"],
   "강원": ["Gangwon FC", "Gangwon"],
@@ -1321,9 +1368,23 @@ const TEAM_SEARCH_ALIASES: Record<string, string[]> = {
 };
 
 function teamAliases(name: string) {
-  const normalized = normalizeMatchName(name);
-  const aliases = TEAM_SEARCH_ALIASES[normalized] ?? [];
-  return [name, ...aliases].filter(Boolean);
+  const normalized =
+    normalizeMatchName(name);
+
+  const aliases =
+    TEAM_SEARCH_ALIASES[
+      normalized
+    ] ??
+    [];
+
+  return Array.from(
+    new Set(
+      [
+        name,
+        ...aliases,
+      ].filter(Boolean)
+    )
+  );
 }
 
 function searchQueryForTeam(name: string, aliases: string[]) {
