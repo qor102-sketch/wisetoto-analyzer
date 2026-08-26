@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_3_9_PRE_LOCK_VERIFY_SEPARATION_20260826
+// DEPLOY_MARKER_V13_3_9_FIX2_EXPLICIT_STAGE_CAST_20260826
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -618,7 +618,7 @@ type BacktestPredictionSnapshot = {
   league: string;
   gameDateMs: number;
   cutoffMs: number;
-  stage: string;
+  stage: "PRE" | "STARTER" | "LINEUP" | "READY";
   markets: any[];
   picks: Array<{
     key: string;
@@ -10706,10 +10706,12 @@ export default function Home() {
       );
     }
 
-    const stage =
-      analysisDirect.factors
-        ?.baseballAnalysisStage ??
-      "PRE";
+    const stage: "PRE" | "STARTER" | "LINEUP" | "READY" =
+      (
+        analysisDirect.factors
+          ?.baseballAnalysisStage ??
+        "PRE"
+      ) as "PRE" | "STARTER" | "LINEUP" | "READY";
 
     const markets =
       marketRows(game);
@@ -10746,7 +10748,8 @@ export default function Home() {
         gameDateMs:
           selectedStartMs,
         cutoffMs,
-        stage,
+        stage:
+          stage as BacktestPredictionSnapshot["stage"],
         markets:
           markets.map(
             (market: any) => ({
@@ -10994,7 +10997,7 @@ export default function Home() {
         gameLabel:
           snapshot.gameLabel,
         stage:
-          snapshot.stage,
+          snapshot.stage as SimpleBacktestRecord["stage"],
         market:
           pick.market,
         pick:
