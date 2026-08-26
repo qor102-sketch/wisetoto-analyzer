@@ -9445,46 +9445,154 @@ export default function Home() {
   async function loadBacktestCandidates() {
     if (backtestLibraryLoading) return;
     setBacktestLibraryLoading(true);
-    setStatus("과거 Betman 발매경기 후보 수집 중…");
-    try {
-      const response = await fetch("/api/betman?scope=past&sport=baseball&days=60", { cache: "no-store" });
-      const payload = await readApiResponse(response, "Betman 과거경기 후보 API");
-      if (!response.ok || !payload?.ok) throw new Error(readableError(payload?.error, "과거 Betman 경기 수집 실패"));
+    setStatus("Betman 과거 회차에서 KBO 백테스트 후보 탐색 중…");
 
-      const now = Date.now();
-      const candidates = getBetmanGames(payload)
-        .filter((game) => {
-          const start = gameTimeMs(game);
-          const markets = Array.isArray((game as any)?.markets) ? (game as any).markets : [];
-          const hasOdds = markets.some((market:any) => Array.isArray(market?.selections) && market.selections.some((selection:any) => Number(selection?.odds) > 1));
-          const leagueText = String((game as any)?.league ?? (game as any)?.sportName ?? "").toLowerCase();
-          const kboLike = leagueText.includes("kbo") || ["nc","삼성","두산","lg","kt","ssg","롯데","한화","키움","kia"].some((name) => `${String(game?.home ?? "")} ${String(game?.away ?? "")}`.toLowerCase().includes(name));
-          return Number.isFinite(start) && start < now - 3 * 60 * 60 * 1000 && hasOdds && kboLike;
-        })
-        .map((game:any) => ({
-          ...game,
-          backtestManual: false,
-          backtestSource: "Betman API 과거 발매행 · 결과정보 미포함",
-        }))
+    const isKboCandidate = (game:any) => {
+      const start = gameTimeMs(game);
+      const markets = Array.isArray(game?.markets) ? game.markets : [];
+      const hasOdds = markets.some(
+        (market:any) =>
+          Array.isArray(market?.selections) &&
+          market.selections.some((selection:any) => Number(selection?.odds) > 1)
+      );
+      const leagueText = String(
+        game?.league ?? game?.leagueName ?? game?.sportName ?? ""
+      ).toLowerCase();
+      const teamText =
+        `${String(game?.home ?? "")} ${String(game?.away ?? "")}`.toLowerCase();
+      const kboTeams = [
+        "nc","삼성","두산","lg","kt","ssg","롯데","한화","키움","kia",
+        "dinos","lions","bears","twins","wiz","landers","giants","eagles","heroes","tigers"
+      ];
+      const kboLike =
+        leagueText.includes("kbo") ||
+        kboTeams.some((name) => teamText.includes(name));
+
+      return (
+        Number.isFinite(start) &&
+        start < Date.now() - 3 * 60 * 60 * 1000 &&
+        hasOdds &&
+        kboLike
+      );
+    };
+
+    try {
+      const currentResponse = await fetch("/api/betman?scope=all", {
+        cache: "no-store",
+      });
+      const currentPayload = await readApiResponse(
+        currentResponse,
+        "Betman 현재 회차 API"
+      );
+      if (!currentResponse.ok || !currentPayload?.ok) {
+        throw new Error(
+          readableError(currentPayload?.error, "현재 Betman 회차 확인 실패")
+        );
+      }
+
+      const currentGmTs = Number(
+        currentPayload?.round?.gmTs ??
+        currentPayload?.data?.round?.gmTs
+      );
+
+      if (!Number.isFinite(currentGmTs) || currentGmTs <= 0) {
+        throw new Error("현재 Betman gmTs를 확인하지 못했습니다.");
+      }
+
+      const yearPrefix = Math.floor(currentGmTs / 10000);
+      const currentRound = currentGmTs % 10000;
+      const collected: any[] = [];
+      const seen = new Set<string>();
+      let scannedRounds = 0;
+      let successfulRounds = 0;
+
+      for (
+        let round = currentRound - 1;
+        round >= 1 && scannedRounds < 24 && collected.length < 30;
+        round--
+      ) {
+        const gmTs = yearPrefix * 10000 + round;
+        scannedRounds += 1;
+        setStatus(
+          `Betman 과거 회차 탐색 중 · ${gmTs} · KBO ${collected.length}/30경기`
+        );
+
+        try {
+          const response = await fetch(
+            `/api/betman?gmTs=${gmTs}&gmId=G101&scope=past&sport=baseball`,
+            { cache: "no-store" }
+          );
+          const payload = await readApiResponse(
+            response,
+            `Betman ${gmTs} 회차 API`
+          );
+          if (!response.ok || !payload?.ok) continue;
+
+          successfulRounds += 1;
+          const games = getBetmanGames(payload)
+            .filter(isKboCandidate)
+            .map((game:any) => ({
+              ...game,
+              betmanGmTs: gmTs,
+              backtestManual: false,
+              backtestSource:
+                `Betman G101 ${gmTs} 과거 회차 · 결과정보 미포함`,
+            }));
+
+          for (const game of games) {
+            const key = String(
+              game?.gameKey ??
+              game?.key ??
+              `${game?.home}|${game?.away}|${game?.gameDateMs ?? game?.gameDate}`
+            );
+            if (!key || seen.has(key)) continue;
+            seen.add(key);
+            collected.push(game);
+            if (collected.length >= 30) break;
+          }
+        } catch {
+          // 개별 회차 실패는 다음 회차 탐색을 계속한다.
+        }
+      }
+
+      const candidates = collected
         .sort((a,b) => gameTimeMs(b) - gameTimeMs(a))
-        .slice(0, 100);
+        .slice(0, 30);
 
       setBacktestGames((previous) => {
         const merged = new Map<string, BetmanMatch>();
-        for (const game of [...BACKTEST_BETMAN_GAMES, ...previous, ...candidates]) {
-          const key = String((game as any)?.gameKey ?? (game as any)?.key ?? `${game.home}|${game.away}|${game.gameDateMs ?? game.gameDate}`);
+        for (const game of [
+          ...BACKTEST_BETMAN_GAMES,
+          ...previous,
+          ...candidates,
+        ]) {
+          const key = String(
+            (game as any)?.gameKey ??
+            (game as any)?.key ??
+            `${game.home}|${game.away}|${game.gameDateMs ?? game.gameDate}`
+          );
           if (key) merged.set(key, game);
         }
-        const next = Array.from(merged.values()).sort((a,b) => gameTimeMs(b) - gameTimeMs(a));
+        const next = Array.from(merged.values()).sort(
+          (a,b) => gameTimeMs(b) - gameTimeMs(a)
+        );
         try {
-          window.localStorage.setItem(BACKTEST_GAME_LIBRARY_STORAGE_KEY, JSON.stringify(next));
+          window.localStorage.setItem(
+            BACKTEST_GAME_LIBRARY_STORAGE_KEY,
+            JSON.stringify(next)
+          );
         } catch {}
         return next;
       });
+
       setBacktestMode(true);
-      setStatus(candidates.length ? `과거 Betman 후보 ${candidates.length}경기 확인 · 백테스트 라이브러리에 병합` : "Betman 현재 응답에는 추가 과거 KBO 발매경기가 없습니다. 기존 저장 샘플은 유지됩니다.");
+      setStatus(
+        candidates.length
+          ? `과거 ${scannedRounds}회차 탐색 · 응답 ${successfulRounds}회차 · KBO ${candidates.length}경기 확보 · 백테스트 라이브러리에 저장`
+          : `과거 ${scannedRounds}회차를 조회했지만 KBO 발매경기를 찾지 못했습니다.`
+      );
     } catch (e:any) {
-      setStatus(readableError(e, "과거 Betman 경기 수집 실패"));
+      setStatus(readableError(e, "과거 Betman 회차 자동수집 실패"));
     } finally {
       setBacktestLibraryLoading(false);
     }
