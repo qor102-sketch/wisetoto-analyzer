@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_3_1_ACTUAL_GAME_ONE_ROW_UI_20260826
+// DEPLOY_MARKER_V13_3_5_SEQUENTIAL_BATCH_NO_RACE_20260826
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -9994,63 +9994,69 @@ export default function Home() {
       const selectedKey = gameKey(currentGame, games.indexOf(currentGame));
       if (selectedBetmanKey !== selectedKey || !selectedBetman || loading) return;
 
-      setBatchBacktest((previous) => ({ ...previous, phase: "WAIT_ANALYZE", phaseStartedAt: Date.now() }));
+      // 다음 경기로 넘어가기 전에 현재 경기의 전체 SportsAPI 상세 분석 요청이
+      // 완전히 끝나도록 기다린다. 중간 timeout 이동을 금지해 이전 경기 응답이
+      // 다음 경기 화면을 덮어쓰는 race condition을 차단한다.
+      setBatchBacktest((previous) => ({
+        ...previous,
+        phase: "WAIT_ANALYZE",
+        phaseStartedAt: Date.now(),
+      }));
+
       void analyzeSelected().then((ok) => {
-        if (!ok) advanceBatchBacktest(false);
-      });
-      return;
-    }
+        if (!ok) {
+          advanceBatchBacktest(false);
+          return;
+        }
 
-    if (batchBacktest.phase === "WAIT_ANALYZE") {
-      if (loading) return;
-
-      const fixtureId = Number(
-        matched?.fixtureId ??
-        matched?.selectedFixture?.id ??
-        matched?.fixture?.id
-      );
-
-      if (Number.isFinite(fixtureId) && actualMarketPicks.length > 0) {
         setBatchBacktest((previous) => ({
           ...previous,
           phase: "REVEAL",
           phaseStartedAt: Date.now(),
         }));
-        return;
-      }
+      });
+      return;
+    }
 
-      const elapsed = Date.now() - batchBacktest.phaseStartedAt;
-      const remaining = Math.max(0, 12_000 - elapsed);
-
-      if (remaining === 0) {
-        setStatus(
-          `자동 백테스트 ${displayNo}/${total} · 분석 데이터 부족으로 스킵 · ${currentGame.home} vs ${currentGame.away}`
-        );
-        advanceBatchBacktest(false);
-        return;
-      }
-
-      const timer = window.setTimeout(() => {
-        setStatus(
-          `자동 백테스트 ${displayNo}/${total} · 분석 응답 대기시간 초과로 스킵 · ${currentGame.home} vs ${currentGame.away}`
-        );
-        advanceBatchBacktest(false);
-      }, remaining);
-
-      return () => window.clearTimeout(timer);
+    if (batchBacktest.phase === "WAIT_ANALYZE") {
+      // analyzeSelected() Promise가 완료될 때까지 대기 전용.
+      // 여기서는 timeout/skip/다음 경기 이동을 절대 수행하지 않는다.
+      return;
     }
 
     if (batchBacktest.phase === "REVEAL") {
-      if (validationLoading || !actualMarketPicks.length) return;
+      if (validationLoading) return;
 
-      setBatchBacktest((previous) => ({ ...previous, phase: "WAIT_REVEAL", phaseStartedAt: Date.now() }));
+      if (!actualMarketPicks.length) {
+        // 분석 요청 자체는 이미 완료된 상태다. 파생 계산이 한 틱 뒤에도 없으면
+        // 이 경기만 실패 처리하고 다음 경기로 간다. 이전 요청은 남아 있지 않다.
+        const timer = window.setTimeout(() => {
+          if (!actualMarketPicks.length) {
+            setStatus(
+              `자동 백테스트 ${displayNo}/${total} · 분석 완료 후 시장 픽 미생성 · 스킵 · ${currentGame.home} vs ${currentGame.away}`
+            );
+            advanceBatchBacktest(false);
+          }
+        }, 800);
+        return () => window.clearTimeout(timer);
+      }
+
+      setBatchBacktest((previous) => ({
+        ...previous,
+        phase: "WAIT_REVEAL",
+        phaseStartedAt: Date.now(),
+      }));
+
       void revealBacktestResult().then((ok) => {
-        if (!ok) advanceBatchBacktest(false);
+        if (!ok) {
+          advanceBatchBacktest(false);
+        }
       });
       return;
     }
 
     if (batchBacktest.phase === "WAIT_REVEAL") {
+      // 결과 API 요청이 실제로 끝날 때까지 기다린다.
       if (validationLoading) return;
 
       if (
@@ -10060,28 +10066,21 @@ export default function Home() {
       ) {
         const timer = window.setTimeout(
           () => advanceBatchBacktest(true),
-          120
+          150
         );
         return () => window.clearTimeout(timer);
       }
 
-      const elapsed = Date.now() - batchBacktest.phaseStartedAt;
-      const remaining = Math.max(0, 12_000 - elapsed);
-
-      if (remaining === 0) {
-        setStatus(
-          `자동 백테스트 ${displayNo}/${total} · 실제 결과 검증 데이터 부족으로 스킵 · ${currentGame.home} vs ${currentGame.away}`
-        );
-        advanceBatchBacktest(false);
-        return;
-      }
-
+      // validationLoading=false인데 검증 데이터가 없다면 결과 조회가 종료된 뒤의
+      // 실제 실패이므로 다음 경기로 진행한다. 진행 중 요청을 잘라내지 않는다.
       const timer = window.setTimeout(() => {
-        setStatus(
-          `자동 백테스트 ${displayNo}/${total} · 결과 검증 대기시간 초과로 스킵 · ${currentGame.home} vs ${currentGame.away}`
-        );
-        advanceBatchBacktest(false);
-      }, remaining);
+        if (!validationLoading) {
+          setStatus(
+            `자동 백테스트 ${displayNo}/${total} · 실제 결과 검증 데이터 없음 · 스킵 · ${currentGame.home} vs ${currentGame.away}`
+          );
+          advanceBatchBacktest(false);
+        }
+      }, 800);
 
       return () => window.clearTimeout(timer);
     }
