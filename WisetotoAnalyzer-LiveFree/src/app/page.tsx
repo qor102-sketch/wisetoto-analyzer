@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_4_0_VERIFY_DEBUG_RATE_BACKOFF_20260826
+// DEPLOY_MARKER_V13_4_1_SCORE_OBJECT_PARSE_MATCH_DEBUG_20260826
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -10624,11 +10624,16 @@ export default function Home() {
       !matchResponse.ok ||
       !matchData?.ok
     ) {
+      const matchDebug =
+        matchData?.debug
+          ? ` · debug=${JSON.stringify(matchData.debug)}`
+          : "";
+
       throw new Error(
         `PRE_MATCH · ${readableError(
           matchData?.error,
           "SportsAPI 동일경기 자동매칭 실패"
-        )}`
+        )}${matchDebug}`
       );
     }
 
