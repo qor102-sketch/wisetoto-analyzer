@@ -1267,6 +1267,7 @@ const TEAM_SEARCH_ALIASES: Record<string, string[]> = {
 
   "롯데": ["Lotte Giants", "Lotte", "Lotte Giants Baseball Club"],
   "롯데자이언츠": ["Lotte Giants", "Lotte", "Lotte Giants Baseball Club"],
+  "lottegiants": ["Lotte Giants", "Lotte", "Lotte Giants Baseball Club"],
 
   "삼성": ["Samsung Lions", "Samsung", "Samsung Lions Baseball Club"],
   "삼성라이온즈": ["Samsung Lions", "Samsung", "Samsung Lions Baseball Club"],
@@ -1281,6 +1282,7 @@ const TEAM_SEARCH_ALIASES: Record<string, string[]> = {
 
   "kia": ["KIA Tigers", "Kia Tigers", "KIA Tigers Baseball Club", "KIA"],
   "kia타이거즈": ["KIA Tigers", "Kia Tigers", "KIA Tigers Baseball Club", "KIA"],
+  "kiatigers": ["KIA Tigers", "Kia Tigers", "KIA Tigers Baseball Club", "KIA"],
   "기아": ["KIA Tigers", "Kia Tigers", "KIA Tigers Baseball Club", "KIA"],
   "기아타이거즈": ["KIA Tigers", "Kia Tigers", "KIA Tigers Baseball Club", "KIA"],
 
