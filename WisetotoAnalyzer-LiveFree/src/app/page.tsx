@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_4_1_SCORE_OBJECT_PARSE_MATCH_DEBUG_20260826
+// DEPLOY_MARKER_V13_4_2_PRE_PREDICT_DEBUG_NPB_ALIASES_20260826
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -10793,8 +10793,52 @@ export default function Home() {
       );
 
     if (!picks.length) {
+      const marketRowsDebug =
+        marketRows(game);
+
+      const marketDebug = {
+        fixtureId,
+        sport: currentSport,
+        marketCount:
+          Array.isArray(marketRowsDebug)
+            ? marketRowsDebug.length
+            : 0,
+        marketLabels:
+          Array.isArray(marketRowsDebug)
+            ? marketRowsDebug
+                .map(
+                  (market: any) =>
+                    String(
+                      market?.label ??
+                      market?.marketName ??
+                      market?.type ??
+                      "-"
+                    )
+                )
+                .slice(0, 20)
+            : [],
+        hasRecent:
+          Boolean(recent),
+        hasH2h:
+          Boolean(directH2h),
+        analysisStage:
+          analysisDirect.factors
+            ?.baseballAnalysisStage ??
+          "PRE",
+        home:
+          String(
+            game?.home ?? ""
+          ),
+        away:
+          String(
+            game?.away ?? ""
+          ),
+      };
+
       throw new Error(
-        `PRE_PREDICT · Fixture #${fixtureId} 분석은 완료됐지만 시장 픽이 생성되지 않았습니다.`
+        `PRE_PREDICT · Fixture #${fixtureId} 분석은 완료됐지만 시장 픽이 생성되지 않았습니다. · debug=${JSON.stringify(
+          marketDebug
+        )}`
       );
     }
 
