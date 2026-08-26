@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V12_9_STARTER_BAYESIAN_20260825
+// DEPLOY_MARKER_V13_4_4_MATCH_SEARCH_FIXTURE_CACHE_20260826
 // WISETOTO_MATCH_SELECTED_V1_20260823
 const BASE = "https://api.sportsapi.app/v2";
 
@@ -45,6 +45,70 @@ let lastRequestAt = 0;
  * 프로세스 내부에서도 기억합니다.
  */
 let rateLimitBlockedUntil = 0;
+
+const SEARCH_CACHE_TTL_MS =
+  24 * 60 * 60 * 1000;
+
+const FIXTURE_CACHE_TTL_MS =
+  30 * 60 * 1000;
+
+type CacheEntry<T> = {
+  value: T;
+  expiresAt: number;
+};
+
+const searchCache =
+  new Map<
+    string,
+    CacheEntry<any>
+  >();
+
+const teamFixtureCache =
+  new Map<
+    string,
+    CacheEntry<{
+      fixtures: AnyObj[];
+      debug: AnyObj[];
+    }>
+  >();
+
+function cacheGet<T>(
+  map: Map<string, CacheEntry<T>>,
+  key: string
+): T | null {
+  const entry =
+    map.get(key);
+
+  if (!entry) {
+    return null;
+  }
+
+  if (
+    entry.expiresAt <=
+    Date.now()
+  ) {
+    map.delete(key);
+    return null;
+  }
+
+  return entry.value;
+}
+
+function cacheSet<T>(
+  map: Map<string, CacheEntry<T>>,
+  key: string,
+  value: T,
+  ttlMs: number
+) {
+  map.set(
+    key,
+    {
+      value,
+      expiresAt:
+        Date.now() + ttlMs,
+    }
+  );
+}
 
 function arr(x: any): any[] {
   if (Array.isArray(x)) return x;
@@ -638,10 +702,8 @@ async function discoverTeams(
   ) {
     try {
       const result =
-        await api(
-          `/search?q=${encodeURIComponent(
-            query
-          )}`,
+        await cachedTeamSearch(
+          query,
           key
         );
 
@@ -743,6 +805,32 @@ async function getTeamFixtures(
   key: string,
   type: "recent" | "upcoming" = "upcoming"
 ) {
+  const cacheKey =
+    `${teamId}|${type}`;
+
+  const cached =
+    cacheGet(
+      teamFixtureCache,
+      cacheKey
+    );
+
+  if (cached) {
+    return {
+      fixtures:
+        cached.fixtures,
+      debug: [
+        {
+          cacheHit: true,
+          teamId,
+          type,
+          count:
+            cached.fixtures.length,
+        },
+        ...cached.debug,
+      ],
+    };
+  }
+
   const debug: AnyObj[] = [];
 
   try {
@@ -757,41 +845,42 @@ async function getTeamFixtures(
 
     debug.push({
       page: 0,
-
       ok: true,
-
       count:
         fixtures.length,
-
+      cacheHit: false,
       rateLimit:
         result.headers,
     });
 
-    return {
+    const value = {
       fixtures,
-
       debug,
     };
+
+    cacheSet(
+      teamFixtureCache,
+      cacheKey,
+      value,
+      FIXTURE_CACHE_TTL_MS
+    );
+
+    return value;
   } catch (e: any) {
     debug.push({
       page: 0,
-
       ok: false,
-
       count: 0,
-
+      cacheHit: false,
       error:
         e?.message ||
         "fixture 조회 실패",
-
       status:
         e?.status ??
         null,
-
       retryAfterMs:
         e?.retryAfterMs ??
         null,
-
       rateLimit:
         e?.rateLimit ??
         null,
@@ -799,7 +888,6 @@ async function getTeamFixtures(
 
     return {
       fixtures: [],
-
       debug,
     };
   }
@@ -1476,6 +1564,50 @@ function fixtureMatchScore(
   };
 }
 
+async function cachedTeamSearch(
+  query: string,
+  key: string
+) {
+  const cacheKey =
+    normalizeMatchName(query);
+
+  const cached =
+    cacheGet(
+      searchCache,
+      cacheKey
+    );
+
+  if (cached) {
+    return {
+      ...cached,
+      cacheHit: true,
+    };
+  }
+
+  const result =
+    await api(
+      `/search?q=${encodeURIComponent(
+        query
+      )}`,
+      key
+    );
+
+  const value = {
+    data: result.data,
+    headers: result.headers,
+    cacheHit: false,
+  };
+
+  cacheSet(
+    searchCache,
+    cacheKey,
+    value,
+    SEARCH_CACHE_TTL_MS
+  );
+
+  return value;
+}
+
 async function findSportsFixtureForBetman(
   betmanGame: AnyObj,
   key: string
@@ -1513,10 +1645,11 @@ async function findSportsFixtureForBetman(
     let searchResult: any;
 
     try {
-      searchResult = await api(
-        `/search?q=${encodeURIComponent(plan.query)}`,
-        key
-      );
+      searchResult =
+        await cachedTeamSearch(
+          plan.query,
+          key
+        );
     } catch (e: any) {
       debug.push({
         stage: "search",
@@ -1557,6 +1690,10 @@ async function findSportsFixtureForBetman(
         sport: x?.sport ?? null,
       })),
       rateLimit: searchResult.headers,
+      cacheHit:
+        Boolean(
+          searchResult.cacheHit
+        ),
     });
 
     if (!chosen) continue;
