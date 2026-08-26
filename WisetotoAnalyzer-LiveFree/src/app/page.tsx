@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_4_2_PRE_PREDICT_DEBUG_NPB_ALIASES_20260826
+// DEPLOY_MARKER_V13_4_3_MARKET_PICK_DIAGNOSTICS_20260826
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -10796,27 +10796,164 @@ export default function Home() {
       const marketRowsDebug =
         marketRows(game);
 
+      const factorDebug = {
+        hasRealData:
+          Boolean(
+            analysisDirect.factors
+              ?.hasRealData
+          ),
+        formUsed:
+          Boolean(
+            analysisDirect.factors
+              ?.formUsed
+          ),
+        h2hUsed:
+          Boolean(
+            analysisDirect.factors
+              ?.h2hUsed
+          ),
+        scoringUsed:
+          Boolean(
+            analysisDirect.factors
+              ?.scoringUsed
+          ),
+        expectedHomeScore:
+          analysisDirect.factors
+            ?.expectedHomeScore ??
+          null,
+        expectedAwayScore:
+          analysisDirect.factors
+            ?.expectedAwayScore ??
+          null,
+        expectedTotal:
+          analysisDirect.factors
+            ?.expectedTotal ??
+          null,
+        expectedMargin:
+          analysisDirect.factors
+            ?.expectedMargin ??
+          null,
+        homeRecentSample:
+          analysisDirect.factors
+            ?.homeRecentSample ??
+          0,
+        awayRecentSample:
+          analysisDirect.factors
+            ?.awayRecentSample ??
+          0,
+      };
+
+      const perMarket =
+        Array.isArray(
+          game?.markets
+        )
+          ? game.markets
+              .map(
+                (
+                  market: any,
+                  index: number
+                ) => {
+                  const selections =
+                    Array.isArray(
+                      market?.selections
+                    )
+                      ? market.selections
+                      : [];
+
+                  const type =
+                    String(
+                      market?.type ??
+                      ""
+                    ).toLowerCase();
+
+                  const betName =
+                    String(
+                      market?.betName ??
+                      market?.displayName ??
+                      market?.betTypeName ??
+                      ""
+                    );
+
+                  const line =
+                    marketNumber(
+                      market
+                    );
+
+                  return {
+                    index,
+                    key:
+                      marketStableKey(
+                        market,
+                        index
+                      ),
+                    type,
+                    betName,
+                    line,
+                    usableOdds:
+                      selections.filter(
+                        (selection: any) =>
+                          Number(
+                            selection
+                              ?.odds
+                          ) > 1
+                      ).length,
+                    selections:
+                      selections
+                        .map(
+                          (
+                            selection: any
+                          ) => ({
+                            label:
+                              selectionLabel(
+                                selection
+                              ),
+                            side:
+                              String(
+                                selection
+                                  ?.side ??
+                                ""
+                              ),
+                            identity:
+                              selectionIdentity(
+                                selection
+                              ),
+                            odds:
+                              Number.isFinite(
+                                Number(
+                                  selection
+                                    ?.odds
+                                )
+                              )
+                                ? Number(
+                                    selection
+                                      .odds
+                                  )
+                                : null,
+                          })
+                        )
+                        .slice(
+                          0,
+                          5
+                        ),
+                  };
+                }
+              )
+              .slice(
+                0,
+                20
+              )
+          : [];
+
       const marketDebug = {
         fixtureId,
-        sport: currentSport,
+        sport:
+          currentSport,
         marketCount:
-          Array.isArray(marketRowsDebug)
+          Array.isArray(
+            marketRowsDebug
+          )
             ? marketRowsDebug.length
             : 0,
-        marketLabels:
-          Array.isArray(marketRowsDebug)
-            ? marketRowsDebug
-                .map(
-                  (market: any) =>
-                    String(
-                      market?.label ??
-                      market?.marketName ??
-                      market?.type ??
-                      "-"
-                    )
-                )
-                .slice(0, 20)
-            : [],
         hasRecent:
           Boolean(recent),
         hasH2h:
@@ -10825,6 +10962,10 @@ export default function Home() {
           analysisDirect.factors
             ?.baseballAnalysisStage ??
           "PRE",
+        factors:
+          factorDebug,
+        markets:
+          perMarket,
         home:
           String(
             game?.home ?? ""
