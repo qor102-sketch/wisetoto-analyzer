@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_4_3_MARKET_PICK_DIAGNOSTICS_20260826
+// DEPLOY_MARKER_V13_4_4_API_CACHE_QUOTA_GUARD_20260826
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -10502,10 +10502,14 @@ export default function Home() {
           ""
         ).toLowerCase();
 
+      const dailyQuotaExceeded =
+        errorText.includes("daily quota");
+
       const rateLimited =
         response.status === 429 ||
         errorText.includes("rate limit") ||
-        errorText.includes("too many requests");
+        errorText.includes("too many requests") ||
+        dailyQuotaExceeded;
 
       if (!rateLimited) {
         return {
@@ -10515,7 +10519,12 @@ export default function Home() {
         };
       }
 
-      if (attempt >= retries) {
+      // 일일 quota 소진은 몇 초 기다려도 복구되지 않으므로
+      // 같은 요청을 반복해서 quota/시간을 더 쓰지 않는다.
+      if (
+        dailyQuotaExceeded ||
+        attempt >= retries
+      ) {
         break;
       }
 
