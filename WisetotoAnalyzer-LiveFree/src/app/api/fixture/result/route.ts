@@ -1,4 +1,4 @@
-// V13.3.9 validation-only result endpoint. PRE prediction must be locked before this route is called.
+// V13.4.0 validation-only result endpoint with safe score-path diagnostics. PRE prediction must be locked before this route is called.
 // This route is intentionally separate from the prediction path and is called
 // only after the user explicitly locks the prediction and opens validation.
 
@@ -89,6 +89,85 @@ function directScorePair(node: any) {
   return null;
 }
 
+
+function collectScoreLikePaths(
+  node: any,
+  path = "$",
+  depth = 0,
+  out: Array<{ path: string; keys: string[]; preview: Record<string, any> }> = []
+) {
+  if (
+    node === null ||
+    node === undefined ||
+    depth > 5 ||
+    out.length >= 80
+  ) {
+    return out;
+  }
+
+  if (Array.isArray(node)) {
+    for (let i = 0; i < Math.min(node.length, 8); i += 1) {
+      collectScoreLikePaths(
+        node[i],
+        `${path}[${i}]`,
+        depth + 1,
+        out
+      );
+      if (out.length >= 80) break;
+    }
+    return out;
+  }
+
+  if (typeof node !== "object") {
+    return out;
+  }
+
+  const keys = Object.keys(node);
+  const scoreishKeys = keys.filter((key) =>
+    /(score|scores|goal|run|point|result|final|home|away|local|visitor|inning|period|quarter|set)/i.test(
+      key
+    )
+  );
+
+  if (scoreishKeys.length) {
+    const preview: Record<string, any> = {};
+    for (const key of scoreishKeys.slice(0, 12)) {
+      const value = node[key];
+      preview[key] =
+        value === null ||
+        ["string", "number", "boolean"].includes(typeof value)
+          ? value
+          : Array.isArray(value)
+            ? `[array:${value.length}]`
+            : `[object:${Object.keys(value ?? {}).slice(0, 8).join(",")}]`;
+    }
+
+    out.push({
+      path,
+      keys: scoreishKeys.slice(0, 20),
+      preview,
+    });
+  }
+
+  for (const key of keys.slice(0, 30)) {
+    const value = node[key];
+    if (
+      value &&
+      typeof value === "object"
+    ) {
+      collectScoreLikePaths(
+        value,
+        `${path}.${key}`,
+        depth + 1,
+        out
+      );
+      if (out.length >= 80) break;
+    }
+  }
+
+  return out;
+}
+
 function findFinalScore(root: any) {
   const seen = new Set<any>();
   const queue: Array<{ value: any; path: string; depth: number }> = [{ value: root, path: "root", depth: 0 }];
@@ -155,6 +234,10 @@ export async function GET(req: Request) {
         debug: {
           rootKeys,
           dataKeys,
+          scoreLikePaths:
+            collectScoreLikePaths(
+              payload
+            ).slice(0, 40),
           validationOnly: true,
         },
       }, { status: 422 });
