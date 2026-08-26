@@ -1,4 +1,4 @@
-// V13.4.0 validation-only result endpoint with safe score-path diagnostics. PRE prediction must be locked before this route is called.
+// V13.4.1 validation-only result endpoint with object score parser and safe diagnostics. PRE prediction must be locked before this route is called.
 // This route is intentionally separate from the prediction path and is called
 // only after the user explicitly locks the prediction and opens validation.
 
@@ -7,6 +7,56 @@ type AnyObj = Record<string, any>;
 function num(value: any): number | null {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function scoreNodeValue(node: any): { value: number; hint: string } | null {
+  const direct = num(node);
+  if (direct !== null && direct >= 0) {
+    return { value: direct, hint: "direct" };
+  }
+
+  if (!node || typeof node !== "object" || Array.isArray(node)) {
+    return null;
+  }
+
+  for (const key of [
+    "current",
+    "display",
+    "total",
+    "overall",
+    "score",
+    "runs",
+    "goals",
+    "points",
+  ]) {
+    const value = num(node?.[key]);
+    if (value !== null && value >= 0) {
+      return { value, hint: key };
+    }
+  }
+
+  const periods =
+    node?.periods &&
+    typeof node.periods === "object" &&
+    !Array.isArray(node.periods)
+      ? node.periods
+      : null;
+
+  if (periods) {
+    const values = Object.entries(periods)
+      .filter(([key]) => /^period[1-9]\d*$/i.test(key))
+      .map(([, value]) => num(value))
+      .filter((value): value is number => value !== null && value >= 0);
+
+    if (values.length) {
+      return {
+        value: values.reduce((sum, value) => sum + value, 0),
+        hint: "periods-sum",
+      };
+    }
+  }
+
+  return null;
 }
 
 function directScorePair(node: any) {
@@ -22,10 +72,16 @@ function directScorePair(node: any) {
   ];
 
   for (const [homeKey, awayKey] of directPairs) {
-    const homeScore = num(node?.[homeKey]);
-    const awayScore = num(node?.[awayKey]);
-    if (homeScore !== null && awayScore !== null && homeScore >= 0 && awayScore >= 0) {
-      return { homeScore, awayScore, pathHint: `${homeKey}/${awayKey}` };
+    const homeParsed = scoreNodeValue(node?.[homeKey]);
+    const awayParsed = scoreNodeValue(node?.[awayKey]);
+
+    if (homeParsed && awayParsed) {
+      return {
+        homeScore: homeParsed.value,
+        awayScore: awayParsed.value,
+        pathHint:
+          `${homeKey}.${homeParsed.hint}/${awayKey}.${awayParsed.hint}`,
+      };
     }
   }
 
@@ -47,14 +103,16 @@ function directScorePair(node: any) {
 
       const homeNode = container?.[homeKey];
       const awayNode = container?.[awayKey];
-      if (homeNode && awayNode && typeof homeNode === "object" && typeof awayNode === "object") {
-        for (const key of ["total", "current", "overall", "score", "runs", "goals", "points"]) {
-          const homeScore = num(homeNode?.[key]);
-          const awayScore = num(awayNode?.[key]);
-          if (homeScore !== null && awayScore !== null && homeScore >= 0 && awayScore >= 0) {
-            return { homeScore, awayScore, pathHint: `${hint}.${homeKey}.${key}/${awayKey}.${key}` };
-          }
-        }
+      const homeParsed = scoreNodeValue(homeNode);
+      const awayParsed = scoreNodeValue(awayNode);
+
+      if (homeParsed && awayParsed) {
+        return {
+          homeScore: homeParsed.value,
+          awayScore: awayParsed.value,
+          pathHint:
+            `${hint}.${homeKey}.${homeParsed.hint}/${awayKey}.${awayParsed.hint}`,
+        };
       }
     }
 
