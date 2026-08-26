@@ -8881,6 +8881,7 @@ type BatchBacktestState = {
   phase: BatchBacktestPhase;
   completed: number;
   failed: number;
+  phaseStartedAt: number;
 };
 
 export default function Home() {
@@ -8913,6 +8914,7 @@ export default function Home() {
       phase: "IDLE",
       completed: 0,
       failed: 0,
+      phaseStartedAt: Date.now(),
     });
   const [betmanGames, setBetmanGames] = useState<BetmanMatch[]>([]);
   const [betmanDiagnostics, setBetmanDiagnostics] = useState<any>(null);
@@ -9983,7 +9985,7 @@ export default function Home() {
     if (batchBacktest.phase === "SELECT") {
       setBacktestResultRevealed(false);
       chooseGame(currentGame, games.indexOf(currentGame));
-      setBatchBacktest((previous) => ({ ...previous, phase: "ANALYZE" }));
+      setBatchBacktest((previous) => ({ ...previous, phase: "ANALYZE", phaseStartedAt: Date.now() }));
       setStatus(`자동 백테스트 ${displayNo}/${total} · 경기 선택 · ${currentGame.home} vs ${currentGame.away}`);
       return;
     }
@@ -9992,7 +9994,7 @@ export default function Home() {
       const selectedKey = gameKey(currentGame, games.indexOf(currentGame));
       if (selectedBetmanKey !== selectedKey || !selectedBetman || loading) return;
 
-      setBatchBacktest((previous) => ({ ...previous, phase: "WAIT_ANALYZE" }));
+      setBatchBacktest((previous) => ({ ...previous, phase: "WAIT_ANALYZE", phaseStartedAt: Date.now() }));
       void analyzeSelected().then((ok) => {
         if (!ok) advanceBatchBacktest(false);
       });
@@ -10001,18 +10003,47 @@ export default function Home() {
 
     if (batchBacktest.phase === "WAIT_ANALYZE") {
       if (loading) return;
-      const fixtureId = Number(matched?.fixtureId ?? matched?.selectedFixture?.id ?? matched?.fixture?.id);
-      if (!Number.isFinite(fixtureId)) return;
-      if (!actualMarketPicks.length) return;
 
-      setBatchBacktest((previous) => ({ ...previous, phase: "REVEAL" }));
-      return;
+      const fixtureId = Number(
+        matched?.fixtureId ??
+        matched?.selectedFixture?.id ??
+        matched?.fixture?.id
+      );
+
+      if (Number.isFinite(fixtureId) && actualMarketPicks.length > 0) {
+        setBatchBacktest((previous) => ({
+          ...previous,
+          phase: "REVEAL",
+          phaseStartedAt: Date.now(),
+        }));
+        return;
+      }
+
+      const elapsed = Date.now() - batchBacktest.phaseStartedAt;
+      const remaining = Math.max(0, 12_000 - elapsed);
+
+      if (remaining === 0) {
+        setStatus(
+          `자동 백테스트 ${displayNo}/${total} · 분석 데이터 부족으로 스킵 · ${currentGame.home} vs ${currentGame.away}`
+        );
+        advanceBatchBacktest(false);
+        return;
+      }
+
+      const timer = window.setTimeout(() => {
+        setStatus(
+          `자동 백테스트 ${displayNo}/${total} · 분석 응답 대기시간 초과로 스킵 · ${currentGame.home} vs ${currentGame.away}`
+        );
+        advanceBatchBacktest(false);
+      }, remaining);
+
+      return () => window.clearTimeout(timer);
     }
 
     if (batchBacktest.phase === "REVEAL") {
       if (validationLoading || !actualMarketPicks.length) return;
 
-      setBatchBacktest((previous) => ({ ...previous, phase: "WAIT_REVEAL" }));
+      setBatchBacktest((previous) => ({ ...previous, phase: "WAIT_REVEAL", phaseStartedAt: Date.now() }));
       void revealBacktestResult().then((ok) => {
         if (!ok) advanceBatchBacktest(false);
       });
@@ -10021,10 +10052,37 @@ export default function Home() {
 
     if (batchBacktest.phase === "WAIT_REVEAL") {
       if (validationLoading) return;
-      if (!backtestResultRevealed || !backtestValidationTruth || !simpleCurrentRecords.length) return;
 
-      // simpleCurrentRecords 저장 effect가 localStorage에 반영될 시간을 한 틱 확보한다.
-      const timer = window.setTimeout(() => advanceBatchBacktest(true), 80);
+      if (
+        backtestResultRevealed &&
+        backtestValidationTruth &&
+        simpleCurrentRecords.length
+      ) {
+        const timer = window.setTimeout(
+          () => advanceBatchBacktest(true),
+          120
+        );
+        return () => window.clearTimeout(timer);
+      }
+
+      const elapsed = Date.now() - batchBacktest.phaseStartedAt;
+      const remaining = Math.max(0, 12_000 - elapsed);
+
+      if (remaining === 0) {
+        setStatus(
+          `자동 백테스트 ${displayNo}/${total} · 실제 결과 검증 데이터 부족으로 스킵 · ${currentGame.home} vs ${currentGame.away}`
+        );
+        advanceBatchBacktest(false);
+        return;
+      }
+
+      const timer = window.setTimeout(() => {
+        setStatus(
+          `자동 백테스트 ${displayNo}/${total} · 결과 검증 대기시간 초과로 스킵 · ${currentGame.home} vs ${currentGame.away}`
+        );
+        advanceBatchBacktest(false);
+      }, remaining);
+
       return () => window.clearTimeout(timer);
     }
   }, [
@@ -10492,6 +10550,7 @@ export default function Home() {
       phase: "SELECT",
       completed: 0,
       failed: 0,
+      phaseStartedAt: Date.now(),
     });
     setStatus(`30경기 자동 백테스트 시작 · KBO 실제경기 ${games.length}경기`);
   }
@@ -10510,6 +10569,7 @@ export default function Home() {
           phase: "IDLE",
           completed,
           failed,
+          phaseStartedAt: Date.now(),
         };
       }
       return {
@@ -10518,6 +10578,7 @@ export default function Home() {
         phase: "SELECT",
         completed,
         failed,
+        phaseStartedAt: Date.now(),
       };
     });
   }
