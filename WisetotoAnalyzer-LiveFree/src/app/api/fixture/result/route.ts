@@ -1,4 +1,4 @@
-// V13.2.1 validation-only result endpoint.
+// V13.3.9 validation-only result endpoint. PRE prediction must be locked before this route is called.
 // This route is intentionally separate from the prediction path and is called
 // only after the user explicitly locks the prediction and opens validation.
 
@@ -12,15 +12,16 @@ function num(value: any): number | null {
 function directScorePair(node: any) {
   if (!node || typeof node !== "object" || Array.isArray(node)) return null;
 
-  const pairs = [
+  const directPairs = [
     ["homeScore", "awayScore"],
     ["home_score", "away_score"],
     ["scoreHome", "scoreAway"],
     ["homeGoals", "awayGoals"],
     ["homeRuns", "awayRuns"],
+    ["localteamScore", "visitorteamScore"],
   ];
 
-  for (const [homeKey, awayKey] of pairs) {
+  for (const [homeKey, awayKey] of directPairs) {
     const homeScore = num(node?.[homeKey]);
     const awayScore = num(node?.[awayKey]);
     if (homeScore !== null && awayScore !== null && homeScore >= 0 && awayScore >= 0) {
@@ -28,14 +29,62 @@ function directScorePair(node: any) {
     }
   }
 
-  const score = node?.score ?? node?.scores ?? null;
-  if (score && typeof score === "object" && !Array.isArray(score)) {
-    const homeScore = num(score?.home ?? score?.homeScore ?? score?.localteam ?? score?.homeTeam);
-    const awayScore = num(score?.away ?? score?.awayScore ?? score?.visitorteam ?? score?.awayTeam);
-    if (homeScore !== null && awayScore !== null && homeScore >= 0 && awayScore >= 0) {
-      return { homeScore, awayScore, pathHint: "score.home/away" };
+  const pairFromContainer = (container: any, hint: string) => {
+    if (!container || typeof container !== "object" || Array.isArray(container)) return null;
+
+    const simplePairs = [
+      ["home", "away"],
+      ["localteam", "visitorteam"],
+      ["homeTeam", "awayTeam"],
+    ];
+
+    for (const [homeKey, awayKey] of simplePairs) {
+      const directHome = num(container?.[homeKey]);
+      const directAway = num(container?.[awayKey]);
+      if (directHome !== null && directAway !== null && directHome >= 0 && directAway >= 0) {
+        return { homeScore: directHome, awayScore: directAway, pathHint: `${hint}.${homeKey}/${awayKey}` };
+      }
+
+      const homeNode = container?.[homeKey];
+      const awayNode = container?.[awayKey];
+      if (homeNode && awayNode && typeof homeNode === "object" && typeof awayNode === "object") {
+        for (const key of ["total", "current", "overall", "score", "runs", "goals", "points"]) {
+          const homeScore = num(homeNode?.[key]);
+          const awayScore = num(awayNode?.[key]);
+          if (homeScore !== null && awayScore !== null && homeScore >= 0 && awayScore >= 0) {
+            return { homeScore, awayScore, pathHint: `${hint}.${homeKey}.${key}/${awayKey}.${key}` };
+          }
+        }
+      }
     }
+
+    return null;
+  };
+
+  for (const [key, hint] of [
+    ["score", "score"],
+    ["scores", "scores"],
+    ["goals", "goals"],
+    ["result", "result"],
+    ["finalScore", "finalScore"],
+    ["fullTime", "fullTime"],
+    ["fulltime", "fulltime"],
+  ] as const) {
+    const pair = pairFromContainer(node?.[key], hint);
+    if (pair) return pair;
   }
+
+  const nestedFullTime =
+    node?.score?.fullTime ??
+    node?.score?.fulltime ??
+    node?.scores?.fullTime ??
+    node?.scores?.fulltime ??
+    node?.result?.fullTime ??
+    node?.result?.fulltime ??
+    null;
+
+  const fullTimePair = pairFromContainer(nestedFullTime, "fullTime");
+  if (fullTimePair) return fullTimePair;
 
   return null;
 }
@@ -91,7 +140,24 @@ export async function GET(req: Request) {
 
     const score = findFinalScore(payload);
     if (!score) {
-      return Response.json({ ok: false, error: "SportsAPI Fixture 응답에서 최종 홈/원정 점수를 찾지 못했습니다.", fixtureId: id }, { status: 422 });
+      const rootKeys =
+        payload && typeof payload === "object"
+          ? Object.keys(payload).slice(0, 30)
+          : [];
+      const dataKeys =
+        payload?.data && typeof payload.data === "object" && !Array.isArray(payload.data)
+          ? Object.keys(payload.data).slice(0, 30)
+          : [];
+      return Response.json({
+        ok: false,
+        error: "SportsAPI Fixture 응답에서 최종 홈/원정 점수를 찾지 못했습니다.",
+        fixtureId: id,
+        debug: {
+          rootKeys,
+          dataKeys,
+          validationOnly: true,
+        },
+      }, { status: 422 });
     }
 
     return Response.json({
