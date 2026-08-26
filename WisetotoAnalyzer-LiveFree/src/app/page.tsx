@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_2_1_BACKTEST_SAMPLE_EXPANSION_20260826
+// DEPLOY_MARKER_V13_3_0_ACTUAL_GAME_GROUPING_MULTISPORT_20260826
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -1501,6 +1501,37 @@ function teamSimilarity(a: unknown, b: unknown) {
   if (!A.size || !B.size) return 0;
   let common=0; A.forEach(v=>{ if(B.has(v)) common++; });
   return (2*common)/(A.size+B.size);
+}
+
+
+function actualGameIdentity(game: BetmanMatch) {
+  const start = game?.gameDateMs ?? game?.gameDate ?? game?.startTime ?? "";
+  const sport = koreanSport(String((game as any)?.sport ?? ""));
+  return [normalizeTeamName(betmanTeam(game, "home")), normalizeTeamName(betmanTeam(game, "away")), String(start), sport].join("|");
+}
+
+function mergeActualGames(games: BetmanMatch[]) {
+  const grouped = new Map<string, BetmanMatch>();
+  for (const game of games) {
+    const key = actualGameIdentity(game);
+    const previous = grouped.get(key);
+    if (!previous) {
+      grouped.set(key, {...game, key, markets:Array.isArray((game as any)?.markets) ? [...(game as any).markets] : []});
+      continue;
+    }
+    const marketMap = new Map<string, any>();
+    for (const market of [...(Array.isArray((previous as any)?.markets)?(previous as any).markets:[]), ...(Array.isArray((game as any)?.markets)?(game as any).markets:[])]) {
+      const marketKey = String(market?.matchSeq ?? market?.gameNo ?? market?.id ?? [market?.type ?? market?.marketType ?? market?.name ?? "", market?.line ?? market?.handicap ?? market?.baseValue ?? market?.value ?? "", JSON.stringify(market?.selections ?? [])].join("|"));
+      if (marketKey) marketMap.set(marketKey, market);
+    }
+    const markets = Array.from(marketMap.values());
+    grouped.set(key, {...previous, ...game, key, gameKey:(previous as any)?.gameKey ?? (game as any)?.gameKey ?? null, markets,
+      moneyline:markets.filter((x:any)=>x?.type==="moneyline"),
+      handicaps:markets.filter((x:any)=>x?.type==="handicap"),
+      totals:markets.filter((x:any)=>x?.type==="total"),
+      otherMarkets:markets.filter((x:any)=>x?.type==="other")});
+  }
+  return Array.from(grouped.values());
 }
 
 function getBetmanGames(payload: any): BetmanMatch[] {
@@ -8933,7 +8964,7 @@ export default function Home() {
   }
 
   function gameKey(game: BetmanMatch, index = 0) {
-    return String(game?.key ?? `${game?.home ?? ""}|${game?.away ?? ""}|${game?.gameDateMs ?? game?.gameDate ?? ""}|${index}`);
+    return String(game?.key ?? (game as any)?.gameKey ?? actualGameIdentity(game) ?? `${game?.home ?? ""}|${game?.away ?? ""}|${game?.gameDateMs ?? game?.gameDate ?? ""}|${index}`);
   }
 
   function gameTimeMs(game: BetmanMatch) {
@@ -9560,27 +9591,10 @@ export default function Home() {
         .slice(0, 30);
 
       setBacktestGames((previous) => {
-        const merged = new Map<string, BetmanMatch>();
-        for (const game of [
-          ...BACKTEST_BETMAN_GAMES,
-          ...previous,
-          ...candidates,
-        ]) {
-          const key = String(
-            (game as any)?.gameKey ??
-            (game as any)?.key ??
-            `${game.home}|${game.away}|${game.gameDateMs ?? game.gameDate}`
-          );
-          if (key) merged.set(key, game);
-        }
-        const next = Array.from(merged.values()).sort(
-          (a,b) => gameTimeMs(b) - gameTimeMs(a)
-        );
+        const next = mergeActualGames([...BACKTEST_BETMAN_GAMES, ...previous, ...candidates])
+          .sort((a,b) => gameTimeMs(b) - gameTimeMs(a));
         try {
-          window.localStorage.setItem(
-            BACKTEST_GAME_LIBRARY_STORAGE_KEY,
-            JSON.stringify(next)
-          );
+          window.localStorage.setItem(BACKTEST_GAME_LIBRARY_STORAGE_KEY, JSON.stringify(next));
         } catch {}
         return next;
       });
@@ -9601,10 +9615,7 @@ export default function Home() {
   useEffect(() => { loadBetmanList(); }, []);
 
   const visibleBetmanGames = useMemo(
-    () =>
-      backtestMode
-        ? backtestGames
-        : betmanGames,
+    () => mergeActualGames(backtestMode ? backtestGames : betmanGames),
     [backtestMode, backtestGames, betmanGames]
   );
 
@@ -10617,7 +10628,7 @@ export default function Home() {
       <div className="top">
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
-          <div className="sub">Betman 배당 있는 미시작 발매경기 전체 → 직접 선택 → SportsAPI 분석 → 실제 핸디/UO 기준 최적 픽</div>
+          <div className="sub">Betman 미시작 발매경기 전체 종목 → 실제 경기 단위 그룹화 → SportsAPI 분석 → 종목별 실제 시장 최적 픽</div>
         </div>
         <div className="bar">
           <button className="btn light" onClick={loadBetmanList} disabled={loading}>🔄 경기목록 새로고침</button>
@@ -10794,8 +10805,8 @@ export default function Home() {
 
           {backtestMode && (
             <div className="notice" style={{ margin: "0 14px 10px" }}>
-              <b>V13.2.1 백테스트 표본 라이브러리</b>
-              {" · "}현재 {backtestGames.length}경기 / {backtestGames.reduce((sum, game) => sum + marketRows(game).length, 0)}배당행
+              <b>V13.3 실제 경기 단위 백테스트 라이브러리</b>
+              {" · "}현재 {mergeActualGames(backtestGames).length}실제경기 / {mergeActualGames(backtestGames).reduce((sum, game) => sum + marketRows(game).length, 0)}배당행
               {" · "}기본 검증 샘플 NC vs 삼성 포함
               <br />
               <span>「과거 후보 불러오기」는 Betman API가 현재 반환하는 종료 경기만 추가합니다. 경기전 배당만 저장하며 실제 결과는 분석 완료 후 별도 SportsAPI 검증 API를 호출할 때만 읽습니다.</span>
