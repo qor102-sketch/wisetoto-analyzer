@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_4_4_API_CACHE_QUOTA_GUARD_20260826
+// DEPLOY_MARKER_V13_4_5_DAILY_QUOTA_AUTO_STOP_20260826
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -11365,6 +11365,24 @@ export default function Home() {
         verified.records,
     };
   }
+  function isDailyQuotaExceededError(error: any) {
+    const message =
+      String(
+        error?.message ??
+        error ??
+        ""
+      ).toLowerCase();
+
+    return (
+      message.includes(
+        "daily quota exceeded"
+      ) ||
+      message.includes(
+        "daily quota"
+      )
+    );
+  }
+
   async function startBatchBacktest() {
     if (
       batchBacktest.running ||
@@ -11409,6 +11427,7 @@ export default function Home() {
 
     let completed = 0;
     let failed = 0;
+    let stoppedByDailyQuota = false;
     const batchRecords:
       SimpleBacktestRecord[] =
       [];
@@ -11519,6 +11538,11 @@ export default function Home() {
           `자동 백테스트 ${index + 1}/${games.length} 완료 · 성공 ${completed} · 실패 ${failed} · 신규 Calibration ${batchRecords.length}행`
         );
       } catch (error: any) {
+        const dailyQuotaExceeded =
+          isDailyQuotaExceededError(
+            error
+          );
+
         failed += 1;
 
         const errorMessage =
@@ -11537,6 +11561,11 @@ export default function Home() {
         const fixtureId =
           fixtureMatch ? Number(fixtureMatch[1]) : null;
 
+        const diagnosticMessage =
+          dailyQuotaExceeded
+            ? "API 일일 한도 소진 · 현재 백테스트 자동 중단 · quota 리셋 후 다시 실행하세요."
+            : errorMessage;
+
         setBatchBacktestDiagnostics((previous) => [
           ...previous,
           {
@@ -11549,7 +11578,7 @@ export default function Home() {
                 ? fixtureId
                 : null,
             calibrationRows: 0,
-            message: errorMessage,
+            message: diagnosticMessage,
             savedAt: Date.now(),
           },
         ]);
@@ -11561,6 +11590,28 @@ export default function Home() {
             failed,
           })
         );
+
+        if (dailyQuotaExceeded) {
+          stoppedByDailyQuota = true;
+
+          setBatchBacktest(
+            (previous) => ({
+              ...previous,
+              running: false,
+              phase: "IDLE",
+              completed,
+              failed,
+              phaseStartedAt:
+                Date.now(),
+            })
+          );
+
+          setStatus(
+            `⛔ SportsAPI 일일 한도 소진 · 자동 백테스트 중단 · ${index + 1}/${games.length}에서 종료 · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행`
+          );
+
+          break;
+        }
 
         setStatus(
           `자동 백테스트 ${index + 1}/${games.length} 실패 · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행 · ${errorMessage}`
@@ -11632,9 +11683,11 @@ export default function Home() {
       })
     );
 
-    setStatus(
-      `30경기 자동 백테스트 완료 · 성공 ${completed}경기 · 실패 ${failed}경기 · 신규 Calibration ${batchRecords.length}행`
-    );
+    if (!stoppedByDailyQuota) {
+      setStatus(
+        `30경기 자동 백테스트 완료 · 성공 ${completed}경기 · 실패 ${failed}경기 · 신규 Calibration ${batchRecords.length}행`
+      );
+    }
   }
 
   function advanceBatchBacktest(success: boolean) {
@@ -12026,6 +12079,9 @@ export default function Home() {
               성공 {batchBacktestDiagnostics.filter((row) => row.status === "SUCCESS").length}
               {" · "}실패 {batchBacktestDiagnostics.filter((row) => row.status === "FAIL").length}
               {" · "}Calibration {batchBacktestDiagnostics.reduce((sum, row) => sum + row.calibrationRows, 0)}행
+              {batchBacktestDiagnostics.some((row) => row.message.includes("API 일일 한도 소진"))
+                ? " · ⛔ API 일일 한도 소진"
+                : ""}
             </span>
           </div>
 
