@@ -1265,9 +1265,25 @@ export async function GET(
         0
       );
 
+    const scope = String(url.searchParams.get("scope") ?? "all").toLowerCase();
+    const daysRaw = Number(url.searchParams.get("days") ?? 0);
+    const days = Number.isFinite(daysRaw) && daysRaw > 0 ? Math.min(daysRaw, 365) : null;
+    const scopedGames = games.filter((game: AnyObj) => {
+      if (scope === "all") return true;
+      const value = num(game?.gameDateMs) ?? (game?.gameDate ? new Date(game.gameDate).getTime() : null);
+      if (value === null || !Number.isFinite(value)) return false;
+      if (scope === "future") return value > now;
+      if (scope === "past") {
+        if (value >= now) return false;
+        if (days !== null && value < now - days * 24 * 60 * 60 * 1000) return false;
+        return true;
+      }
+      return true;
+    });
+
     const filtered =
       filterGames(
-        games,
+        scopedGames,
         url
       );
 
@@ -1486,6 +1502,16 @@ export async function GET(
           url.searchParams.get(
             "market"
           ),
+
+        scope:
+          url.searchParams.get(
+            "scope"
+          ) ?? "all",
+
+        days:
+          url.searchParams.get(
+            "days"
+          ),
       },
 
       games:
@@ -1501,6 +1527,7 @@ export async function GET(
           "/api/betman?market=handicap",
           "/api/betman?market=total",
           "/api/betman?home=아스널&away=리즈",
+          "/api/betman?scope=past&sport=baseball&days=60",
         ],
 
         notes: [
