@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_3_8_BATCH_DIAGNOSTICS_20260826
+// DEPLOY_MARKER_V13_3_9_PRE_LOCK_VERIFY_SEPARATION_20260826
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -607,6 +607,36 @@ type SimpleBacktestRecord = {
   savedAt: number;
 };
 
+type BacktestPredictionSnapshot = {
+  snapshotId: string;
+  fixtureId: number;
+  gameKey: string;
+  gameLabel: string;
+  home: string;
+  away: string;
+  sport: string;
+  league: string;
+  gameDateMs: number;
+  cutoffMs: number;
+  stage: string;
+  markets: any[];
+  picks: Array<{
+    key: string;
+    market: string;
+    pick: string;
+    probability: number;
+    odds: number | null;
+    expectedValue: number | null;
+    grade: string;
+  }>;
+  lockedAt: number;
+  locked: true;
+  audit: {
+    predictionUsesFinalResult: false;
+    resultEndpointCalledBeforeLock: false;
+  };
+};
+
 type SimpleBacktestSummary = {
   games: number;
   records: number;
@@ -734,6 +764,7 @@ function calibrationBiasLabel(summary: CalibrationAuditSummary) {
 
 const SIMPLE_BACKTEST_STORAGE_KEY =
   "wisetoto-backtest-v12";
+const BACKTEST_PRE_SNAPSHOT_STORAGE_KEY = "wisetoto_v13_3_9_pre_prediction_snapshots";
 
 const BACKTEST_GAME_LIBRARY_STORAGE_KEY =
   "wisetoto-backtest-game-library-v1321";
@@ -10404,13 +10435,53 @@ export default function Home() {
       (league.includes("kbo") || kboTeams.some((name) => teams.includes(name)));
   }
 
-  async function analyzeBacktestGameDirect(
+  function lockBacktestPredictionSnapshot(
+    snapshot: BacktestPredictionSnapshot
+  ) {
+    // PRE snapshot은 최종점수/결과를 절대 포함하지 않는다.
+    // VERIFY 호출 직전에 먼저 localStorage에 잠금 저장한다.
+    try {
+      const raw = window.localStorage.getItem(
+        BACKTEST_PRE_SNAPSHOT_STORAGE_KEY
+      );
+      const previous = raw
+        ? JSON.parse(raw)
+        : [];
+      const rows = Array.isArray(previous)
+        ? previous
+        : [];
+      const byId = new Map<string, any>();
+      for (const row of rows) {
+        if (row?.snapshotId) {
+          byId.set(
+            String(row.snapshotId),
+            row
+          );
+        }
+      }
+      byId.set(
+        snapshot.snapshotId,
+        snapshot
+      );
+      window.localStorage.setItem(
+        BACKTEST_PRE_SNAPSHOT_STORAGE_KEY,
+        JSON.stringify(
+          Array.from(
+            byId.values()
+          )
+        )
+      );
+    } catch {}
+
+    return snapshot;
+  }
+
+  async function createBacktestPredictionSnapshot(
     game: BetmanMatch
   ): Promise<{
     fixtureId: number;
     combined: any;
-    picks: any[];
-    records: SimpleBacktestRecord[];
+    snapshot: BacktestPredictionSnapshot;
   }> {
     const selectedStartMs = gameTimeMs(game);
     const cutoffMs =
@@ -10419,68 +10490,105 @@ export default function Home() {
         : null;
 
     if (cutoffMs === null) {
-      throw new Error("백테스트 경기 시작시간을 확인하지 못했습니다.");
+      throw new Error(
+        "PRE · 백테스트 경기 시작시간을 확인하지 못했습니다."
+      );
     }
 
-    const matchHome = sportsApiTeamName(game?.home);
-    const matchAway = sportsApiTeamName(game?.away);
+    const matchHome =
+      sportsApiTeamName(game?.home);
+    const matchAway =
+      sportsApiTeamName(game?.away);
 
     const params = new URLSearchParams({
       mode: "selected",
       home: matchHome,
       away: matchAway,
-      originalHome: String(game?.home ?? ""),
-      originalAway: String(game?.away ?? ""),
-      gameDateMs: String(selectedStartMs),
-      sport: String((game as any)?.sport ?? ""),
-      league: String((game as any)?.league ?? ""),
+      originalHome:
+        String(game?.home ?? ""),
+      originalAway:
+        String(game?.away ?? ""),
+      gameDateMs:
+        String(selectedStartMs),
+      sport:
+        String(
+          (game as any)?.sport ??
+          ""
+        ),
+      league:
+        String(
+          (game as any)?.league ??
+          ""
+        ),
       backtest: "1",
     });
 
-    // 1) Fixture 매칭을 완전히 기다린다.
+    // PRE-1. Fixture 매칭. 여기서는 결과 API를 호출하지 않는다.
     const matchResponse = await fetch(
       `/api/match?${params.toString()}`,
       { cache: "no-store" }
     );
-    const matchData = await readApiResponse(
-      matchResponse,
-      "자동 백테스트 Fixture 매칭 API"
-    );
+    const matchData =
+      await readApiResponse(
+        matchResponse,
+        "PRE Fixture 매칭 API"
+      );
 
-    if (!matchResponse.ok || !matchData?.ok) {
+    if (
+      !matchResponse.ok ||
+      !matchData?.ok
+    ) {
       throw new Error(
-        readableError(
+        `PRE_MATCH · ${readableError(
           matchData?.error,
           "SportsAPI 동일경기 자동매칭 실패"
-        )
+        )}`
       );
     }
 
-    const fixtureId = Number(matchData?.fixtureId);
-    if (!Number.isFinite(fixtureId)) {
-      throw new Error("SportsAPI Fixture ID를 받지 못했습니다.");
+    const fixtureId =
+      Number(
+        matchData?.fixtureId
+      );
+
+    if (
+      !Number.isFinite(
+        fixtureId
+      )
+    ) {
+      throw new Error(
+        "PRE_MATCH · SportsAPI Fixture ID를 받지 못했습니다."
+      );
     }
 
-    // 2) cutoff 이전 H2H/Form 상세 데이터를 완전히 기다린다.
-    const detailParams = new URLSearchParams({
-      cutoffMs: String(cutoffMs),
-    });
+    // PRE-2. 경기 시작 직전 cutoff 이전 H2H/Form만 조회한다.
+    const detailParams =
+      new URLSearchParams({
+        cutoffMs:
+          String(cutoffMs),
+      });
 
-    const detailResponse = await fetch(
-      `/api/match/${fixtureId}?${detailParams.toString()}`,
-      { cache: "no-store" }
-    );
-    const detailData = await readApiResponse(
-      detailResponse,
-      "자동 백테스트 Fixture 상세 API"
-    );
+    const detailResponse =
+      await fetch(
+        `/api/match/${fixtureId}?${detailParams.toString()}`,
+        { cache: "no-store" }
+      );
 
-    if (!detailResponse.ok || !detailData?.ok) {
+    const detailData =
+      await readApiResponse(
+        detailResponse,
+        "PRE Fixture 상세 API"
+      );
+
+    if (
+      !detailResponse.ok ||
+      !detailData?.ok
+    ) {
       throw new Error(
-        readableError(
+        `PRE_DETAIL · ${readableError(
           detailData?.error,
           `Fixture #${fixtureId} 상세 분석 데이터 수신 실패`
-        )
+        )}`
       );
     }
 
@@ -10496,8 +10604,10 @@ export default function Home() {
           matchData?.lineups ??
           null,
         selectedFixture:
-          detailData?.selectedFixture ??
-          matchData?.selectedFixture ??
+          detailData
+            ?.selectedFixture ??
+          matchData
+            ?.selectedFixture ??
           null,
       });
 
@@ -10511,15 +10621,19 @@ export default function Home() {
         detailData?.fixture ??
         matchData?.detail,
       selectedFixture:
-        detailData?.selectedFixture ??
-        matchData?.selectedFixture,
+        detailData
+          ?.selectedFixture ??
+        matchData
+          ?.selectedFixture,
       h2h:
         detailData?.h2h ??
         matchData?.h2h ??
         null,
       recentSummary:
-        detailData?.recentSummary ??
-        matchData?.recentSummary ??
+        detailData
+          ?.recentSummary ??
+        matchData
+          ?.recentSummary ??
         null,
       statistics: null,
       lineups:
@@ -10529,7 +10643,7 @@ export default function Home() {
       detailDebug: null,
     };
 
-    // 3) 예측 계산 전에 사후정보를 제거한다.
+    // PRE-3. 혹시 상세 payload에 경기후 정보가 섞여도 예측 전에 제거.
     const combined =
       sanitizeMatchedForBacktest(
         combinedRaw,
@@ -10588,20 +10702,151 @@ export default function Home() {
 
     if (!picks.length) {
       throw new Error(
-        `Fixture #${fixtureId} 분석은 완료됐지만 시장 픽이 생성되지 않았습니다.`
+        `PRE_PREDICT · Fixture #${fixtureId} 분석은 완료됐지만 시장 픽이 생성되지 않았습니다.`
       );
     }
 
-    // 4) 여기까지 예측이 확정된 뒤에만 실제 결과 API를 호출한다.
-    const resultResponse = await fetch(
-      `/api/fixture/result?id=${encodeURIComponent(String(fixtureId))}`,
-      { cache: "no-store" }
+    const stage =
+      analysisDirect.factors
+        ?.baseballAnalysisStage ??
+      "PRE";
+
+    const markets =
+      marketRows(game);
+
+    const snapshotId =
+      `${fixtureId}|${stage}|${selectedStartMs}`;
+
+    const snapshot:
+      BacktestPredictionSnapshot = {
+        snapshotId,
+        fixtureId,
+        gameKey:
+          actualGameIdentity(game),
+        gameLabel:
+          `${game?.home ?? "-"} vs ${game?.away ?? "-"}`,
+        home:
+          String(
+            game?.home ?? ""
+          ),
+        away:
+          String(
+            game?.away ?? ""
+          ),
+        sport:
+          String(
+            (game as any)?.sport ??
+            ""
+          ),
+        league:
+          String(
+            (game as any)?.league ??
+            ""
+          ),
+        gameDateMs:
+          selectedStartMs,
+        cutoffMs,
+        stage,
+        markets:
+          markets.map(
+            (market: any) => ({
+              ...market,
+            })
+          ),
+        picks:
+          picks.map(
+            (pick) => ({
+              key:
+                String(
+                  pick.key
+                ),
+              market:
+                String(
+                  pick.market
+                ),
+              pick:
+                String(
+                  pick.pick
+                ),
+              probability:
+                clamp(
+                  Number(
+                    pick.probability
+                  ),
+                  0,
+                  100
+                ),
+              odds:
+                pick.odds ??
+                null,
+              expectedValue:
+                pick.expectedValue ??
+                null,
+              grade:
+                pick.stageGradeLabel ??
+                pick.valueGrade ??
+                "-",
+            })
+          ),
+        lockedAt:
+          Date.now(),
+        locked: true,
+        audit: {
+          predictionUsesFinalResult:
+            false,
+          resultEndpointCalledBeforeLock:
+            false,
+        },
+      };
+
+    // PRE-4. 결과 API 호출 전에 반드시 예측 스냅샷부터 잠금 저장.
+    lockBacktestPredictionSnapshot(
+      snapshot
     );
+
+    return {
+      fixtureId,
+      combined,
+      snapshot,
+    };
+  }
+
+  async function verifyLockedBacktestSnapshot(
+    snapshot: BacktestPredictionSnapshot
+  ): Promise<{
+    truth: BacktestValidationResult;
+    records: SimpleBacktestRecord[];
+  }> {
+    if (
+      !snapshot?.locked ||
+      !snapshot?.lockedAt ||
+      snapshot.audit
+        ?.predictionUsesFinalResult !==
+        false ||
+      snapshot.audit
+        ?.resultEndpointCalledBeforeLock !==
+        false
+    ) {
+      throw new Error(
+        "VERIFY_GUARD · PRE 예측 스냅샷이 잠금되지 않아 결과 조회를 차단했습니다."
+      );
+    }
+
+    // VERIFY-1. PRE snapshot이 잠긴 뒤에만 최종 결과를 호출한다.
+    const resultResponse =
+      await fetch(
+        `/api/fixture/result?id=${encodeURIComponent(
+          String(
+            snapshot.fixtureId
+          )
+        )}`,
+        { cache: "no-store" }
+      );
 
     const resultPayload =
       await readApiResponse(
         resultResponse,
-        "자동 백테스트 결과 검증 API"
+        "VERIFY 결과 검증 API"
       );
 
     if (
@@ -10610,59 +10855,70 @@ export default function Home() {
       !resultPayload?.result
     ) {
       throw new Error(
-        readableError(
+        `VERIFY_RESULT · ${readableError(
           resultPayload?.error,
-          `Fixture #${fixtureId} 실제 결과를 확인하지 못했습니다.`
-        )
+          `Fixture #${snapshot.fixtureId} 실제 결과를 확인하지 못했습니다.`
+        )}`
       );
     }
 
-    const truth: BacktestValidationResult = {
-      homeScore: Number(
-        resultPayload.result.homeScore
-      ),
-      awayScore: Number(
-        resultPayload.result.awayScore
-      ),
-      firstHalfHomeScore:
-        Number.isFinite(
+    const truth:
+      BacktestValidationResult = {
+        homeScore:
           Number(
-            resultPayload.result.firstHalfHomeScore
-          )
-        )
-          ? Number(
-              resultPayload.result.firstHalfHomeScore
-            )
-          : null,
-      firstHalfAwayScore:
-        Number.isFinite(
+            resultPayload
+              .result
+              .homeScore
+          ),
+        awayScore:
           Number(
-            resultPayload.result.firstHalfAwayScore
-          )
-        )
-          ? Number(
-              resultPayload.result.firstHalfAwayScore
+            resultPayload
+              .result
+              .awayScore
+          ),
+        firstHalfHomeScore:
+          Number.isFinite(
+            Number(
+              resultPayload
+                .result
+                .firstHalfHomeScore
             )
-          : null,
-      sourceLabel:
-        `SportsAPI Fixture #${fixtureId} · 예측 확정 후 검증 전용`,
-    };
-
-    const markets =
-      marketRows(game);
-
-    const stage =
-      analysisDirect.factors
-        ?.baseballAnalysisStage ??
-      "PRE";
+          )
+            ? Number(
+                resultPayload
+                  .result
+                  .firstHalfHomeScore
+              )
+            : null,
+        firstHalfAwayScore:
+          Number.isFinite(
+            Number(
+              resultPayload
+                .result
+                .firstHalfAwayScore
+            )
+          )
+            ? Number(
+                resultPayload
+                  .result
+                  .firstHalfAwayScore
+              )
+            : null,
+        sourceLabel:
+          `SportsAPI Fixture #${snapshot.fixtureId} · PRE 잠금 후 VERIFY 전용`,
+      };
 
     const records:
       SimpleBacktestRecord[] =
       [];
 
-    for (const pick of picks) {
+    // VERIFY-2. 정답은 잠금된 picks와 비교만 한다.
+    // 새로운 예측 계산/buildAnalysis/buildActualMarketPicks는 호출하지 않는다.
+    for (
+      const pick of snapshot.picks
+    ) {
       const marketIndex =
-        markets.findIndex(
+        snapshot.markets.findIndex(
           (
             market: any,
             index: number
@@ -10675,13 +10931,15 @@ export default function Home() {
 
       const market =
         marketIndex >= 0
-          ? markets[marketIndex]
+          ? snapshot.markets[
+              marketIndex
+            ]
           : null;
 
       const validation =
         validateBacktestMarket(
           market,
-          pick,
+          pick as any,
           truth
         );
 
@@ -10708,23 +10966,18 @@ export default function Home() {
         );
 
       const p =
-        probability / 100;
+        probability /
+        100;
 
       const odds =
-        pick.odds ?? null;
-
-      const expectedValue =
-        pick.expectedValue ??
+        pick.odds ??
         null;
-
-      const grade =
-        pick.stageGradeLabel ??
-        pick.valueGrade ??
-        "-";
 
       const realizedReturn =
         odds !== null &&
-        Number.isFinite(odds) &&
+        Number.isFinite(
+          odds
+        ) &&
         odds > 1
           ? hit
             ? odds - 1
@@ -10733,20 +10986,25 @@ export default function Home() {
 
       records.push({
         id:
-          `${fixtureId}|${stage}|${pick.key}`,
+          `${snapshot.fixtureId}|${snapshot.stage}|${pick.key}`,
         fixtureKey:
-          String(fixtureId),
+          String(
+            snapshot.fixtureId
+          ),
         gameLabel:
-          `${game?.home ?? "-"} vs ${game?.away ?? "-"}`,
-        stage,
+          snapshot.gameLabel,
+        stage:
+          snapshot.stage,
         market:
           pick.market,
         pick:
           pick.pick,
         probability,
         odds,
-        expectedValue,
-        grade,
+        expectedValue:
+          pick.expectedValue,
+        grade:
+          pick.grade,
         hit,
         realizedReturn,
         brier:
@@ -10754,7 +11012,11 @@ export default function Home() {
             (
               (
                 p -
-                (hit ? 1 : 0)
+                (
+                  hit
+                    ? 1
+                    : 0
+                )
               ) ** 2
             ).toFixed(6)
           ),
@@ -10765,18 +11027,47 @@ export default function Home() {
 
     if (!records.length) {
       throw new Error(
-        `Fixture #${fixtureId} 결과는 확인했지만 검증 가능한 시장 레코드가 생성되지 않았습니다.`
+        `VERIFY_SCORE · Fixture #${snapshot.fixtureId} 결과는 확인했지만 검증 가능한 시장 레코드가 생성되지 않았습니다.`
       );
     }
 
     return {
-      fixtureId,
-      combined,
-      picks,
+      truth,
       records,
     };
   }
 
+  async function analyzeBacktestGameDirect(
+    game: BetmanMatch
+  ): Promise<{
+    fixtureId: number;
+    combined: any;
+    snapshot: BacktestPredictionSnapshot;
+    records: SimpleBacktestRecord[];
+  }> {
+    // 완전 분리:
+    // PRE 예측 + snapshot LOCK 완료 후에만 VERIFY를 호출한다.
+    const pre =
+      await createBacktestPredictionSnapshot(
+        game
+      );
+
+    const verified =
+      await verifyLockedBacktestSnapshot(
+        pre.snapshot
+      );
+
+    return {
+      fixtureId:
+        pre.fixtureId,
+      combined:
+        pre.combined,
+      snapshot:
+        pre.snapshot,
+      records:
+        verified.records,
+    };
+  }
   async function startBatchBacktest() {
     if (
       batchBacktest.running ||
@@ -10912,7 +11203,7 @@ export default function Home() {
             status: "SUCCESS",
             fixtureId: result.fixtureId,
             calibrationRows: result.records.length,
-            message: `Fixture #${result.fixtureId} · 검증 레코드 ${result.records.length}행 생성`,
+            message: `PRE 잠금 완료 → VERIFY Fixture #${result.fixtureId} · 검증 레코드 ${result.records.length}행 생성`,
             savedAt: Date.now(),
           },
         ]);
