@@ -10956,7 +10956,18 @@ export default function Home() {
                           )}
                         </div>
                         <div>
-                          {formatDateTime(game?.gameDateMs ?? game?.gameDate ?? game?.startTime)}
+                          {(() => {
+                            const raw = game?.gameDateMs ?? game?.gameDate ?? game?.startTime;
+                            const d = new Date(raw as any);
+                            if (!Number.isFinite(d.getTime())) return String(raw ?? "-");
+                            return d.toLocaleString("ko-KR", {
+                              month: "2-digit",
+                              day: "2-digit",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              hour12: false,
+                            });
+                          })()}
                         </div>
                         <div>
                           {String(
