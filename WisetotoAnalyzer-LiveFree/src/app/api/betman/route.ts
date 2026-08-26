@@ -1010,7 +1010,7 @@ function sportCounts(games: AnyObj[], onlyFuture = false) {
   return base;
 }
 
-async function fetchBetman() {
+async function fetchBetman(gmTs?: number | null, gmId = "G101") {
   let lastError: Error | null = null;
 
   for (
@@ -1030,7 +1030,14 @@ async function fetchBetman() {
     try {
       const response =
         await fetch(
-          BETMAN_PROXY_URL,
+          (() => {
+            const proxyUrl = new URL(BETMAN_PROXY_URL);
+            if (gmTs !== null && gmTs !== undefined && Number.isFinite(gmTs)) {
+              proxyUrl.searchParams.set("gmTs", String(gmTs));
+              proxyUrl.searchParams.set("gmId", gmId || "G101");
+            }
+            return proxyUrl.toString();
+          })(),
           {
             method: "GET",
 
@@ -1138,8 +1145,16 @@ export async function GET(
     const url =
       new URL(req.url);
 
+    const requestedGmTsRaw = Number(url.searchParams.get("gmTs"));
+    const requestedGmTs =
+      Number.isFinite(requestedGmTsRaw) && requestedGmTsRaw > 0
+        ? requestedGmTsRaw
+        : null;
+    const requestedGmId =
+      String(url.searchParams.get("gmId") ?? "G101").trim() || "G101";
+
     const raw =
-      await fetchBetman();
+      await fetchBetman(requestedGmTs, requestedGmId);
 
     /*
      * 예전에는 raw.schedulesList 하나만 읽었습니다.
