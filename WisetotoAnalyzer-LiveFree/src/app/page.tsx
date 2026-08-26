@@ -10999,9 +10999,11 @@ export default function Home() {
                           <button
                             className="btn light"
                             onClick={() =>
-                              selectBetmanGame(
-                                game,
-                                gameIndex
+                              setSelectedKey(
+                                gameKey(
+                                  game,
+                                  gameIndex
+                                )
                               )
                             }
                             style={{
