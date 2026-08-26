@@ -10650,7 +10650,14 @@ export default function Home() {
       if (!Number.isFinite(fixtureId)) throw new Error("SportsAPI Fixture ID를 받지 못했습니다.");
       setMatched(data);
       setStatus(`Fixture #${fixtureId} 매칭 완료 · H2H/최근 Form 조회 중…`);
-      const detailResponse = await fetch(`/api/match/${fixtureId}`, { cache:"no-store" });
+      const detailParams = new URLSearchParams();
+      if (backtestCutoffMs !== null) {
+        detailParams.set("cutoffMs", String(backtestCutoffMs));
+      }
+      const detailResponse = await fetch(
+        `/api/match/${fixtureId}${detailParams.toString() ? `?${detailParams.toString()}` : ""}`,
+        { cache:"no-store" }
+      );
       const detailData = await readApiResponse(detailResponse,"Fixture 상세 API");
       if (detailResponse.ok && detailData?.ok) {
         const pregameAudit =
@@ -11232,14 +11239,10 @@ export default function Home() {
                           {oddsText(moneyline)}
                         </div>
                         <div>
-                          {handicap
-                            ? String(handicap?.label ?? handicap?.marketName ?? handicap?.type ?? "H")
-                            : "-"}
+                          {(() => { const h = chooseBetmanHandicap(game); return h ? `H ${h.line > 0 ? "+" : ""}${h.line}` : "-"; })()}
                         </div>
                         <div>
-                          {total
-                            ? String(total?.label ?? total?.marketName ?? total?.type ?? "U/O")
-                            : "-"}
+                          {(() => { const u = chooseBetmanTotal(game); return u ? `U/O ${u.line}` : "-"; })()}
                         </div>
                         <div>
                           <button
