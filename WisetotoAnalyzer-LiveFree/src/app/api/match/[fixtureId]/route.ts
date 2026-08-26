@@ -667,7 +667,8 @@ function summarizeForm(
 async function getRecentFixtures(
   teamId: number,
   key: string,
-  label: string
+  label: string,
+  cutoffMs: number | null = null
 ) {
   const result =
     await optionalEndpoint(
@@ -710,11 +711,22 @@ async function getRecentFixtures(
           ).getTime()
       )
       .filter(
-        (fixture) =>
-          getTeamResult(
+        (fixture) => {
+          if (
+            cutoffMs !== null &&
+            Number.isFinite(cutoffMs)
+          ) {
+            const fixtureMs = new Date(fixture?.startTime).getTime();
+            if (!Number.isFinite(fixtureMs) || fixtureMs >= cutoffMs) {
+              return false;
+            }
+          }
+
+          return getTeamResult(
             fixture,
             teamId
-          ) !== null
+          ) !== null;
+        }
       )
       .slice(
         0,
@@ -750,6 +762,10 @@ export async function GET(
     }>;
   }
 ) {
+  const url = new URL(req.url);
+  const cutoffRaw = Number(url.searchParams.get("cutoffMs"));
+  const cutoffMs = Number.isFinite(cutoffRaw) && cutoffRaw > 0 ? cutoffRaw : null;
+
   const key =
     process.env
       .SPORTSAPI_KEY;
@@ -894,7 +910,8 @@ export async function GET(
         await getRecentFixtures(
           homeId,
           key,
-          "Home Recent"
+          "Home Recent",
+          cutoffMs
         );
     }
 
@@ -932,7 +949,8 @@ export async function GET(
         await getRecentFixtures(
           awayId,
           key,
-          "Away Recent"
+          "Away Recent",
+          cutoffMs
         );
     }
 
@@ -1091,7 +1109,9 @@ export async function GET(
         },
 
         note:
-          "최근 경기 Form은 각 팀의 recent fixture 중 실제 점수 판정이 가능한 최신 5경기를 기준으로 계산합니다.",
+          cutoffMs !== null
+            ? `백테스트 Form은 cutoff(${cutoffMs}) 이전 fixture 중 실제 점수 판정 가능한 최신 5경기로 계산합니다.`
+            : "최근 경기 Form은 각 팀의 recent fixture 중 실제 점수 판정이 가능한 최신 5경기를 기준으로 계산합니다.",
       },
     });
   } catch (e: any) {
