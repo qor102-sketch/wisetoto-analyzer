@@ -10999,7 +10999,7 @@ export default function Home() {
                           <button
                             className="btn light"
                             onClick={() =>
-                              setSelectedKey(
+                              setSelectedBetmanKey(
                                 gameKey(
                                   game,
                                   gameIndex
