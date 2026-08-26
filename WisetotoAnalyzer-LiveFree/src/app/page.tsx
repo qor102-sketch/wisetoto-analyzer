@@ -10956,7 +10956,7 @@ export default function Home() {
                           )}
                         </div>
                         <div>
-                          {formatBetmanDate(game)}
+                          {formatDateTime(game?.gameDateMs ?? game?.gameDate ?? game?.startTime)}
                         </div>
                         <div>
                           {String(
