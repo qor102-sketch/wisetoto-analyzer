@@ -8872,6 +8872,17 @@ function formatBacktestCutoff(
 }
 
 
+type BatchBacktestPhase = "IDLE" | "SELECT" | "ANALYZE" | "WAIT_ANALYZE" | "REVEAL" | "WAIT_REVEAL";
+
+type BatchBacktestState = {
+  running: boolean;
+  gameKeys: string[];
+  index: number;
+  phase: BatchBacktestPhase;
+  completed: number;
+  failed: number;
+};
+
 export default function Home() {
   const [sport, setSport] = useState<Sport>("전체");
   const [status, setStatus] = useState("Betman 발매경기 불러오는 중…");
@@ -8894,6 +8905,15 @@ export default function Home() {
     useState<Record<string, BacktestValidationResult>>({});
   const [validationLoading, setValidationLoading] =
     useState(false);
+  const [batchBacktest, setBatchBacktest] =
+    useState<BatchBacktestState>({
+      running: false,
+      gameKeys: [],
+      index: 0,
+      phase: "IDLE",
+      completed: 0,
+      failed: 0,
+    });
   const [betmanGames, setBetmanGames] = useState<BetmanMatch[]>([]);
   const [betmanDiagnostics, setBetmanDiagnostics] = useState<any>(null);
   const [selectedBetmanKey, setSelectedBetmanKey] = useState<string | null>(null);
@@ -9938,6 +9958,90 @@ export default function Home() {
     simpleCurrentSignature,
   ]);
 
+  useEffect(() => {
+    if (!batchBacktest.running) {
+      if (batchBacktest.phase === "IDLE" && batchBacktest.gameKeys.length) {
+        setStatus(
+          `30경기 자동 백테스트 완료 · 성공 ${batchBacktest.completed}경기 · 실패 ${batchBacktest.failed}경기 · Calibration 누적 ${simpleBacktestRecords.length}행`
+        );
+      }
+      return;
+    }
+
+    const games = mergeActualGames(backtestGames);
+    const currentKey = batchBacktest.gameKeys[batchBacktest.index];
+    const currentGame = games.find((game) => actualGameIdentity(game) === currentKey);
+
+    if (!currentGame) {
+      advanceBatchBacktest(false);
+      return;
+    }
+
+    const displayNo = batchBacktest.index + 1;
+    const total = batchBacktest.gameKeys.length;
+
+    if (batchBacktest.phase === "SELECT") {
+      setBacktestResultRevealed(false);
+      chooseGame(currentGame, games.indexOf(currentGame));
+      setBatchBacktest((previous) => ({ ...previous, phase: "ANALYZE" }));
+      setStatus(`자동 백테스트 ${displayNo}/${total} · 경기 선택 · ${currentGame.home} vs ${currentGame.away}`);
+      return;
+    }
+
+    if (batchBacktest.phase === "ANALYZE") {
+      const selectedKey = gameKey(currentGame, games.indexOf(currentGame));
+      if (selectedBetmanKey !== selectedKey || !selectedBetman || loading) return;
+
+      setBatchBacktest((previous) => ({ ...previous, phase: "WAIT_ANALYZE" }));
+      void analyzeSelected().then((ok) => {
+        if (!ok) advanceBatchBacktest(false);
+      });
+      return;
+    }
+
+    if (batchBacktest.phase === "WAIT_ANALYZE") {
+      if (loading) return;
+      const fixtureId = Number(matched?.fixtureId ?? matched?.selectedFixture?.id ?? matched?.fixture?.id);
+      if (!Number.isFinite(fixtureId)) return;
+      if (!actualMarketPicks.length) return;
+
+      setBatchBacktest((previous) => ({ ...previous, phase: "REVEAL" }));
+      return;
+    }
+
+    if (batchBacktest.phase === "REVEAL") {
+      if (validationLoading || !actualMarketPicks.length) return;
+
+      setBatchBacktest((previous) => ({ ...previous, phase: "WAIT_REVEAL" }));
+      void revealBacktestResult().then((ok) => {
+        if (!ok) advanceBatchBacktest(false);
+      });
+      return;
+    }
+
+    if (batchBacktest.phase === "WAIT_REVEAL") {
+      if (validationLoading) return;
+      if (!backtestResultRevealed || !backtestValidationTruth || !simpleCurrentRecords.length) return;
+
+      // simpleCurrentRecords 저장 effect가 localStorage에 반영될 시간을 한 틱 확보한다.
+      const timer = window.setTimeout(() => advanceBatchBacktest(true), 80);
+      return () => window.clearTimeout(timer);
+    }
+  }, [
+    batchBacktest,
+    backtestGames,
+    selectedBetmanKey,
+    selectedBetman,
+    loading,
+    matched,
+    actualMarketPicks.length,
+    validationLoading,
+    backtestResultRevealed,
+    backtestValidationTruth,
+    simpleCurrentSignature,
+    simpleBacktestRecords.length,
+  ]);
+
   const simpleSummary =
     simpleBacktestSummary(
       simpleBacktestRecords
@@ -10354,6 +10458,70 @@ export default function Home() {
   const hasH2H = Boolean(h2h && (Number(h2h?.homeWins ?? 0) + Number(h2h?.awayWins ?? 0) + Number(h2h?.draws ?? 0) > 0));
   const hasRecent = Boolean((recentSummary?.home?.fixtures?.length ?? 0) || (recentSummary?.away?.fixtures?.length ?? 0));
 
+  function isKboBacktestGame(game: BetmanMatch) {
+    const league = String((game as any)?.league ?? (game as any)?.leagueName ?? "").toLowerCase();
+    const teams = `${String(game?.home ?? "")} ${String(game?.away ?? "")}`.toLowerCase();
+    const kboTeams = [
+      "nc", "삼성", "두산", "lg", "kt", "ssg", "롯데", "한화", "키움", "kia",
+      "dinos", "lions", "bears", "twins", "wiz", "landers", "giants", "eagles", "heroes", "tigers",
+    ];
+    return koreanSport(String((game as any)?.sport ?? "")) === "야구" &&
+      (league.includes("kbo") || kboTeams.some((name) => teams.includes(name)));
+  }
+
+  function startBatchBacktest() {
+    if (batchBacktest.running || loading || validationLoading) return;
+
+    const games = mergeActualGames(backtestGames)
+      .filter((game) => Number.isFinite(gameTimeMs(game)) && gameTimeMs(game) < Date.now())
+      .filter(isKboBacktestGame)
+      .sort((a,b) => gameTimeMs(b) - gameTimeMs(a))
+      .slice(0, 30);
+
+    if (!games.length) {
+      setStatus("자동 백테스트 대상 KBO 과거경기가 없습니다. 먼저 과거 후보를 불러오세요.");
+      return;
+    }
+
+    setBacktestMode(true);
+    setBacktestResultRevealed(false);
+    setBatchBacktest({
+      running: true,
+      gameKeys: games.map(actualGameIdentity),
+      index: 0,
+      phase: "SELECT",
+      completed: 0,
+      failed: 0,
+    });
+    setStatus(`30경기 자동 백테스트 시작 · KBO 실제경기 ${games.length}경기`);
+  }
+
+  function advanceBatchBacktest(success: boolean) {
+    setBatchBacktest((previous) => {
+      if (!previous.running) return previous;
+      const completed = previous.completed + (success ? 1 : 0);
+      const failed = previous.failed + (success ? 0 : 1);
+      const nextIndex = previous.index + 1;
+      if (nextIndex >= previous.gameKeys.length) {
+        return {
+          ...previous,
+          running: false,
+          index: nextIndex,
+          phase: "IDLE",
+          completed,
+          failed,
+        };
+      }
+      return {
+        ...previous,
+        index: nextIndex,
+        phase: "SELECT",
+        completed,
+        failed,
+      };
+    });
+  }
+
   function chooseGame(game: BetmanMatch, index: number) {
     const selectedTime =
       gameTimeMs(game);
@@ -10376,8 +10544,8 @@ export default function Home() {
     );
   }
 
-  async function analyzeSelected() {
-    if (loading || !selectedBetman) return;
+  async function analyzeSelected(): Promise<boolean> {
+    if (loading || !selectedBetman) return false;
 
     const selectedStartMs =
       gameTimeMs(
@@ -10494,21 +10662,23 @@ export default function Home() {
       } else {
         setStatus(`경기 매칭 완료 · Fixture #${fixtureId} · 상세 분석 데이터 일부 미수신`);
       }
+      return true;
     } catch (e:any) {
       const message = readableError(e,"선택 경기 분석 실패");
       setStatus(message);
       setBetman((prev) => ({ ...prev, error:message }));
+      return false;
     } finally { setLoading(false); }
   }
 
 
-  async function revealBacktestResult() {
-    if (!backtestMode || validationLoading || !actualMarketPicks.length) return;
+  async function revealBacktestResult(): Promise<boolean> {
+    if (!backtestMode || validationLoading || !actualMarketPicks.length) return false;
 
     const fixtureId = Number(matched?.fixtureId ?? matched?.selectedFixture?.id ?? matched?.fixture?.id);
     if (!Number.isFinite(fixtureId)) {
       setStatus("실제 결과를 불러올 SportsAPI Fixture ID가 없습니다.");
-      return;
+      return false;
     }
 
     setValidationLoading(true);
@@ -10529,8 +10699,10 @@ export default function Home() {
       setDynamicValidationResults((previous) => ({ ...previous, [String(fixtureId)]: result }));
       setBacktestResultRevealed(true);
       setStatus(`Fixture #${fixtureId} 실제 결과 연결 완료 · 검증 레이어 공개`);
+      return true;
     } catch (e:any) {
       setStatus(readableError(e, "실제 결과 검증 실패"));
+      return false;
     } finally {
       setValidationLoading(false);
     }
@@ -10631,7 +10803,7 @@ export default function Home() {
           <div className="sub">Betman 미시작 발매경기 전체 종목 → 실제 경기 단위 그룹화 → SportsAPI 분석 → 종목별 실제 시장 최적 픽</div>
         </div>
         <div className="bar">
-          <button className="btn light" onClick={loadBetmanList} disabled={loading}>🔄 경기목록 새로고침</button>
+          <button className="btn light" onClick={loadBetmanList} disabled={loading || batchBacktest.running}>🔄 경기목록 새로고침</button>
 
           <button
             className={`btn ${backtestMode ? "primary" : "light"}`}
@@ -10647,7 +10819,7 @@ export default function Home() {
                 error: null,
               });
             }}
-            disabled={loading}
+            disabled={loading || batchBacktest.running}
             title="과거 경기 분석 시 경기 시작 이전 데이터만 사용합니다."
           >
             🧪 백테스트 {backtestMode ? "ON" : "OFF"}
@@ -10664,7 +10836,20 @@ export default function Home() {
             </button>
           )}
 
-          <button className="btn primary" onClick={analyzeSelected} disabled={loading || !selectedBetman}>
+          {backtestMode && (
+            <button
+              className="btn light"
+              onClick={startBatchBacktest}
+              disabled={loading || validationLoading || backtestLibraryLoading || batchBacktest.running}
+              title="KBO 과거 실제경기 최대 30경기를 순차 분석하고, 예측 확정 후 결과 검증 레이어를 호출해 Calibration 데이터를 누적합니다."
+            >
+              {batchBacktest.running
+                ? `⏳ 자동 ${Math.min(batchBacktest.index + 1, batchBacktest.gameKeys.length)}/${batchBacktest.gameKeys.length}`
+                : "🚀 30경기 자동 백테스트"}
+            </button>
+          )}
+
+          <button className="btn primary" onClick={analyzeSelected} disabled={loading || batchBacktest.running || !selectedBetman}>
             {loading ? "⏳ 분석 중" : "📊 선택 경기 분석"}
           </button>
           <span className={betman.error ? "small err" : "small"}>{status}</span>
