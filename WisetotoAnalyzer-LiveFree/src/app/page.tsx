@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_3_9_FIX2_EXPLICIT_STAGE_CAST_20260826
+// DEPLOY_MARKER_V13_4_0_VERIFY_DEBUG_RATE_BACKOFF_20260826
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -10476,6 +10476,90 @@ export default function Home() {
     return snapshot;
   }
 
+  async function fetchWithBackoff(
+    input: RequestInfo | URL,
+    init: RequestInit | undefined,
+    label: string,
+    retries = 3
+  ) {
+    let lastResponse: Response | null = null;
+    let lastPayload: any = null;
+
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      const response = await fetch(input, init);
+      const payload = await readApiResponse(
+        response,
+        label
+      );
+
+      lastResponse = response;
+      lastPayload = payload;
+
+      const errorText =
+        String(
+          payload?.error ??
+          payload?.message ??
+          ""
+        ).toLowerCase();
+
+      const rateLimited =
+        response.status === 429 ||
+        errorText.includes("rate limit") ||
+        errorText.includes("too many requests");
+
+      if (!rateLimited) {
+        return {
+          response,
+          payload,
+          attempts: attempt + 1,
+        };
+      }
+
+      if (attempt >= retries) {
+        break;
+      }
+
+      const retryAfterHeader =
+        Number(
+          response.headers.get(
+            "retry-after"
+          )
+        );
+
+      const waitMs =
+        Number.isFinite(
+          retryAfterHeader
+        ) &&
+        retryAfterHeader > 0
+          ? retryAfterHeader * 1000
+          : Math.min(
+              16_000,
+              2_000 *
+                2 ** attempt
+            );
+
+      setStatus(
+        `${label} · rate limit · ${Math.round(
+          waitMs / 1000
+        )}초 후 재시도 ${attempt + 2}/${retries + 1}`
+      );
+
+      await new Promise(
+        (resolve) =>
+          window.setTimeout(
+            resolve,
+            waitMs
+          )
+      );
+    }
+
+    return {
+      response: lastResponse!,
+      payload: lastPayload,
+      attempts: retries + 1,
+    };
+  }
+
   async function createBacktestPredictionSnapshot(
     game: BetmanMatch
   ): Promise<{
@@ -10524,15 +10608,17 @@ export default function Home() {
     });
 
     // PRE-1. Fixture 매칭. 여기서는 결과 API를 호출하지 않는다.
-    const matchResponse = await fetch(
-      `/api/match?${params.toString()}`,
-      { cache: "no-store" }
-    );
-    const matchData =
-      await readApiResponse(
-        matchResponse,
-        "PRE Fixture 매칭 API"
+    const matchAttempt =
+      await fetchWithBackoff(
+        `/api/match?${params.toString()}`,
+        { cache: "no-store" },
+        "PRE Fixture 매칭 API",
+        3
       );
+    const matchResponse =
+      matchAttempt.response;
+    const matchData =
+      matchAttempt.payload;
 
     if (
       !matchResponse.ok ||
@@ -10568,17 +10654,18 @@ export default function Home() {
           String(cutoffMs),
       });
 
-    const detailResponse =
-      await fetch(
+    const detailAttempt =
+      await fetchWithBackoff(
         `/api/match/${fixtureId}?${detailParams.toString()}`,
-        { cache: "no-store" }
+        { cache: "no-store" },
+        "PRE Fixture 상세 API",
+        3
       );
 
+    const detailResponse =
+      detailAttempt.response;
     const detailData =
-      await readApiResponse(
-        detailResponse,
-        "PRE Fixture 상세 API"
-      );
+      detailAttempt.payload;
 
     if (
       !detailResponse.ok ||
@@ -10836,32 +10923,40 @@ export default function Home() {
     }
 
     // VERIFY-1. PRE snapshot이 잠긴 뒤에만 최종 결과를 호출한다.
-    const resultResponse =
-      await fetch(
+    const resultAttempt =
+      await fetchWithBackoff(
         `/api/fixture/result?id=${encodeURIComponent(
           String(
             snapshot.fixtureId
           )
         )}`,
-        { cache: "no-store" }
+        { cache: "no-store" },
+        "VERIFY 결과 검증 API",
+        3
       );
 
+    const resultResponse =
+      resultAttempt.response;
     const resultPayload =
-      await readApiResponse(
-        resultResponse,
-        "VERIFY 결과 검증 API"
-      );
+      resultAttempt.payload;
 
     if (
       !resultResponse.ok ||
       !resultPayload?.ok ||
       !resultPayload?.result
     ) {
+      const debugText =
+        resultPayload?.debug
+          ? ` · debug=${JSON.stringify(
+              resultPayload.debug
+            )}`
+          : "";
+
       throw new Error(
         `VERIFY_RESULT · ${readableError(
           resultPayload?.error,
           `Fixture #${snapshot.fixtureId} 실제 결과를 확인하지 못했습니다.`
-        )}`
+        )}${debugText}`
       );
     }
 
@@ -11270,6 +11365,17 @@ export default function Home() {
 
         setStatus(
           `자동 백테스트 ${index + 1}/${games.length} 실패 · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행 · ${errorMessage}`
+        );
+      }
+
+      // SportsAPI 연속 호출 압력을 낮추기 위한 경기 간 간격.
+      if (index < games.length - 1) {
+        await new Promise(
+          (resolve) =>
+            window.setTimeout(
+              resolve,
+              1500
+            )
         );
       }
     }
