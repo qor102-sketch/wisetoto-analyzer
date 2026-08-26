@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V12_9_STARTER_BAYESIAN_20260825
+// DEPLOY_MARKER_V13_2_1_BACKTEST_SAMPLE_EXPANSION_20260826
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -617,8 +617,126 @@ type SimpleBacktestSummary = {
   avgBrier: number | null;
 };
 
+// V13.2 Calibration Audit는 V13.0/V13.1 예측값을 수정하지 않고
+// 저장된 검증 레코드를 구간별로 재집계하는 읽기 전용 진단 레이어다.
+type CalibrationAuditSummary = SimpleBacktestSummary & {
+  avgProbability: number | null;
+  calibrationGap: number | null;
+  absoluteGap: number | null;
+};
+
+type CalibrationBucket = {
+  key: string;
+  label: string;
+  summary: CalibrationAuditSummary;
+};
+
+const CALIBRATION_MIN_SAMPLE = 20;
+
+function calibrationAuditSummary(
+  rows: SimpleBacktestRecord[]
+): CalibrationAuditSummary {
+  const base = simpleBacktestSummary(rows);
+
+  if (!rows.length) {
+    return {
+      ...base,
+      avgProbability: null,
+      calibrationGap: null,
+      absoluteGap: null,
+    };
+  }
+
+  const avgProbability =
+    rows.reduce((sum, row) => sum + clamp(row.probability, 0, 100), 0) /
+    rows.length;
+  const hitRate = base.hitRate;
+  const calibrationGap =
+    hitRate === null ? null : avgProbability - hitRate;
+
+  return {
+    ...base,
+    avgProbability,
+    calibrationGap,
+    absoluteGap:
+      calibrationGap === null ? null : Math.abs(calibrationGap),
+  };
+}
+
+function probabilityCalibrationBuckets(
+  rows: SimpleBacktestRecord[]
+): CalibrationBucket[] {
+  const definitions = [
+    { key: "p-0-50", label: "< 50%", min: 0, max: 50 },
+    { key: "p-50-55", label: "50~55%", min: 50, max: 55 },
+    { key: "p-55-60", label: "55~60%", min: 55, max: 60 },
+    { key: "p-60-65", label: "60~65%", min: 60, max: 65 },
+    { key: "p-65-70", label: "65~70%", min: 65, max: 70 },
+    { key: "p-70-75", label: "70~75%", min: 70, max: 75 },
+    { key: "p-75-80", label: "75~80%", min: 75, max: 80 },
+    { key: "p-80-101", label: "80%+", min: 80, max: 101 },
+  ];
+
+  return definitions.map((bucket) => ({
+    key: bucket.key,
+    label: bucket.label,
+    summary: calibrationAuditSummary(
+      rows.filter((row) =>
+        row.probability >= bucket.min && row.probability < bucket.max
+      )
+    ),
+  }));
+}
+
+function evCalibrationBuckets(
+  rows: SimpleBacktestRecord[]
+): CalibrationBucket[] {
+  const definitions = [
+    { key: "ev-neg10", label: "< -10%", min: -Infinity, max: -10 },
+    { key: "ev-neg10-0", label: "-10~0%", min: -10, max: 0 },
+    { key: "ev-0-3", label: "0~3%", min: 0, max: 3 },
+    { key: "ev-3-5", label: "3~5%", min: 3, max: 5 },
+    { key: "ev-5-8", label: "5~8%", min: 5, max: 8 },
+    { key: "ev-8-15", label: "8~15%", min: 8, max: 15 },
+    { key: "ev-15", label: "15%+", min: 15, max: Infinity },
+  ];
+
+  return definitions.map((bucket) => ({
+    key: bucket.key,
+    label: bucket.label,
+    summary: calibrationAuditSummary(
+      rows.filter((row) =>
+        row.expectedValue !== null &&
+        Number.isFinite(row.expectedValue) &&
+        row.expectedValue >= bucket.min &&
+        row.expectedValue < bucket.max
+      )
+    ),
+  }));
+}
+
+function calibrationGradeBucket(value: string) {
+  const normalized = String(value ?? "").toUpperCase();
+  if (normalized.includes("STRONG VALUE")) return "STRONG VALUE";
+  if (normalized.includes("VALUE")) return "VALUE";
+  if (normalized.includes("WATCH")) return "WATCH";
+  if (normalized.includes("PASS")) return "PASS";
+  return normalized || "-";
+}
+
+function calibrationBiasLabel(summary: CalibrationAuditSummary) {
+  if (summary.calibrationGap === null) return "-";
+  if (summary.records < CALIBRATION_MIN_SAMPLE) return "표본 부족";
+  if (summary.calibrationGap >= 5) return "과신";
+  if (summary.calibrationGap <= -5) return "과소신";
+  return "대체로 보정";
+}
+
 const SIMPLE_BACKTEST_STORAGE_KEY =
   "wisetoto-backtest-v12";
+
+const BACKTEST_GAME_LIBRARY_STORAGE_KEY =
+  "wisetoto-backtest-game-library-v1321";
 
 function simpleBacktestSummary(
   rows: SimpleBacktestRecord[]
@@ -8737,6 +8855,14 @@ export default function Home() {
 
   const [simpleBacktestRecords, setSimpleBacktestRecords] =
     useState<SimpleBacktestRecord[]>([]);
+  const [backtestGames, setBacktestGames] =
+    useState<BetmanMatch[]>(BACKTEST_BETMAN_GAMES);
+  const [backtestLibraryLoading, setBacktestLibraryLoading] =
+    useState(false);
+  const [dynamicValidationResults, setDynamicValidationResults] =
+    useState<Record<string, BacktestValidationResult>>({});
+  const [validationLoading, setValidationLoading] =
+    useState(false);
   const [betmanGames, setBetmanGames] = useState<BetmanMatch[]>([]);
   const [betmanDiagnostics, setBetmanDiagnostics] = useState<any>(null);
   const [selectedBetmanKey, setSelectedBetmanKey] = useState<string | null>(null);
@@ -8774,6 +8900,27 @@ export default function Home() {
       }
     } catch {
       // 누적 백테스트 저장 실패는 예측 엔진과 무관.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(BACKTEST_GAME_LIBRARY_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+
+      const merged = new Map<string, BetmanMatch>();
+      for (const game of BACKTEST_BETMAN_GAMES) {
+        merged.set(String((game as any)?.gameKey ?? (game as any)?.key ?? `${game.home}|${game.away}|${game.gameDate}`), game);
+      }
+      for (const game of parsed) {
+        const key = String(game?.gameKey ?? game?.key ?? `${game?.home}|${game?.away}|${game?.gameDate}`);
+        if (key) merged.set(key, game);
+      }
+      setBacktestGames(Array.from(merged.values()).sort((a,b) => gameTimeMs(b) - gameTimeMs(a)));
+    } catch {
+      // 백테스트 경기 라이브러리 복원 실패는 분석 엔진과 분리.
     }
   }, []);
 
@@ -9295,14 +9442,62 @@ export default function Home() {
     }
   }
 
+  async function loadBacktestCandidates() {
+    if (backtestLibraryLoading) return;
+    setBacktestLibraryLoading(true);
+    setStatus("과거 Betman 발매경기 후보 수집 중…");
+    try {
+      const response = await fetch("/api/betman?scope=past&sport=baseball&days=60", { cache: "no-store" });
+      const payload = await readApiResponse(response, "Betman 과거경기 후보 API");
+      if (!response.ok || !payload?.ok) throw new Error(readableError(payload?.error, "과거 Betman 경기 수집 실패"));
+
+      const now = Date.now();
+      const candidates = getBetmanGames(payload)
+        .filter((game) => {
+          const start = gameTimeMs(game);
+          const markets = Array.isArray((game as any)?.markets) ? (game as any).markets : [];
+          const hasOdds = markets.some((market:any) => Array.isArray(market?.selections) && market.selections.some((selection:any) => Number(selection?.odds) > 1));
+          const leagueText = String((game as any)?.league ?? (game as any)?.sportName ?? "").toLowerCase();
+          const kboLike = leagueText.includes("kbo") || ["nc","삼성","두산","lg","kt","ssg","롯데","한화","키움","kia"].some((name) => `${String(game?.home ?? "")} ${String(game?.away ?? "")}`.toLowerCase().includes(name));
+          return Number.isFinite(start) && start < now - 3 * 60 * 60 * 1000 && hasOdds && kboLike;
+        })
+        .map((game:any) => ({
+          ...game,
+          backtestManual: false,
+          backtestSource: "Betman API 과거 발매행 · 결과정보 미포함",
+        }))
+        .sort((a,b) => gameTimeMs(b) - gameTimeMs(a))
+        .slice(0, 100);
+
+      setBacktestGames((previous) => {
+        const merged = new Map<string, BetmanMatch>();
+        for (const game of [...BACKTEST_BETMAN_GAMES, ...previous, ...candidates]) {
+          const key = String((game as any)?.gameKey ?? (game as any)?.key ?? `${game.home}|${game.away}|${game.gameDateMs ?? game.gameDate}`);
+          if (key) merged.set(key, game);
+        }
+        const next = Array.from(merged.values()).sort((a,b) => gameTimeMs(b) - gameTimeMs(a));
+        try {
+          window.localStorage.setItem(BACKTEST_GAME_LIBRARY_STORAGE_KEY, JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+      setBacktestMode(true);
+      setStatus(candidates.length ? `과거 Betman 후보 ${candidates.length}경기 확인 · 백테스트 라이브러리에 병합` : "Betman 현재 응답에는 추가 과거 KBO 발매경기가 없습니다. 기존 저장 샘플은 유지됩니다.");
+    } catch (e:any) {
+      setStatus(readableError(e, "과거 Betman 경기 수집 실패"));
+    } finally {
+      setBacktestLibraryLoading(false);
+    }
+  }
+
   useEffect(() => { loadBetmanList(); }, []);
 
   const visibleBetmanGames = useMemo(
     () =>
       backtestMode
-        ? BACKTEST_BETMAN_GAMES
+        ? backtestGames
         : betmanGames,
-    [backtestMode, betmanGames]
+    [backtestMode, backtestGames, betmanGames]
   );
 
   const filteredGames = useMemo(
@@ -9419,12 +9614,21 @@ export default function Home() {
       actualMarketPicks
     );
 
+  const dynamicValidationKey = String(
+    matched?.fixtureId ??
+    matched?.selectedFixture?.id ??
+    backtestValidationKey(selectedBetman) ??
+    ""
+  );
+
   const backtestValidationResolved =
     backtestMode
-      ? resolveBacktestValidationResult(
-          selectedBetman,
-          matched
-        )
+      ? dynamicValidationResults[dynamicValidationKey]
+        ? { truth: dynamicValidationResults[dynamicValidationKey], matchedBy: `SportsAPI fixture result:${dynamicValidationKey} · 검증 레이어 전용` }
+        : resolveBacktestValidationResult(
+            selectedBetman,
+            matched
+          )
       : {
           truth:
             null as BacktestValidationResult | null,
@@ -9658,6 +9862,58 @@ export default function Home() {
           simpleBacktestRecords.filter((row) => row.grade === grade)
         ),
       }));
+
+
+  // V13.2 Calibration Audit: 저장된 V13.1 검증 데이터만 읽어서
+  // 확률/EV/등급/시장/단계별 실제 성능과 예측확률의 괴리를 진단한다.
+  const calibrationOverall =
+    calibrationAuditSummary(simpleBacktestRecords);
+
+  const calibrationProbabilityBuckets =
+    probabilityCalibrationBuckets(simpleBacktestRecords);
+
+  const calibrationEvBuckets =
+    evCalibrationBuckets(simpleBacktestRecords);
+
+  const calibrationGradeSummaries =
+    Array.from(
+      new Set(
+        simpleBacktestRecords.map((row) => calibrationGradeBucket(row.grade))
+      )
+    ).map((grade) => ({
+      grade,
+      summary: calibrationAuditSummary(
+        simpleBacktestRecords.filter(
+          (row) => calibrationGradeBucket(row.grade) === grade
+        )
+      ),
+    }));
+
+  const calibrationMarketSummaries =
+    Array.from(new Set(simpleBacktestRecords.map((row) => row.market)))
+      .map((market) => ({
+        market,
+        summary: calibrationAuditSummary(
+          simpleBacktestRecords.filter((row) => row.market === market)
+        ),
+      }));
+
+  const calibrationStageSummaries =
+    (["PRE", "STARTER", "LINEUP", "READY"] as const).map((stage) => ({
+      stage,
+      summary: calibrationAuditSummary(
+        simpleBacktestRecords.filter((row) => row.stage === stage)
+      ),
+    }));
+
+  const calibrationEce = (() => {
+    if (!simpleBacktestRecords.length) return null;
+    const weighted = calibrationProbabilityBuckets.reduce((sum, bucket) => {
+      if (bucket.summary.absoluteGap === null) return sum;
+      return sum + bucket.summary.absoluteGap * bucket.summary.records;
+    }, 0);
+    return weighted / simpleBacktestRecords.length;
+  })();
 
   function clearSimpleBacktest() {
     setSimpleBacktestRecords([]);
@@ -10126,6 +10382,41 @@ export default function Home() {
     } finally { setLoading(false); }
   }
 
+
+  async function revealBacktestResult() {
+    if (!backtestMode || validationLoading || !actualMarketPicks.length) return;
+
+    const fixtureId = Number(matched?.fixtureId ?? matched?.selectedFixture?.id ?? matched?.fixture?.id);
+    if (!Number.isFinite(fixtureId)) {
+      setStatus("실제 결과를 불러올 SportsAPI Fixture ID가 없습니다.");
+      return;
+    }
+
+    setValidationLoading(true);
+    setStatus(`Fixture #${fixtureId} 실제 결과를 검증 레이어에서 불러오는 중…`);
+    try {
+      const response = await fetch(`/api/fixture/result?id=${encodeURIComponent(String(fixtureId))}`, { cache: "no-store" });
+      const payload = await readApiResponse(response, "Fixture 결과 검증 API");
+      if (!response.ok || !payload?.ok || !payload?.result) {
+        throw new Error(readableError(payload?.error, "실제 경기결과를 확인하지 못했습니다."));
+      }
+      const result: BacktestValidationResult = {
+        homeScore: Number(payload.result.homeScore),
+        awayScore: Number(payload.result.awayScore),
+        firstHalfHomeScore: Number.isFinite(Number(payload.result.firstHalfHomeScore)) ? Number(payload.result.firstHalfHomeScore) : null,
+        firstHalfAwayScore: Number.isFinite(Number(payload.result.firstHalfAwayScore)) ? Number(payload.result.firstHalfAwayScore) : null,
+        sourceLabel: `SportsAPI Fixture #${fixtureId} · 예측 확정 후 검증 전용`,
+      };
+      setDynamicValidationResults((previous) => ({ ...previous, [String(fixtureId)]: result }));
+      setBacktestResultRevealed(true);
+      setStatus(`Fixture #${fixtureId} 실제 결과 연결 완료 · 검증 레이어 공개`);
+    } catch (e:any) {
+      setStatus(readableError(e, "실제 결과 검증 실패"));
+    } finally {
+      setValidationLoading(false);
+    }
+  }
+
   return (
     <main className="app">
       <style jsx global>{`
@@ -10242,6 +10533,17 @@ export default function Home() {
           >
             🧪 백테스트 {backtestMode ? "ON" : "OFF"}
           </button>
+
+          {backtestMode && (
+            <button
+              className="btn light"
+              onClick={loadBacktestCandidates}
+              disabled={loading || backtestLibraryLoading}
+              title="Betman API가 현재 제공하는 응답에서 종료된 KBO 발매경기를 찾아 로컬 백테스트 라이브러리에 병합합니다."
+            >
+              {backtestLibraryLoading ? "⏳ 과거 후보 수집" : "📚 과거 후보 불러오기"}
+            </button>
+          )}
 
           <button className="btn primary" onClick={analyzeSelected} disabled={loading || !selectedBetman}>
             {loading ? "⏳ 분석 중" : "📊 선택 경기 분석"}
@@ -10384,11 +10686,11 @@ export default function Home() {
 
           {backtestMode && (
             <div className="notice" style={{ margin: "0 14px 10px" }}>
-              <b>백테스트 데이터 소스</b>
-              {" · "}현재 샘플 1경기:
-              2026.08.22 19:00 KBO NC vs 삼성
-              {" · "}경기번호 5567~5574
-              {" · "}사용자 제공 경기 전 배당만 저장되어 있으며 최종점수/승패결과는 포함하지 않았습니다.
+              <b>V13.2.1 백테스트 표본 라이브러리</b>
+              {" · "}현재 {backtestGames.length}경기 / {backtestGames.reduce((sum, game) => sum + marketRows(game).length, 0)}배당행
+              {" · "}기본 검증 샘플 NC vs 삼성 포함
+              <br />
+              <span>「과거 후보 불러오기」는 Betman API가 현재 반환하는 종료 경기만 추가합니다. 경기전 배당만 저장하며 실제 결과는 분석 완료 후 별도 SportsAPI 검증 API를 호출할 때만 읽습니다.</span>
             </div>
           )}
 
@@ -11878,10 +12180,20 @@ export default function Home() {
                       </div>
 
                       {!backtestValidationTruth ? (
-                        <div className="notice" style={{ margin: 0 }}>
-                          이 경기의 실제 결과 검증 데이터가 아직 등록되지 않았습니다.
-                          예측은 정상적으로 사용할 수 있으며, 결과 데이터가 등록되기 전에는 검증 버튼을 표시하지 않습니다.
-                        </div>
+                        <>
+                          <div className="notice" style={{ margin: "0 0 8px" }}>
+                            예측 계산은 완료되었습니다. 이 경기의 실제 결과는 아직 읽지 않았습니다.
+                            아래 버튼을 누를 때만 SportsAPI Fixture 결과를 별도 검증 레이어에서 조회합니다.
+                          </div>
+                          <button
+                            className="btn primary"
+                            style={{ width: "100%", minHeight: 44, fontSize: 13, fontWeight: 900, marginTop: 4 }}
+                            onClick={revealBacktestResult}
+                            disabled={!actualMarketPicks.length || validationLoading}
+                          >
+                            {validationLoading ? "⏳ 실제 결과 확인 중" : "🔒 예측 확정 · 실제 결과 불러오기"}
+                          </button>
+                        </>
                       ) : !backtestResultRevealed ? (
                         <>
                           <div className="notice" style={{ margin: "0 0 8px" }}>
@@ -12188,6 +12500,123 @@ export default function Home() {
                       <div className="notice" style={{ margin: "8px 0 0" }}>
                         실제 결과를 연 뒤 검증 가능한 HIT/MISS 마켓을 단계별로 localStorage에 저장합니다.
                         V13.1은 PRE/STARTER/LINEUP/READY의 적중률·ROI·평균 EV·Brier를 분리 측정하며, 이 누적 기록은 예측 엔진 입력에 사용하지 않습니다.
+                      </div>
+
+                      <div style={{ marginTop: 14, borderTop: "2px solid #dbe5ef", paddingTop: 12 }}>
+                        <h3 style={{ margin: 0 }}>V13.2 Calibration Audit</h3>
+                        <div className="notice" style={{ margin: "8px 0" }}>
+                          V13.0 계산 엔진은 동결 상태입니다. 아래 값은 V13.1 누적 검증 레코드를 읽기 전용으로 재집계하며 예측확률이나 λ를 수정하지 않습니다.
+                          Calibration Gap = 평균 예측확률 - 실제 적중률이며, 양수는 과신 방향·음수는 과소신 방향입니다. N {CALIBRATION_MIN_SAMPLE} 미만은 판단을 보류합니다.
+                        </div>
+
+                        <div className="cards" style={{ marginTop: 8 }}>
+                          <div className="card">
+                            평균 예측
+                            <b>{calibrationOverall.avgProbability === null ? "-" : `${calibrationOverall.avgProbability.toFixed(1)}%`}</b>
+                          </div>
+                          <div className="card">
+                            실제 적중
+                            <b>{calibrationOverall.hitRate === null ? "-" : `${calibrationOverall.hitRate.toFixed(1)}%`}</b>
+                          </div>
+                          <div className="card">
+                            Calibration Gap
+                            <b>{calibrationOverall.calibrationGap === null ? "-" : `${calibrationOverall.calibrationGap >= 0 ? "+" : ""}${calibrationOverall.calibrationGap.toFixed(1)}%p`}</b>
+                            <div className="small">{calibrationBiasLabel(calibrationOverall)}</div>
+                          </div>
+                          <div className="card">
+                            ECE
+                            <b>{calibrationEce === null ? "-" : `${calibrationEce.toFixed(1)}%p`}</b>
+                            <div className="small">확률구간 가중 절대오차</div>
+                          </div>
+                        </div>
+
+                        <div style={{ marginTop: 10, overflowX: "auto" }}>
+                          <b style={{ fontSize: 10 }}>예측확률 구간별 Calibration</b>
+                          <div style={{ minWidth: 650, marginTop: 4 }}>
+                            {calibrationProbabilityBuckets.map(({ key, label, summary }) => (
+                              <div key={key} style={{ display: "grid", gridTemplateColumns: "78px 52px 86px 86px 82px 70px 70px", gap: 6, padding: "6px 8px", borderBottom: "1px solid #e6edf5", fontSize: 9 }}>
+                                <div><b>{label}</b></div>
+                                <div>N {summary.records}</div>
+                                <div>예측 {summary.avgProbability === null ? "-" : `${summary.avgProbability.toFixed(1)}%`}</div>
+                                <div>실제 {summary.hitRate === null ? "-" : `${summary.hitRate.toFixed(1)}%`}</div>
+                                <div>Gap {summary.calibrationGap === null ? "-" : `${summary.calibrationGap >= 0 ? "+" : ""}${summary.calibrationGap.toFixed(1)}%p`}</div>
+                                <div>Brier {summary.avgBrier === null ? "-" : summary.avgBrier.toFixed(3)}</div>
+                                <div>{calibrationBiasLabel(summary)}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div style={{ marginTop: 10, overflowX: "auto" }}>
+                          <b style={{ fontSize: 10 }}>EV 구간별 실제 ROI</b>
+                          <div style={{ minWidth: 590, marginTop: 4 }}>
+                            {calibrationEvBuckets.map(({ key, label, summary }) => (
+                              <div key={key} style={{ display: "grid", gridTemplateColumns: "78px 52px 86px 86px 86px 86px", gap: 6, padding: "6px 8px", borderBottom: "1px solid #e6edf5", fontSize: 9 }}>
+                                <div><b>{label}</b></div>
+                                <div>N {summary.records}</div>
+                                <div>평균 EV {summary.avgEv === null ? "-" : `${summary.avgEv >= 0 ? "+" : ""}${summary.avgEv.toFixed(1)}%`}</div>
+                                <div>ROI {summary.roi === null ? "-" : `${summary.roi >= 0 ? "+" : ""}${summary.roi.toFixed(1)}%`}</div>
+                                <div>적중 {summary.hitRate === null ? "-" : `${summary.hitRate.toFixed(1)}%`}</div>
+                                <div>Brier {summary.avgBrier === null ? "-" : summary.avgBrier.toFixed(3)}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {calibrationGradeSummaries.length > 0 && (
+                          <div style={{ marginTop: 10, overflowX: "auto" }}>
+                            <b style={{ fontSize: 10 }}>VALUE / WATCH / PASS 등급별 Calibration</b>
+                            <div style={{ minWidth: 650, marginTop: 4 }}>
+                              {calibrationGradeSummaries.map(({ grade, summary }) => (
+                                <div key={`cal-grade-${grade}`} style={{ display: "grid", gridTemplateColumns: "100px 52px 82px 82px 82px 72px 72px", gap: 6, padding: "6px 8px", borderBottom: "1px solid #e6edf5", fontSize: 9 }}>
+                                  <div><b>{grade}</b></div>
+                                  <div>N {summary.records}</div>
+                                  <div>적중 {summary.hitRate === null ? "-" : `${summary.hitRate.toFixed(1)}%`}</div>
+                                  <div>ROI {summary.roi === null ? "-" : `${summary.roi >= 0 ? "+" : ""}${summary.roi.toFixed(1)}%`}</div>
+                                  <div>Gap {summary.calibrationGap === null ? "-" : `${summary.calibrationGap >= 0 ? "+" : ""}${summary.calibrationGap.toFixed(1)}%p`}</div>
+                                  <div>Brier {summary.avgBrier === null ? "-" : summary.avgBrier.toFixed(3)}</div>
+                                  <div>{calibrationBiasLabel(summary)}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div style={{ marginTop: 10, overflowX: "auto" }}>
+                          <b style={{ fontSize: 10 }}>PRE / STARTER / LINEUP / READY 단계별 Calibration</b>
+                          <div style={{ minWidth: 650, marginTop: 4 }}>
+                            {calibrationStageSummaries.map(({ stage, summary }) => (
+                              <div key={`cal-stage-${stage}`} style={{ display: "grid", gridTemplateColumns: "82px 52px 82px 82px 82px 72px 72px", gap: 6, padding: "6px 8px", borderBottom: "1px solid #e6edf5", fontSize: 9 }}>
+                                <div><b>{stage}</b></div>
+                                <div>N {summary.records}</div>
+                                <div>예측 {summary.avgProbability === null ? "-" : `${summary.avgProbability.toFixed(1)}%`}</div>
+                                <div>실제 {summary.hitRate === null ? "-" : `${summary.hitRate.toFixed(1)}%`}</div>
+                                <div>Gap {summary.calibrationGap === null ? "-" : `${summary.calibrationGap >= 0 ? "+" : ""}${summary.calibrationGap.toFixed(1)}%p`}</div>
+                                <div>ROI {summary.roi === null ? "-" : `${summary.roi >= 0 ? "+" : ""}${summary.roi.toFixed(1)}%`}</div>
+                                <div>{calibrationBiasLabel(summary)}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {calibrationMarketSummaries.length > 0 && (
+                          <div style={{ marginTop: 10, overflowX: "auto" }}>
+                            <b style={{ fontSize: 10 }}>시장별 Calibration</b>
+                            <div style={{ minWidth: 720, marginTop: 4 }}>
+                              {calibrationMarketSummaries.map(({ market, summary }) => (
+                                <div key={`cal-market-${market}`} style={{ display: "grid", gridTemplateColumns: "130px 52px 82px 82px 82px 72px 72px", gap: 6, padding: "6px 8px", borderBottom: "1px solid #e6edf5", fontSize: 9 }}>
+                                  <div><b>{market}</b></div>
+                                  <div>N {summary.records}</div>
+                                  <div>예측 {summary.avgProbability === null ? "-" : `${summary.avgProbability.toFixed(1)}%`}</div>
+                                  <div>실제 {summary.hitRate === null ? "-" : `${summary.hitRate.toFixed(1)}%`}</div>
+                                  <div>Gap {summary.calibrationGap === null ? "-" : `${summary.calibrationGap >= 0 ? "+" : ""}${summary.calibrationGap.toFixed(1)}%p`}</div>
+                                  <div>ROI {summary.roi === null ? "-" : `${summary.roi >= 0 ? "+" : ""}${summary.roi.toFixed(1)}%`}</div>
+                                  <div>Brier {summary.avgBrier === null ? "-" : summary.avgBrier.toFixed(3)}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
