@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_3_7_FIX1_MARKETPICK_TYPE_20260826
+// DEPLOY_MARKER_V13_3_8_BATCH_DIAGNOSTICS_20260826
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -8884,6 +8884,17 @@ type BatchBacktestState = {
   phaseStartedAt: number;
 };
 
+type BatchBacktestDiagnostic = {
+  index: number;
+  gameNo: string;
+  gameLabel: string;
+  status: "SUCCESS" | "FAIL";
+  fixtureId: number | null;
+  calibrationRows: number;
+  message: string;
+  savedAt: number;
+};
+
 export default function Home() {
   const [sport, setSport] = useState<Sport>("전체");
   const [status, setStatus] = useState("Betman 발매경기 불러오는 중…");
@@ -8916,6 +8927,8 @@ export default function Home() {
       failed: 0,
       phaseStartedAt: Date.now(),
     });
+  const [batchBacktestDiagnostics, setBatchBacktestDiagnostics] =
+    useState<BatchBacktestDiagnostic[]>([]);
   const [betmanGames, setBetmanGames] = useState<BetmanMatch[]>([]);
   const [betmanDiagnostics, setBetmanDiagnostics] = useState<any>(null);
   const [selectedBetmanKey, setSelectedBetmanKey] = useState<string | null>(null);
@@ -10804,6 +10817,7 @@ export default function Home() {
 
     setBacktestMode(true);
     setBacktestResultRevealed(false);
+    setBatchBacktestDiagnostics([]);
 
     let completed = 0;
     let failed = 0;
@@ -10865,7 +10879,7 @@ export default function Home() {
       );
 
       setStatus(
-        `자동 백테스트 ${index + 1}/${games.length} · ${game?.home ?? "-"} vs ${game?.away ?? "-"} · 순차 분석 중…`
+        `자동 백테스트 ${index + 1}/${games.length} · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행 · ${game?.home ?? "-"} vs ${game?.away ?? "-"} · 순차 분석 중…`
       );
 
       try {
@@ -10881,6 +10895,27 @@ export default function Home() {
         batchRecords.push(
           ...result.records
         );
+
+        const gameNo = String(
+          (game as any)?.gameNo ??
+          marketRows(game)?.[0]?.gameNo ??
+          marketRows(game)?.[0]?.matchSeq ??
+          "-"
+        );
+
+        setBatchBacktestDiagnostics((previous) => [
+          ...previous,
+          {
+            index: index + 1,
+            gameNo,
+            gameLabel: `${game?.home ?? "-"} vs ${game?.away ?? "-"}`,
+            status: "SUCCESS",
+            fixtureId: result.fixtureId,
+            calibrationRows: result.records.length,
+            message: `Fixture #${result.fixtureId} · 검증 레코드 ${result.records.length}행 생성`,
+            savedAt: Date.now(),
+          },
+        ]);
 
         completed += 1;
 
@@ -10898,6 +10933,39 @@ export default function Home() {
       } catch (error: any) {
         failed += 1;
 
+        const errorMessage =
+          readableError(error, "분석/검증 실패");
+
+        const gameNo = String(
+          (game as any)?.gameNo ??
+          marketRows(game)?.[0]?.gameNo ??
+          marketRows(game)?.[0]?.matchSeq ??
+          "-"
+        );
+
+        const fixtureMatch =
+          String(errorMessage).match(/Fixture\s*#(\d+)/i);
+
+        const fixtureId =
+          fixtureMatch ? Number(fixtureMatch[1]) : null;
+
+        setBatchBacktestDiagnostics((previous) => [
+          ...previous,
+          {
+            index: index + 1,
+            gameNo,
+            gameLabel: `${game?.home ?? "-"} vs ${game?.away ?? "-"}`,
+            status: "FAIL",
+            fixtureId:
+              Number.isFinite(fixtureId)
+                ? fixtureId
+                : null,
+            calibrationRows: 0,
+            message: errorMessage,
+            savedAt: Date.now(),
+          },
+        ]);
+
         setBatchBacktest(
           (previous) => ({
             ...previous,
@@ -10907,7 +10975,7 @@ export default function Home() {
         );
 
         setStatus(
-          `자동 백테스트 ${index + 1}/${games.length} 실패 · ${readableError(error, "분석/검증 실패")}`
+          `자동 백테스트 ${index + 1}/${games.length} 실패 · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행 · ${errorMessage}`
         );
       }
     }
@@ -11327,7 +11395,7 @@ export default function Home() {
               title="KBO 과거 실제경기 최대 30경기를 순차 분석하고, 예측 확정 후 결과 검증 레이어를 호출해 Calibration 데이터를 누적합니다."
             >
               {batchBacktest.running
-                ? `⏳ 자동 ${Math.min(batchBacktest.index + 1, batchBacktest.gameKeys.length)}/${batchBacktest.gameKeys.length}`
+                ? `⏳ ${Math.min(batchBacktest.index + 1, batchBacktest.gameKeys.length)}/${batchBacktest.gameKeys.length} · ✅${batchBacktest.completed} ❌${batchBacktest.failed}`
                 : "🚀 30경기 자동 백테스트"}
             </button>
           )}
@@ -11338,6 +11406,69 @@ export default function Home() {
           <span className={betman.error ? "small err" : "small"}>{status}</span>
         </div>
       </div>
+
+      {backtestMode && batchBacktestDiagnostics.length > 0 && (
+        <div style={{
+          margin: "8px 12px 0",
+          padding: 10,
+          border: "1px solid #cbd5e1",
+          borderRadius: 12,
+          background: "#fff",
+        }}>
+          <div style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 7,
+          }}>
+            <b>🧾 자동 백테스트 진단 로그</b>
+            <span className="small">
+              성공 {batchBacktestDiagnostics.filter((row) => row.status === "SUCCESS").length}
+              {" · "}실패 {batchBacktestDiagnostics.filter((row) => row.status === "FAIL").length}
+              {" · "}Calibration {batchBacktestDiagnostics.reduce((sum, row) => sum + row.calibrationRows, 0)}행
+            </span>
+          </div>
+
+          <div style={{
+            maxHeight: 220,
+            overflowY: "auto",
+            border: "1px solid #e2e8f0",
+            borderRadius: 9,
+          }}>
+            {batchBacktestDiagnostics.map((row) => (
+              <div
+                key={`${row.index}|${row.gameNo}|${row.savedAt}`}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "46px 64px 72px minmax(180px,1fr) minmax(280px,1.5fr)",
+                  gap: 8,
+                  alignItems: "center",
+                  padding: "7px 9px",
+                  borderBottom: "1px solid #e2e8f0",
+                  fontSize: 12,
+                }}
+              >
+                <b>#{row.index}</b>
+                <span>{row.gameNo}</span>
+                <b style={{color: row.status === "SUCCESS" ? "#15803d" : "#dc2626"}}>
+                  {row.status === "SUCCESS" ? "성공" : "실패"}
+                </b>
+                <span>
+                  {row.gameLabel}
+                  {row.fixtureId !== null ? ` · F#${row.fixtureId}` : ""}
+                </span>
+                <span style={{
+                  color: row.status === "SUCCESS" ? "#166534" : "#991b1b",
+                  overflowWrap: "anywhere",
+                }}>
+                  {row.message}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="tabs">
         {(["전체","축구","야구","농구","배구"] as Sport[]).map((s) => (
