@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_3_0_ACTUAL_GAME_GROUPING_MULTISPORT_20260826
+// DEPLOY_MARKER_V13_3_1_ACTUAL_GAME_ONE_ROW_UI_20260826
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -10809,7 +10809,7 @@ export default function Home() {
               {" · "}현재 {mergeActualGames(backtestGames).length}실제경기 / {mergeActualGames(backtestGames).reduce((sum, game) => sum + marketRows(game).length, 0)}배당행
               {" · "}기본 검증 샘플 NC vs 삼성 포함
               <br />
-              <span>「과거 후보 불러오기」는 Betman API가 현재 반환하는 종료 경기만 추가합니다. 경기전 배당만 저장하며 실제 결과는 분석 완료 후 별도 SportsAPI 검증 API를 호출할 때만 읽습니다.</span>
+              <span>목록은 실제 경기 1줄로 표시하고, 해당 경기의 승패·핸디·U/O·전반 등 모든 Betman 시장은 오른쪽 분석에 함께 전달합니다. 실제 결과는 분석 완료 후 별도 SportsAPI 검증 API를 호출할 때만 읽습니다.</span>
             </div>
           )}
 
@@ -10861,18 +10861,18 @@ export default function Home() {
                       "1px solid #9aa6b2",
                   }}
                 >
-                  <div>경기번호</div>
+                  <div>대표번호</div>
                   <div>일시</div>
                   <div>리그</div>
-                  <div>게임유형</div>
+                  <div>시장수</div>
                   <div>대상경기</div>
-                  <div>승/언더</div>
-                  <div>무</div>
-                  <div>패/오버</div>
+                  <div>주요배당</div>
+                  <div>핸디</div>
+                  <div>U/O</div>
                   <div>선택</div>
                 </div>
 
-                {filteredGames.flatMap(
+                {filteredGames.map(
                   (
                     game,
                     gameIndex
@@ -10892,282 +10892,120 @@ export default function Home() {
                         game
                       );
 
-                    return rows.map(
-                      (
-                        market: any,
-                        marketIndex: number
-                      ) => {
-                        const isFirst =
-                          marketIndex ===
-                          0;
+                    const firstRow =
+                      rows[0];
 
-                        const matchSeq =
-                          Number(
-                            market
-                              ?.matchSeq
-                          );
+                    const moneyline =
+                      rows.find((row:any) =>
+                        String(row?.label ?? row?.marketName ?? row?.type ?? "")
+                          .match(/승패|승1패|moneyline/i)
+                      );
 
-                        const rowKey = [
-                          key,
-                          Number.isFinite(matchSeq)
-                            ? matchSeq
-                            : "no-seq",
-                          market?.betId ?? "",
-                          market?.betTypeId ?? "",
-                          market?.betName ?? "",
-                          market?.betTypeName ?? "",
-                          market?.rawHandiCode ?? "",
-                          market?.line ?? "",
-                          marketIndex,
-                        ].join("|");
+                    const handicap =
+                      rows.find((row:any) =>
+                        String(row?.label ?? row?.marketName ?? row?.type ?? "")
+                          .match(/(^|\s)H\s|핸디|handicap/i)
+                      );
 
-                        const label =
-                          marketLabel(
-                            market
-                          );
+                    const total =
+                      rows.find((row:any) =>
+                        String(row?.label ?? row?.marketName ?? row?.type ?? "")
+                          .match(/U\/O|(^|\s)U\s|언더|오버|total/i)
+                      );
 
-                        return (
-                          <div
-                            key={
-                              rowKey
-                            }
+                    const oddsText = (row:any) => {
+                      if (!row) return "-";
+                      const values = [
+                        row?.homeOdds ?? row?.oddsHome ?? row?.selections?.[0]?.odds,
+                        row?.drawOdds ?? row?.oddsDraw ?? row?.selections?.[1]?.odds,
+                        row?.awayOdds ?? row?.oddsAway ?? row?.selections?.[2]?.odds,
+                      ].filter((v:any) => Number(v) > 0);
+                      return values.length
+                        ? values.map((v:any) => Number(v).toFixed(2)).join(" / ")
+                        : "-";
+                    };
+
+                    return (
+                      <div
+                        key={key}
+                        style={{
+                          display:
+                            "grid",
+                          gridTemplateColumns:
+                            "58px 96px 92px 70px minmax(190px,1fr) 116px 86px 86px 58px",
+                          minHeight:
+                            42,
+                          alignItems:
+                            "center",
+                          textAlign:
+                            "center",
+                          borderBottom:
+                            "1px solid #cfd6dc",
+                          background:
+                            selected
+                              ? "#e8f2ff"
+                              : "#fff",
+                        }}
+                      >
+                        <div>
+                          {String(
+                            firstRow?.gameNo ??
+                            firstRow?.matchSeq ??
+                            (game as any)?.gameNo ??
+                            "-"
+                          )}
+                        </div>
+                        <div>
+                          {formatBetmanDate(game)}
+                        </div>
+                        <div>
+                          {String(
+                            (game as any)?.league ??
+                            koreanSport(String((game as any)?.sport ?? "")) ??
+                            "-"
+                          )}
+                        </div>
+                        <div style={{fontWeight:800}}>
+                          {rows.length}개
+                        </div>
+                        <div style={{fontWeight:800}}>
+                          {betmanTeam(game,"home")} : {betmanTeam(game,"away")}
+                        </div>
+                        <div>
+                          {oddsText(moneyline)}
+                        </div>
+                        <div>
+                          {handicap
+                            ? String(handicap?.label ?? handicap?.marketName ?? handicap?.type ?? "H")
+                            : "-"}
+                        </div>
+                        <div>
+                          {total
+                            ? String(total?.label ?? total?.marketName ?? total?.type ?? "U/O")
+                            : "-"}
+                        </div>
+                        <div>
+                          <button
+                            className="btn light"
                             onClick={() =>
-                              chooseGame(
+                              selectBetmanGame(
                                 game,
                                 gameIndex
                               )
                             }
                             style={{
-                              display:
-                                "grid",
-                              gridTemplateColumns:
-                                "58px 96px 92px 70px minmax(190px,1fr) 58px 58px 58px 58px",
-                              minHeight:
-                                35,
-                              alignItems:
-                                "center",
-                              borderBottom:
-                                "1px solid #c7cdd2",
-                              background:
-                                selected
-                                  ? "#eef7ff"
-                                  : isFirst
-                                    ? "#f7f7f7"
-                                    : "#fff",
-                              cursor:
-                                "pointer",
+                              padding:
+                                "5px 7px",
+                              minWidth:
+                                50,
                             }}
                           >
-                            <div
-                              style={{
-                                padding:
-                                  "0 4px",
-                                textAlign:
-                                  "center",
-                                fontWeight:
-                                  700,
-                              }}
-                            >
-                              {Number.isFinite(
-                                matchSeq
-                              )
-                                ? matchSeq
-                                : "-"}
-                            </div>
-
-                            <div
-                              style={{
-                                padding:
-                                  "0 5px",
-                                whiteSpace:
-                                  "nowrap",
-                                fontWeight:
-                                  isFirst
-                                    ? 700
-                                    : 500,
-                              }}
-                            >
-                              {compactGameDate(
-                                game
-                              )}
-                            </div>
-
-                            <div
-                              style={{
-                                padding:
-                                  "0 5px",
-                                whiteSpace:
-                                  "nowrap",
-                                overflow:
-                                  "hidden",
-                                textOverflow:
-                                  "ellipsis",
-                              }}
-                              title={
-                                String(
-                                  (game as any)
-                                    ?.league ??
-                                  "-"
-                                )
-                              }
-                            >
-                              {
-                                I[
-                                  koreanSport(
-                                    String(
-                                      (game as any)
-                                        ?.sport ??
-                                      ""
-                                    )
-                                  )
-                                ]
-                              }{" "}
-                              {(game as any)
-                                ?.league ??
-                                "-"}
-                            </div>
-
-                            <div
-                              style={{
-                                padding:
-                                  "0 4px",
-                                textAlign:
-                                  "center",
-                                fontWeight:
-                                  900,
-                                color:
-                                  marketLabelColor(
-                                    market
-                                  ),
-                                whiteSpace:
-                                  "nowrap",
-                              }}
-                            >
-                              {label}
-                            </div>
-
-                            <div
-                              style={{
-                                padding:
-                                  "0 7px",
-                                textAlign:
-                                  "center",
-                                fontWeight:
-                                  isFirst
-                                    ? 800
-                                    : 600,
-                                textDecoration:
-                                  "underline",
-                                textUnderlineOffset:
-                                  2,
-                              }}
-                            >
-                              {game?.home ??
-                                "-"}{" "}
-                              :{" "}
-                              {game?.away ??
-                                "-"}
-                            </div>
-
-                            <div
-                              style={{
-                                textAlign:
-                                  "center",
-                                fontWeight:
-                                  800,
-                                textDecoration:
-                                  "underline",
-                              }}
-                            >
-                              {selectionOdds(
-                                market,
-                                "win"
-                              )}
-                            </div>
-
-                            <div
-                              style={{
-                                textAlign:
-                                  "center",
-                                fontWeight:
-                                  800,
-                                textDecoration:
-                                  selectionOdds(
-                                    market,
-                                    "draw"
-                                  ) !==
-                                  "-"
-                                    ? "underline"
-                                    : "none",
-                              }}
-                            >
-                              {selectionOdds(
-                                market,
-                                "draw"
-                              )}
-                            </div>
-
-                            <div
-                              style={{
-                                textAlign:
-                                  "center",
-                                fontWeight:
-                                  800,
-                                textDecoration:
-                                  "underline",
-                              }}
-                            >
-                              {selectionOdds(
-                                market,
-                                "lose"
-                              )}
-                            </div>
-
-                            <div
-                              style={{
-                                textAlign:
-                                  "center",
-                              }}
-                            >
-                              <button
-                                type="button"
-                                onClick={(
-                                  event
-                                ) => {
-                                  event.stopPropagation();
-
-                                  chooseGame(
-                                    game,
-                                    gameIndex
-                                  );
-                                }}
-                                style={{
-                                  padding:
-                                    "4px 7px",
-                                  border:
-                                    selected
-                                      ? "1px solid #0b6cb8"
-                                      : "1px solid #9aa4ad",
-                                  background:
-                                    selected
-                                      ? "#e4f2ff"
-                                      : "#fff",
-                                  cursor:
-                                    "pointer",
-                                  fontSize:
-                                    11,
-                                  fontWeight:
-                                    700,
-                                }}
-                              >
-                                {selected
-                                  ? "선택됨"
-                                  : "경기전"}
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      }
+                            {selected
+                              ? "선택됨"
+                              : "경기전"}
+                          </button>
+                        </div>
+                      </div>
                     );
                   }
                 )}
