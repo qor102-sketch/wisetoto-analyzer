@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_3_6_WAIT_FOR_DERIVED_PICKS_20260826
+// DEPLOY_MARKER_V13_3_7_DIRECT_SEQUENTIAL_BACKTEST_20260826
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -8872,7 +8872,7 @@ function formatBacktestCutoff(
 }
 
 
-type BatchBacktestPhase = "IDLE" | "SELECT" | "ANALYZE" | "WAIT_ANALYZE" | "REVEAL" | "WAIT_REVEAL";
+type BatchBacktestPhase = "IDLE" | "DIRECT" | "SELECT" | "ANALYZE" | "WAIT_ANALYZE" | "REVEAL" | "WAIT_REVEAL";
 
 type BatchBacktestState = {
   running: boolean;
@@ -9960,169 +9960,9 @@ export default function Home() {
     simpleCurrentSignature,
   ]);
 
-  useEffect(() => {
-    if (!batchBacktest.running) {
-      if (batchBacktest.phase === "IDLE" && batchBacktest.gameKeys.length) {
-        setStatus(
-          `30경기 자동 백테스트 완료 · 성공 ${batchBacktest.completed}경기 · 실패 ${batchBacktest.failed}경기 · Calibration 누적 ${simpleBacktestRecords.length}행`
-        );
-      }
-      return;
-    }
 
-    const games = mergeActualGames(backtestGames);
-    const currentKey = batchBacktest.gameKeys[batchBacktest.index];
-    const currentGame = games.find((game) => actualGameIdentity(game) === currentKey);
-
-    if (!currentGame) {
-      advanceBatchBacktest(false);
-      return;
-    }
-
-    const displayNo = batchBacktest.index + 1;
-    const total = batchBacktest.gameKeys.length;
-
-    if (batchBacktest.phase === "SELECT") {
-      setBacktestResultRevealed(false);
-      chooseGame(currentGame, games.indexOf(currentGame));
-      setBatchBacktest((previous) => ({ ...previous, phase: "ANALYZE", phaseStartedAt: Date.now() }));
-      setStatus(`자동 백테스트 ${displayNo}/${total} · 경기 선택 · ${currentGame.home} vs ${currentGame.away}`);
-      return;
-    }
-
-    if (batchBacktest.phase === "ANALYZE") {
-      const selectedKey = gameKey(currentGame, games.indexOf(currentGame));
-      if (selectedBetmanKey !== selectedKey || !selectedBetman || loading) return;
-
-      // 다음 경기로 넘어가기 전에 현재 경기의 전체 SportsAPI 상세 분석 요청이
-      // 완전히 끝나도록 기다린다. 중간 timeout 이동을 금지해 이전 경기 응답이
-      // 다음 경기 화면을 덮어쓰는 race condition을 차단한다.
-      setBatchBacktest((previous) => ({
-        ...previous,
-        phase: "WAIT_ANALYZE",
-        phaseStartedAt: Date.now(),
-      }));
-
-      void analyzeSelected().then((ok) => {
-        if (!ok) {
-          advanceBatchBacktest(false);
-        }
-        // 성공 시에는 phase를 바꾸지 않는다.
-        // matched/recentSummary/actualMarketPicks가 현재 경기 기준으로
-        // React 파생 계산까지 완료된 것을 WAIT_ANALYZE에서 확인한 뒤 이동한다.
-      });
-      return;
-    }
-
-    if (batchBacktest.phase === "WAIT_ANALYZE") {
-      if (loading) return;
-
-      const selectedKey = gameKey(currentGame, games.indexOf(currentGame));
-      if (selectedBetmanKey !== selectedKey || !selectedBetman) return;
-
-      const fixtureId = Number(
-        matched?.fixtureId ??
-        matched?.selectedFixture?.id ??
-        matched?.fixture?.id
-      );
-
-      // 분석 API Promise가 끝났어도 React 파생값(actualMarketPicks)은
-      // 다음 렌더에서 생성될 수 있다. 현재 fixture와 시장 픽이 모두 확인된
-      // 뒤에만 실제 결과 검증 단계로 넘어간다.
-      if (Number.isFinite(fixtureId) && actualMarketPicks.length > 0) {
-        setBatchBacktest((previous) => ({
-          ...previous,
-          phase: "REVEAL",
-          phaseStartedAt: Date.now(),
-        }));
-        return;
-      }
-
-      // 요청이 끝난 뒤에도 실제 분석 산출물이 생성되지 않는 경기만 실패 처리.
-      // 이 타이머는 API 진행 중 요청을 자르는 용도가 아니라
-      // React 파생 계산/불완전 상세 응답을 판별하는 후처리 대기다.
-      if (Number.isFinite(fixtureId) && matched) {
-        const timer = window.setTimeout(() => {
-          if (!loading && actualMarketPicks.length === 0) {
-            setStatus(
-              `자동 백테스트 ${displayNo}/${total} · 상세 분석 완료 후 시장 픽 없음 · 스킵 · ${currentGame.home} vs ${currentGame.away}`
-            );
-            advanceBatchBacktest(false);
-          }
-        }, 2500);
-        return () => window.clearTimeout(timer);
-      }
-
-      return;
-    }
-
-    if (batchBacktest.phase === "REVEAL") {
-      if (validationLoading || !actualMarketPicks.length) return;
-
-      setBatchBacktest((previous) => ({
-        ...previous,
-        phase: "WAIT_REVEAL",
-        phaseStartedAt: Date.now(),
-      }));
-
-      void revealBacktestResult().then((ok) => {
-        if (!ok) {
-          advanceBatchBacktest(false);
-        }
-      });
-      return;
-    }
-
-    if (batchBacktest.phase === "WAIT_REVEAL") {
-      if (validationLoading) return;
-
-      if (
-        backtestResultRevealed &&
-        backtestValidationTruth &&
-        simpleCurrentRecords.length
-      ) {
-        const timer = window.setTimeout(
-          () => advanceBatchBacktest(true),
-          300
-        );
-        return () => window.clearTimeout(timer);
-      }
-
-      // 결과 요청이 종료된 뒤 React 검증 파생값이 반영될 시간을 준다.
-      // backtestResultRevealed=true인데도 validation rows가 없으면
-      // 시장키/결과매칭 실패이므로 해당 경기만 실패 처리한다.
-      if (backtestResultRevealed) {
-        const timer = window.setTimeout(() => {
-          if (
-            backtestResultRevealed &&
-            !validationLoading &&
-            simpleCurrentRecords.length === 0
-          ) {
-            setStatus(
-              `자동 백테스트 ${displayNo}/${total} · 결과는 수신했지만 검증 레코드 생성 실패 · 스킵 · ${currentGame.home} vs ${currentGame.away}`
-            );
-            advanceBatchBacktest(false);
-          }
-        }, 2500);
-        return () => window.clearTimeout(timer);
-      }
-
-      return;
-    }
-  }, [
-    batchBacktest,
-    backtestGames,
-    selectedBetmanKey,
-    selectedBetman,
-    loading,
-    matched,
-    actualMarketPicks.length,
-    validationLoading,
-    backtestResultRevealed,
-    backtestValidationTruth,
-    simpleCurrentSignature,
-    simpleBacktestRecords.length,
-  ]);
+  // V13.3.7: 자동 백테스트는 React 상태 감시형 state-machine을 사용하지 않고
+  // 한 경기씩 await 하는 직접 순차 실행 함수에서 처리합니다.
 
   const simpleSummary =
     simpleBacktestSummary(
@@ -10551,32 +10391,585 @@ export default function Home() {
       (league.includes("kbo") || kboTeams.some((name) => teams.includes(name)));
   }
 
-  function startBatchBacktest() {
-    if (batchBacktest.running || loading || validationLoading) return;
+  async function analyzeBacktestGameDirect(
+    game: BetmanMatch
+  ): Promise<{
+    fixtureId: number;
+    combined: any;
+    picks: any[];
+    records: SimpleBacktestRecord[];
+  }> {
+    const selectedStartMs = gameTimeMs(game);
+    const cutoffMs =
+      Number.isFinite(selectedStartMs)
+        ? selectedStartMs - 60_000
+        : null;
 
-    const games = mergeActualGames(backtestGames)
-      .filter((game) => Number.isFinite(gameTimeMs(game)) && gameTimeMs(game) < Date.now())
-      .filter(isKboBacktestGame)
-      .sort((a,b) => gameTimeMs(b) - gameTimeMs(a))
-      .slice(0, 30);
+    if (cutoffMs === null) {
+      throw new Error("백테스트 경기 시작시간을 확인하지 못했습니다.");
+    }
+
+    const matchHome = sportsApiTeamName(game?.home);
+    const matchAway = sportsApiTeamName(game?.away);
+
+    const params = new URLSearchParams({
+      mode: "selected",
+      home: matchHome,
+      away: matchAway,
+      originalHome: String(game?.home ?? ""),
+      originalAway: String(game?.away ?? ""),
+      gameDateMs: String(selectedStartMs),
+      sport: String((game as any)?.sport ?? ""),
+      league: String((game as any)?.league ?? ""),
+      backtest: "1",
+    });
+
+    // 1) Fixture 매칭을 완전히 기다린다.
+    const matchResponse = await fetch(
+      `/api/match?${params.toString()}`,
+      { cache: "no-store" }
+    );
+    const matchData = await readApiResponse(
+      matchResponse,
+      "자동 백테스트 Fixture 매칭 API"
+    );
+
+    if (!matchResponse.ok || !matchData?.ok) {
+      throw new Error(
+        readableError(
+          matchData?.error,
+          "SportsAPI 동일경기 자동매칭 실패"
+        )
+      );
+    }
+
+    const fixtureId = Number(matchData?.fixtureId);
+    if (!Number.isFinite(fixtureId)) {
+      throw new Error("SportsAPI Fixture ID를 받지 못했습니다.");
+    }
+
+    // 2) cutoff 이전 H2H/Form 상세 데이터를 완전히 기다린다.
+    const detailParams = new URLSearchParams({
+      cutoffMs: String(cutoffMs),
+    });
+
+    const detailResponse = await fetch(
+      `/api/match/${fixtureId}?${detailParams.toString()}`,
+      { cache: "no-store" }
+    );
+    const detailData = await readApiResponse(
+      detailResponse,
+      "자동 백테스트 Fixture 상세 API"
+    );
+
+    if (!detailResponse.ok || !detailData?.ok) {
+      throw new Error(
+        readableError(
+          detailData?.error,
+          `Fixture #${fixtureId} 상세 분석 데이터 수신 실패`
+        )
+      );
+    }
+
+    const pregameAudit =
+      safePregameStructureDiagnostic({
+        ...detailData,
+        fixture:
+          detailData?.fixture ??
+          matchData?.fixture ??
+          null,
+        lineups:
+          detailData?.lineups ??
+          matchData?.lineups ??
+          null,
+        selectedFixture:
+          detailData?.selectedFixture ??
+          matchData?.selectedFixture ??
+          null,
+      });
+
+    const combinedRaw = {
+      ...matchData,
+      pregameAudit,
+      fixture:
+        detailData?.fixture ??
+        matchData?.fixture,
+      detail:
+        detailData?.fixture ??
+        matchData?.detail,
+      selectedFixture:
+        detailData?.selectedFixture ??
+        matchData?.selectedFixture,
+      h2h:
+        detailData?.h2h ??
+        matchData?.h2h ??
+        null,
+      recentSummary:
+        detailData?.recentSummary ??
+        matchData?.recentSummary ??
+        null,
+      statistics: null,
+      lineups:
+        detailData?.lineups ??
+        matchData?.lineups ??
+        null,
+      detailDebug: null,
+    };
+
+    // 3) 예측 계산 전에 사후정보를 제거한다.
+    const combined =
+      sanitizeMatchedForBacktest(
+        combinedRaw,
+        cutoffMs,
+        game
+      );
+
+    const selectedFixture =
+      combined?.selectedFixture ??
+      null;
+
+    const currentSport =
+      selectedFixture
+        ? koreanSport(
+            selectedFixture?.sport
+          )
+        : koreanSport(
+            String(
+              (game as any)?.sport ??
+              ""
+            )
+          );
+
+    const recent =
+      combined?.recentSummary ??
+      null;
+
+    const directH2h =
+      combined?.h2h ??
+      null;
+
+    const analysisDirect =
+      buildAnalysis(
+        currentSport,
+        directH2h,
+        recent,
+        game,
+        combined
+      );
+
+    const picksRaw =
+      buildActualMarketPicks(
+        game,
+        currentSport,
+        analysisDirect.factors,
+        recent,
+        directH2h
+      );
+
+    const picks =
+      applyLineupStatsCoverageGate(
+        picksRaw,
+        currentSport,
+        analysisDirect.factors
+      );
+
+    if (!picks.length) {
+      throw new Error(
+        `Fixture #${fixtureId} 분석은 완료됐지만 시장 픽이 생성되지 않았습니다.`
+      );
+    }
+
+    // 4) 여기까지 예측이 확정된 뒤에만 실제 결과 API를 호출한다.
+    const resultResponse = await fetch(
+      `/api/fixture/result?id=${encodeURIComponent(String(fixtureId))}`,
+      { cache: "no-store" }
+    );
+
+    const resultPayload =
+      await readApiResponse(
+        resultResponse,
+        "자동 백테스트 결과 검증 API"
+      );
+
+    if (
+      !resultResponse.ok ||
+      !resultPayload?.ok ||
+      !resultPayload?.result
+    ) {
+      throw new Error(
+        readableError(
+          resultPayload?.error,
+          `Fixture #${fixtureId} 실제 결과를 확인하지 못했습니다.`
+        )
+      );
+    }
+
+    const truth: BacktestValidationResult = {
+      homeScore: Number(
+        resultPayload.result.homeScore
+      ),
+      awayScore: Number(
+        resultPayload.result.awayScore
+      ),
+      firstHalfHomeScore:
+        Number.isFinite(
+          Number(
+            resultPayload.result.firstHalfHomeScore
+          )
+        )
+          ? Number(
+              resultPayload.result.firstHalfHomeScore
+            )
+          : null,
+      firstHalfAwayScore:
+        Number.isFinite(
+          Number(
+            resultPayload.result.firstHalfAwayScore
+          )
+        )
+          ? Number(
+              resultPayload.result.firstHalfAwayScore
+            )
+          : null,
+      sourceLabel:
+        `SportsAPI Fixture #${fixtureId} · 예측 확정 후 검증 전용`,
+    };
+
+    const markets =
+      marketRows(game);
+
+    const stage =
+      analysisDirect.factors
+        ?.baseballAnalysisStage ??
+      "PRE";
+
+    const records:
+      SimpleBacktestRecord[] =
+      [];
+
+    for (const pick of picks) {
+      const marketIndex =
+        markets.findIndex(
+          (
+            market: any,
+            index: number
+          ) =>
+            marketStableKey(
+              market,
+              index
+            ) === pick.key
+        );
+
+      const market =
+        marketIndex >= 0
+          ? markets[marketIndex]
+          : null;
+
+      const validation =
+        validateBacktestMarket(
+          market,
+          pick,
+          truth
+        );
+
+      if (
+        validation.status !==
+          "HIT" &&
+        validation.status !==
+          "MISS"
+      ) {
+        continue;
+      }
+
+      const hit =
+        validation.status ===
+        "HIT";
+
+      const probability =
+        clamp(
+          Number(
+            pick.probability
+          ),
+          0,
+          100
+        );
+
+      const p =
+        probability / 100;
+
+      const odds =
+        pick.odds ?? null;
+
+      const expectedValue =
+        pick.expectedValue ??
+        null;
+
+      const grade =
+        pick.displayGrade ??
+        pick.stageGradeLabel ??
+        pick.grade ??
+        pick.valueGrade ??
+        "-";
+
+      const realizedReturn =
+        odds !== null &&
+        Number.isFinite(odds) &&
+        odds > 1
+          ? hit
+            ? odds - 1
+            : -1
+          : null;
+
+      records.push({
+        id:
+          `${fixtureId}|${stage}|${pick.key}`,
+        fixtureKey:
+          String(fixtureId),
+        gameLabel:
+          `${game?.home ?? "-"} vs ${game?.away ?? "-"}`,
+        stage,
+        market:
+          pick.market,
+        pick:
+          pick.pick,
+        probability,
+        odds,
+        expectedValue,
+        grade,
+        hit,
+        realizedReturn,
+        brier:
+          Number(
+            (
+              (
+                p -
+                (hit ? 1 : 0)
+              ) ** 2
+            ).toFixed(6)
+          ),
+        savedAt:
+          Date.now(),
+      });
+    }
+
+    if (!records.length) {
+      throw new Error(
+        `Fixture #${fixtureId} 결과는 확인했지만 검증 가능한 시장 레코드가 생성되지 않았습니다.`
+      );
+    }
+
+    return {
+      fixtureId,
+      combined,
+      picks,
+      records,
+    };
+  }
+
+  async function startBatchBacktest() {
+    if (
+      batchBacktest.running ||
+      loading ||
+      validationLoading
+    ) {
+      return;
+    }
+
+    const games =
+      mergeActualGames(
+        backtestGames
+      )
+        .filter(
+          (game) =>
+            Number.isFinite(
+              gameTimeMs(game)
+            ) &&
+            gameTimeMs(game) <
+              Date.now()
+        )
+        .filter(
+          isKboBacktestGame
+        )
+        .sort(
+          (a, b) =>
+            gameTimeMs(b) -
+            gameTimeMs(a)
+        )
+        .slice(0, 30);
 
     if (!games.length) {
-      setStatus("자동 백테스트 대상 KBO 과거경기가 없습니다. 먼저 과거 후보를 불러오세요.");
+      setStatus(
+        "자동 백테스트 대상 KBO 과거경기가 없습니다. 먼저 과거 후보를 불러오세요."
+      );
       return;
     }
 
     setBacktestMode(true);
     setBacktestResultRevealed(false);
+
+    let completed = 0;
+    let failed = 0;
+    const batchRecords:
+      SimpleBacktestRecord[] =
+      [];
+
     setBatchBacktest({
       running: true,
-      gameKeys: games.map(actualGameIdentity),
+      gameKeys:
+        games.map(
+          actualGameIdentity
+        ),
       index: 0,
-      phase: "SELECT",
+      phase: "DIRECT",
       completed: 0,
       failed: 0,
-      phaseStartedAt: Date.now(),
+      phaseStartedAt:
+        Date.now(),
     });
-    setStatus(`30경기 자동 백테스트 시작 · KBO 실제경기 ${games.length}경기`);
+
+    for (
+      let index = 0;
+      index < games.length;
+      index += 1
+    ) {
+      const game =
+        games[index];
+
+      // 화면에는 현재 처리 중인 경기만 보여주되,
+      // 분석 계산 자체는 React 선택 state가 아니라 game 인자로 수행한다.
+      setSelectedBetmanKey(
+        gameKey(
+          game,
+          mergeActualGames(
+            backtestGames
+          ).indexOf(game)
+        )
+      );
+      setBetman({
+        loading: false,
+        matched: game,
+        score: 1,
+        error: null,
+      });
+      setMatched(null);
+      setBacktestResultRevealed(false);
+
+      setBatchBacktest(
+        (previous) => ({
+          ...previous,
+          index,
+          phase: "DIRECT",
+          completed,
+          failed,
+          phaseStartedAt:
+            Date.now(),
+        })
+      );
+
+      setStatus(
+        `자동 백테스트 ${index + 1}/${games.length} · ${game?.home ?? "-"} vs ${game?.away ?? "-"} · 순차 분석 중…`
+      );
+
+      try {
+        const result =
+          await analyzeBacktestGameDirect(
+            game
+          );
+
+        // 이 경기의 전체 분석/결과검증이 끝난 뒤에만 UI와 누적자료를 갱신한다.
+        setMatched(
+          result.combined
+        );
+        batchRecords.push(
+          ...result.records
+        );
+
+        completed += 1;
+
+        setBatchBacktest(
+          (previous) => ({
+            ...previous,
+            completed,
+            failed,
+          })
+        );
+
+        setStatus(
+          `자동 백테스트 ${index + 1}/${games.length} 완료 · 성공 ${completed} · 실패 ${failed} · 신규 Calibration ${batchRecords.length}행`
+        );
+      } catch (error: any) {
+        failed += 1;
+
+        setBatchBacktest(
+          (previous) => ({
+            ...previous,
+            completed,
+            failed,
+          })
+        );
+
+        setStatus(
+          `자동 백테스트 ${index + 1}/${games.length} 실패 · ${readableError(error, "분석/검증 실패")}`
+        );
+      }
+    }
+
+    // 같은 ID는 마지막 값으로 덮어쓰고 한 번에 저장한다.
+    setSimpleBacktestRecords(
+      (previous) => {
+        const byId =
+          new Map<
+            string,
+            SimpleBacktestRecord
+          >();
+
+        for (const row of previous) {
+          byId.set(
+            row.id,
+            row
+          );
+        }
+
+        for (const row of batchRecords) {
+          byId.set(
+            row.id,
+            row
+          );
+        }
+
+        const next =
+          Array.from(
+            byId.values()
+          );
+
+        try {
+          window.localStorage.setItem(
+            SIMPLE_BACKTEST_STORAGE_KEY,
+            JSON.stringify(next)
+          );
+        } catch {}
+
+        return next;
+      }
+    );
+
+    setBatchBacktest(
+      (previous) => ({
+        ...previous,
+        running: false,
+        index:
+          games.length,
+        phase: "IDLE",
+        completed,
+        failed,
+        phaseStartedAt:
+          Date.now(),
+      })
+    );
+
+    setStatus(
+      `30경기 자동 백테스트 완료 · 성공 ${completed}경기 · 실패 ${failed}경기 · 신규 Calibration ${batchRecords.length}행`
+    );
   }
 
   function advanceBatchBacktest(success: boolean) {
