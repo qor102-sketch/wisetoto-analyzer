@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_3_7_DIRECT_SEQUENTIAL_BACKTEST_20260826
+// DEPLOY_MARKER_V13_3_7_FIX1_MARKETPICK_TYPE_20260826
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -10705,9 +10705,7 @@ export default function Home() {
         null;
 
       const grade =
-        pick.displayGrade ??
         pick.stageGradeLabel ??
-        pick.grade ??
         pick.valueGrade ??
         "-";
 
