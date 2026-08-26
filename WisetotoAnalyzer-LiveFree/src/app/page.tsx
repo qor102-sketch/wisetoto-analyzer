@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_3_5_SEQUENTIAL_BATCH_NO_RACE_20260826
+// DEPLOY_MARKER_V13_3_6_WAIT_FOR_DERIVED_PICKS_20260826
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -10006,40 +10006,58 @@ export default function Home() {
       void analyzeSelected().then((ok) => {
         if (!ok) {
           advanceBatchBacktest(false);
-          return;
         }
-
-        setBatchBacktest((previous) => ({
-          ...previous,
-          phase: "REVEAL",
-          phaseStartedAt: Date.now(),
-        }));
+        // 성공 시에는 phase를 바꾸지 않는다.
+        // matched/recentSummary/actualMarketPicks가 현재 경기 기준으로
+        // React 파생 계산까지 완료된 것을 WAIT_ANALYZE에서 확인한 뒤 이동한다.
       });
       return;
     }
 
     if (batchBacktest.phase === "WAIT_ANALYZE") {
-      // analyzeSelected() Promise가 완료될 때까지 대기 전용.
-      // 여기서는 timeout/skip/다음 경기 이동을 절대 수행하지 않는다.
+      if (loading) return;
+
+      const selectedKey = gameKey(currentGame, games.indexOf(currentGame));
+      if (selectedBetmanKey !== selectedKey || !selectedBetman) return;
+
+      const fixtureId = Number(
+        matched?.fixtureId ??
+        matched?.selectedFixture?.id ??
+        matched?.fixture?.id
+      );
+
+      // 분석 API Promise가 끝났어도 React 파생값(actualMarketPicks)은
+      // 다음 렌더에서 생성될 수 있다. 현재 fixture와 시장 픽이 모두 확인된
+      // 뒤에만 실제 결과 검증 단계로 넘어간다.
+      if (Number.isFinite(fixtureId) && actualMarketPicks.length > 0) {
+        setBatchBacktest((previous) => ({
+          ...previous,
+          phase: "REVEAL",
+          phaseStartedAt: Date.now(),
+        }));
+        return;
+      }
+
+      // 요청이 끝난 뒤에도 실제 분석 산출물이 생성되지 않는 경기만 실패 처리.
+      // 이 타이머는 API 진행 중 요청을 자르는 용도가 아니라
+      // React 파생 계산/불완전 상세 응답을 판별하는 후처리 대기다.
+      if (Number.isFinite(fixtureId) && matched) {
+        const timer = window.setTimeout(() => {
+          if (!loading && actualMarketPicks.length === 0) {
+            setStatus(
+              `자동 백테스트 ${displayNo}/${total} · 상세 분석 완료 후 시장 픽 없음 · 스킵 · ${currentGame.home} vs ${currentGame.away}`
+            );
+            advanceBatchBacktest(false);
+          }
+        }, 2500);
+        return () => window.clearTimeout(timer);
+      }
+
       return;
     }
 
     if (batchBacktest.phase === "REVEAL") {
-      if (validationLoading) return;
-
-      if (!actualMarketPicks.length) {
-        // 분석 요청 자체는 이미 완료된 상태다. 파생 계산이 한 틱 뒤에도 없으면
-        // 이 경기만 실패 처리하고 다음 경기로 간다. 이전 요청은 남아 있지 않다.
-        const timer = window.setTimeout(() => {
-          if (!actualMarketPicks.length) {
-            setStatus(
-              `자동 백테스트 ${displayNo}/${total} · 분석 완료 후 시장 픽 미생성 · 스킵 · ${currentGame.home} vs ${currentGame.away}`
-            );
-            advanceBatchBacktest(false);
-          }
-        }, 800);
-        return () => window.clearTimeout(timer);
-      }
+      if (validationLoading || !actualMarketPicks.length) return;
 
       setBatchBacktest((previous) => ({
         ...previous,
@@ -10056,7 +10074,6 @@ export default function Home() {
     }
 
     if (batchBacktest.phase === "WAIT_REVEAL") {
-      // 결과 API 요청이 실제로 끝날 때까지 기다린다.
       if (validationLoading) return;
 
       if (
@@ -10066,23 +10083,31 @@ export default function Home() {
       ) {
         const timer = window.setTimeout(
           () => advanceBatchBacktest(true),
-          150
+          300
         );
         return () => window.clearTimeout(timer);
       }
 
-      // validationLoading=false인데 검증 데이터가 없다면 결과 조회가 종료된 뒤의
-      // 실제 실패이므로 다음 경기로 진행한다. 진행 중 요청을 잘라내지 않는다.
-      const timer = window.setTimeout(() => {
-        if (!validationLoading) {
-          setStatus(
-            `자동 백테스트 ${displayNo}/${total} · 실제 결과 검증 데이터 없음 · 스킵 · ${currentGame.home} vs ${currentGame.away}`
-          );
-          advanceBatchBacktest(false);
-        }
-      }, 800);
+      // 결과 요청이 종료된 뒤 React 검증 파생값이 반영될 시간을 준다.
+      // backtestResultRevealed=true인데도 validation rows가 없으면
+      // 시장키/결과매칭 실패이므로 해당 경기만 실패 처리한다.
+      if (backtestResultRevealed) {
+        const timer = window.setTimeout(() => {
+          if (
+            backtestResultRevealed &&
+            !validationLoading &&
+            simpleCurrentRecords.length === 0
+          ) {
+            setStatus(
+              `자동 백테스트 ${displayNo}/${total} · 결과는 수신했지만 검증 레코드 생성 실패 · 스킵 · ${currentGame.home} vs ${currentGame.away}`
+            );
+            advanceBatchBacktest(false);
+          }
+        }, 2500);
+        return () => window.clearTimeout(timer);
+      }
 
-      return () => window.clearTimeout(timer);
+      return;
     }
   }, [
     batchBacktest,
