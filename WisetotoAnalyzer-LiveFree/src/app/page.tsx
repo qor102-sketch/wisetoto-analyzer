@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_5_0_RECENT_SUMMARY_FORM_BRIDGE_20260827
+// DEPLOY_MARKER_V13_5_1_ONE_SIDE_RECENT_FALLBACK_20260827
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -11310,10 +11310,20 @@ export default function Home() {
               (recent?.home as any)
                 ?.backtestSafeForm
             ),
+          homeFallbackUsed:
+            Boolean(
+              (recent?.home as any)
+                ?.fallbackUsed
+            ),
           awaySafeForm:
             Boolean(
               (recent?.away as any)
                 ?.backtestSafeForm
+            ),
+          awayFallbackUsed:
+            Boolean(
+              (recent?.away as any)
+                ?.fallbackUsed
             ),
           homeFormPlayed:
             Number(
