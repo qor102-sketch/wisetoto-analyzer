@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_4_9_SAFE_FORM_BRIDGE_20260827
+// DEPLOY_MARKER_V13_5_0_RECENT_SUMMARY_FORM_BRIDGE_20260827
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -8295,6 +8295,221 @@ function rebuildHistoricalForm(
   };
 }
 
+function rebuildHistoricalFormFromSafeSummaries(
+  team: RecentTeam | null | undefined,
+  fixtures: any[]
+): FormData {
+  let played = 0;
+  let wins = 0;
+  let draws = 0;
+  let losses = 0;
+  let scored = 0;
+  let conceded = 0;
+
+  const teamId =
+    recentTeamId(
+      team
+    );
+
+  const teamName =
+    recentTeamName(
+      team
+    );
+
+  for (
+    const fixture
+    of fixtures
+  ) {
+    const result =
+      String(
+        fixture?.result ??
+        ""
+      ).toUpperCase();
+
+    if (
+      ![
+        "W",
+        "D",
+        "L",
+      ].includes(
+        result
+      )
+    ) {
+      continue;
+    }
+
+    const homeScore =
+      Number(
+        fixture?.homeScore
+      );
+
+    const awayScore =
+      Number(
+        fixture?.awayScore
+      );
+
+    if (
+      !Number.isFinite(
+        homeScore
+      ) ||
+      !Number.isFinite(
+        awayScore
+      )
+    ) {
+      continue;
+    }
+
+    const homeId =
+      Number(
+        fixture?.homeId ??
+        fixture?.home?.id
+      );
+
+    const awayId =
+      Number(
+        fixture?.awayId ??
+        fixture?.away?.id
+      );
+
+    let side:
+      | "home"
+      | "away"
+      | null = null;
+
+    if (
+      teamId !== null &&
+      Number.isFinite(
+        teamId
+      )
+    ) {
+      if (
+        homeId ===
+        teamId
+      ) {
+        side = "home";
+      } else if (
+        awayId ===
+        teamId
+      ) {
+        side = "away";
+      }
+    }
+
+    if (!side) {
+      const normalizedTeam =
+        normalizeTeamName(
+          teamName
+        );
+
+      const homeName =
+        normalizeTeamName(
+          fixture?.home ??
+          fixture?.homeName ??
+          ""
+        );
+
+      const awayName =
+        normalizeTeamName(
+          fixture?.away ??
+          fixture?.awayName ??
+          ""
+        );
+
+      if (
+        normalizedTeam &&
+        homeName &&
+        (
+          normalizedTeam.includes(
+            homeName
+          ) ||
+          homeName.includes(
+            normalizedTeam
+          )
+        )
+      ) {
+        side = "home";
+      } else if (
+        normalizedTeam &&
+        awayName &&
+        (
+          normalizedTeam.includes(
+            awayName
+          ) ||
+          awayName.includes(
+            normalizedTeam
+          )
+        )
+      ) {
+        side = "away";
+      }
+    }
+
+    if (!side) {
+      continue;
+    }
+
+    played += 1;
+
+    if (
+      result === "W"
+    ) {
+      wins += 1;
+    } else if (
+      result === "D"
+    ) {
+      draws += 1;
+    } else {
+      losses += 1;
+    }
+
+    if (
+      side === "home"
+    ) {
+      scored +=
+        homeScore;
+      conceded +=
+        awayScore;
+    } else {
+      scored +=
+        awayScore;
+      conceded +=
+        homeScore;
+    }
+  }
+
+  const points =
+    wins * 3 +
+    draws;
+
+  const formPercent =
+    played > 0
+      ? (
+          points /
+          (played * 3)
+        ) *
+        100
+      : 0;
+
+  return {
+    played,
+    wins,
+    draws,
+    losses,
+    scored,
+    conceded,
+    goalDifference:
+      scored -
+      conceded,
+    points,
+    formPercent:
+      Number(
+        formPercent.toFixed(
+          1
+        )
+      ),
+  };
+}
+
 function sanitizeRecentTeamForBacktest(
   team: RecentTeam | null | undefined,
   cutoffMs: number,
@@ -8404,6 +8619,18 @@ function sanitizeRecentTeamForBacktest(
       fixtures
     );
 
+  /*
+   * /api/match/[fixtureId]의 recent.fixtures는 서버에서
+   * cutoff 이전 + 실제 결과 판정 가능 경기만 남긴 요약본이다.
+   * 요약본에서는 원본 fixture의 nested team 구조가 사라질 수 있으므로,
+   * result/homeId/awayId/homeScore/awayScore를 이용해 한 번 더 안전하게 집계한다.
+   */
+  const summarizedFixtureForm =
+    rebuildHistoricalFormFromSafeSummaries(
+      normalizedTeam,
+      fixtures
+    );
+
   const serverSafeForm =
     Boolean(
       (team as any)
@@ -8435,8 +8662,14 @@ function sanitizeRecentTeamForBacktest(
       0
     ) > 0
       ? rebuiltForm
-      : serverSafeForm ??
-        rebuiltForm;
+      : Number(
+          summarizedFixtureForm
+            ?.played ??
+          0
+        ) > 0
+        ? summarizedFixtureForm
+        : serverSafeForm ??
+          rebuiltForm;
 
   return {
     team: {
@@ -8446,9 +8679,21 @@ function sanitizeRecentTeamForBacktest(
       backtestSafeForm:
         Boolean(
           serverSafeForm
-        ),
+        ) ||
+        Number(
+          summarizedFixtureForm
+            ?.played ??
+          0
+        ) > 0,
       backtestCutoffMs:
-        serverSafeForm
+        (
+          serverSafeForm ||
+          Number(
+            summarizedFixtureForm
+              ?.played ??
+            0
+          ) > 0
+        )
           ? cutoffMs
           : null,
     } as RecentTeam,
@@ -11080,6 +11325,18 @@ export default function Home() {
               recent?.away?.form?.played ??
               0
             ),
+          homeFixtureCount:
+            Array.isArray(
+              recent?.home?.fixtures
+            )
+              ? recent.home.fixtures.length
+              : 0,
+          awayFixtureCount:
+            Array.isArray(
+              recent?.away?.fixtures
+            )
+              ? recent.away.fixtures.length
+              : 0,
           raw:
             recent?.status ??
             null,
