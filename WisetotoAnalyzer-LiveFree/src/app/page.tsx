@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_4_7_RECENT_SCORE_PARSER_20260827
+// DEPLOY_MARKER_V13_4_8_RECENT_PIPELINE_DIAGNOSTICS_20260827
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -10965,6 +10965,38 @@ export default function Home() {
             : 0,
         hasRecent:
           Boolean(recent),
+        recentKeys:
+          recent &&
+          typeof recent === "object"
+            ? Object.keys(
+                recent
+              ).slice(
+                0,
+                30
+              )
+            : [],
+        homeRecentKeys:
+          recent?.home &&
+          typeof recent.home ===
+            "object"
+            ? Object.keys(
+                recent.home
+              ).slice(
+                0,
+                30
+              )
+            : [],
+        awayRecentKeys:
+          recent?.away &&
+          typeof recent.away ===
+            "object"
+            ? Object.keys(
+                recent.away
+              ).slice(
+                0,
+                30
+              )
+            : [],
         hasH2h:
           Boolean(directH2h),
         analysisStage:
@@ -10973,6 +11005,21 @@ export default function Home() {
           "PRE",
         factors:
           factorDebug,
+        recentPipeline: {
+          home:
+            recent?.home?.status ??
+            recent?.homeStatus ??
+            recent?.status?.home ??
+            null,
+          away:
+            recent?.away?.status ??
+            recent?.awayStatus ??
+            recent?.status?.away ??
+            null,
+          raw:
+            recent?.status ??
+            null,
+        },
         markets:
           perMarket,
         home:
