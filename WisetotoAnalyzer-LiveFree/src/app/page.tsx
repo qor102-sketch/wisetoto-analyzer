@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_5_2_ZERO_PICK_MARKET_FALLBACK_20260827
+// DEPLOY_MARKER_V13_5_2_FIX1_TYPED_FALLBACK_ROWS_20260827
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -5728,7 +5728,11 @@ function buildZeroPickMarketFallback(
         ? market.selections
         : [];
 
-    const usable =
+    const usable: Array<{
+      selection: any;
+      odds: number;
+      identity: string;
+    }> =
       selections
         .map(
           (
@@ -5743,15 +5747,26 @@ function buildZeroPickMarketFallback(
               selection,
               odds,
               identity:
-                selectionIdentity(
-                  selection
+                String(
+                  selectionIdentity(
+                    selection
+                  ) ??
+                  ""
                 ),
             };
           }
         )
         .filter(
-          (row) =>
-            row.identity &&
+          (
+            row: {
+              selection: any;
+              odds: number;
+              identity: string;
+            }
+          ) =>
+            Boolean(
+              row.identity
+            ) &&
             Number.isFinite(
               row.odds
             ) &&
