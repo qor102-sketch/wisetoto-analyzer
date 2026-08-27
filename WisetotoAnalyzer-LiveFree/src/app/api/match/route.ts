@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_4_4_MATCH_SEARCH_FIXTURE_CACHE_20260826
+// DEPLOY_MARKER_V13_4_6_PROPAGATE_RATE_LIMIT_20260827
 // WISETOTO_MATCH_SELECTED_V1_20260823
 const BASE = "https://api.sportsapi.app/v2";
 
@@ -2995,6 +2995,115 @@ async function getNaverPregameLineups(args: {
   };
 }
 
+function findNestedApiLimit(
+  value: any
+): {
+  status: number;
+  error: string;
+  retryAfterMs: number | null;
+} | null {
+  const seen =
+    new Set<any>();
+
+  function walk(
+    node: any,
+    depth = 0
+  ): {
+    status: number;
+    error: string;
+    retryAfterMs: number | null;
+  } | null {
+    if (
+      node === null ||
+      node === undefined ||
+      depth > 7
+    ) {
+      return null;
+    }
+
+    if (
+      typeof node !== "object"
+    ) {
+      return null;
+    }
+
+    if (seen.has(node)) {
+      return null;
+    }
+
+    seen.add(node);
+
+    const status =
+      Number(
+        node?.status ??
+        node?.httpStatus
+      );
+
+    const error =
+      String(
+        node?.error ??
+        node?.message ??
+        ""
+      );
+
+    if (
+      status === 429 ||
+      /rate limit|daily quota|too many requests/i.test(
+        error
+      )
+    ) {
+      return {
+        status: 429,
+        error:
+          error ||
+          "SportsAPI rate limit exceeded",
+        retryAfterMs:
+          Number.isFinite(
+            Number(
+              node?.retryAfterMs
+            )
+          )
+            ? Number(
+                node.retryAfterMs
+              )
+            : null,
+      };
+    }
+
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        const found =
+          walk(
+            item,
+            depth + 1
+          );
+        if (found) {
+          return found;
+        }
+      }
+      return null;
+    }
+
+    for (
+      const key
+      of Object.keys(node)
+    ) {
+      const found =
+        walk(
+          node[key],
+          depth + 1
+        );
+      if (found) {
+        return found;
+      }
+    }
+
+    return null;
+  }
+
+  return walk(value);
+}
+
 async function runSelectedMode(
   req: Request,
   key: string
@@ -3017,6 +3126,56 @@ async function runSelectedMode(
   }, key);
 
   if (!result.fixture) {
+    const apiLimit =
+      findNestedApiLimit(
+        result.debug
+      );
+
+    if (apiLimit) {
+      return Response.json(
+        {
+          ok: false,
+          mode: "selected",
+          matched: false,
+          error:
+            apiLimit.error,
+          retryAfterMs:
+            apiLimit.retryAfterMs,
+          selectedBetman: {
+            home,
+            away,
+            sport,
+            gameDateMs:
+              Number.isFinite(
+                gameDateMs
+              )
+                ? gameDateMs
+                : null,
+          },
+          debug:
+            result.debug,
+        },
+        {
+          status: 429,
+          headers:
+            apiLimit.retryAfterMs
+              ? {
+                  "Retry-After":
+                    String(
+                      Math.max(
+                        1,
+                        Math.ceil(
+                          apiLimit.retryAfterMs /
+                            1000
+                        )
+                      )
+                    ),
+                }
+              : undefined,
+        }
+      );
+    }
+
     return Response.json({
       ok:false,
       mode:"selected",
