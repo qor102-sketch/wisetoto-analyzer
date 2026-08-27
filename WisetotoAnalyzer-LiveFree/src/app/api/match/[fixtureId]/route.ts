@@ -1453,6 +1453,12 @@ export async function GET(
           form:
             homeRecent
               .summary,
+
+          backtestSafeForm:
+            cutoffMs !== null,
+
+          backtestCutoffMs:
+            cutoffMs,
         },
 
         away: {
@@ -1472,6 +1478,12 @@ export async function GET(
           form:
             awayRecent
               .summary,
+
+          backtestSafeForm:
+            cutoffMs !== null,
+
+          backtestCutoffMs:
+            cutoffMs,
         },
       },
 
