@@ -670,37 +670,123 @@ async function getRecentFixtures(
   label: string,
   cutoffMs: number | null = null
 ) {
-  const result =
-    await optionalEndpoint(
-      `/teams/${teamId}/fixtures?type=recent&page=0`,
-      key,
-      label
-    );
+  const allFixtures: AnyObj[] =
+    [];
 
-  if (!result.data) {
-    return {
-      fixtures: [],
-      summary:
-        summarizeForm(
-          [],
-          teamId
-        ),
-      status:
-        result.status,
-    };
-  }
-
-  const rawFixtures =
-    arr(
-      result.data
-    );
+  const pageStatus:
+    AnyObj[] =
+    [];
 
   /*
-   * 최신 경기부터 정렬한 뒤
-   * 최근 5경기만 사용
+   * 백테스트 시점보다 최신 경기만 page=0에 몰려 있으면
+   * 단순 cutoff 필터 후 표본이 0이 될 수 있다.
+   * 필요한 5경기가 채워질 때까지만 과거 page를 추가 조회한다.
+   *
+   * API 절약:
+   * - 최대 3페이지
+   * - 이미 5경기 확보되면 즉시 중단
+   * - 429/실패 시 추가 페이지 요청 중단
    */
+  for (
+    let page = 0;
+    page < 3;
+    page += 1
+  ) {
+    const result =
+      await optionalEndpoint(
+        `/teams/${teamId}/fixtures?type=recent&page=${page}`,
+        key,
+        `${label} page ${page}`
+      );
+
+    pageStatus.push({
+      page,
+      ...result.status,
+    });
+
+    if (!result.data) {
+      break;
+    }
+
+    const rows =
+      arr(
+        result.data
+      );
+
+    allFixtures.push(
+      ...rows
+    );
+
+    const usableCount =
+      allFixtures
+        .filter(
+          (fixture) => {
+            if (
+              cutoffMs !== null &&
+              Number.isFinite(
+                cutoffMs
+              )
+            ) {
+              const fixtureMs =
+                new Date(
+                  fixture?.startTime
+                ).getTime();
+
+              if (
+                !Number.isFinite(
+                  fixtureMs
+                ) ||
+                fixtureMs >=
+                  cutoffMs
+              ) {
+                return false;
+              }
+            }
+
+            return (
+              getTeamResult(
+                fixture,
+                teamId
+              ) !== null
+            );
+          }
+        )
+        .length;
+
+    if (
+      usableCount >=
+      RECENT_LIMIT
+    ) {
+      break;
+    }
+
+    /*
+     * 더 이상 페이지가 없다고 판단 가능한 경우 중단.
+     */
+    if (
+      rows.length === 0
+    ) {
+      break;
+    }
+  }
+
+  const deduped =
+    Array.from(
+      new Map(
+        allFixtures.map(
+          (fixture) => [
+            String(
+              fixture?.id ??
+              `${fixture?.startTime}|${fixture?.home?.id}|${fixture?.away?.id}`
+            ),
+            fixture,
+          ]
+        )
+      ).values()
+    );
+
   const fixtures =
-    [...rawFixtures]
+    deduped
       .sort(
         (a, b) =>
           new Date(
@@ -714,18 +800,32 @@ async function getRecentFixtures(
         (fixture) => {
           if (
             cutoffMs !== null &&
-            Number.isFinite(cutoffMs)
+            Number.isFinite(
+              cutoffMs
+            )
           ) {
-            const fixtureMs = new Date(fixture?.startTime).getTime();
-            if (!Number.isFinite(fixtureMs) || fixtureMs >= cutoffMs) {
+            const fixtureMs =
+              new Date(
+                fixture?.startTime
+              ).getTime();
+
+            if (
+              !Number.isFinite(
+                fixtureMs
+              ) ||
+              fixtureMs >=
+                cutoffMs
+            ) {
               return false;
             }
           }
 
-          return getTeamResult(
-            fixture,
-            teamId
-          ) !== null;
+          return (
+            getTeamResult(
+              fixture,
+              teamId
+            ) !== null
+          );
         }
       )
       .slice(
@@ -749,8 +849,36 @@ async function getRecentFixtures(
         teamId
       ),
 
-    status:
-      result.status,
+    status: {
+      ok:
+        fixtures.length > 0,
+      error:
+        fixtures.length > 0
+          ? null
+          : (
+              pageStatus
+                .find(
+                  (row) =>
+                    row?.error
+                )
+                ?.error ??
+              "cutoff 이전 최근 경기 표본 없음"
+            ),
+      httpStatus:
+        pageStatus
+          .find(
+            (row) =>
+              row?.httpStatus
+          )
+          ?.httpStatus ??
+        null,
+      pages:
+        pageStatus,
+      fetched:
+        allFixtures.length,
+      usable:
+        fixtures.length,
+    },
   };
 }
 
