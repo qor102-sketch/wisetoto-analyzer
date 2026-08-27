@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_5_3_BACKTEST_HIT_RATE_DASHBOARD_20260827
+// DEPLOY_MARKER_V13_5_4_MODEL_MARKET_CROSS_HIT_RATE_20260827
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -9674,6 +9674,30 @@ export default function Home() {
               )
           );
 
+        // V13.5.4: NORMAL / MARKET FALLBACK을 시장별로 교차 집계합니다.
+        // 기존 Calibration 레코드는 읽기만 하며 PRE/LOCK/VERIFY 로직은 변경하지 않습니다.
+        const byModelMarket = byModel.map((modelRow) => {
+          const sourceRows =
+            modelRow.key === "FALLBACK"
+              ? fallbackRows
+              : normalRows;
+
+          return {
+            key: modelRow.key,
+            label: modelRow.label,
+            markets: marketGroups.map((group) =>
+              backtestPerformanceRow(
+                `${modelRow.key}|${group}`,
+                group,
+                sourceRows.filter(
+                  (row) =>
+                    backtestMarketGroup(row.market) === group
+                )
+              )
+            ),
+          };
+        });
+
         return {
           rows,
           total:
@@ -9684,6 +9708,7 @@ export default function Home() {
             ),
           byModel,
           byMarket,
+          byModelMarket,
         };
       },
       [
@@ -13024,6 +13049,75 @@ export default function Home() {
                     </div>
                   </div>
                 ))}
+              </div>
+
+              <div
+                style={{
+                  margin: "0 10px 10px",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 8,
+                  overflowX: "auto",
+                }}
+              >
+                <div
+                  style={{
+                    padding: "8px 9px",
+                    background: "#f8fafc",
+                    borderBottom: "1px solid #e2e8f0",
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
+                  모델 × 시장 교차 적중률
+                </div>
+                <div
+                  style={{
+                    minWidth: 720,
+                    display: "grid",
+                    gridTemplateColumns: "150px repeat(6, minmax(90px,1fr))",
+                  }}
+                >
+                  <div style={{padding: 7, fontSize: 11, fontWeight: 700, background: "#f8fafc"}}>모델</div>
+                  {["승패", "승1패", "핸디캡", "U/O", "SUM", "전반"].map((label) => (
+                    <div
+                      key={`cross-head-${label}`}
+                      style={{padding: 7, fontSize: 11, fontWeight: 700, textAlign: "center", background: "#f8fafc"}}
+                    >
+                      {label}
+                    </div>
+                  ))}
+
+                  {currentBatchPerformance.byModelMarket.map((model) => (
+                    <div key={model.key} style={{display: "contents"}}>
+                      <div
+                        style={{
+                          padding: 8,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          borderTop: "1px solid #e2e8f0",
+                        }}
+                      >
+                        {model.label}
+                      </div>
+                      {model.markets.map((row) => (
+                        <div
+                          key={row.key}
+                          style={{
+                            padding: 8,
+                            textAlign: "center",
+                            borderTop: "1px solid #e2e8f0",
+                            fontSize: 11,
+                          }}
+                        >
+                          <b>{row.hits}/{row.records}</b>
+                          <div className="small">
+                            {row.hitRate === null ? "-" : `${row.hitRate.toFixed(1)}%`}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div
