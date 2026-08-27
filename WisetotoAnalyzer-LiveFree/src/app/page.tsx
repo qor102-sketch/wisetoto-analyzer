@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_5_1_ONE_SIDE_RECENT_FALLBACK_20260827
+// DEPLOY_MARKER_V13_5_2_ZERO_PICK_MARKET_FALLBACK_20260827
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -5272,6 +5272,7 @@ type MarketPick = {
   valueGradeScore: number;
   valueGradeReason: string;
   stageGradeLabel?: string | null;
+  zeroPickFallback?: boolean;
 
   calibrationWeight: number | null;
   signalConflictScore: number;
@@ -5692,6 +5693,223 @@ function fairMarketProbabilities(market: any) {
     probabilities,
     overround: rawTotal,
   };
+}
+
+function buildZeroPickMarketFallback(
+  game: BetmanMatch | null | undefined
+): MarketPick[] {
+  if (
+    !game ||
+    !Array.isArray(
+      game?.markets
+    )
+  ) {
+    return [];
+  }
+
+  const result:
+    MarketPick[] = [];
+
+  for (
+    let index = 0;
+    index <
+    game.markets.length;
+    index += 1
+  ) {
+    const market: any =
+      game.markets[
+        index
+      ];
+
+    const selections =
+      Array.isArray(
+        market?.selections
+      )
+        ? market.selections
+        : [];
+
+    const usable =
+      selections
+        .map(
+          (
+            selection: any
+          ) => {
+            const odds =
+              Number(
+                selection?.odds
+              );
+
+            return {
+              selection,
+              odds,
+              identity:
+                selectionIdentity(
+                  selection
+                ),
+            };
+          }
+        )
+        .filter(
+          (row) =>
+            row.identity &&
+            Number.isFinite(
+              row.odds
+            ) &&
+            row.odds > 1
+        );
+
+    if (!usable.length) {
+      continue;
+    }
+
+    /*
+     * Betman 배당 자체의 마진을 제거한 fair probability.
+     * 결과/최종점수/경기후 데이터는 전혀 사용하지 않는다.
+     */
+    const fair =
+      fairMarketProbabilities(
+        market
+      );
+
+    let best:
+      | {
+          selection: any;
+          odds: number;
+          identity: string;
+          probability: number;
+        }
+      | null = null;
+
+    for (
+      const row
+      of usable
+    ) {
+      const probability =
+        Number(
+          fair
+            .probabilities[
+            row.identity
+          ]
+        );
+
+      if (
+        !Number.isFinite(
+          probability
+        )
+      ) {
+        continue;
+      }
+
+      if (
+        !best ||
+        probability >
+          best.probability
+      ) {
+        best = {
+          ...row,
+          probability,
+        };
+      }
+    }
+
+    if (!best) {
+      continue;
+    }
+
+    const probability =
+      Number(
+        clamp(
+          best.probability,
+          0,
+          100
+        ).toFixed(1)
+      );
+
+    const ev =
+      betExpectedValue(
+        probability,
+        best.odds
+      );
+
+    /*
+     * 독립 모델 신호가 없는 fallback이므로
+     * edge=0 / PASS / 낮은 confidence로 강제한다.
+     * 실전 VALUE 픽으로 승격시키지 않는다.
+     */
+    result.push({
+      key:
+        marketStableKey(
+          market,
+          index
+        ),
+      market:
+        marketLabelStandalone(
+          market
+        ),
+      pick:
+        selectionLabel(
+          best.selection
+        ) ||
+        best.identity,
+      rawProbability:
+        probability,
+      probability,
+      odds:
+        best.odds,
+      marketProbability:
+        probability,
+      edge:
+        0,
+      breakEvenProbability:
+        ev.breakEvenProbability,
+      expectedValue:
+        ev.expectedValue,
+
+      valueGrade:
+        "PASS",
+      valueGradeScore:
+        0,
+      valueGradeReason:
+        "ZERO-PICK 시장 컨센서스 fallback · 독립 모델 신호 없음",
+      stageGradeLabel:
+        "MARKET FALLBACK",
+      zeroPickFallback:
+        true,
+
+      calibrationWeight:
+        0,
+      signalConflictScore:
+        0,
+      signalConflictLabel:
+        "시장 컨센서스 fallback",
+
+      decisionRiskScore:
+        100,
+      decisionRiskReason:
+        "PRE 실데이터 부족 · 시장 배당만 사용",
+
+      confidenceScore:
+        20,
+      confidenceGrade:
+        "C",
+      recommendationScore:
+        0,
+
+      preUncertaintyApplied:
+        true,
+      preProbabilityBefore:
+        probability,
+      preUncertaintyWeight:
+        0,
+      preUncertaintyTarget:
+        probability,
+
+      detail:
+        "ZERO-PICK FALLBACK · Betman 경기전 배당의 마진 제거 시장확률만 사용 · 실전 VALUE 추천 아님",
+    });
+  }
+
+  return result;
 }
 
 function confidenceGrade(score: number) {
@@ -11074,7 +11292,7 @@ export default function Home() {
         combined
       );
 
-    const picksRaw =
+    const modelPicksRaw =
       buildActualMarketPicks(
         game,
         currentSport,
@@ -11083,12 +11301,31 @@ export default function Home() {
         directH2h
       );
 
+    const zeroPickFallback =
+      modelPicksRaw.length === 0
+        ? buildZeroPickMarketFallback(
+            game
+          )
+        : [];
+
+    const picksRaw =
+      modelPicksRaw.length > 0
+        ? modelPicksRaw
+        : zeroPickFallback;
+
+    /*
+     * 정상 모델 픽은 기존 gate를 그대로 적용.
+     * ZERO-PICK fallback은 이미 PASS/낮은 confidence/edge 0으로
+     * 별도 차단되어 있으므로 모델 gate를 재해석하지 않는다.
+     */
     const picks =
-      applyLineupStatsCoverageGate(
-        picksRaw,
-        currentSport,
-        analysisDirect.factors
-      );
+      modelPicksRaw.length > 0
+        ? applyLineupStatsCoverageGate(
+            picksRaw,
+            currentSport,
+            analysisDirect.factors
+          )
+        : picksRaw;
 
     if (!picks.length) {
       const marketRowsDebug =
@@ -11897,7 +12134,7 @@ export default function Home() {
             status: "SUCCESS",
             fixtureId: result.fixtureId,
             calibrationRows: result.records.length,
-            message: `PRE 잠금 완료 → VERIFY Fixture #${result.fixtureId} · 검증 레코드 ${result.records.length}행 생성`,
+            message: `PRE 잠금 완료 → VERIFY Fixture #${result.fixtureId} · 검증 레코드 ${result.records.length}행 생성${result.snapshot.picks.some((pick: any) => String(pick.grade).includes("FALLBACK")) ? " · MARKET FALLBACK 사용" : ""}`,
             savedAt: Date.now(),
           },
         ]);
