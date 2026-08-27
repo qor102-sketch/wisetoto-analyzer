@@ -373,6 +373,115 @@ async function optionalEndpoint(
   }
 }
 
+function scoreNodeValue(
+  node: any
+): number | null {
+  const direct =
+    Number(node);
+
+  if (
+    Number.isFinite(direct) &&
+    direct >= 0
+  ) {
+    return direct;
+  }
+
+  if (
+    !node ||
+    typeof node !== "object" ||
+    Array.isArray(node)
+  ) {
+    return null;
+  }
+
+  for (
+    const key
+    of [
+      "current",
+      "display",
+      "total",
+      "overall",
+      "score",
+      "runs",
+      "goals",
+      "points",
+    ]
+  ) {
+    const value =
+      Number(
+        node?.[key]
+      );
+
+    if (
+      Number.isFinite(value) &&
+      value >= 0
+    ) {
+      return value;
+    }
+  }
+
+  const periods =
+    node?.periods &&
+    typeof node.periods === "object" &&
+    !Array.isArray(node.periods)
+      ? node.periods
+      : null;
+
+  if (periods) {
+    const values =
+      Object.entries(periods)
+        .filter(([key]) =>
+          /^period[1-9]\d*$/i.test(key)
+        )
+        .map(([, value]) =>
+          Number(value)
+        )
+        .filter((value) =>
+          Number.isFinite(value) &&
+          value >= 0
+        );
+
+    if (values.length) {
+      return values.reduce(
+        (sum, value) =>
+          sum + value,
+        0
+      );
+    }
+  }
+
+  return null;
+}
+
+function fixtureScorePair(
+  fixture: AnyObj
+): {
+  homeScore: number;
+  awayScore: number;
+} | null {
+  const homeScore =
+    scoreNodeValue(
+      fixture?.homeScore
+    );
+
+  const awayScore =
+    scoreNodeValue(
+      fixture?.awayScore
+    );
+
+  if (
+    homeScore === null ||
+    awayScore === null
+  ) {
+    return null;
+  }
+
+  return {
+    homeScore,
+    awayScore,
+  };
+}
+
 /*
  * --------------------------------------------------
  * 최근 경기에서 팀의 W / D / L 판정
@@ -396,28 +505,19 @@ function getTeamResult(
       fixture?.away?.id
     );
 
-  const homeScore =
-    Number(
-      fixture?.homeScore
-        ?.current
+  const scorePair =
+    fixtureScorePair(
+      fixture
     );
 
-  const awayScore =
-    Number(
-      fixture?.awayScore
-        ?.current
-    );
-
-  if (
-    !Number.isFinite(
-      homeScore
-    ) ||
-    !Number.isFinite(
-      awayScore
-    )
-  ) {
+  if (!scorePair) {
     return null;
   }
+
+  const {
+    homeScore,
+    awayScore,
+  } = scorePair;
 
   if (
     homeScore ===
@@ -494,15 +594,15 @@ function summarizeRecentFixture(
       null,
 
     homeScore:
-      fixture
-        ?.homeScore
-        ?.current ??
+      fixtureScorePair(
+        fixture
+      )?.homeScore ??
       null,
 
     awayScore:
-      fixture
-        ?.awayScore
-        ?.current ??
+      fixtureScorePair(
+        fixture
+      )?.awayScore ??
       null,
 
     result:
@@ -551,30 +651,19 @@ function summarizeForm(
           ?.home?.id
       );
 
-    const homeScore =
-      Number(
+    const scorePair =
+      fixtureScorePair(
         fixture
-          ?.homeScore
-          ?.current
       );
 
-    const awayScore =
-      Number(
-        fixture
-          ?.awayScore
-          ?.current
-      );
-
-    if (
-      !Number.isFinite(
-        homeScore
-      ) ||
-      !Number.isFinite(
-        awayScore
-      )
-    ) {
+    if (!scorePair) {
       continue;
     }
+
+    const {
+      homeScore,
+      awayScore,
+    } = scorePair;
 
     counted++;
 
@@ -878,6 +967,13 @@ async function getRecentFixtures(
         allFixtures.length,
       usable:
         fixtures.length,
+      scoreParsed:
+        deduped.filter(
+          (fixture) =>
+            fixtureScorePair(
+              fixture
+            ) !== null
+        ).length,
     },
   };
 }
