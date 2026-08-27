@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_5_4_MODEL_MARKET_CROSS_HIT_RATE_20260827
+// DEPLOY_MARKER_V13_6_0_OFFLINE_DATASET_REPLAY_20260827
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -636,6 +636,220 @@ type BacktestPredictionSnapshot = {
     resultEndpointCalledBeforeLock: false;
   };
 };
+
+
+type BacktestDatasetEntry = {
+  id: string;
+  schemaVersion: 1;
+  game: BetmanMatch;
+  fixtureId: number;
+  cutoffMs: number;
+  combined: any;
+  truth: BacktestValidationResult;
+  capturedAt: number;
+};
+
+const BACKTEST_DATASET_DB_NAME =
+  "wisetoto-backtest-dataset-v136";
+
+const BACKTEST_DATASET_STORE =
+  "entries";
+
+function openBacktestDatasetDb():
+  Promise<IDBDatabase> {
+  return new Promise(
+    (resolve, reject) => {
+      const request =
+        window.indexedDB.open(
+          BACKTEST_DATASET_DB_NAME,
+          1
+        );
+
+      request.onupgradeneeded =
+        () => {
+          const db =
+            request.result;
+
+          if (
+            !db.objectStoreNames.contains(
+              BACKTEST_DATASET_STORE
+            )
+          ) {
+            db.createObjectStore(
+              BACKTEST_DATASET_STORE,
+              {
+                keyPath: "id",
+              }
+            );
+          }
+        };
+
+      request.onsuccess =
+        () =>
+          resolve(
+            request.result
+          );
+
+      request.onerror =
+        () =>
+          reject(
+            request.error ??
+            new Error(
+              "백테스트 데이터셋 DB 열기 실패"
+            )
+          );
+    }
+  );
+}
+
+function cloneBacktestDatasetValue<T>(
+  value: T
+): T {
+  return JSON.parse(
+    JSON.stringify(
+      value
+    )
+  ) as T;
+}
+
+async function putBacktestDatasetEntry(
+  entry: BacktestDatasetEntry
+) {
+  const db =
+    await openBacktestDatasetDb();
+
+  try {
+    await new Promise<void>(
+      (resolve, reject) => {
+        const tx =
+          db.transaction(
+            BACKTEST_DATASET_STORE,
+            "readwrite"
+          );
+
+        tx.objectStore(
+          BACKTEST_DATASET_STORE
+        ).put(
+          cloneBacktestDatasetValue(
+            entry
+          )
+        );
+
+        tx.oncomplete =
+          () =>
+            resolve();
+
+        tx.onerror =
+          () =>
+            reject(
+              tx.error ??
+              new Error(
+                "백데이터 저장 실패"
+              )
+            );
+
+        tx.onabort =
+          () =>
+            reject(
+              tx.error ??
+              new Error(
+                "백데이터 저장 중단"
+              )
+            );
+      }
+    );
+  } finally {
+    db.close();
+  }
+}
+
+async function getAllBacktestDatasetEntries():
+  Promise<BacktestDatasetEntry[]> {
+  const db =
+    await openBacktestDatasetDb();
+
+  try {
+    return await new Promise<
+      BacktestDatasetEntry[]
+    >(
+      (resolve, reject) => {
+        const tx =
+          db.transaction(
+            BACKTEST_DATASET_STORE,
+            "readonly"
+          );
+
+        const request =
+          tx.objectStore(
+            BACKTEST_DATASET_STORE
+          ).getAll();
+
+        request.onsuccess =
+          () =>
+            resolve(
+              Array.isArray(
+                request.result
+              )
+                ? request.result as BacktestDatasetEntry[]
+                : []
+            );
+
+        request.onerror =
+          () =>
+            reject(
+              request.error ??
+              new Error(
+                "백데이터 읽기 실패"
+              )
+            );
+      }
+    );
+  } finally {
+    db.close();
+  }
+}
+
+async function countBacktestDatasetEntries() {
+  const db =
+    await openBacktestDatasetDb();
+
+  try {
+    return await new Promise<number>(
+      (resolve, reject) => {
+        const tx =
+          db.transaction(
+            BACKTEST_DATASET_STORE,
+            "readonly"
+          );
+
+        const request =
+          tx.objectStore(
+            BACKTEST_DATASET_STORE
+          ).count();
+
+        request.onsuccess =
+          () =>
+            resolve(
+              Number(
+                request.result ??
+                0
+              )
+            );
+
+        request.onerror =
+          () =>
+            reject(
+              request.error ??
+              new Error(
+                "백데이터 개수 확인 실패"
+              )
+            );
+      }
+    );
+  } finally {
+    db.close();
+  }
+}
 
 type SimpleBacktestSummary = {
   games: number;
@@ -9590,6 +9804,24 @@ export default function Home() {
   const [batchBacktestDiagnostics, setBatchBacktestDiagnostics] =
     useState<BatchBacktestDiagnostic[]>([]);
 
+  const [
+    offlineDatasetCount,
+    setOfflineDatasetCount,
+  ] =
+    useState(0);
+
+  async function refreshOfflineDatasetCount() {
+    try {
+      setOfflineDatasetCount(
+        await countBacktestDatasetEntries()
+      );
+    } catch {
+      setOfflineDatasetCount(
+        0
+      );
+    }
+  }
+
   const currentBatchPerformance =
     useMemo(
       () => {
@@ -9674,30 +9906,6 @@ export default function Home() {
               )
           );
 
-        // V13.5.4: NORMAL / MARKET FALLBACK을 시장별로 교차 집계합니다.
-        // 기존 Calibration 레코드는 읽기만 하며 PRE/LOCK/VERIFY 로직은 변경하지 않습니다.
-        const byModelMarket = byModel.map((modelRow) => {
-          const sourceRows =
-            modelRow.key === "FALLBACK"
-              ? fallbackRows
-              : normalRows;
-
-          return {
-            key: modelRow.key,
-            label: modelRow.label,
-            markets: marketGroups.map((group) =>
-              backtestPerformanceRow(
-                `${modelRow.key}|${group}`,
-                group,
-                sourceRows.filter(
-                  (row) =>
-                    backtestMarketGroup(row.market) === group
-                )
-              )
-            ),
-          };
-        });
-
         return {
           rows,
           total:
@@ -9708,7 +9916,6 @@ export default function Home() {
             ),
           byModel,
           byMarket,
-          byModelMarket,
         };
       },
       [
@@ -9754,6 +9961,10 @@ export default function Home() {
     } catch {
       // 누적 백테스트 저장 실패는 예측 엔진과 무관.
     }
+  }, []);
+
+  useEffect(() => {
+    void refreshOfflineDatasetCount();
   }, []);
 
   useEffect(() => {
@@ -12218,6 +12429,41 @@ export default function Home() {
         pre.snapshot
       );
 
+    // 온라인 API를 사용한 경기의 PRE 입력 + VERIFY 결과를
+    // IndexedDB에 영구 저장한다.
+    // 이후 모델 수정 테스트는 이 데이터만 재생하므로 SportsAPI 호출이 0회다.
+    try {
+      await putBacktestDatasetEntry({
+        id:
+          actualGameIdentity(
+            game
+          ),
+        schemaVersion: 1,
+        game:
+          cloneBacktestDatasetValue(
+            game
+          ),
+        fixtureId:
+          pre.fixtureId,
+        cutoffMs:
+          pre.snapshot.cutoffMs,
+        combined:
+          cloneBacktestDatasetValue(
+            pre.combined
+          ),
+        truth:
+          cloneBacktestDatasetValue(
+            verified.truth
+          ),
+        capturedAt:
+          Date.now(),
+      });
+
+      void refreshOfflineDatasetCount();
+    } catch {
+      // 데이터셋 저장 실패가 온라인 검증 결과 자체를 실패시키지는 않는다.
+    }
+
     return {
       fixtureId:
         pre.fixtureId,
@@ -12229,6 +12475,604 @@ export default function Home() {
         verified.records,
     };
   }
+  function scoreLockedSnapshotOffline(
+    snapshot: BacktestPredictionSnapshot,
+    truth: BacktestValidationResult
+  ): SimpleBacktestRecord[] {
+    const records:
+      SimpleBacktestRecord[] =
+      [];
+
+    for (
+      const pick of snapshot.picks
+    ) {
+      const marketIndex =
+        snapshot.markets.findIndex(
+          (
+            market: any,
+            index: number
+          ) =>
+            marketStableKey(
+              market,
+              index
+            ) ===
+            pick.key
+        );
+
+      const market =
+        marketIndex >= 0
+          ? snapshot.markets[
+              marketIndex
+            ]
+          : null;
+
+      const validation =
+        validateBacktestMarket(
+          market,
+          pick as any,
+          truth
+        );
+
+      if (
+        validation.status !== "HIT" &&
+        validation.status !== "MISS"
+      ) {
+        continue;
+      }
+
+      const hit =
+        validation.status ===
+        "HIT";
+
+      const probability =
+        clamp(
+          Number(
+            pick.probability
+          ),
+          0,
+          100
+        );
+
+      const p =
+        probability /
+        100;
+
+      const odds =
+        pick.odds ??
+        null;
+
+      const realizedReturn =
+        odds !== null &&
+        Number.isFinite(
+          odds
+        ) &&
+        odds > 1
+          ? hit
+            ? odds - 1
+            : -1
+          : null;
+
+      records.push({
+        id:
+          `${snapshot.fixtureId}|${snapshot.stage}|${pick.key}`,
+        fixtureKey:
+          String(
+            snapshot.fixtureId
+          ),
+        gameLabel:
+          snapshot.gameLabel,
+        stage:
+          snapshot.stage,
+        market:
+          pick.market,
+        pick:
+          pick.pick,
+        probability,
+        odds,
+        expectedValue:
+          pick.expectedValue,
+        grade:
+          pick.grade,
+        hit,
+        realizedReturn,
+        brier:
+          Number(
+            (
+              (
+                p -
+                (
+                  hit
+                    ? 1
+                    : 0
+                )
+              ) ** 2
+            ).toFixed(
+              6
+            )
+          ),
+        savedAt:
+          Date.now(),
+      });
+    }
+
+    if (!records.length) {
+      throw new Error(
+        `OFFLINE_VERIFY · Fixture #${snapshot.fixtureId} 검증 가능한 시장 레코드가 없습니다.`
+      );
+    }
+
+    return records;
+  }
+
+  function createOfflinePredictionSnapshot(
+    entry: BacktestDatasetEntry
+  ) {
+    const game =
+      cloneBacktestDatasetValue(
+        entry.game
+      );
+
+    const combined =
+      sanitizeMatchedForBacktest(
+        cloneBacktestDatasetValue(
+          entry.combined
+        ),
+        entry.cutoffMs,
+        game
+      );
+
+    const selectedFixture =
+      combined?.selectedFixture ??
+      null;
+
+    const currentSport =
+      selectedFixture
+        ? koreanSport(
+            selectedFixture?.sport
+          )
+        : koreanSport(
+            String(
+              (game as any)?.sport ??
+              ""
+            )
+          );
+
+    const recent =
+      combined?.recentSummary ??
+      null;
+
+    const directH2h =
+      combined?.h2h ??
+      null;
+
+    const analysisDirect =
+      buildAnalysis(
+        currentSport,
+        directH2h,
+        recent,
+        game,
+        combined
+      );
+
+    const modelPicksRaw =
+      buildActualMarketPicks(
+        game,
+        currentSport,
+        analysisDirect.factors,
+        recent,
+        directH2h
+      );
+
+    const fallback =
+      modelPicksRaw.length === 0
+        ? buildZeroPickMarketFallback(
+            game
+          )
+        : [];
+
+    const picksRaw =
+      modelPicksRaw.length > 0
+        ? modelPicksRaw
+        : fallback;
+
+    const picks =
+      modelPicksRaw.length > 0
+        ? applyLineupStatsCoverageGate(
+            picksRaw,
+            currentSport,
+            analysisDirect.factors
+          )
+        : picksRaw;
+
+    if (!picks.length) {
+      throw new Error(
+        `OFFLINE_PREDICT · Fixture #${entry.fixtureId} 현재 모델에서 픽이 생성되지 않았습니다.`
+      );
+    }
+
+    const stage =
+      (
+        analysisDirect.factors
+          ?.baseballAnalysisStage ??
+        "PRE"
+      ) as BacktestPredictionSnapshot["stage"];
+
+    const snapshot:
+      BacktestPredictionSnapshot = {
+        snapshotId:
+          `offline|${entry.fixtureId}|${stage}|${entry.cutoffMs}|${Date.now()}`,
+        fixtureId:
+          entry.fixtureId,
+        gameKey:
+          actualGameIdentity(
+            game
+          ),
+        gameLabel:
+          `${game?.home ?? "-"} vs ${game?.away ?? "-"}`,
+        home:
+          String(
+            game?.home ??
+            ""
+          ),
+        away:
+          String(
+            game?.away ??
+            ""
+          ),
+        sport:
+          String(
+            (game as any)?.sport ??
+            ""
+          ),
+        league:
+          String(
+            (game as any)?.league ??
+            ""
+          ),
+        gameDateMs:
+          gameTimeMs(
+            game
+          ),
+        cutoffMs:
+          entry.cutoffMs,
+        stage,
+        markets:
+          marketRows(
+            game
+          ).map(
+            (market: any) => ({
+              ...market,
+            })
+          ),
+        picks:
+          picks.map(
+            (pick) => ({
+              key:
+                String(
+                  pick.key
+                ),
+              market:
+                String(
+                  pick.market
+                ),
+              pick:
+                String(
+                  pick.pick
+                ),
+              probability:
+                clamp(
+                  Number(
+                    pick.probability
+                  ),
+                  0,
+                  100
+                ),
+              odds:
+                pick.odds ??
+                null,
+              expectedValue:
+                pick.expectedValue ??
+                null,
+              grade:
+                pick.stageGradeLabel ??
+                pick.valueGrade ??
+                "-",
+            })
+          ),
+        lockedAt:
+          Date.now(),
+        locked:
+          true,
+        audit: {
+          predictionUsesFinalResult:
+            false,
+          resultEndpointCalledBeforeLock:
+            false,
+        },
+      };
+
+    lockBacktestPredictionSnapshot(
+      snapshot
+    );
+
+    return {
+      game,
+      combined,
+      snapshot,
+    };
+  }
+
+  async function startOfflineBatchBacktest() {
+    if (
+      batchBacktest.running ||
+      loading ||
+      validationLoading
+    ) {
+      return;
+    }
+
+    let entries:
+      BacktestDatasetEntry[] =
+      [];
+
+    try {
+      entries =
+        (
+          await getAllBacktestDatasetEntries()
+        )
+          .filter(
+            (entry) =>
+              entry?.game &&
+              entry?.truth &&
+              Number.isFinite(
+                entry?.fixtureId
+              )
+          )
+          .sort(
+            (a, b) =>
+              gameTimeMs(
+                b.game
+              ) -
+              gameTimeMs(
+                a.game
+              )
+          )
+          .slice(
+            0,
+            30
+          );
+    } catch (error: any) {
+      setStatus(
+        `오프라인 백데이터 읽기 실패 · ${readableError(
+          error,
+          "IndexedDB 오류"
+        )}`
+      );
+      return;
+    }
+
+    if (!entries.length) {
+      setStatus(
+        "저장된 오프라인 백데이터가 없습니다. 먼저 온라인 30경기 수집을 실행하세요."
+      );
+      return;
+    }
+
+    setBacktestMode(
+      true
+    );
+    setBacktestResultRevealed(
+      false
+    );
+    setBatchBacktestDiagnostics(
+      []
+    );
+
+    let completed = 0;
+    let failed = 0;
+    const batchRecords:
+      SimpleBacktestRecord[] =
+      [];
+
+    setBatchBacktest({
+      running: true,
+      gameKeys:
+        entries.map(
+          (entry) =>
+            entry.id
+        ),
+      index: 0,
+      phase: "DIRECT",
+      completed: 0,
+      failed: 0,
+      phaseStartedAt:
+        Date.now(),
+    });
+
+    for (
+      let index = 0;
+      index <
+      entries.length;
+      index += 1
+    ) {
+      const entry =
+        entries[index];
+
+      setBatchBacktest(
+        (previous) => ({
+          ...previous,
+          index,
+          completed,
+          failed,
+        })
+      );
+
+      setStatus(
+        `💾 오프라인 백테스트 ${index + 1}/${entries.length} · SportsAPI 호출 0회 · ${entry.game?.home ?? "-"} vs ${entry.game?.away ?? "-"}`
+      );
+
+      try {
+        const offline =
+          createOfflinePredictionSnapshot(
+            entry
+          );
+
+        const records =
+          scoreLockedSnapshotOffline(
+            offline.snapshot,
+            cloneBacktestDatasetValue(
+              entry.truth
+            )
+          );
+
+        batchRecords.push(
+          ...records
+        );
+
+        const gameNo =
+          String(
+            (entry.game as any)?.gameNo ??
+            marketRows(
+              entry.game
+            )?.[0]?.gameNo ??
+            marketRows(
+              entry.game
+            )?.[0]?.matchSeq ??
+            "-"
+          );
+
+        completed += 1;
+
+        setBatchBacktestDiagnostics(
+          (previous) => [
+            ...previous,
+            {
+              index:
+                index + 1,
+              gameNo,
+              gameLabel:
+                `${entry.game?.home ?? "-"} vs ${entry.game?.away ?? "-"}`,
+              status:
+                "SUCCESS",
+              fixtureId:
+                entry.fixtureId,
+              calibrationRows:
+                records.length,
+              message:
+                `OFFLINE PRE 재계산 → LOCK → 저장 VERIFY 채점 · ${records.length}행 · SportsAPI 0회${offline.snapshot.picks.some((pick: any) => String(pick.grade).includes("FALLBACK")) ? " · MARKET FALLBACK 사용" : ""}`,
+              savedAt:
+                Date.now(),
+            },
+          ]
+        );
+      } catch (error: any) {
+        failed += 1;
+
+        setBatchBacktestDiagnostics(
+          (previous) => [
+            ...previous,
+            {
+              index:
+                index + 1,
+              gameNo:
+                String(
+                  (entry.game as any)?.gameNo ??
+                  marketRows(
+                    entry.game
+                  )?.[0]?.matchSeq ??
+                  "-"
+                ),
+              gameLabel:
+                `${entry.game?.home ?? "-"} vs ${entry.game?.away ?? "-"}`,
+              status:
+                "FAIL",
+              fixtureId:
+                entry.fixtureId,
+              calibrationRows:
+                0,
+              message:
+                readableError(
+                  error,
+                  "오프라인 재생 실패"
+                ),
+              savedAt:
+                Date.now(),
+            },
+          ]
+        );
+      }
+    }
+
+    setSimpleBacktestRecords(
+      (previous) => {
+        const byId =
+          new Map<
+            string,
+            SimpleBacktestRecord
+          >();
+
+        for (
+          const row
+          of previous
+        ) {
+          byId.set(
+            row.id,
+            row
+          );
+        }
+
+        for (
+          const row
+          of batchRecords
+        ) {
+          byId.set(
+            row.id,
+            row
+          );
+        }
+
+        const next =
+          Array.from(
+            byId.values()
+          );
+
+        try {
+          window.localStorage.setItem(
+            SIMPLE_BACKTEST_STORAGE_KEY,
+            JSON.stringify(
+              next
+            )
+          );
+        } catch {}
+
+        return next;
+      }
+    );
+
+    setBatchBacktest({
+      running: false,
+      gameKeys:
+        entries.map(
+          (entry) =>
+            entry.id
+        ),
+      index:
+        Math.max(
+          0,
+          entries.length - 1
+        ),
+      phase: "IDLE",
+      completed,
+      failed,
+      phaseStartedAt:
+        Date.now(),
+    });
+
+    setStatus(
+      `💾 오프라인 ${entries.length}경기 완료 · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행 · SportsAPI 호출 0회`
+    );
+  }
+
   function isDailyQuotaExceededError(error: any) {
     const message =
       String(
@@ -12256,7 +13100,7 @@ export default function Home() {
       return;
     }
 
-    const games =
+    const targetGames =
       mergeActualGames(
         backtestGames
       )
@@ -12276,12 +13120,48 @@ export default function Home() {
             gameTimeMs(b) -
             gameTimeMs(a)
         )
-        .slice(0, 30);
+        .slice(
+          0,
+          30
+        );
 
-    if (!games.length) {
+    let savedIds =
+      new Set<string>();
+
+    try {
+      savedIds =
+        new Set(
+          (
+            await getAllBacktestDatasetEntries()
+          ).map(
+            (entry) =>
+              entry.id
+          )
+        );
+    } catch {}
+
+    const games =
+      targetGames.filter(
+        (game) =>
+          !savedIds.has(
+            actualGameIdentity(
+              game
+            )
+          )
+      );
+
+    if (!targetGames.length) {
       setStatus(
         "자동 백테스트 대상 KBO 과거경기가 없습니다. 먼저 과거 후보를 불러오세요."
       );
+      return;
+    }
+
+    if (!games.length) {
+      setStatus(
+        `📦 최근 ${targetGames.length}경기 백데이터가 이미 저장되어 있습니다. 💾 오프라인 30경기를 실행하세요.`
+      );
+      void refreshOfflineDatasetCount();
       return;
     }
 
@@ -12908,11 +13788,11 @@ export default function Home() {
               className="btn light"
               onClick={startBatchBacktest}
               disabled={loading || validationLoading || backtestLibraryLoading || batchBacktest.running}
-              title="KBO 과거 실제경기 최대 30경기를 순차 분석하고, 예측 확정 후 결과 검증 레이어를 호출해 Calibration 데이터를 누적합니다."
+              title="아직 저장되지 않은 KBO 과거경기만 SportsAPI로 수집합니다. 저장된 경기는 자동 건너뜁니다."
             >
               {batchBacktest.running
                 ? `⏳ ${Math.min(batchBacktest.index + 1, batchBacktest.gameKeys.length)}/${batchBacktest.gameKeys.length} · ✅${batchBacktest.completed} ❌${batchBacktest.failed}`
-                : "🚀 30경기 자동 백테스트"}
+                : "📥 백데이터 수집"}
             </button>
           )}
 
@@ -13049,75 +13929,6 @@ export default function Home() {
                     </div>
                   </div>
                 ))}
-              </div>
-
-              <div
-                style={{
-                  margin: "0 10px 10px",
-                  border: "1px solid #e2e8f0",
-                  borderRadius: 8,
-                  overflowX: "auto",
-                }}
-              >
-                <div
-                  style={{
-                    padding: "8px 9px",
-                    background: "#f8fafc",
-                    borderBottom: "1px solid #e2e8f0",
-                    fontSize: 12,
-                    fontWeight: 700,
-                  }}
-                >
-                  모델 × 시장 교차 적중률
-                </div>
-                <div
-                  style={{
-                    minWidth: 720,
-                    display: "grid",
-                    gridTemplateColumns: "150px repeat(6, minmax(90px,1fr))",
-                  }}
-                >
-                  <div style={{padding: 7, fontSize: 11, fontWeight: 700, background: "#f8fafc"}}>모델</div>
-                  {["승패", "승1패", "핸디캡", "U/O", "SUM", "전반"].map((label) => (
-                    <div
-                      key={`cross-head-${label}`}
-                      style={{padding: 7, fontSize: 11, fontWeight: 700, textAlign: "center", background: "#f8fafc"}}
-                    >
-                      {label}
-                    </div>
-                  ))}
-
-                  {currentBatchPerformance.byModelMarket.map((model) => (
-                    <div key={model.key} style={{display: "contents"}}>
-                      <div
-                        style={{
-                          padding: 8,
-                          fontSize: 11,
-                          fontWeight: 700,
-                          borderTop: "1px solid #e2e8f0",
-                        }}
-                      >
-                        {model.label}
-                      </div>
-                      {model.markets.map((row) => (
-                        <div
-                          key={row.key}
-                          style={{
-                            padding: 8,
-                            textAlign: "center",
-                            borderTop: "1px solid #e2e8f0",
-                            fontSize: 11,
-                          }}
-                        >
-                          <b>{row.hits}/{row.records}</b>
-                          <div className="small">
-                            {row.hitRate === null ? "-" : `${row.hitRate.toFixed(1)}%`}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
               </div>
 
               <div
@@ -13307,8 +14118,9 @@ export default function Home() {
 
           {backtestMode && (
             <div className="notice" style={{ margin: "0 14px 10px" }}>
-              <b>V13.3 실제 경기 단위 백테스트 라이브러리</b>
+              <b>V13.6 실제 경기 단위 백테스트 라이브러리</b>
               {" · "}현재 {mergeActualGames(backtestGames).length}실제경기 / {mergeActualGames(backtestGames).reduce((sum, game) => sum + marketRows(game).length, 0)}배당행
+              {" · "}💾 오프라인 저장 {offlineDatasetCount}경기
               {" · "}기본 검증 샘플 NC vs 삼성 포함
               <br />
               <span>목록은 실제 경기 1줄로 표시하고, 해당 경기의 승패·핸디·U/O·전반 등 모든 Betman 시장은 오른쪽 분석에 함께 전달합니다. 실제 결과는 분석 완료 후 별도 SportsAPI 검증 API를 호출할 때만 읽습니다.</span>
