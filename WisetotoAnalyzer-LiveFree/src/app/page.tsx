@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_5_2_FIX1_TYPED_FALLBACK_ROWS_20260827
+// DEPLOY_MARKER_V13_5_3_BACKTEST_HIT_RATE_DASHBOARD_20260827
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -841,6 +841,113 @@ function simpleBacktestSummary(
         ? brierSum / rows.length
         : null,
   };
+}
+
+type BacktestPerformanceRow = {
+  key: string;
+  label: string;
+  records: number;
+  hits: number;
+  misses: number;
+  hitRate: number | null;
+};
+
+function backtestPerformanceRow(
+  key: string,
+  label: string,
+  rows: SimpleBacktestRecord[]
+): BacktestPerformanceRow {
+  const hits =
+    rows.filter(
+      (row) =>
+        row.hit
+    ).length;
+
+  const records =
+    rows.length;
+
+  return {
+    key,
+    label,
+    records,
+    hits,
+    misses:
+      Math.max(
+        0,
+        records - hits
+      ),
+    hitRate:
+      records > 0
+        ? (
+            hits /
+            records
+          ) *
+          100
+        : null,
+  };
+}
+
+function backtestMarketGroup(
+  market: string
+) {
+  const value =
+    String(
+      market ??
+      ""
+    );
+
+  if (
+    /전반/i.test(
+      value
+    )
+  ) {
+    return "전반";
+  }
+
+  if (
+    /핸디|handicap|\bH\s*[+-]?\d/i.test(
+      value
+    )
+  ) {
+    return "핸디캡";
+  }
+
+  if (
+    /U\/O|언더|오버|OVER|UNDER|total/i.test(
+      value
+    )
+  ) {
+    return "U/O";
+  }
+
+  if (
+    /SUM|홀짝|odd|even/i.test(
+      value
+    )
+  ) {
+    return "SUM";
+  }
+
+  if (
+    /승1패/i.test(
+      value
+    )
+  ) {
+    return "승1패";
+  }
+
+  return "승패";
+}
+
+function isMarketFallbackRecord(
+  row: SimpleBacktestRecord
+) {
+  return /MARKET\s*FALLBACK/i.test(
+    String(
+      row.grade ??
+      ""
+    )
+  );
 }
 
 function normalizedPickToken(
@@ -9482,6 +9589,108 @@ export default function Home() {
     });
   const [batchBacktestDiagnostics, setBatchBacktestDiagnostics] =
     useState<BatchBacktestDiagnostic[]>([]);
+
+  const currentBatchPerformance =
+    useMemo(
+      () => {
+        const fixtureKeys =
+          new Set(
+            batchBacktestDiagnostics
+              .filter(
+                (row) =>
+                  row.status ===
+                    "SUCCESS" &&
+                  row.fixtureId !==
+                    null
+              )
+              .map(
+                (row) =>
+                  String(
+                    row.fixtureId
+                  )
+              )
+          );
+
+        const rows =
+          fixtureKeys.size > 0
+            ? simpleBacktestRecords.filter(
+                (row) =>
+                  fixtureKeys.has(
+                    String(
+                      row.fixtureKey
+                    )
+                  )
+              )
+            : [];
+
+        const normalRows =
+          rows.filter(
+            (row) =>
+              !isMarketFallbackRecord(
+                row
+              )
+          );
+
+        const fallbackRows =
+          rows.filter(
+            isMarketFallbackRecord
+          );
+
+        const byModel = [
+          backtestPerformanceRow(
+            "NORMAL",
+            "NORMAL 모델",
+            normalRows
+          ),
+          backtestPerformanceRow(
+            "FALLBACK",
+            "MARKET FALLBACK",
+            fallbackRows
+          ),
+        ];
+
+        const marketGroups = [
+          "승패",
+          "승1패",
+          "핸디캡",
+          "U/O",
+          "SUM",
+          "전반",
+        ];
+
+        const byMarket =
+          marketGroups.map(
+            (group) =>
+              backtestPerformanceRow(
+                group,
+                group,
+                rows.filter(
+                  (row) =>
+                    backtestMarketGroup(
+                      row.market
+                    ) ===
+                    group
+                )
+              )
+          );
+
+        return {
+          rows,
+          total:
+            backtestPerformanceRow(
+              "TOTAL",
+              "전체",
+              rows
+            ),
+          byModel,
+          byMarket,
+        };
+      },
+      [
+        simpleBacktestRecords,
+        batchBacktestDiagnostics,
+      ]
+    );
   const [betmanGames, setBetmanGames] = useState<BetmanMatch[]>([]);
   const [betmanDiagnostics, setBetmanDiagnostics] = useState<any>(null);
   const [selectedBetmanKey, setSelectedBetmanKey] = useState<string | null>(null);
@@ -12714,6 +12923,121 @@ export default function Home() {
                 : ""}
             </span>
           </div>
+
+          {currentBatchPerformance.total.records > 0 && (
+            <div
+              style={{
+                marginBottom: 10,
+                border: "1px solid #dbe4ef",
+                borderRadius: 10,
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  alignItems: "center",
+                  padding: "9px 10px",
+                  background: "#f8fafc",
+                  borderBottom: "1px solid #e2e8f0",
+                }}
+              >
+                <b>🎯 백테스트 실제 적중 성적</b>
+                <span className="small">
+                  검증 {currentBatchPerformance.total.records}픽
+                  {" · "}적중 {currentBatchPerformance.total.hits}
+                  {" · "}실패 {currentBatchPerformance.total.misses}
+                  {" · "}적중률{" "}
+                  {currentBatchPerformance.total.hitRate === null
+                    ? "-"
+                    : `${currentBatchPerformance.total.hitRate.toFixed(1)}%`}
+                </span>
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3, minmax(150px,1fr))",
+                  gap: 8,
+                  padding: 10,
+                }}
+              >
+                <div style={{padding: 9, border: "1px solid #e2e8f0", borderRadius: 8}}>
+                  <div className="small">전체 Calibration</div>
+                  <b>{currentBatchPerformance.total.hits}/{currentBatchPerformance.total.records}</b>
+                  <div className="small">
+                    {currentBatchPerformance.total.hitRate === null
+                      ? "-"
+                      : `${currentBatchPerformance.total.hitRate.toFixed(1)}%`}
+                  </div>
+                </div>
+
+                {currentBatchPerformance.byModel.map((row) => (
+                  <div
+                    key={row.key}
+                    style={{
+                      padding: 9,
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 8,
+                    }}
+                  >
+                    <div className="small">{row.label}</div>
+                    <b>{row.hits}/{row.records}</b>
+                    <div className="small">
+                      적중률{" "}
+                      {row.hitRate === null
+                        ? "-"
+                        : `${row.hitRate.toFixed(1)}%`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(6, minmax(90px,1fr))",
+                  gap: 6,
+                  padding: "0 10px 10px",
+                }}
+              >
+                {currentBatchPerformance.byMarket.map((row) => (
+                  <div
+                    key={row.key}
+                    style={{
+                      padding: 8,
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 8,
+                      textAlign: "center",
+                    }}
+                  >
+                    <b style={{fontSize: 11}}>{row.label}</b>
+                    <div style={{fontSize: 12, marginTop: 3}}>
+                      {row.hits}/{row.records}
+                    </div>
+                    <div className="small">
+                      {row.hitRate === null
+                        ? "-"
+                        : `${row.hitRate.toFixed(1)}%`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div
+                className="small"
+                style={{
+                  padding: "0 10px 9px",
+                  color: "#64748b",
+                }}
+              >
+                ※ 적중률은 VERIFY에서 HIT/MISS로 확정되어 Calibration에 저장된 픽만 집계합니다.
+                PUSH·전반 점수 미확보 등 검증불가 시장은 기존 정책대로 Calibration 행에 포함되지 않습니다.
+              </div>
+            </div>
+          )}
 
           <div style={{
             maxHeight: 220,
