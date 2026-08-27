@@ -487,6 +487,25 @@ function fixtureScorePair(
  * 최근 경기에서 팀의 W / D / L 판정
  * --------------------------------------------------
  */
+function fixtureTeamIds(
+  fixture: AnyObj
+) {
+  return {
+    homeId:
+      Number(
+        fixture?.home?.id ??
+        fixture?.homeTeam?.id ??
+        fixture?.localteam?.id
+      ),
+    awayId:
+      Number(
+        fixture?.away?.id ??
+        fixture?.awayTeam?.id ??
+        fixture?.visitorteam?.id
+      ),
+  };
+}
+
 function getTeamResult(
   fixture: AnyObj,
   teamId: number
@@ -965,8 +984,50 @@ async function getRecentFixtures(
         pageStatus,
       fetched:
         allFixtures.length,
-      usable:
-        fixtures.length,
+      deduped:
+        deduped.length,
+      beforeCutoff:
+        deduped.filter(
+          (fixture) => {
+            if (
+              cutoffMs === null ||
+              !Number.isFinite(
+                cutoffMs
+              )
+            ) {
+              return true;
+            }
+
+            const fixtureMs =
+              new Date(
+                fixture?.startTime
+              ).getTime();
+
+            return (
+              Number.isFinite(
+                fixtureMs
+              ) &&
+              fixtureMs <
+                cutoffMs
+            );
+          }
+        ).length,
+      teamIdMatched:
+        deduped.filter(
+          (fixture) => {
+            const ids =
+              fixtureTeamIds(
+                fixture
+              );
+
+            return (
+              ids.homeId ===
+                teamId ||
+              ids.awayId ===
+                teamId
+            );
+          }
+        ).length,
       scoreParsed:
         deduped.filter(
           (fixture) =>
@@ -974,6 +1035,125 @@ async function getRecentFixtures(
               fixture
             ) !== null
         ).length,
+      resultParsed:
+        deduped.filter(
+          (fixture) =>
+            getTeamResult(
+              fixture,
+              teamId
+            ) !== null
+        ).length,
+      cutoffAndResultParsed:
+        deduped.filter(
+          (fixture) => {
+            if (
+              cutoffMs !== null &&
+              Number.isFinite(
+                cutoffMs
+              )
+            ) {
+              const fixtureMs =
+                new Date(
+                  fixture?.startTime
+                ).getTime();
+
+              if (
+                !Number.isFinite(
+                  fixtureMs
+                ) ||
+                fixtureMs >=
+                  cutoffMs
+              ) {
+                return false;
+              }
+            }
+
+            return (
+              getTeamResult(
+                fixture,
+                teamId
+              ) !== null
+            );
+          }
+        ).length,
+      usable:
+        fixtures.length,
+      samplePreview:
+        deduped
+          .slice(
+            0,
+            8
+          )
+          .map(
+            (fixture) => {
+              const ids =
+                fixtureTeamIds(
+                  fixture
+                );
+
+              const score =
+                fixtureScorePair(
+                  fixture
+                );
+
+              const fixtureMs =
+                new Date(
+                  fixture?.startTime
+                ).getTime();
+
+              return {
+                id:
+                  fixture?.id ??
+                  null,
+                startTime:
+                  fixture?.startTime ??
+                  null,
+                beforeCutoff:
+                  cutoffMs === null ||
+                  !Number.isFinite(
+                    cutoffMs
+                  )
+                    ? true
+                    : (
+                        Number.isFinite(
+                          fixtureMs
+                        ) &&
+                        fixtureMs <
+                          cutoffMs
+                      ),
+                homeId:
+                  Number.isFinite(
+                    ids.homeId
+                  )
+                    ? ids.homeId
+                    : null,
+                awayId:
+                  Number.isFinite(
+                    ids.awayId
+                  )
+                    ? ids.awayId
+                    : null,
+                targetTeamMatched:
+                  ids.homeId ===
+                    teamId ||
+                  ids.awayId ===
+                    teamId,
+                scoreParsed:
+                  Boolean(score),
+                homeScore:
+                  score?.homeScore ??
+                  null,
+                awayScore:
+                  score?.awayScore ??
+                  null,
+                result:
+                  getTeamResult(
+                    fixture,
+                    teamId
+                  ),
+              };
+            }
+          ),
     },
   };
 }
