@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_4_8_RECENT_PIPELINE_DIAGNOSTICS_20260827
+// DEPLOY_MARKER_V13_4_9_SAFE_FORM_BRIDGE_20260827
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -8398,15 +8398,59 @@ function sanitizeRecentTeamForBacktest(
     fixtures,
   } as RecentTeam;
 
+  const rebuiltForm =
+    rebuildHistoricalForm(
+      normalizedTeam,
+      fixtures
+    );
+
+  const serverSafeForm =
+    Boolean(
+      (team as any)
+        ?.backtestSafeForm
+    ) &&
+    Number(
+      (team as any)
+        ?.backtestCutoffMs
+    ) ===
+      cutoffMs &&
+    Number(
+      team?.form?.played ??
+      0
+    ) > 0
+      ? team?.form ??
+        null
+      : null;
+
+  /*
+   * 원칙:
+   * 1) 원시 fixture로 재계산 가능하면 rebuiltForm 사용.
+   * 2) 원시 fixture 요약 구조 때문에 client에서 team-side 재판정이 0이 되더라도,
+   *    서버가 같은 cutoffMs 이전 경기만으로 계산했다고 명시한 aggregate Form은 사용 가능.
+   * 3) backtestSafeForm 표식이 없으면 기존처럼 aggregate Form을 절대 신뢰하지 않음.
+   */
+  const historicalForm =
+    Number(
+      rebuiltForm?.played ??
+      0
+    ) > 0
+      ? rebuiltForm
+      : serverSafeForm ??
+        rebuiltForm;
+
   return {
     team: {
       ...normalizedTeam,
-      // 현재시점 aggregate Form은 절대 재사용하지 않음.
       form:
-        rebuildHistoricalForm(
-          normalizedTeam,
-          fixtures
+        historicalForm,
+      backtestSafeForm:
+        Boolean(
+          serverSafeForm
         ),
+      backtestCutoffMs:
+        serverSafeForm
+          ? cutoffMs
+          : null,
     } as RecentTeam,
     removed:
       original.length -
@@ -11016,6 +11060,26 @@ export default function Home() {
             recent?.awayStatus ??
             recent?.status?.away ??
             null,
+          homeSafeForm:
+            Boolean(
+              (recent?.home as any)
+                ?.backtestSafeForm
+            ),
+          awaySafeForm:
+            Boolean(
+              (recent?.away as any)
+                ?.backtestSafeForm
+            ),
+          homeFormPlayed:
+            Number(
+              recent?.home?.form?.played ??
+              0
+            ),
+          awayFormPlayed:
+            Number(
+              recent?.away?.form?.played ??
+              0
+            ),
           raw:
             recent?.status ??
             null,
