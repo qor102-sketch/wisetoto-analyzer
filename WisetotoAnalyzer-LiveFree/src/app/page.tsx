@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_7_4_FIX4_READINESS_90_20260828
+// DEPLOY_MARKER_V13_7_5_VALIDATION_POOL_150_20260828
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -11006,7 +11006,7 @@ export default function Home() {
               gameTimeMs(b) -
               gameTimeMs(a)
           )
-          .slice(0, 90);
+          .slice(0, 150);
 
       const saved =
         await getAllBacktestDatasetEntries();
@@ -12261,13 +12261,13 @@ export default function Home() {
 
       for (
         let round = currentRound - 1;
-        round >= 1 && scannedRounds < 36 && collected.length < (90);
+        round >= 1 && scannedRounds < 60 && collected.length < (150);
         round--
       ) {
         const gmTs = yearPrefix * 10000 + round;
         scannedRounds += 1;
         setStatus(
-          `Betman 과거 회차 탐색 중 · ${gmTs} · KBO ${collected.length}/${90}경기`
+          `Betman 과거 회차 탐색 중 · ${gmTs} · KBO ${collected.length}/${150}경기`
         );
 
         try {
@@ -12301,7 +12301,7 @@ export default function Home() {
             if (!key || seen.has(key)) continue;
             seen.add(key);
             collected.push(game);
-            if (collected.length >= (90)) break;
+            if (collected.length >= (150)) break;
           }
         } catch {
           // 개별 회차 실패는 다음 회차 탐색을 계속한다.
@@ -12310,7 +12310,7 @@ export default function Home() {
 
       const candidates = collected
         .sort((a,b) => gameTimeMs(b) - gameTimeMs(a))
-        .slice(0, 90);
+        .slice(0, 150);
 
       const currentLibrary =
         mergeActualGames(
@@ -12383,7 +12383,7 @@ export default function Home() {
               gameTimeMs(b) -
               gameTimeMs(a)
           )
-          .slice(0, 90);
+          .slice(0, 150);
 
       const storedCount =
         targetCandidates.filter(
@@ -15394,7 +15394,7 @@ export default function Home() {
       readValidationMatchFailureCache();
 
     const validationCandidatePool =
-      allGames.slice(0, 90);
+      allGames.slice(0, 150);
 
     const candidates =
       validationCandidatePool
