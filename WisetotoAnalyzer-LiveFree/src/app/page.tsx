@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_7_3_MATCH_ALIAS_CACHE_20260828
+// DEPLOY_MARKER_V13_7_4_CLEAN_UI_VALIDATION_POOL_20260828
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -12264,13 +12264,13 @@ export default function Home() {
 
       for (
         let round = currentRound - 1;
-        round >= 1 && scannedRounds < 36 && collected.length < (datasetSplit ? 60 : 30);
+        round >= 1 && scannedRounds < 36 && collected.length < (90);
         round--
       ) {
         const gmTs = yearPrefix * 10000 + round;
         scannedRounds += 1;
         setStatus(
-          `Betman 과거 회차 탐색 중 · ${gmTs} · KBO ${collected.length}/${datasetSplit ? 60 : 30}경기`
+          `Betman 과거 회차 탐색 중 · ${gmTs} · KBO ${collected.length}/${90}경기`
         );
 
         try {
@@ -12304,7 +12304,7 @@ export default function Home() {
             if (!key || seen.has(key)) continue;
             seen.add(key);
             collected.push(game);
-            if (collected.length >= (datasetSplit ? 60 : 30)) break;
+            if (collected.length >= (90)) break;
           }
         } catch {
           // 개별 회차 실패는 다음 회차 탐색을 계속한다.
@@ -12313,7 +12313,7 @@ export default function Home() {
 
       const candidates = collected
         .sort((a,b) => gameTimeMs(b) - gameTimeMs(a))
-        .slice(0, datasetSplit ? 60 : 30);
+        .slice(0, 90);
 
       const currentLibrary =
         mergeActualGames(
@@ -12386,10 +12386,7 @@ export default function Home() {
               gameTimeMs(b) -
               gameTimeMs(a)
           )
-          .slice(
-            0,
-            30
-          );
+          .slice(0, 90);
 
       const storedCount =
         targetCandidates.filter(
@@ -15399,8 +15396,11 @@ export default function Home() {
     const failureCache =
       readValidationMatchFailureCache();
 
+    const validationCandidatePool =
+      allGames.slice(0, 90);
+
     const candidates =
-      allGames
+      validationCandidatePool
         .filter(
           (game) =>
             !savedGameIds.has(
@@ -15435,7 +15435,7 @@ export default function Home() {
       !candidates.length
     ) {
       setStatus(
-        `신규 검증 후보가 없습니다 · 현재 검증 ${existingValidation}/${VALIDATION_TARGET_GAMES} · 최근 PRE_MATCH 실패 경기는 12시간 재호출하지 않습니다 · 📚 과거 후보 불러오기로 다른 후보를 확보하세요.`
+        `신규 검증 후보가 없습니다 · 검증 ${existingValidation}/${VALIDATION_TARGET_GAMES} · 개발셋/저장완료/최근 매칭실패 제외 후 신규 후보가 없습니다 · 과거 후보를 다시 불러오세요.`
       );
       return;
     }
@@ -16535,20 +16535,7 @@ export default function Home() {
           <div className="sub">Betman 미시작 발매경기 전체 종목 → 실제 경기 단위 그룹화 → SportsAPI 분석 → 종목별 실제 시장 최적 픽</div>
         </div>
         <div className="bar">
-          <button
-            className="btn light"
-            onClick={() => {
-              setBacktestMode(false);
-              setBacktestResultRevealed(false);
-              setSelectedBetmanKey(null);
-              setMatched(null);
-              void loadBetmanList();
-            }}
-            disabled={loading || batchBacktest.running}
-            title="실전 발매 경기 목록으로 돌아가 새로고침합니다."
-          >
-            🔄 경기목록 새로고침
-          </button>
+          
 
           <button
             className="btn light"
@@ -16789,189 +16776,7 @@ export default function Home() {
               : "▶ 오프라인 30경기"}
           </button>
 
-          <button className="btn primary" onClick={analyzeSelected} disabled={loading || batchBacktest.running || !selectedBetman}>
-            {loading ? "⏳ 분석 중" : "📊 선택 경기 분석"}
-          </button>
-          <span
-            className="small"
-            style={{
-              padding: "6px 8px",
-              border: "1px solid #dbe4ef",
-              borderRadius: 8,
-              background: backtestMode ? "#eef6ff" : "#f8fafc",
-              whiteSpace: "nowrap",
-            }}
-            title="작업에 따라 실전/과거 분석 모드가 자동 전환됩니다."
-          >
-            {backtestMode ? "🧪 과거 분석" : "📡 실전 분석"}
-          </span>
-          <span className={betman.error ? "small err" : "small"}>{status}</span>
-        </div>
-      </div>
-
-      {backtestMode && batchBacktestDiagnostics.length > 0 && (
-        <div style={{
-          margin: "8px 12px 0",
-          padding: 10,
-          border: "1px solid #cbd5e1",
-          borderRadius: 12,
-          background: "#fff",
-        }}>
-          <div style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 10,
-            marginBottom: 7,
-          }}>
-            <b>🧾 자동 백테스트 진단 로그</b>
-            <span className="small">
-              성공 {batchBacktestDiagnostics.filter((row) => row.status === "SUCCESS").length}
-              {" · "}실패 {batchBacktestDiagnostics.filter((row) => row.status === "FAIL").length}
-              {" · "}Calibration {batchBacktestDiagnostics.reduce((sum, row) => sum + row.calibrationRows, 0)}행
-              {batchBacktestDiagnostics.some((row) => row.message.includes("API 일일 한도 소진"))
-                ? " · ⛔ API 일일 한도 소진"
-                : ""}
-            </span>
-          </div>
-
-          {currentBatchPerformance.total.records > 0 && (
-            <div
-              style={{
-                marginBottom: 10,
-                border: "1px solid #dbe4ef",
-                borderRadius: 10,
-                overflow: "hidden",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  alignItems: "center",
-                  padding: "9px 10px",
-                  background: "#f8fafc",
-                  borderBottom: "1px solid #e2e8f0",
-                }}
-              >
-                <b>🎯 백테스트 실제 적중 성적</b>
-                <span className="small">
-                  검증 {currentBatchPerformance.total.records}픽
-                  {" · "}적중 {currentBatchPerformance.total.hits}
-                  {" · "}실패 {currentBatchPerformance.total.misses}
-                  {" · "}적중률{" "}
-                  {currentBatchPerformance.total.hitRate === null
-                    ? "-"
-                    : `${currentBatchPerformance.total.hitRate.toFixed(1)}%`}
-                </span>
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(3, minmax(150px,1fr))",
-                  gap: 8,
-                  padding: 10,
-                }}
-              >
-                <div style={{padding: 9, border: "1px solid #e2e8f0", borderRadius: 8}}>
-                  <div className="small">전체 Calibration</div>
-                  <b>{currentBatchPerformance.total.hits}/{currentBatchPerformance.total.records}</b>
-                  <div className="small">
-                    {currentBatchPerformance.total.hitRate === null
-                      ? "-"
-                      : `${currentBatchPerformance.total.hitRate.toFixed(1)}%`}
-                  </div>
-                </div>
-
-                {currentBatchPerformance.byModel.map((row) => (
-                  <div
-                    key={row.key}
-                    style={{
-                      padding: 9,
-                      border: "1px solid #e2e8f0",
-                      borderRadius: 8,
-                    }}
-                  >
-                    <div className="small">{row.label}</div>
-                    <b>{row.hits}/{row.records}</b>
-                    <div className="small">
-                      적중률{" "}
-                      {row.hitRate === null
-                        ? "-"
-                        : `${row.hitRate.toFixed(1)}%`}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(6, minmax(90px,1fr))",
-                  gap: 6,
-                  padding: "0 10px 10px",
-                }}
-              >
-                {currentBatchPerformance.byMarket.map((row) => (
-                  <div
-                    key={row.key}
-                    style={{
-                      padding: 8,
-                      border: "1px solid #e2e8f0",
-                      borderRadius: 8,
-                      textAlign: "center",
-                    }}
-                  >
-                    <b style={{fontSize: 11}}>{row.label}</b>
-                    <div style={{fontSize: 12, marginTop: 3}}>
-                      {row.hits}/{row.records}
-                    </div>
-                    <div className="small">
-                      {row.hitRate === null
-                        ? "-"
-                        : `${row.hitRate.toFixed(1)}%`}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div
-                style={{
-                  margin: "0 10px 10px",
-                  padding: 10,
-                  border: "1px solid #dbe4ef",
-                  borderRadius: 9,
-                  background: "#fbfdff",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: 10,
-                    marginBottom: 8,
-                  }}
-                >
-                  <b>📌 Baseline 비교</b>
-
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 6,
-                    }}
-                  >
-                    <button
-                      className="btn light"
-                      onClick={saveCurrentBacktestAsBaseline}
-                      disabled={
-                        currentBatchPerformance.total.records <= 0
-                      }
-                    >
-                      현재 결과를 Baseline 저장
-                    </button>
+          
 
                     {backtestBaseline && (
                       <button
