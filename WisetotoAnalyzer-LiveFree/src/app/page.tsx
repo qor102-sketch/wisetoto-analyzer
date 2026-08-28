@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_7_2_VALIDATION_COLLECTOR_20260828
+// DEPLOY_MARKER_V13_7_2_FIX1_DATASETSPLIT_SCOPE_20260828
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -8772,7 +8772,7 @@ function safeRecentFixtureShape(
               other.path === item.path
           ) === index
       )
-      .slice(0, datasetSplit ? 60 : 30);
+      .slice(0, 30);
 
   return result;
 }
@@ -12217,7 +12217,7 @@ export default function Home() {
 
       const candidates = collected
         .sort((a,b) => gameTimeMs(b) - gameTimeMs(a))
-        .slice(0, 30);
+        .slice(0, datasetSplit ? 60 : 30);
 
       const currentLibrary =
         mergeActualGames(
