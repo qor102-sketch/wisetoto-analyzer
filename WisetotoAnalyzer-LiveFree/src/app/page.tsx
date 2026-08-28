@@ -1,7 +1,7 @@
-// DEPLOY_MARKER_V13_6_8_FALLBACK_DIAGNOSTIC_20260828
+// DEPLOY_MARKER_V13_6_9_DATASET_EXPORT_IMPORT_20260828
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 
 type Sport =
   | "전체"
@@ -10564,6 +10564,10 @@ export default function Home() {
     setOfflineDatasetCount,
   ] =
     useState(0);
+  const datasetImportInputRef =
+    useRef<HTMLInputElement | null>(
+      null
+    );
 
 
   const [
@@ -10690,6 +10694,89 @@ export default function Home() {
         games: 0,
         calibrationRows: 0,
       });
+    }
+  }
+
+  async function exportBacktestDatasetJson() {
+    try {
+      const entries = await getAllBacktestDatasetEntries();
+      if (!entries.length) {
+        setStatus("💾 내보낼 영구 백데이터가 없습니다.");
+        return;
+      }
+      const payload = {
+        format: "wisetoto-backtest-dataset",
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        count: entries.length,
+        entries,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: "application/json;charset=utf-8",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      link.href = url;
+      link.download = `wisetoto-backtest-${entries.length}-${stamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setStatus(`💾 백데이터 백업 완료 · ${entries.length}경기`);
+    } catch (error) {
+      setStatus(`❌ 백데이터 백업 실패 · ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  async function importBacktestDatasetJson(file: File) {
+    try {
+      const parsed = JSON.parse(await file.text());
+      const entries = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.entries)
+          ? parsed.entries
+          : [];
+
+      const validEntries = entries.filter(
+        (entry: any) =>
+          entry &&
+          typeof entry === "object" &&
+          typeof entry.id === "string" &&
+          entry.game &&
+          Number.isFinite(Number(entry.fixtureId)) &&
+          Number.isFinite(Number(entry.cutoffMs)) &&
+          entry.combined &&
+          entry.truth
+      ) as BacktestDatasetEntry[];
+
+      if (!validEntries.length) {
+        throw new Error("유효한 PRE+VERIFY 백데이터가 없습니다.");
+      }
+
+      for (const entry of validEntries) {
+        await putBacktestDatasetEntry(entry);
+      }
+
+      const nextLibrary = mergeActualGames([
+        ...backtestGames,
+        ...validEntries.map((entry) => entry.game),
+      ]).sort((a, b) => gameTimeMs(b) - gameTimeMs(a));
+
+      setBacktestGames(nextLibrary);
+      try {
+        window.localStorage.setItem(
+          BACKTEST_GAME_LIBRARY_STORAGE_KEY,
+          JSON.stringify(nextLibrary)
+        );
+      } catch {}
+
+      await refreshOfflineDatasetCount();
+      refreshLegacyRecoveryPreview();
+      await refreshCollectionReadiness(nextLibrary);
+      setStatus(`📂 백데이터 복원 완료 · ${validEntries.length}경기 · 오프라인 재분석 준비`);
+    } catch (error) {
+      setStatus(`❌ 백데이터 복원 실패 · ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -15437,6 +15524,33 @@ export default function Home() {
           >
             💾 영구 저장 {offlineDatasetCount}경기
           </span>
+
+          <button
+            onClick={exportBacktestDatasetJson}
+            disabled={offlineDatasetCount <= 0}
+            title="현재 origin의 영구 백데이터를 JSON 파일로 백업"
+          >
+            ⬇ 백데이터 백업
+          </button>
+
+          <button
+            onClick={() => datasetImportInputRef.current?.click()}
+            title="백업 JSON을 현재 origin의 IndexedDB로 복원"
+          >
+            ⬆ 백데이터 복원
+          </button>
+
+          <input
+            ref={datasetImportInputRef}
+            type="file"
+            accept="application/json,.json"
+            style={{ display: "none" }}
+            onChange={async (event) => {
+              const file = event.target.files?.[0];
+              if (file) await importBacktestDatasetJson(file);
+              event.target.value = "";
+            }}
+          />
 
           <span
             className="small"
