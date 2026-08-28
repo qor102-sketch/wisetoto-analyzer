@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_6_9_DATASET_EXPORT_IMPORT_20260828
+// DEPLOY_MARKER_V13_7_0_FALLBACK_GATE_V1_20260828
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -6906,6 +6906,84 @@ function buildZeroPickMarketFallback(
   return result;
 }
 
+type FallbackGateV1Result = {
+  allowed: MarketPick[];
+  blocked: MarketPick[];
+};
+
+function isFallbackGateV1Blocked(
+  pick: MarketPick
+) {
+  if (
+    !/MARKET\s*FALLBACK/i.test(
+      String(
+        pick.stageGradeLabel ??
+        pick.valueGrade ??
+        ""
+      )
+    ) &&
+    !Boolean(
+      (pick as any)
+        ?.zeroPickFallback
+    )
+  ) {
+    return false;
+  }
+
+  const group =
+    backtestMarketGroup(
+      String(
+        pick.market ??
+        ""
+      )
+    );
+
+  /*
+   * V1은 동일 30경기에서 0%였던 시장 단위만 차단한다.
+   * 전반 0/18, 핸디캡 0/7, U/O 0/7.
+   * 승패/승1패/SUM은 유지하여 과적합을 줄인다.
+   */
+  return (
+    group === "전반" ||
+    group === "핸디캡" ||
+    group === "U/O"
+  );
+}
+
+function applyFallbackGateV1(
+  picks: MarketPick[]
+): FallbackGateV1Result {
+  const allowed:
+    MarketPick[] = [];
+
+  const blocked:
+    MarketPick[] = [];
+
+  for (
+    const pick of picks
+  ) {
+    if (
+      isFallbackGateV1Blocked(
+        pick
+      )
+    ) {
+      blocked.push(
+        pick
+      );
+    } else {
+      allowed.push(
+        pick
+      );
+    }
+  }
+
+  return {
+    allowed,
+    blocked,
+  };
+}
+
+
 function confidenceGrade(score: number) {
   if (score >= 84) return "A";
   if (score >= 76) return "B+";
@@ -10546,6 +10624,16 @@ export default function Home() {
 
 
   const [
+    fallbackGateV1Stats,
+    setFallbackGateV1Stats,
+  ] =
+    useState({
+      blocked: 0,
+      allowedFallback: 0,
+    });
+
+
+  const [
     backtestBaseline,
     setBacktestBaseline,
   ] =
@@ -13127,7 +13215,7 @@ export default function Home() {
      * ZERO-PICK fallback은 이미 PASS/낮은 confidence/edge 0으로
      * 별도 차단되어 있으므로 모델 gate를 재해석하지 않는다.
      */
-    const picks =
+    const picksBeforeFallbackGate =
       modelPicksRaw.length > 0
         ? applyLineupStatsCoverageGate(
             picksRaw,
@@ -13135,6 +13223,14 @@ export default function Home() {
             analysisDirect.factors
           )
         : picksRaw;
+
+    const fallbackGate =
+      applyFallbackGateV1(
+        picksBeforeFallbackGate
+      );
+
+    const picks =
+      fallbackGate.allowed;
 
     if (!picks.length) {
       const marketRowsDebug =
@@ -14024,7 +14120,7 @@ export default function Home() {
         ? modelPicksRaw
         : fallback;
 
-    const picks =
+    const picksBeforeFallbackGate =
       modelPicksRaw.length > 0
         ? applyLineupStatsCoverageGate(
             picksRaw,
@@ -14033,9 +14129,17 @@ export default function Home() {
           )
         : picksRaw;
 
+    const fallbackGate =
+      applyFallbackGateV1(
+        picksBeforeFallbackGate
+      );
+
+    const picks =
+      fallbackGate.allowed;
+
     if (!picks.length) {
       throw new Error(
-        `OFFLINE_PREDICT · Fixture #${entry.fixtureId} 현재 모델에서 픽이 생성되지 않았습니다.`
+        `OFFLINE_PREDICT · Fixture #${entry.fixtureId} 현재 모델에서 픽이 생성되지 않았습니다. · FALLBACK Gate V1 차단 ${fallbackGate.blocked.length}픽`
       );
     }
 
@@ -14148,6 +14252,23 @@ export default function Home() {
       game,
       combined,
       snapshot,
+      fallbackGateBlocked:
+        fallbackGate.blocked.length,
+      fallbackGateAllowed:
+        picks.filter(
+          (pick) =>
+            /MARKET\s*FALLBACK/i.test(
+              String(
+                pick.stageGradeLabel ??
+                pick.valueGrade ??
+                ""
+              )
+            ) ||
+            Boolean(
+              (pick as any)
+                ?.zeroPickFallback
+            )
+        ).length,
     };
   }
 
@@ -14398,8 +14519,15 @@ export default function Home() {
         []
       );
 
+      setFallbackGateV1Stats({
+        blocked: 0,
+        allowedFallback: 0,
+      });
+
       let completed = 0;
       let failed = 0;
+      let fallbackGateBlocked = 0;
+      let fallbackGateAllowed = 0;
 
       const batchRecords:
         SimpleBacktestRecord[] =
@@ -14463,6 +14591,19 @@ export default function Home() {
               entry
             );
 
+          fallbackGateBlocked +=
+            offline.fallbackGateBlocked;
+
+          fallbackGateAllowed +=
+            offline.fallbackGateAllowed;
+
+          setFallbackGateV1Stats({
+            blocked:
+              fallbackGateBlocked,
+            allowedFallback:
+              fallbackGateAllowed,
+          });
+
           const records =
             scoreLockedSnapshotOffline(
               offline.snapshot,
@@ -14505,7 +14646,7 @@ export default function Home() {
                 calibrationRows:
                   records.length,
                 message:
-                  `OFFLINE PRE 재계산 → LOCK → 저장 VERIFY 채점 · ${records.length}행 · SportsAPI 0회${offline.snapshot.picks.some((pick: any) => String(pick.grade).includes("FALLBACK")) ? " · MARKET FALLBACK 사용" : ""}`,
+                  `OFFLINE PRE 재계산 → LOCK → 저장 VERIFY 채점 · ${records.length}행 · SportsAPI 0회${offline.snapshot.picks.some((pick: any) => String(pick.grade).includes("FALLBACK")) ? " · MARKET FALLBACK 사용" : ""}${offline.fallbackGateBlocked > 0 ? ` · Gate V1 차단 ${offline.fallbackGateBlocked}픽` : ""}`,
                 savedAt:
                   Date.now(),
               },
@@ -14633,7 +14774,7 @@ export default function Home() {
       });
 
       setStatus(
-        `✅ 오프라인 ${entries.length}경기 완료 · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행 · SportsAPI 호출 0회`
+        `✅ 오프라인 ${entries.length}경기 완료 · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행 · Gate V1 차단 ${fallbackGateBlocked}픽 · SportsAPI 호출 0회`
       );
     } catch (error: any) {
       setBatchBacktest(
@@ -15980,6 +16121,82 @@ export default function Home() {
                     </div>
                   </>
                 )}
+              </div>
+
+              <div
+                style={{
+                  margin: "0 10px 10px",
+                  padding: 10,
+                  border: "1px solid #dbe4ef",
+                  borderRadius: 9,
+                  background: "#f8fbff",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
+                  <div>
+                    <b>🛡 FALLBACK Gate V1</b>
+                    <div
+                      className="small"
+                      style={{
+                        marginTop: 3,
+                      }}
+                    >
+                      전반 · 핸디캡 · U/O의 MARKET FALLBACK만 차단. 승패 · 승1패 · SUM은 유지.
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 14,
+                      textAlign: "center",
+                    }}
+                  >
+                    <div>
+                      <div className="small">
+                        차단
+                      </div>
+                      <b>
+                        {fallbackGateV1Stats.blocked}픽
+                      </b>
+                    </div>
+
+                    <div>
+                      <div className="small">
+                        유지 FALLBACK
+                      </div>
+                      <b>
+                        {fallbackGateV1Stats.allowedFallback}픽
+                      </b>
+                    </div>
+
+                    <div>
+                      <div className="small">
+                        현재 검증 픽
+                      </div>
+                      <b>
+                        {currentBatchPerformance.total.records}픽
+                      </b>
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  className="small"
+                  style={{
+                    marginTop: 7,
+                    color: "#64748b",
+                  }}
+                >
+                  ※ 적중률 상승과 함께 픽 수 감소를 반드시 같이 봅니다. Gate로 차단된 픽은 Calibration 적중률 분모에서도 제외됩니다.
+                </div>
               </div>
 
               {fallbackDiagnostics.total.records > 0 && (
