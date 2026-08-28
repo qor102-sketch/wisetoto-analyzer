@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_7_4_FIX3_SAFE_UI_20260828
+// DEPLOY_MARKER_V13_7_4_BUILDSAFE_NO_JSX_EDIT_20260828
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -15397,10 +15397,7 @@ export default function Home() {
       readValidationMatchFailureCache();
 
     const validationCandidatePool =
-      allGames.slice(
-        0,
-        90
-      );
+      allGames.slice(0, 90);
 
     const candidates =
       validationCandidatePool
@@ -16540,9 +16537,7 @@ export default function Home() {
         <div className="bar">
           <button
             className="btn light"
-            onClick={() =
-            style={{ display: "none" }}
-          > {
+            onClick={() => {
               setBacktestMode(false);
               setBacktestResultRevealed(false);
               setSelectedBetmanKey(null);
@@ -16605,7 +16600,7 @@ export default function Home() {
 
           <span
             className="small"
-            style={{ display: "none",
+            style={{
               padding: "8px 10px",
               border: "1px solid #dbe4ef",
               borderRadius: 9,
@@ -16794,9 +16789,7 @@ export default function Home() {
               : "▶ 오프라인 30경기"}
           </button>
 
-          <button className="btn primary" onClick={analyzeSelected} disabled={loading || batchBacktest.running || !selectedBetman}
-            style={{ display: "none" }}
-          >
+          <button className="btn primary" onClick={analyzeSelected} disabled={loading || batchBacktest.running || !selectedBetman}>
             {loading ? "⏳ 분석 중" : "📊 선택 경기 분석"}
           </button>
           <span
