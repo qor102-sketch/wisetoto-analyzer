@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_6_4_RESUMABLE_COLLECTION_20260828
+// DEPLOY_MARKER_V13_6_5_BASELINE_COMPARE_20260828
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -10217,6 +10217,88 @@ type BatchBacktestDiagnostic = {
   savedAt: number;
 };
 
+
+type BacktestBaselineSnapshot = {
+  savedAt: number;
+  total: BacktestPerformanceRow;
+  byModel: BacktestPerformanceRow[];
+  byMarket: BacktestPerformanceRow[];
+};
+
+const BACKTEST_BASELINE_STORAGE_KEY =
+  "wisetoto-backtest-baseline-v1365";
+
+function readBacktestBaseline():
+  BacktestBaselineSnapshot | null {
+  try {
+    const raw =
+      window.localStorage.getItem(
+        BACKTEST_BASELINE_STORAGE_KEY
+      );
+
+    if (!raw) {
+      return null;
+    }
+
+    const parsed =
+      JSON.parse(raw);
+
+    return (
+      parsed &&
+      typeof parsed === "object" &&
+      parsed.total &&
+      Array.isArray(parsed.byModel) &&
+      Array.isArray(parsed.byMarket)
+    )
+      ? parsed as BacktestBaselineSnapshot
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveBacktestBaseline(
+  value: BacktestBaselineSnapshot
+) {
+  try {
+    window.localStorage.setItem(
+      BACKTEST_BASELINE_STORAGE_KEY,
+      JSON.stringify(value)
+    );
+  } catch {}
+}
+
+function performanceDelta(
+  current: BacktestPerformanceRow | null,
+  baseline: BacktestPerformanceRow | null
+) {
+  if (
+    !current ||
+    !baseline ||
+    current.hitRate === null ||
+    baseline.hitRate === null
+  ) {
+    return null;
+  }
+
+  return current.hitRate - baseline.hitRate;
+}
+
+function formatPerformanceDelta(
+  value: number | null
+) {
+  if (value === null) {
+    return "-";
+  }
+
+  const prefix =
+    value > 0
+      ? "+"
+      : "";
+
+  return `${prefix}${value.toFixed(1)}%p`;
+}
+
 export default function Home() {
   const [sport, setSport] = useState<Sport>("전체");
   const [status, setStatus] = useState("Betman 발매경기 불러오는 중…");
@@ -10251,6 +10333,21 @@ export default function Home() {
     });
   const [batchBacktestDiagnostics, setBatchBacktestDiagnostics] =
     useState<BatchBacktestDiagnostic[]>([]);
+
+
+  const [
+    backtestBaseline,
+    setBacktestBaseline,
+  ] =
+    useState<BacktestBaselineSnapshot | null>(
+      null
+    );
+
+  useEffect(() => {
+    setBacktestBaseline(
+      readBacktestBaseline()
+    );
+  }, []);
 
   const [
     offlineDatasetCount,
@@ -10477,6 +10574,56 @@ export default function Home() {
       // 백테스트 경기 라이브러리 복원 실패는 분석 엔진과 분리.
     }
   }, []);
+
+
+  function saveCurrentBacktestAsBaseline() {
+    if (
+      currentBatchPerformance.total.records <= 0
+    ) {
+      setStatus(
+        "Baseline으로 저장할 백테스트 결과가 없습니다."
+      );
+      return;
+    }
+
+    const snapshot:
+      BacktestBaselineSnapshot = {
+        savedAt: Date.now(),
+        total:
+          currentBatchPerformance.total,
+        byModel:
+          currentBatchPerformance.byModel,
+        byMarket:
+          currentBatchPerformance.byMarket,
+      };
+
+    saveBacktestBaseline(
+      snapshot
+    );
+    setBacktestBaseline(
+      snapshot
+    );
+
+    setStatus(
+      `📌 Baseline 저장 완료 · 전체 ${snapshot.total.hits}/${snapshot.total.records} · 적중률 ${snapshot.total.hitRate?.toFixed(1) ?? "-"}%`
+    );
+  }
+
+  function clearBacktestBaseline() {
+    try {
+      window.localStorage.removeItem(
+        BACKTEST_BASELINE_STORAGE_KEY
+      );
+    } catch {}
+
+    setBacktestBaseline(
+      null
+    );
+
+    setStatus(
+      "Baseline 비교 기준을 삭제했습니다."
+    );
+  }
 
   function readableError(value: any, fallback: string) {
     if (!value) return fallback;
@@ -14842,6 +14989,232 @@ export default function Home() {
                     </div>
                   </div>
                 ))}
+              </div>
+
+              <div
+                style={{
+                  margin: "0 10px 10px",
+                  padding: 10,
+                  border: "1px solid #dbe4ef",
+                  borderRadius: 9,
+                  background: "#fbfdff",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 10,
+                    marginBottom: 8,
+                  }}
+                >
+                  <b>📌 Baseline 비교</b>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 6,
+                    }}
+                  >
+                    <button
+                      className="btn light"
+                      onClick={saveCurrentBacktestAsBaseline}
+                      disabled={
+                        currentBatchPerformance.total.records <= 0
+                      }
+                    >
+                      현재 결과를 Baseline 저장
+                    </button>
+
+                    {backtestBaseline && (
+                      <button
+                        className="btn light"
+                        onClick={clearBacktestBaseline}
+                      >
+                        Baseline 삭제
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {!backtestBaseline ? (
+                  <div className="small">
+                    현재 30경기 결과를 Baseline으로 저장한 뒤 모델을 수정하고 다시 오프라인 테스트하면 전/후 차이를 자동 비교합니다.
+                  </div>
+                ) : (
+                  <>
+                    <div
+                      className="small"
+                      style={{
+                        marginBottom: 8,
+                      }}
+                    >
+                      저장 기준:{" "}
+                      {new Date(
+                        backtestBaseline.savedAt
+                      ).toLocaleString()}
+                      {" · "}전체{" "}
+                      {backtestBaseline.total.hits}/
+                      {backtestBaseline.total.records}
+                      {" · "}
+                      {backtestBaseline.total.hitRate === null
+                        ? "-"
+                        : `${backtestBaseline.total.hitRate.toFixed(1)}%`}
+                    </div>
+
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns:
+                          "repeat(3, minmax(150px,1fr))",
+                        gap: 7,
+                        marginBottom: 8,
+                      }}
+                    >
+                      {[
+                        {
+                          key: "TOTAL",
+                          label: "전체",
+                          current:
+                            currentBatchPerformance.total,
+                          baseline:
+                            backtestBaseline.total,
+                        },
+                        ...currentBatchPerformance.byModel.map(
+                          (current) => ({
+                            key: current.key,
+                            label: current.label,
+                            current,
+                            baseline:
+                              backtestBaseline.byModel.find(
+                                (row) =>
+                                  row.key === current.key
+                              ) ?? null,
+                          })
+                        ),
+                      ].map(
+                        (row) => {
+                          const delta =
+                            performanceDelta(
+                              row.current,
+                              row.baseline
+                            );
+
+                          return (
+                            <div
+                              key={row.key}
+                              style={{
+                                padding: 8,
+                                border:
+                                  "1px solid #e2e8f0",
+                                borderRadius: 8,
+                              }}
+                            >
+                              <div className="small">
+                                {row.label}
+                              </div>
+
+                              <b>
+                                {row.current.hitRate === null
+                                  ? "-"
+                                  : `${row.current.hitRate.toFixed(1)}%`}
+                              </b>
+
+                              <div
+                                className="small"
+                                style={{
+                                  fontWeight: 700,
+                                  color:
+                                    delta === null
+                                      ? "#64748b"
+                                      : delta > 0
+                                        ? "#07884a"
+                                        : delta < 0
+                                          ? "#d33d3d"
+                                          : "#64748b",
+                                }}
+                              >
+                                Baseline 대비{" "}
+                                {formatPerformanceDelta(delta)}
+                              </div>
+                            </div>
+                          );
+                        }
+                      )}
+                    </div>
+
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns:
+                          "repeat(6, minmax(90px,1fr))",
+                        gap: 6,
+                      }}
+                    >
+                      {currentBatchPerformance.byMarket.map(
+                        (current) => {
+                          const baseline =
+                            backtestBaseline.byMarket.find(
+                              (row) =>
+                                row.key === current.key
+                            ) ?? null;
+
+                          const delta =
+                            performanceDelta(
+                              current,
+                              baseline
+                            );
+
+                          return (
+                            <div
+                              key={current.key}
+                              style={{
+                                padding: 7,
+                                border:
+                                  "1px solid #e2e8f0",
+                                borderRadius: 8,
+                                textAlign: "center",
+                              }}
+                            >
+                              <b style={{fontSize: 11}}>
+                                {current.label}
+                              </b>
+
+                              <div
+                                style={{
+                                  fontSize: 12,
+                                  marginTop: 3,
+                                }}
+                              >
+                                {current.hitRate === null
+                                  ? "-"
+                                  : `${current.hitRate.toFixed(1)}%`}
+                              </div>
+
+                              <div
+                                className="small"
+                                style={{
+                                  fontWeight: 700,
+                                  color:
+                                    delta === null
+                                      ? "#64748b"
+                                      : delta > 0
+                                        ? "#07884a"
+                                        : delta < 0
+                                          ? "#d33d3d"
+                                          : "#64748b",
+                                }}
+                              >
+                                {formatPerformanceDelta(delta)}
+                              </div>
+                            </div>
+                          );
+                        }
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
 
               <div
