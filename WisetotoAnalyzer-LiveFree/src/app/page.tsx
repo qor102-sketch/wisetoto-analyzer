@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_6_6_AUTO_BACKTEST_MODE_NO_TOGGLE_20260828
+// DEPLOY_MARKER_V13_6_7_CANDIDATE_DATASET_BRIDGE_20260828
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -10357,6 +10357,96 @@ export default function Home() {
 
 
   const [
+    collectionReadiness,
+    setCollectionReadiness,
+  ] =
+    useState({
+      candidates: 0,
+      stored: 0,
+      missing: 0,
+    });
+
+  async function refreshCollectionReadiness(
+    sourceGames?: BetmanMatch[]
+  ) {
+    try {
+      const source =
+        mergeActualGames(
+          sourceGames ??
+          backtestGames
+        )
+          .filter(
+            (game) =>
+              Number.isFinite(
+                gameTimeMs(game)
+              ) &&
+              gameTimeMs(game) <
+                Date.now()
+          )
+          .filter(
+            isKboBacktestGame
+          )
+          .sort(
+            (a, b) =>
+              gameTimeMs(b) -
+              gameTimeMs(a)
+          )
+          .slice(
+            0,
+            30
+          );
+
+      const saved =
+        await getAllBacktestDatasetEntries();
+
+      const savedIds =
+        new Set(
+          saved.map(
+            (entry) =>
+              entry.id
+          )
+        );
+
+      const stored =
+        source.filter(
+          (game) =>
+            savedIds.has(
+              actualGameIdentity(
+                game
+              )
+            )
+        ).length;
+
+      setCollectionReadiness({
+        candidates:
+          source.length,
+        stored,
+        missing:
+          Math.max(
+            0,
+            source.length -
+            stored
+          ),
+      });
+    } catch {
+      setCollectionReadiness(
+        (previous) => ({
+          ...previous,
+          stored:
+            offlineDatasetCount,
+          missing:
+            Math.max(
+              0,
+              previous.candidates -
+              offlineDatasetCount
+            ),
+        })
+      );
+    }
+  }
+
+
+  const [
     collectionCheckpoint,
     setCollectionCheckpoint,
   ] =
@@ -10553,6 +10643,20 @@ export default function Home() {
       readBacktestCollectionCheckpoint()
     );
   }, []);
+
+
+  useEffect(() => {
+    if (
+      backtestGames.length > 0
+    ) {
+      void refreshCollectionReadiness(
+        backtestGames
+      );
+    }
+  }, [
+    backtestGames,
+    offlineDatasetCount,
+  ]);
 
   useEffect(() => {
     try {
@@ -11260,19 +11364,103 @@ export default function Home() {
         .sort((a,b) => gameTimeMs(b) - gameTimeMs(a))
         .slice(0, 30);
 
-      setBacktestGames((previous) => {
-        const next = mergeActualGames([...BACKTEST_BETMAN_GAMES, ...previous, ...candidates])
-          .sort((a,b) => gameTimeMs(b) - gameTimeMs(a));
-        try {
-          window.localStorage.setItem(BACKTEST_GAME_LIBRARY_STORAGE_KEY, JSON.stringify(next));
-        } catch {}
-        return next;
-      });
+      const currentLibrary =
+        mergeActualGames(
+          backtestGames
+        );
+
+      const nextLibrary =
+        mergeActualGames([
+          ...BACKTEST_BETMAN_GAMES,
+          ...currentLibrary,
+          ...candidates,
+        ])
+          .sort(
+            (a, b) =>
+              gameTimeMs(b) -
+              gameTimeMs(a)
+          );
+
+      setBacktestGames(
+        nextLibrary
+      );
+
+      try {
+        window.localStorage.setItem(
+          BACKTEST_GAME_LIBRARY_STORAGE_KEY,
+          JSON.stringify(
+            nextLibrary
+          )
+        );
+      } catch {}
+
+      // 후보 라이브러리 저장 직후 UI의 legacy/수집 필요 수치를 즉시 갱신한다.
+      refreshLegacyRecoveryPreview();
+      await refreshCollectionReadiness(
+        nextLibrary
+      );
+
+      const savedEntries =
+        await getAllBacktestDatasetEntries()
+          .catch(
+            () =>
+              [] as BacktestDatasetEntry[]
+          );
+
+      const savedIds =
+        new Set(
+          savedEntries.map(
+            (entry) =>
+              entry.id
+          )
+        );
+
+      const targetCandidates =
+        mergeActualGames(
+          nextLibrary
+        )
+          .filter(
+            (game) =>
+              Number.isFinite(
+                gameTimeMs(game)
+              ) &&
+              gameTimeMs(game) <
+                Date.now()
+          )
+          .filter(
+            isKboBacktestGame
+          )
+          .sort(
+            (a, b) =>
+              gameTimeMs(b) -
+              gameTimeMs(a)
+          )
+          .slice(
+            0,
+            30
+          );
+
+      const storedCount =
+        targetCandidates.filter(
+          (game) =>
+            savedIds.has(
+              actualGameIdentity(
+                game
+              )
+            )
+        ).length;
+
+      const missingCount =
+        Math.max(
+          0,
+          targetCandidates.length -
+          storedCount
+        );
 
       setBacktestMode(true);
       setStatus(
         candidates.length
-          ? `과거 ${scannedRounds}회차 탐색 · 응답 ${successfulRounds}회차 · KBO ${candidates.length}경기 확보 · 백테스트 라이브러리에 저장`
+          ? `과거 ${scannedRounds}회차 탐색 · 응답 ${successfulRounds}회차 · KBO ${targetCandidates.length}경기 후보 · 영구 저장 ${storedCount} · 수집 필요 ${missingCount} · 후보 자체에는 SportsAPI PRE 데이터가 없어 필요한 경기만 백데이터 수집합니다.`
           : `과거 ${scannedRounds}회차를 조회했지만 KBO 발매경기를 찾지 못했습니다.`
       );
     } catch (e:any) {
@@ -14305,6 +14493,9 @@ export default function Home() {
             quotaCheckpoint
           );
 
+          await refreshOfflineDatasetCount();
+          await refreshCollectionReadiness();
+
           setStatus(
             `⛔ SportsAPI 일일 한도 소진 · 여기서 안전 중단 · 영구 저장 ${quotaCheckpoint.stored}/${quotaCheckpoint.target}경기 · 다음 실행 시 남은 ${quotaCheckpoint.remaining}경기부터 자동 이어받기`
           );
@@ -14406,6 +14597,9 @@ export default function Home() {
       setCollectionCheckpoint(
         finalCheckpoint
       );
+
+      await refreshOfflineDatasetCount();
+      await refreshCollectionReadiness();
 
       setStatus(
         `📦 백데이터 수집 완료 · 영구 저장 ${finalCheckpoint.stored}/${finalCheckpoint.target}경기 · 이번 성공 ${completed} · 실패 ${failed} · 다음 실행 시 저장 경기는 API 호출 없이 건너뜀`
@@ -14769,7 +14963,7 @@ export default function Home() {
           >
             {batchBacktest.running
               ? `⏳ ${Math.min(batchBacktest.index + 1, batchBacktest.gameKeys.length)}/${batchBacktest.gameKeys.length} · ✅${batchBacktest.completed} ❌${batchBacktest.failed}`
-              : `📥 백데이터 수집${offlineDatasetCount > 0 ? ` · 저장 ${offlineDatasetCount}` : ""}`}
+              : `📥 백데이터 수집${collectionReadiness.missing > 0 ? ` · 필요 ${collectionReadiness.missing}` : collectionReadiness.candidates > 0 ? " · 완료" : ""}`}
           </button>
 
           <button
@@ -14809,14 +15003,16 @@ export default function Home() {
 
           <span
             className="small"
-            title="기존 브라우저 저장소에서 확인된 자료"
+            title="후보는 Betman 경기/배당 자료이고, 영구는 PRE 입력+VERIFY 결과까지 저장된 오프라인 재분석 가능 데이터입니다."
             style={{
               whiteSpace: "nowrap",
               color: "#64748b",
             }}
           >
-            legacy: 후보 {legacyRecovery.games}
-            {" · "}snapshot {legacyRecovery.snapshots}
+            후보 {collectionReadiness.candidates}
+            {" · "}영구 {collectionReadiness.stored}
+            {" · "}수집필요 {collectionReadiness.missing}
+            {" · "}legacy snapshot {legacyRecovery.snapshots}
             {" · "}cal {legacyRecovery.calibrationRows}
           </span>
 
