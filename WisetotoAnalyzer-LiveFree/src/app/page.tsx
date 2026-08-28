@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_7_4_BUILDSAFE_NO_JSX_EDIT_20260828
+// DEPLOY_MARKER_V13_7_4_FIX4_READINESS_90_20260828
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -11006,10 +11006,7 @@ export default function Home() {
               gameTimeMs(b) -
               gameTimeMs(a)
           )
-          .slice(
-            0,
-            30
-          );
+          .slice(0, 90);
 
       const saved =
         await getAllBacktestDatasetEntries();
