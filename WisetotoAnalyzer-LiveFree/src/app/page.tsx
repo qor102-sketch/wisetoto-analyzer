@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_7_0_FALLBACK_GATE_V1_20260828
+// DEPLOY_MARKER_V13_7_1_DEV_VALIDATION_SPLIT_20260828
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -10587,6 +10587,60 @@ function formatPerformanceDelta(
   return `${prefix}${value.toFixed(1)}%p`;
 }
 
+
+type BacktestDatasetSplit = {
+  version: 1;
+  lockedAt: number;
+  gateVersion: "FALLBACK_GATE_V1";
+  devFixtureIds: number[];
+};
+
+const BACKTEST_DATASET_SPLIT_STORAGE_KEY =
+  "wisetoto-backtest-dataset-split-v1371";
+
+function readBacktestDatasetSplit():
+  BacktestDatasetSplit | null {
+  try {
+    const raw =
+      window.localStorage.getItem(
+        BACKTEST_DATASET_SPLIT_STORAGE_KEY
+      );
+
+    if (!raw) {
+      return null;
+    }
+
+    const parsed =
+      JSON.parse(raw);
+
+    if (
+      parsed?.version === 1 &&
+      parsed?.gateVersion ===
+        "FALLBACK_GATE_V1" &&
+      Array.isArray(
+        parsed?.devFixtureIds
+      )
+    ) {
+      return parsed as BacktestDatasetSplit;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function saveBacktestDatasetSplit(
+  split: BacktestDatasetSplit
+) {
+  try {
+    window.localStorage.setItem(
+      BACKTEST_DATASET_SPLIT_STORAGE_KEY,
+      JSON.stringify(split)
+    );
+  } catch {}
+}
+
 export default function Home() {
   const [sport, setSport] = useState<Sport>("전체");
   const [status, setStatus] = useState("Betman 발매경기 불러오는 중…");
@@ -10634,6 +10688,153 @@ export default function Home() {
 
 
   const [
+    datasetSplit,
+    setDatasetSplit,
+  ] =
+    useState<BacktestDatasetSplit | null>(
+      null
+    );
+
+  const [
+    datasetSplitCounts,
+    setDatasetSplitCounts,
+  ] =
+    useState({
+      dev: 0,
+      validation: 0,
+      total: 0,
+    });
+
+  async function refreshDatasetSplitCounts(
+    splitOverride?:
+      BacktestDatasetSplit | null
+  ) {
+    try {
+      const entries =
+        await getAllBacktestDatasetEntries();
+
+      const split =
+        splitOverride === undefined
+          ? datasetSplit
+          : splitOverride;
+
+      const devIds =
+        new Set(
+          split?.devFixtureIds ??
+          []
+        );
+
+      const dev =
+        entries.filter(
+          (entry) =>
+            devIds.has(
+              Number(
+                entry.fixtureId
+              )
+            )
+        ).length;
+
+      setDatasetSplitCounts({
+        dev,
+        validation:
+          Math.max(
+            0,
+            entries.length -
+            dev
+          ),
+        total:
+          entries.length,
+      });
+    } catch {
+      setDatasetSplitCounts({
+        dev: 0,
+        validation: 0,
+        total: 0,
+      });
+    }
+  }
+
+  async function lockCurrentDatasetAsDevSet() {
+    try {
+      const entries =
+        await getAllBacktestDatasetEntries();
+
+      if (
+        entries.length < 1
+      ) {
+        setStatus(
+          "개발셋으로 고정할 영구 백데이터가 없습니다."
+        );
+        return;
+      }
+
+      const fixtureIds =
+        Array.from(
+          new Set(
+            entries.map(
+              (entry) =>
+                Number(
+                  entry.fixtureId
+                )
+            )
+          )
+        )
+          .filter(
+            Number.isFinite
+          );
+
+      const split:
+        BacktestDatasetSplit = {
+          version: 1,
+          lockedAt:
+            Date.now(),
+          gateVersion:
+            "FALLBACK_GATE_V1",
+          devFixtureIds:
+            fixtureIds,
+        };
+
+      saveBacktestDatasetSplit(
+        split
+      );
+      setDatasetSplit(
+        split
+      );
+      await refreshDatasetSplitCounts(
+        split
+      );
+
+      setStatus(
+        `🔒 개발셋 고정 완료 · ${fixtureIds.length}경기 · 이후 새로 저장되는 경기는 검증셋으로 분리`
+      );
+    } catch (error) {
+      setStatus(
+        `❌ 개발셋 고정 실패 · ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  function clearDatasetSplit() {
+    try {
+      window.localStorage.removeItem(
+        BACKTEST_DATASET_SPLIT_STORAGE_KEY
+      );
+    } catch {}
+
+    setDatasetSplit(
+      null
+    );
+    void refreshDatasetSplitCounts(
+      null
+    );
+
+    setStatus(
+      "개발/검증셋 분리를 해제했습니다."
+    );
+  }
+
+
+  const [
     backtestBaseline,
     setBacktestBaseline,
   ] =
@@ -10644,6 +10845,20 @@ export default function Home() {
   useEffect(() => {
     setBacktestBaseline(
       readBacktestBaseline()
+    );
+  }, []);
+
+
+  useEffect(() => {
+    const split =
+      readBacktestDatasetSplit();
+
+    setDatasetSplit(
+      split
+    );
+
+    void refreshDatasetSplitCounts(
+      split
     );
   }, []);
 
@@ -10797,6 +11012,8 @@ export default function Home() {
         version: 1,
         exportedAt: new Date().toISOString(),
         count: entries.length,
+        datasetSplit:
+          readBacktestDatasetSplit(),
         entries,
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], {
@@ -10826,6 +11043,14 @@ export default function Home() {
           ? parsed.entries
           : [];
 
+      const importedSplit =
+        parsed?.datasetSplit &&
+        parsed.datasetSplit.version === 1 &&
+        parsed.datasetSplit.gateVersion === "FALLBACK_GATE_V1" &&
+        Array.isArray(parsed.datasetSplit.devFixtureIds)
+          ? parsed.datasetSplit as BacktestDatasetSplit
+          : null;
+
       const validEntries = entries.filter(
         (entry: any) =>
           entry &&
@@ -10846,6 +11071,17 @@ export default function Home() {
         await putBacktestDatasetEntry(entry);
       }
 
+      if (
+        importedSplit
+      ) {
+        saveBacktestDatasetSplit(
+          importedSplit
+        );
+        setDatasetSplit(
+          importedSplit
+        );
+      }
+
       const nextLibrary = mergeActualGames([
         ...backtestGames,
         ...validEntries.map((entry) => entry.game),
@@ -10862,6 +11098,10 @@ export default function Home() {
       await refreshOfflineDatasetCount();
       refreshLegacyRecoveryPreview();
       await refreshCollectionReadiness(nextLibrary);
+      await refreshDatasetSplitCounts(
+        importedSplit ??
+        datasetSplit
+      );
       setStatus(`📂 백데이터 복원 완료 · ${validEntries.length}경기 · 오프라인 재분석 준비`);
     } catch (error) {
       setStatus(`❌ 백데이터 복원 실패 · ${error instanceof Error ? error.message : String(error)}`);
@@ -10873,6 +11113,7 @@ export default function Home() {
       setOfflineDatasetCount(
         await countBacktestDatasetEntries()
       );
+      await refreshDatasetSplitCounts();
     } catch {
       setOfflineDatasetCount(
         0
@@ -14425,7 +14666,13 @@ export default function Home() {
     }
   }
 
-  async function startOfflineBatchBacktest() {
+  async function startOfflineBatchBacktest(
+    datasetMode:
+      "ALL" |
+      "DEV" |
+      "VALIDATION" =
+      "ALL"
+  ) {
     if (
       batchBacktest.running ||
       loading ||
@@ -14467,7 +14714,7 @@ export default function Home() {
         [];
 
       try {
-        entries =
+        const allEntries =
           (
             await getAllBacktestDatasetEntries()
           )
@@ -14487,6 +14734,46 @@ export default function Home() {
                 gameTimeMs(
                   a.game
                 )
+            );
+
+        const devIds =
+          new Set(
+            datasetSplit?.devFixtureIds ??
+            []
+          );
+
+        entries =
+          allEntries
+            .filter(
+              (entry) => {
+                const isDev =
+                  devIds.has(
+                    Number(
+                      entry.fixtureId
+                    )
+                  );
+
+                if (
+                  datasetMode ===
+                  "DEV"
+                ) {
+                  return isDev;
+                }
+
+                if (
+                  datasetMode ===
+                  "VALIDATION"
+                ) {
+                  return (
+                    Boolean(
+                      datasetSplit
+                    ) &&
+                    !isDev
+                  );
+                }
+
+                return true;
+              }
             )
             .slice(
               0,
@@ -14504,7 +14791,11 @@ export default function Home() {
 
       if (!entries.length) {
         setStatus(
-          "저장된 오프라인 백데이터가 없습니다. 먼저 📥 백데이터 수집을 실행하세요."
+          datasetMode === "VALIDATION"
+            ? "신규 검증셋 데이터가 아직 없습니다. 개발셋 고정 이후 새 경기만 검증셋으로 들어갑니다."
+            : datasetMode === "DEV"
+              ? "고정된 개발셋 데이터가 없습니다."
+              : "저장된 오프라인 백데이터가 없습니다. 먼저 📥 백데이터 수집을 실행하세요."
         );
         return;
       }
@@ -14548,8 +14839,15 @@ export default function Home() {
           Date.now(),
       });
 
+      const datasetModeLabel =
+        datasetMode === "DEV"
+          ? "개발셋"
+          : datasetMode === "VALIDATION"
+            ? "검증셋"
+            : "전체";
+
       setStatus(
-        `💾 오프라인 백테스트 0/${entries.length} 시작 · SportsAPI 호출 0회`
+        `💾 ${datasetModeLabel} 오프라인 0/${entries.length} 시작 · SportsAPI 호출 0회`
       );
 
       await yieldToUi(
@@ -14577,7 +14875,7 @@ export default function Home() {
         );
 
         setStatus(
-          `💾 오프라인 ${index + 1}/${entries.length} · 성공 ${completed} · 실패 ${failed} · ${entry.game?.home ?? "-"} vs ${entry.game?.away ?? "-"} · SportsAPI 0회`
+          `💾 ${datasetModeLabel} ${index + 1}/${entries.length} · 성공 ${completed} · 실패 ${failed} · ${entry.game?.home ?? "-"} vs ${entry.game?.away ?? "-"} · SportsAPI 0회`
         );
 
         // 화면에 현재 경기 진행 상태를 먼저 표시한 뒤 계산한다.
@@ -14698,7 +14996,7 @@ export default function Home() {
         );
 
         setStatus(
-          `💾 오프라인 ${index + 1}/${entries.length} 완료 · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행 · SportsAPI 0회`
+          `💾 ${datasetModeLabel} ${index + 1}/${entries.length} 완료 · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행 · SportsAPI 0회`
         );
 
         // 다음 경기 전에 render/사용자 입력을 처리할 시간을 준다.
@@ -14774,7 +15072,7 @@ export default function Home() {
       });
 
       setStatus(
-        `✅ 오프라인 ${entries.length}경기 완료 · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행 · Gate V1 차단 ${fallbackGateBlocked}픽 · SportsAPI 호출 0회`
+        `✅ ${datasetModeLabel} 오프라인 ${entries.length}경기 완료 · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행 · Gate V1 차단 ${fallbackGateBlocked}픽 · SportsAPI 호출 0회`
       );
     } catch (error: any) {
       setBatchBacktest(
@@ -15726,12 +16024,87 @@ export default function Home() {
               </span>
             )}
 
+          {!datasetSplit ? (
+            <button
+              className="btn light"
+              onClick={lockCurrentDatasetAsDevSet}
+              disabled={
+                loading ||
+                validationLoading ||
+                batchBacktest.running ||
+                offlineDatasetCount === 0
+              }
+              title="현재 영구 저장 데이터를 FALLBACK Gate V1 개발셋으로 고정합니다. 이후 신규 데이터는 검증셋으로 분리됩니다."
+            >
+              🔒 현재 {offlineDatasetCount}경기 개발셋 고정
+            </button>
+          ) : (
+            <>
+              <span
+                className="small"
+                style={{
+                  whiteSpace: "nowrap",
+                  fontWeight: 700,
+                  color: "#334155",
+                }}
+                title="Gate V1 개발셋은 고정되어 이후 신규 경기와 섞이지 않습니다."
+              >
+                🔒 개발 {datasetSplitCounts.dev}
+                {" · "}검증 {datasetSplitCounts.validation}
+              </span>
+
+              <button
+                className="btn light"
+                onClick={() => {
+                  setBacktestMode(true);
+                  setBacktestResultRevealed(false);
+                  void startOfflineBatchBacktest(
+                    "DEV"
+                  );
+                }}
+                disabled={
+                  loading ||
+                  validationLoading ||
+                  batchBacktest.running ||
+                  datasetSplitCounts.dev === 0
+                }
+              >
+                ▶ 개발셋 검증
+              </button>
+
+              <button
+                className="btn light"
+                onClick={() => {
+                  setBacktestMode(true);
+                  setBacktestResultRevealed(false);
+                  void startOfflineBatchBacktest(
+                    "VALIDATION"
+                  );
+                }}
+                disabled={
+                  loading ||
+                  validationLoading ||
+                  batchBacktest.running ||
+                  datasetSplitCounts.validation === 0
+                }
+                title="개발셋 고정 이후 새로 수집/복원된 경기만 평가합니다."
+              >
+                ▶ 신규 검증셋
+                {datasetSplitCounts.validation > 0
+                  ? ` ${datasetSplitCounts.validation}`
+                  : ""}
+              </button>
+            </>
+          )}
+
           <button
             className="btn light"
             onClick={() => {
               setBacktestMode(true);
               setBacktestResultRevealed(false);
-              void startOfflineBatchBacktest();
+              void startOfflineBatchBacktest(
+                "ALL"
+              );
             }}
             disabled={
               loading ||
@@ -16140,7 +16513,98 @@ export default function Home() {
                     gap: 10,
                   }}
                 >
+                  <div
+                style={{
+                  margin: "0 10px 10px",
+                  padding: 10,
+                  border: "1px solid #c7d7ee",
+                  borderRadius: 9,
+                  background: "#f7fbff",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
                   <div>
+                    <b>🧪 Gate V1 과적합 방지 검증</b>
+                    <div
+                      className="small"
+                      style={{
+                        marginTop: 3,
+                      }}
+                    >
+                      현재 30경기는 개발셋으로 고정하고, 이후 추가되는 경기는 별도 신규 검증셋으로만 평가합니다.
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 12,
+                      alignItems: "center",
+                    }}
+                  >
+                    <div
+                      className="small"
+                      style={{
+                        textAlign: "center",
+                      }}
+                    >
+                      개발
+                      <br />
+                      <b>
+                        {datasetSplitCounts.dev}
+                      </b>
+                    </div>
+                    <div
+                      className="small"
+                      style={{
+                        textAlign: "center",
+                      }}
+                    >
+                      신규 검증
+                      <br />
+                      <b>
+                        {datasetSplitCounts.validation}
+                      </b>
+                    </div>
+
+                    {datasetSplit && (
+                      <button
+                        className="btn light"
+                        onClick={clearDatasetSplit}
+                        disabled={
+                          batchBacktest.running
+                        }
+                        title="실험 설계를 다시 시작할 때만 사용하세요."
+                      >
+                        분리 해제
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div
+                  className="small"
+                  style={{
+                    marginTop: 7,
+                    color: "#475569",
+                  }}
+                >
+                  Gate 버전: FALLBACK_GATE_V1
+                  {datasetSplit
+                    ? ` · 고정 ${new Date(datasetSplit.lockedAt).toLocaleString()}`
+                    : " · 아직 개발셋 미고정"}
+                  {" · "}신규 검증셋 결과가 쌓이기 전에는 Gate V2 조건을 추가하지 않는 것을 권장합니다.
+                </div>
+              </div>
+
+              <div>
                     <b>🛡 FALLBACK Gate V1</b>
                     <div
                       className="small"
