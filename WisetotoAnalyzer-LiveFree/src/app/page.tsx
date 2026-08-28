@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_7_4_FIX2_FULL_PANEL_REBUILD_20260828
+// DEPLOY_MARKER_V13_7_4_FIX3_SAFE_UI_20260828
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -15397,7 +15397,10 @@ export default function Home() {
       readValidationMatchFailureCache();
 
     const validationCandidatePool =
-      allGames.slice(0, 90);
+      allGames.slice(
+        0,
+        90
+      );
 
     const candidates =
       validationCandidatePool
@@ -15435,7 +15438,7 @@ export default function Home() {
       !candidates.length
     ) {
       setStatus(
-        `신규 검증 후보가 없습니다 · 검증 ${existingValidation}/${VALIDATION_TARGET_GAMES} · 개발셋/저장완료/최근 매칭실패 제외 후 신규 후보가 없습니다 · 과거 후보를 다시 불러오세요.`
+        `신규 검증 후보가 없습니다 · 현재 검증 ${existingValidation}/${VALIDATION_TARGET_GAMES} · 최근 PRE_MATCH 실패 경기는 12시간 재호출하지 않습니다 · 📚 과거 후보 불러오기로 다른 후보를 확보하세요.`
       );
       return;
     }
@@ -16535,7 +16538,22 @@ export default function Home() {
           <div className="sub">Betman 미시작 발매경기 전체 종목 → 실제 경기 단위 그룹화 → SportsAPI 분석 → 종목별 실제 시장 최적 픽</div>
         </div>
         <div className="bar">
-          
+          <button
+            className="btn light"
+            onClick={() =
+            style={{ display: "none" }}
+          > {
+              setBacktestMode(false);
+              setBacktestResultRevealed(false);
+              setSelectedBetmanKey(null);
+              setMatched(null);
+              void loadBetmanList();
+            }}
+            disabled={loading || batchBacktest.running}
+            title="실전 발매 경기 목록으로 돌아가 새로고침합니다."
+          >
+            🔄 경기목록 새로고침
+          </button>
 
           <button
             className="btn light"
@@ -16587,7 +16605,7 @@ export default function Home() {
 
           <span
             className="small"
-            style={{
+            style={{ display: "none",
               padding: "8px 10px",
               border: "1px solid #dbe4ef",
               borderRadius: 9,
@@ -16776,82 +16794,72 @@ export default function Home() {
               : "▶ 오프라인 30경기"}
           </button>
 
+          <button className="btn primary" onClick={analyzeSelected} disabled={loading || batchBacktest.running || !selectedBetman}
+            style={{ display: "none" }}
+          >
+            {loading ? "⏳ 분석 중" : "📊 선택 경기 분석"}
+          </button>
           <span
             className="small"
             style={{
+              padding: "6px 8px",
+              border: "1px solid #dbe4ef",
+              borderRadius: 8,
+              background: backtestMode ? "#eef6ff" : "#f8fafc",
               whiteSpace: "nowrap",
-              color: "#64748b",
             }}
+            title="작업에 따라 실전/과거 분석 모드가 자동 전환됩니다."
           >
-            후보 {collectionReadiness.candidates}
-            {" · "}영구 {collectionReadiness.stored}
-            {" · "}수집필요 {collectionReadiness.missing}
-            {" · "}개발 {datasetSplitCounts.dev}
-            {" · "}검증 {datasetSplitCounts.validation}/{VALIDATION_TARGET_GAMES}
+            {backtestMode ? "🧪 과거 분석" : "📡 실전 분석"}
           </span>
-
-        </div>
-
-        <div
-          className={betman.error ? "small err" : "small"}
-          style={{
-            marginTop: 7,
-          }}
-        >
-          {status}
+          <span className={betman.error ? "small err" : "small"}>{status}</span>
         </div>
       </div>
 
-      {batchBacktestDiagnostics.length > 0 && (
-        <section
-          className="panel"
-          style={{
-            marginTop: 10,
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 10,
-              marginBottom: 8,
-            }}
-          >
-            <h3
-              style={{
-                margin: 0,
-              }}
-            >
-              📜 자동 백테스트 진단 로그
-            </h3>
-
+      {backtestMode && batchBacktestDiagnostics.length > 0 && (
+        <div style={{
+          margin: "8px 12px 0",
+          padding: 10,
+          border: "1px solid #cbd5e1",
+          borderRadius: 12,
+          background: "#fff",
+        }}>
+          <div style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 7,
+          }}>
+            <b>🧾 자동 백테스트 진단 로그</b>
             <span className="small">
-              성공 {batchBacktest.completed}
-              {" · "}실패 {batchBacktest.failed}
-              {" · "}Calibration {currentBatchPerformance.total.records}행
+              성공 {batchBacktestDiagnostics.filter((row) => row.status === "SUCCESS").length}
+              {" · "}실패 {batchBacktestDiagnostics.filter((row) => row.status === "FAIL").length}
+              {" · "}Calibration {batchBacktestDiagnostics.reduce((sum, row) => sum + row.calibrationRows, 0)}행
+              {batchBacktestDiagnostics.some((row) => row.message.includes("API 일일 한도 소진"))
+                ? " · ⛔ API 일일 한도 소진"
+                : ""}
             </span>
           </div>
 
           {currentBatchPerformance.total.records > 0 && (
             <div
               style={{
+                marginBottom: 10,
                 border: "1px solid #dbe4ef",
                 borderRadius: 10,
-                background: "#fff",
                 overflow: "hidden",
-                marginBottom: 10,
               }}
             >
               <div
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
+                  gap: 12,
                   alignItems: "center",
-                  gap: 10,
                   padding: "9px 10px",
-                  borderBottom: "1px solid #dbe4ef",
                   background: "#f8fafc",
+                  borderBottom: "1px solid #e2e8f0",
                 }}
               >
                 <b>🎯 백테스트 실제 적중 성적</b>
@@ -16869,31 +16877,34 @@ export default function Home() {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns:
-                    "repeat(3, minmax(180px, 1fr))",
+                  gridTemplateColumns: "repeat(3, minmax(150px,1fr))",
                   gap: 8,
                   padding: 10,
                 }}
               >
-                {[
-                  currentBatchPerformance.total,
-                  ...currentBatchPerformance.byModel,
-                ].map((row) => (
+                <div style={{padding: 9, border: "1px solid #e2e8f0", borderRadius: 8}}>
+                  <div className="small">전체 Calibration</div>
+                  <b>{currentBatchPerformance.total.hits}/{currentBatchPerformance.total.records}</b>
+                  <div className="small">
+                    {currentBatchPerformance.total.hitRate === null
+                      ? "-"
+                      : `${currentBatchPerformance.total.hitRate.toFixed(1)}%`}
+                  </div>
+                </div>
+
+                {currentBatchPerformance.byModel.map((row) => (
                   <div
                     key={row.key}
                     style={{
-                      padding: 8,
-                      border: "1px solid #dbe4ef",
+                      padding: 9,
+                      border: "1px solid #e2e8f0",
                       borderRadius: 8,
                     }}
                   >
+                    <div className="small">{row.label}</div>
+                    <b>{row.hits}/{row.records}</b>
                     <div className="small">
-                      {row.label}
-                    </div>
-                    <b>
-                      {row.hits}/{row.records}
-                    </b>
-                    <div className="small">
+                      적중률{" "}
                       {row.hitRate === null
                         ? "-"
                         : `${row.hitRate.toFixed(1)}%`}
@@ -16905,9 +16916,8 @@ export default function Home() {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns:
-                    "repeat(6, minmax(100px, 1fr))",
-                  gap: 7,
+                  gridTemplateColumns: "repeat(6, minmax(90px,1fr))",
+                  gap: 6,
                   padding: "0 10px 10px",
                 }}
               >
@@ -16915,24 +16925,14 @@ export default function Home() {
                   <div
                     key={row.key}
                     style={{
-                      padding: 7,
-                      border: "1px solid #dbe4ef",
+                      padding: 8,
+                      border: "1px solid #e2e8f0",
                       borderRadius: 8,
                       textAlign: "center",
                     }}
                   >
-                    <b
-                      style={{
-                        fontSize: 11,
-                      }}
-                    >
-                      {row.label}
-                    </b>
-                    <div
-                      style={{
-                        fontSize: 12,
-                      }}
-                    >
+                    <b style={{fontSize: 11}}>{row.label}</b>
+                    <div style={{fontSize: 12, marginTop: 3}}>
                       {row.hits}/{row.records}
                     </div>
                     <div className="small">
@@ -16993,85 +16993,201 @@ export default function Home() {
 
                 {!backtestBaseline ? (
                   <div className="small">
-                    현재 결과를 Baseline으로 저장하면 이후 동일 데이터 재검증 결과와 자동 비교합니다.
+                    현재 30경기 결과를 Baseline으로 저장한 뒤 모델을 수정하고 다시 오프라인 테스트하면 전/후 차이를 자동 비교합니다.
                   </div>
                 ) : (
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns:
-                        "repeat(3, minmax(150px,1fr))",
-                      gap: 7,
-                    }}
-                  >
-                    {[
-                      {
-                        key: "TOTAL",
-                        label: "전체",
-                        current: currentBatchPerformance.total,
-                        baseline: backtestBaseline.total,
-                      },
-                      ...currentBatchPerformance.byModel.map(
-                        (current) => ({
-                          key: current.key,
-                          label: current.label,
-                          current,
+                  <>
+                    <div
+                      className="small"
+                      style={{
+                        marginBottom: 8,
+                      }}
+                    >
+                      저장 기준:{" "}
+                      {new Date(
+                        backtestBaseline.savedAt
+                      ).toLocaleString()}
+                      {" · "}전체{" "}
+                      {backtestBaseline.total.hits}/
+                      {backtestBaseline.total.records}
+                      {" · "}
+                      {backtestBaseline.total.hitRate === null
+                        ? "-"
+                        : `${backtestBaseline.total.hitRate.toFixed(1)}%`}
+                    </div>
+
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns:
+                          "repeat(3, minmax(150px,1fr))",
+                        gap: 7,
+                        marginBottom: 8,
+                      }}
+                    >
+                      {[
+                        {
+                          key: "TOTAL",
+                          label: "전체",
+                          current:
+                            currentBatchPerformance.total,
                           baseline:
-                            backtestBaseline.byModel.find(
+                            backtestBaseline.total,
+                        },
+                        ...currentBatchPerformance.byModel.map(
+                          (current) => ({
+                            key: current.key,
+                            label: current.label,
+                            current,
+                            baseline:
+                              backtestBaseline.byModel.find(
+                                (row) =>
+                                  row.key === current.key
+                              ) ?? null,
+                          })
+                        ),
+                      ].map(
+                        (row) => {
+                          const delta =
+                            performanceDelta(
+                              row.current,
+                              row.baseline
+                            );
+
+                          return (
+                            <div
+                              key={row.key}
+                              style={{
+                                padding: 8,
+                                border:
+                                  "1px solid #e2e8f0",
+                                borderRadius: 8,
+                              }}
+                            >
+                              <div className="small">
+                                {row.label}
+                              </div>
+
+                              <b>
+                                {row.current.hitRate === null
+                                  ? "-"
+                                  : `${row.current.hitRate.toFixed(1)}%`}
+                              </b>
+
+                              <div
+                                className="small"
+                                style={{
+                                  fontWeight: 700,
+                                  color:
+                                    delta === null
+                                      ? "#64748b"
+                                      : delta > 0
+                                        ? "#07884a"
+                                        : delta < 0
+                                          ? "#d33d3d"
+                                          : "#64748b",
+                                }}
+                              >
+                                Baseline 대비{" "}
+                                {formatPerformanceDelta(delta)}
+                              </div>
+                            </div>
+                          );
+                        }
+                      )}
+                    </div>
+
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns:
+                          "repeat(6, minmax(90px,1fr))",
+                        gap: 6,
+                      }}
+                    >
+                      {currentBatchPerformance.byMarket.map(
+                        (current) => {
+                          const baseline =
+                            backtestBaseline.byMarket.find(
                               (row) =>
                                 row.key === current.key
-                            ) ?? null,
-                        })
-                      ),
-                    ].map((row) => {
-                      const delta =
-                        performanceDelta(
-                          row.current,
-                          row.baseline
-                        );
+                            ) ?? null;
 
-                      return (
-                        <div
-                          key={row.key}
-                          style={{
-                            padding: 8,
-                            border: "1px solid #e2e8f0",
-                            borderRadius: 8,
-                          }}
-                        >
-                          <div className="small">
-                            {row.label}
-                          </div>
-                          <b>
-                            {row.current.hitRate === null
-                              ? "-"
-                              : `${row.current.hitRate.toFixed(1)}%`}
-                          </b>
-                          <div
-                            className="small"
-                            style={{
-                              fontWeight: 700,
-                              color:
-                                delta === null
-                                  ? "#64748b"
-                                  : delta > 0
-                                    ? "#07884a"
-                                    : delta < 0
-                                      ? "#d33d3d"
-                                      : "#64748b",
-                            }}
-                          >
-                            Baseline 대비{" "}
-                            {formatPerformanceDelta(delta)}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                          const delta =
+                            performanceDelta(
+                              current,
+                              baseline
+                            );
+
+                          return (
+                            <div
+                              key={current.key}
+                              style={{
+                                padding: 7,
+                                border:
+                                  "1px solid #e2e8f0",
+                                borderRadius: 8,
+                                textAlign: "center",
+                              }}
+                            >
+                              <b style={{fontSize: 11}}>
+                                {current.label}
+                              </b>
+
+                              <div
+                                style={{
+                                  fontSize: 12,
+                                  marginTop: 3,
+                                }}
+                              >
+                                {current.hitRate === null
+                                  ? "-"
+                                  : `${current.hitRate.toFixed(1)}%`}
+                              </div>
+
+                              <div
+                                className="small"
+                                style={{
+                                  fontWeight: 700,
+                                  color:
+                                    delta === null
+                                      ? "#64748b"
+                                      : delta > 0
+                                        ? "#07884a"
+                                        : delta < 0
+                                          ? "#d33d3d"
+                                          : "#64748b",
+                                }}
+                              >
+                                {formatPerformanceDelta(delta)}
+                              </div>
+                            </div>
+                          );
+                        }
+                      )}
+                    </div>
+                  </>
                 )}
               </div>
 
               <div
+                style={{
+                  margin: "0 10px 10px",
+                  padding: 10,
+                  border: "1px solid #dbe4ef",
+                  borderRadius: 9,
+                  background: "#f8fbff",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
+                  <div
                 style={{
                   margin: "0 10px 10px",
                   padding: 10,
@@ -17096,7 +17212,7 @@ export default function Home() {
                         marginTop: 3,
                       }}
                     >
-                      개발셋은 고정하고 신규 데이터만 별도 검증셋으로 평가합니다.
+                      현재 30경기는 개발셋으로 고정하고, 이후 추가되는 경기는 별도 신규 검증셋으로만 평가합니다.
                     </div>
                   </div>
 
@@ -17107,50 +17223,70 @@ export default function Home() {
                       alignItems: "center",
                     }}
                   >
-                    <span className="small">
-                      개발 <b>{datasetSplitCounts.dev}</b>
-                    </span>
-                    <span className="small">
-                      검증{" "}
+                    <div
+                      className="small"
+                      style={{
+                        textAlign: "center",
+                      }}
+                    >
+                      개발
+                      <br />
+                      <b>
+                        {datasetSplitCounts.dev}
+                      </b>
+                    </div>
+                    <div
+                      className="small"
+                      style={{
+                        textAlign: "center",
+                      }}
+                    >
+                      신규 검증
+                      <br />
                       <b>
                         {datasetSplitCounts.validation}/{VALIDATION_TARGET_GAMES}
                       </b>
-                    </span>
+                    </div>
 
                     {datasetSplit && (
                       <button
                         className="btn light"
                         onClick={clearDatasetSplit}
-                        disabled={batchBacktest.running}
+                        disabled={
+                          batchBacktest.running
+                        }
+                        title="실험 설계를 다시 시작할 때만 사용하세요."
                       >
                         분리 해제
                       </button>
                     )}
                   </div>
                 </div>
-              </div>
 
-              <div
-                style={{
-                  margin: "0 10px 10px",
-                  padding: 10,
-                  border: "1px solid #dbe4ef",
-                  borderRadius: 9,
-                  background: "#f8fbff",
-                }}
-              >
                 <div
+                  className="small"
                   style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: 10,
+                    marginTop: 7,
+                    color: "#475569",
                   }}
                 >
-                  <div>
+                  Gate 버전: FALLBACK_GATE_V1
+                  {datasetSplit
+                    ? ` · 고정 ${new Date(datasetSplit.lockedAt).toLocaleString()}`
+                    : " · 아직 개발셋 미고정"}
+                  {" · "}신규 검증셋 결과가 쌓이기 전에는 Gate V2 조건을 추가하지 않는 것을 권장합니다.
+                </div>
+              </div>
+
+              <div>
                     <b>🛡 FALLBACK Gate V1</b>
-                    <div className="small">
-                      전반 · 핸디캡 · U/O FALLBACK 차단 / 승패 · 승1패 · SUM 유지
+                    <div
+                      className="small"
+                      style={{
+                        marginTop: 3,
+                      }}
+                    >
+                      전반 · 핸디캡 · U/O의 MARKET FALLBACK만 차단. 승패 · 승1패 · SUM은 유지.
                     </div>
                   </div>
 
@@ -17161,18 +17297,43 @@ export default function Home() {
                       textAlign: "center",
                     }}
                   >
-                    <span className="small">
-                      차단 <b>{fallbackGateV1Stats.blocked}픽</b>
-                    </span>
-                    <span className="small">
-                      유지 FALLBACK{" "}
-                      <b>{fallbackGateV1Stats.allowedFallback}픽</b>
-                    </span>
-                    <span className="small">
-                      현재 검증{" "}
-                      <b>{currentBatchPerformance.total.records}픽</b>
-                    </span>
+                    <div>
+                      <div className="small">
+                        차단
+                      </div>
+                      <b>
+                        {fallbackGateV1Stats.blocked}픽
+                      </b>
+                    </div>
+
+                    <div>
+                      <div className="small">
+                        유지 FALLBACK
+                      </div>
+                      <b>
+                        {fallbackGateV1Stats.allowedFallback}픽
+                      </b>
+                    </div>
+
+                    <div>
+                      <div className="small">
+                        현재 검증 픽
+                      </div>
+                      <b>
+                        {currentBatchPerformance.total.records}픽
+                      </b>
+                    </div>
                   </div>
+                </div>
+
+                <div
+                  className="small"
+                  style={{
+                    marginTop: 7,
+                    color: "#64748b",
+                  }}
+                >
+                  ※ 적중률 상승과 함께 픽 수 감소를 반드시 같이 봅니다. Gate로 차단된 픽은 Calibration 적중률 분모에서도 제외됩니다.
                 </div>
               </div>
 
