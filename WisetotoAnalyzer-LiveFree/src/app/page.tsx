@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_7_1_DEV_VALIDATION_SPLIT_20260828
+// DEPLOY_MARKER_V13_7_2_VALIDATION_COLLECTOR_20260828
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -8772,7 +8772,7 @@ function safeRecentFixtureShape(
               other.path === item.path
           ) === index
       )
-      .slice(0, 30);
+      .slice(0, datasetSplit ? 60 : 30);
 
   return result;
 }
@@ -10598,6 +10598,8 @@ type BacktestDatasetSplit = {
 const BACKTEST_DATASET_SPLIT_STORAGE_KEY =
   "wisetoto-backtest-dataset-split-v1371";
 
+const VALIDATION_TARGET_GAMES = 30;
+
 function readBacktestDatasetSplit():
   BacktestDatasetSplit | null {
   try {
@@ -12166,13 +12168,13 @@ export default function Home() {
 
       for (
         let round = currentRound - 1;
-        round >= 1 && scannedRounds < 24 && collected.length < 30;
+        round >= 1 && scannedRounds < 36 && collected.length < (datasetSplit ? 60 : 30);
         round--
       ) {
         const gmTs = yearPrefix * 10000 + round;
         scannedRounds += 1;
         setStatus(
-          `Betman 과거 회차 탐색 중 · ${gmTs} · KBO ${collected.length}/30경기`
+          `Betman 과거 회차 탐색 중 · ${gmTs} · KBO ${collected.length}/${datasetSplit ? 60 : 30}경기`
         );
 
         try {
@@ -12206,7 +12208,7 @@ export default function Home() {
             if (!key || seen.has(key)) continue;
             seen.add(key);
             collected.push(game);
-            if (collected.length >= 30) break;
+            if (collected.length >= (datasetSplit ? 60 : 30)) break;
           }
         } catch {
           // 개별 회차 실패는 다음 회차 탐색을 계속한다.
@@ -15112,6 +15114,419 @@ export default function Home() {
     );
   }
 
+  async function startValidationCollection() {
+    if (
+      !datasetSplit
+    ) {
+      setStatus(
+        "먼저 현재 영구 데이터를 개발셋으로 고정하세요."
+      );
+      return;
+    }
+
+    if (
+      batchBacktest.running ||
+      loading ||
+      validationLoading ||
+      backtestLibraryLoading
+    ) {
+      return;
+    }
+
+    const allGames =
+      mergeActualGames(
+        backtestGames
+      )
+        .filter(
+          (game) =>
+            Number.isFinite(
+              gameTimeMs(game)
+            ) &&
+            gameTimeMs(game) <
+              Date.now()
+        )
+        .filter(
+          isKboBacktestGame
+        )
+        .sort(
+          (a, b) =>
+            gameTimeMs(b) -
+            gameTimeMs(a)
+        );
+
+    const devFixtureIds =
+      new Set(
+        datasetSplit.devFixtureIds
+      );
+
+    let savedEntries:
+      BacktestDatasetEntry[] =
+      [];
+
+    try {
+      savedEntries =
+        await getAllBacktestDatasetEntries();
+    } catch {}
+
+    const savedGameIds =
+      new Set(
+        savedEntries.map(
+          (entry) =>
+            entry.id
+        )
+      );
+
+    const existingValidation =
+      savedEntries.filter(
+        (entry) =>
+          !devFixtureIds.has(
+            Number(
+              entry.fixtureId
+            )
+          )
+      ).length;
+
+    const remainingTarget =
+      Math.max(
+        0,
+        VALIDATION_TARGET_GAMES -
+        existingValidation
+      );
+
+    if (
+      remainingTarget <= 0
+    ) {
+      setStatus(
+        `✅ 신규 검증셋 ${existingValidation}/${VALIDATION_TARGET_GAMES}경기 확보 완료 · ▶ 신규 검증셋으로 평가하세요.`
+      );
+      return;
+    }
+
+    /*
+     * 개발셋에 속한 과거 경기와 이미 영구 저장된 경기는
+     * SportsAPI 호출 전에 제외한다.
+     */
+    const candidates =
+      allGames
+        .filter(
+          (game) =>
+            !savedGameIds.has(
+              actualGameIdentity(
+                game
+              )
+            )
+        )
+        .slice(
+          0,
+          remainingTarget
+        );
+
+    if (
+      !candidates.length
+    ) {
+      setStatus(
+        `신규 검증 후보가 없습니다 · 현재 검증 ${existingValidation}/${VALIDATION_TARGET_GAMES} · 📚 과거 후보 불러오기로 더 최신 회차를 확보하세요.`
+      );
+      return;
+    }
+
+    setBacktestMode(
+      true
+    );
+    setBacktestResultRevealed(
+      false
+    );
+    setBatchBacktestDiagnostics(
+      []
+    );
+
+    let completed =
+      0;
+    let failed =
+      0;
+    let stoppedByDailyQuota =
+      false;
+
+    const batchRecords:
+      SimpleBacktestRecord[] =
+      [];
+
+    setBatchBacktest({
+      running: true,
+      gameKeys:
+        candidates.map(
+          actualGameIdentity
+        ),
+      index: 0,
+      phase: "DIRECT",
+      completed: 0,
+      failed: 0,
+      phaseStartedAt:
+        Date.now(),
+    });
+
+    setStatus(
+      `🧪 신규 검증 수집 시작 · 현재 ${existingValidation}/${VALIDATION_TARGET_GAMES} · 이번 후보 ${candidates.length}경기`
+    );
+
+    for (
+      let index = 0;
+      index <
+      candidates.length;
+      index += 1
+    ) {
+      const game =
+        candidates[index];
+
+      setSelectedBetmanKey(
+        gameKey(
+          game,
+          mergeActualGames(
+            backtestGames
+          ).indexOf(
+            game
+          )
+        )
+      );
+
+      setBetman({
+        loading: false,
+        matched: game,
+        score: 1,
+        error: null,
+      });
+
+      setMatched(
+        null
+      );
+      setBacktestResultRevealed(
+        false
+      );
+
+      setBatchBacktest(
+        (previous) => ({
+          ...previous,
+          index,
+          phase: "DIRECT",
+          completed,
+          failed,
+          phaseStartedAt:
+            Date.now(),
+        })
+      );
+
+      const currentValidation =
+        existingValidation +
+        completed;
+
+      setStatus(
+        `🧪 신규 검증 ${currentValidation}/${VALIDATION_TARGET_GAMES} · 이번 ${index + 1}/${candidates.length} · ${game?.home ?? "-"} vs ${game?.away ?? "-"}`
+      );
+
+      try {
+        const result =
+          await analyzeBacktestGameDirect(
+            game
+          );
+
+        batchRecords.push(
+          ...result.records
+        );
+
+        completed +=
+          1;
+
+        const gameNo =
+          String(
+            (game as any)?.gameNo ??
+            marketRows(
+              game
+            )?.[0]?.gameNo ??
+            marketRows(
+              game
+            )?.[0]?.matchSeq ??
+            "-"
+          );
+
+        setBatchBacktestDiagnostics(
+          (previous) => [
+            ...previous,
+            {
+              index:
+                index + 1,
+              gameNo,
+              gameLabel:
+                `${game?.home ?? "-"} vs ${game?.away ?? "-"}`,
+              status:
+                "SUCCESS",
+              fixtureId:
+                result.fixtureId,
+              calibrationRows:
+                result.records.length,
+              message:
+                `VALIDATION PRE 잠금 → VERIFY Fixture #${result.fixtureId} · ${result.records.length}행 · 개발셋과 분리 저장`,
+              savedAt:
+                Date.now(),
+            },
+          ]
+        );
+
+        setBatchBacktest(
+          (previous) => ({
+            ...previous,
+            completed,
+            failed,
+          })
+        );
+
+        await refreshOfflineDatasetCount();
+        await refreshDatasetSplitCounts(
+          datasetSplit
+        );
+      } catch (error: any) {
+        const dailyQuotaExceeded =
+          isDailyQuotaExceededError(
+            error
+          );
+
+        failed +=
+          1;
+
+        const errorMessage =
+          readableError(
+            error,
+            "검증셋 수집 실패"
+          );
+
+        setBatchBacktestDiagnostics(
+          (previous) => [
+            ...previous,
+            {
+              index:
+                index + 1,
+              gameNo:
+                String(
+                  (game as any)?.gameNo ??
+                  marketRows(
+                    game
+                  )?.[0]?.matchSeq ??
+                  "-"
+                ),
+              gameLabel:
+                `${game?.home ?? "-"} vs ${game?.away ?? "-"}`,
+              status:
+                "FAIL",
+              fixtureId:
+                null,
+              calibrationRows:
+                0,
+              message:
+                dailyQuotaExceeded
+                  ? "VALIDATION · API 일일 한도 소진 · 안전 중단"
+                  : `VALIDATION · ${errorMessage}`,
+              savedAt:
+                Date.now(),
+            },
+          ]
+        );
+
+        setBatchBacktest(
+          (previous) => ({
+            ...previous,
+            completed,
+            failed,
+          })
+        );
+
+        if (
+          dailyQuotaExceeded
+        ) {
+          stoppedByDailyQuota =
+            true;
+
+          setStatus(
+            `⛔ 신규 검증 수집 중 API 한도 소진 · 저장된 ${existingValidation + completed}/${VALIDATION_TARGET_GAMES}경기는 유지 · 다음 실행 시 이어받기`
+          );
+
+          break;
+        }
+      }
+    }
+
+    setSimpleBacktestRecords(
+      (previous) => {
+        const byId =
+          new Map<
+            string,
+            SimpleBacktestRecord
+          >();
+
+        for (
+          const row of previous
+        ) {
+          byId.set(
+            row.id,
+            row
+          );
+        }
+
+        for (
+          const row of batchRecords
+        ) {
+          byId.set(
+            row.id,
+            row
+          );
+        }
+
+        const next =
+          Array.from(
+            byId.values()
+          );
+
+        try {
+          window.localStorage.setItem(
+            SIMPLE_BACKTEST_STORAGE_KEY,
+            JSON.stringify(
+              next
+            )
+          );
+        } catch {}
+
+        return next;
+      }
+    );
+
+    setBatchBacktest(
+      (previous) => ({
+        ...previous,
+        running: false,
+        phase: "IDLE",
+        completed,
+        failed,
+        phaseStartedAt:
+          Date.now(),
+      })
+    );
+
+    await refreshOfflineDatasetCount();
+    await refreshDatasetSplitCounts(
+      datasetSplit
+    );
+
+    if (
+      !stoppedByDailyQuota
+    ) {
+      const finalValidation =
+        existingValidation +
+        completed;
+
+      setStatus(
+        `✅ 신규 검증 수집 완료 · 검증 ${finalValidation}/${VALIDATION_TARGET_GAMES}경기 · 이번 성공 ${completed} · 실패 ${failed}${finalValidation >= VALIDATION_TARGET_GAMES ? " · ▶ 신규 검증셋으로 평가하세요." : " · 다음 후보가 생기면 계속 누적하세요."}`
+      );
+    }
+  }
+
   async function startBatchBacktest() {
     if (
       batchBacktest.running ||
@@ -16050,7 +16465,7 @@ export default function Home() {
                 title="Gate V1 개발셋은 고정되어 이후 신규 경기와 섞이지 않습니다."
               >
                 🔒 개발 {datasetSplitCounts.dev}
-                {" · "}검증 {datasetSplitCounts.validation}
+                {" · "}검증 {datasetSplitCounts.validation}/{VALIDATION_TARGET_GAMES}
               </span>
 
               <button
@@ -16070,6 +16485,24 @@ export default function Home() {
                 }
               >
                 ▶ 개발셋 검증
+              </button>
+
+              <button
+                className="btn light"
+                onClick={startValidationCollection}
+                disabled={
+                  loading ||
+                  validationLoading ||
+                  backtestLibraryLoading ||
+                  batchBacktest.running ||
+                  datasetSplitCounts.validation >=
+                    VALIDATION_TARGET_GAMES
+                }
+                title="개발셋을 제외한 새 경기만 SportsAPI로 수집해 신규 검증셋에 추가합니다."
+              >
+                {batchBacktest.running
+                  ? "⏳ 신규 검증 수집"
+                  : `📥 신규 검증 수집 ${datasetSplitCounts.validation}/${VALIDATION_TARGET_GAMES}`}
               </button>
 
               <button
@@ -16570,7 +17003,7 @@ export default function Home() {
                       신규 검증
                       <br />
                       <b>
-                        {datasetSplitCounts.validation}
+                        {datasetSplitCounts.validation}/{VALIDATION_TARGET_GAMES}
                       </b>
                     </div>
 
