@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_6_3_LEGACY_DATA_RECOVERY_20260828
+// DEPLOY_MARKER_V13_6_3_FIX1_RECOVERY_SCOPE_20260828
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -1073,7 +1073,7 @@ function findLegacyGameForSnapshot(
     }
 
     const gameTime =
-      gameTimeMs(
+      validationGameTimeMs(
         game
       );
 
@@ -13318,7 +13318,7 @@ export default function Home() {
               Number(
                 snapshot?.cutoffMs ??
                 snapshot?.gameDateMs ??
-                gameTimeMs(
+                validationGameTimeMs(
                   game
                 )
               ),
