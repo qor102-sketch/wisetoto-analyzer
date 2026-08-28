@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_6_7_CANDIDATE_DATASET_BRIDGE_20260828
+// DEPLOY_MARKER_V13_6_8_FALLBACK_DIAGNOSTIC_20260828
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -1610,6 +1610,216 @@ function isMarketFallbackRecord(
       ""
     )
   );
+}
+
+
+type FallbackDiagnosticRow = {
+  key: string;
+  label: string;
+  records: number;
+  hits: number;
+  misses: number;
+  hitRate: number | null;
+};
+
+function fallbackDiagnosticRow(
+  key: string,
+  label: string,
+  rows: SimpleBacktestRecord[]
+): FallbackDiagnosticRow {
+  const hits =
+    rows.filter(
+      (row) =>
+        row.hit
+    ).length;
+
+  const records =
+    rows.length;
+
+  return {
+    key,
+    label,
+    records,
+    hits,
+    misses:
+      Math.max(
+        0,
+        records - hits
+      ),
+    hitRate:
+      records > 0
+        ? (
+            hits /
+            records
+          ) *
+          100
+        : null,
+  };
+}
+
+function fallbackPickDirection(
+  row: SimpleBacktestRecord
+) {
+  const pick =
+    String(
+      row.pick ??
+      ""
+    )
+      .trim()
+      .toLowerCase();
+
+  if (
+    pick.includes("under") ||
+    pick.includes("언더")
+  ) {
+    return "UNDER";
+  }
+
+  if (
+    pick.includes("over") ||
+    pick.includes("오버")
+  ) {
+    return "OVER";
+  }
+
+  if (
+    pick.includes("홈") ||
+    pick === "승" ||
+    pick.includes("home")
+  ) {
+    return "홈/승";
+  }
+
+  if (
+    pick.includes("원정") ||
+    pick === "패" ||
+    pick.includes("away")
+  ) {
+    return "원정/패";
+  }
+
+  if (
+    pick === "1" ||
+    pick.includes("무")
+  ) {
+    return "무/1";
+  }
+
+  if (
+    pick.includes("홀")
+  ) {
+    return "홀";
+  }
+
+  if (
+    pick.includes("짝")
+  ) {
+    return "짝";
+  }
+
+  return (
+    String(
+      row.pick ??
+      "-"
+    ) || "-"
+  );
+}
+
+function fallbackOddsBucket(
+  odds: number | null
+) {
+  if (
+    odds === null ||
+    !Number.isFinite(
+      odds
+    )
+  ) {
+    return "배당없음";
+  }
+
+  if (odds < 1.50) {
+    return "<1.50";
+  }
+
+  if (odds < 1.70) {
+    return "1.50~1.69";
+  }
+
+  if (odds < 2.00) {
+    return "1.70~1.99";
+  }
+
+  if (odds < 2.50) {
+    return "2.00~2.49";
+  }
+
+  return "2.50+";
+}
+
+function fallbackProbabilityBucket(
+  probability: number
+) {
+  const p =
+    Number(
+      probability
+    );
+
+  if (
+    !Number.isFinite(
+      p
+    )
+  ) {
+    return "확률없음";
+  }
+
+  if (p < 50) {
+    return "<50%";
+  }
+
+  if (p < 55) {
+    return "50~54.9%";
+  }
+
+  if (p < 60) {
+    return "55~59.9%";
+  }
+
+  if (p < 65) {
+    return "60~64.9%";
+  }
+
+  return "65%+";
+}
+
+function fallbackEvBucket(
+  ev: number | null
+) {
+  if (
+    ev === null ||
+    !Number.isFinite(
+      ev
+    )
+  ) {
+    return "EV없음";
+  }
+
+  if (ev < 0) {
+    return "<0%";
+  }
+
+  if (ev < 3) {
+    return "0~2.9%";
+  }
+
+  if (ev < 5) {
+    return "3~4.9%";
+  }
+
+  if (ev < 8) {
+    return "5~7.9%";
+  }
+
+  return "8%+";
 }
 
 function normalizedPickToken(
@@ -10680,6 +10890,233 @@ export default function Home() {
   }, []);
 
 
+
+  const fallbackDiagnostics =
+    useMemo(
+      () => {
+        const rows =
+          currentBatchPerformance.rows.filter(
+            isMarketFallbackRecord
+          );
+
+        const marketGroups =
+          [
+            "승패",
+            "승1패",
+            "핸디캡",
+            "U/O",
+            "SUM",
+            "전반",
+          ];
+
+        const byMarket =
+          marketGroups.map(
+            (group) =>
+              fallbackDiagnosticRow(
+                group,
+                group,
+                rows.filter(
+                  (row) =>
+                    backtestMarketGroup(
+                      row.market
+                    ) ===
+                    group
+                )
+              )
+          );
+
+        const directionKeys =
+          Array.from(
+            new Set(
+              rows.map(
+                fallbackPickDirection
+              )
+            )
+          );
+
+        const byDirection =
+          directionKeys.map(
+            (key) =>
+              fallbackDiagnosticRow(
+                key,
+                key,
+                rows.filter(
+                  (row) =>
+                    fallbackPickDirection(
+                      row
+                    ) ===
+                    key
+                )
+              )
+          )
+            .sort(
+              (a, b) =>
+                b.records -
+                a.records
+            );
+
+        const oddsOrder =
+          [
+            "<1.50",
+            "1.50~1.69",
+            "1.70~1.99",
+            "2.00~2.49",
+            "2.50+",
+            "배당없음",
+          ];
+
+        const byOdds =
+          oddsOrder.map(
+            (key) =>
+              fallbackDiagnosticRow(
+                key,
+                key,
+                rows.filter(
+                  (row) =>
+                    fallbackOddsBucket(
+                      row.odds
+                    ) ===
+                    key
+                )
+              )
+          );
+
+        const probabilityOrder =
+          [
+            "<50%",
+            "50~54.9%",
+            "55~59.9%",
+            "60~64.9%",
+            "65%+",
+            "확률없음",
+          ];
+
+        const byProbability =
+          probabilityOrder.map(
+            (key) =>
+              fallbackDiagnosticRow(
+                key,
+                key,
+                rows.filter(
+                  (row) =>
+                    fallbackProbabilityBucket(
+                      row.probability
+                    ) ===
+                    key
+                )
+              )
+          );
+
+        const evOrder =
+          [
+            "<0%",
+            "0~2.9%",
+            "3~4.9%",
+            "5~7.9%",
+            "8%+",
+            "EV없음",
+          ];
+
+        const byEv =
+          evOrder.map(
+            (key) =>
+              fallbackDiagnosticRow(
+                key,
+                key,
+                rows.filter(
+                  (row) =>
+                    fallbackEvBucket(
+                      row.expectedValue
+                    ) ===
+                    key
+                )
+              )
+          );
+
+        const worstRows =
+          [
+            ...byMarket.map(
+              (row) => ({
+                ...row,
+                family: "시장",
+              })
+            ),
+            ...byDirection.map(
+              (row) => ({
+                ...row,
+                family: "선택",
+              })
+            ),
+            ...byOdds.map(
+              (row) => ({
+                ...row,
+                family: "배당",
+              })
+            ),
+            ...byProbability.map(
+              (row) => ({
+                ...row,
+                family: "확률",
+              })
+            ),
+            ...byEv.map(
+              (row) => ({
+                ...row,
+                family: "EV",
+              })
+            ),
+          ]
+            .filter(
+              (row) =>
+                row.records >= 3 &&
+                row.hitRate !== null
+            )
+            .sort(
+              (a, b) => {
+                const rateDiff =
+                  (a.hitRate ?? 100) -
+                  (b.hitRate ?? 100);
+
+                if (
+                  Math.abs(
+                    rateDiff
+                  ) > 0.001
+                ) {
+                  return rateDiff;
+                }
+
+                return (
+                  b.records -
+                  a.records
+                );
+              }
+            )
+            .slice(
+              0,
+              8
+            );
+
+        return {
+          rows,
+          total:
+            fallbackDiagnosticRow(
+              "TOTAL",
+              "FALLBACK 전체",
+              rows
+            ),
+          byMarket,
+          byDirection,
+          byOdds,
+          byProbability,
+          byEv,
+          worstRows,
+        };
+      },
+      [
+        currentBatchPerformance.rows,
+      ]
+    );
+
   function saveCurrentBacktestAsBaseline() {
     if (
       currentBatchPerformance.total.records <= 0
@@ -15430,6 +15867,247 @@ export default function Home() {
                   </>
                 )}
               </div>
+
+              {fallbackDiagnostics.total.records > 0 && (
+                <div
+                  style={{
+                    margin: "0 10px 10px",
+                    padding: 10,
+                    border: "1px solid #f2c7c7",
+                    borderRadius: 9,
+                    background: "#fffafa",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 10,
+                      marginBottom: 8,
+                    }}
+                  >
+                    <div>
+                      <b>🧭 MARKET FALLBACK 진단</b>
+                      <div
+                        className="small"
+                        style={{
+                          marginTop: 3,
+                        }}
+                      >
+                        현재 batch의 FALLBACK {fallbackDiagnostics.total.records}픽을 시장·선택·배당·확률·EV로 분해합니다.
+                      </div>
+                    </div>
+
+                    <div
+                      className="small"
+                      style={{
+                        textAlign: "right",
+                      }}
+                    >
+                      {fallbackDiagnostics.total.hits}/{fallbackDiagnostics.total.records}
+                      {" · "}
+                      {fallbackDiagnostics.total.hitRate === null
+                        ? "-"
+                        : `${fallbackDiagnostics.total.hitRate.toFixed(1)}%`}
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(2, minmax(260px, 1fr))",
+                      gap: 8,
+                      marginBottom: 8,
+                    }}
+                  >
+                    {[
+                      {
+                        title: "시장별",
+                        rows: fallbackDiagnostics.byMarket,
+                      },
+                      {
+                        title: "선택 방향별",
+                        rows: fallbackDiagnostics.byDirection,
+                      },
+                      {
+                        title: "배당 구간별",
+                        rows: fallbackDiagnostics.byOdds,
+                      },
+                      {
+                        title: "확률 구간별",
+                        rows: fallbackDiagnostics.byProbability,
+                      },
+                      {
+                        title: "EV 구간별",
+                        rows: fallbackDiagnostics.byEv,
+                      },
+                    ].map(
+                      (group) => (
+                        <div
+                          key={group.title}
+                          style={{
+                            border:
+                              "1px solid #eadede",
+                            borderRadius:
+                              8,
+                            overflow:
+                              "hidden",
+                          }}
+                        >
+                          <div
+                            style={{
+                              padding:
+                                "7px 8px",
+                              background:
+                                "#fff5f5",
+                              borderBottom:
+                                "1px solid #eadede",
+                              fontWeight:
+                                700,
+                              fontSize:
+                                11,
+                            }}
+                          >
+                            {group.title}
+                          </div>
+
+                          {group.rows.map(
+                            (row) => (
+                              <div
+                                key={`${group.title}-${row.key}`}
+                                style={{
+                                  display:
+                                    "grid",
+                                  gridTemplateColumns:
+                                    "1.2fr .55fr .55fr .7fr",
+                                  gap: 6,
+                                  padding:
+                                    "6px 8px",
+                                  borderBottom:
+                                    "1px solid #f3e8e8",
+                                  alignItems:
+                                    "center",
+                                  fontSize:
+                                    10,
+                                }}
+                              >
+                                <span>
+                                  {row.label}
+                                </span>
+                                <span>
+                                  {row.records}픽
+                                </span>
+                                <span>
+                                  {row.hits}H
+                                  {" / "}
+                                  {row.misses}M
+                                </span>
+                                <b
+                                  style={{
+                                    color:
+                                      row.hitRate === null
+                                        ? "#64748b"
+                                        : row.hitRate >= 50
+                                          ? "#07884a"
+                                          : "#d33d3d",
+                                  }}
+                                >
+                                  {row.hitRate === null
+                                    ? "-"
+                                    : `${row.hitRate.toFixed(1)}%`}
+                                </b>
+                              </div>
+                            )
+                          )}
+                        </div>
+                      )
+                    )}
+                  </div>
+
+                  {fallbackDiagnostics.worstRows.length > 0 && (
+                    <div
+                      style={{
+                        border:
+                          "1px solid #f1c9c9",
+                        borderRadius:
+                          8,
+                        overflow:
+                          "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          padding:
+                            "7px 8px",
+                          background:
+                            "#fff0f0",
+                          borderBottom:
+                            "1px solid #f1c9c9",
+                          fontWeight:
+                            700,
+                          fontSize:
+                            11,
+                        }}
+                      >
+                        ⚠ 우선 개선 후보 · 최소 3픽 이상 저성능 구간
+                      </div>
+
+                      {fallbackDiagnostics.worstRows.map(
+                        (row) => (
+                          <div
+                            key={`${row.family}-${row.key}`}
+                            style={{
+                              display:
+                                "grid",
+                              gridTemplateColumns:
+                                "70px 1.2fr 70px 90px",
+                              gap: 8,
+                              padding:
+                                "6px 8px",
+                              borderBottom:
+                                "1px solid #f7e6e6",
+                              fontSize:
+                                10,
+                            }}
+                          >
+                            <span>
+                              {row.family}
+                            </span>
+                            <b>
+                              {row.label}
+                            </b>
+                            <span>
+                              {row.hits}/{row.records}
+                            </span>
+                            <b
+                              style={{
+                                color:
+                                  (row.hitRate ?? 0) < 40
+                                    ? "#d33d3d"
+                                    : "#b45309",
+                              }}
+                            >
+                              {row.hitRate?.toFixed(1)}%
+                            </b>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  )}
+
+                  <div
+                    className="small"
+                    style={{
+                      marginTop: 8,
+                      color: "#7f1d1d",
+                    }}
+                  >
+                    ※ 이 표는 FALLBACK을 바로 제거하기 위한 것이 아니라, 동일 30경기에서 반복적으로 실패하는 조건을 찾아 다음 모델 실험의 차단/대체 규칙 후보를 만드는 진단용입니다.
+                  </div>
+                </div>
+              )}
 
               <div
                 className="small"
