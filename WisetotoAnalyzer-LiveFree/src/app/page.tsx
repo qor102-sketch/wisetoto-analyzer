@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_6_1_OFFLINE_UI_ALWAYS_VISIBLE_20260828
+// DEPLOY_MARKER_V13_6_2_OFFLINE_PROGRESS_YIELD_20260828
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -12808,269 +12808,349 @@ export default function Home() {
       loading ||
       validationLoading
     ) {
+      setStatus(
+        "오프라인 백테스트를 시작할 수 없습니다. 현재 다른 분석 작업이 진행 중입니다."
+      );
       return;
     }
 
-    let entries:
-      BacktestDatasetEntry[] =
-      [];
+    /*
+     * 오프라인 분석은 API 대기 시간이 없어서 30경기를 동기식으로 연속 계산하면
+     * 브라우저가 중간 render를 하지 못해 '버튼이 아무 반응 없는 것처럼' 보일 수 있다.
+     * 경기마다 event loop에 제어권을 반환해 진행상황을 실제 화면에 표시한다.
+     */
+    const yieldToUi =
+      (delay = 20) =>
+        new Promise<void>(
+          (resolve) =>
+            window.setTimeout(
+              resolve,
+              delay
+            )
+        );
+
+    setStatus(
+      `💾 오프라인 백테스트 준비 중 · 저장 데이터 ${offlineDatasetCount}경기 · SportsAPI 호출 0회`
+    );
+
+    // 첫 상태 변경이 반드시 화면에 그려질 시간을 준다.
+    await yieldToUi(
+      30
+    );
 
     try {
-      entries =
-        (
-          await getAllBacktestDatasetEntries()
-        )
-          .filter(
+      let entries:
+        BacktestDatasetEntry[] =
+        [];
+
+      try {
+        entries =
+          (
+            await getAllBacktestDatasetEntries()
+          )
+            .filter(
+              (entry) =>
+                entry?.game &&
+                entry?.truth &&
+                Number.isFinite(
+                  entry?.fixtureId
+                )
+            )
+            .sort(
+              (a, b) =>
+                gameTimeMs(
+                  b.game
+                ) -
+                gameTimeMs(
+                  a.game
+                )
+            )
+            .slice(
+              0,
+              30
+            );
+      } catch (error: any) {
+        setStatus(
+          `❌ 오프라인 백데이터 읽기 실패 · ${readableError(
+            error,
+            "IndexedDB 오류"
+          )}`
+        );
+        return;
+      }
+
+      if (!entries.length) {
+        setStatus(
+          "저장된 오프라인 백데이터가 없습니다. 먼저 📥 백데이터 수집을 실행하세요."
+        );
+        return;
+      }
+
+      setBacktestMode(
+        true
+      );
+      setBacktestResultRevealed(
+        false
+      );
+      setBatchBacktestDiagnostics(
+        []
+      );
+
+      let completed = 0;
+      let failed = 0;
+
+      const batchRecords:
+        SimpleBacktestRecord[] =
+        [];
+
+      setBatchBacktest({
+        running: true,
+        gameKeys:
+          entries.map(
             (entry) =>
-              entry?.game &&
-              entry?.truth &&
-              Number.isFinite(
-                entry?.fixtureId
+              entry.id
+          ),
+        index: 0,
+        phase: "DIRECT",
+        completed: 0,
+        failed: 0,
+        phaseStartedAt:
+          Date.now(),
+      });
+
+      setStatus(
+        `💾 오프라인 백테스트 0/${entries.length} 시작 · SportsAPI 호출 0회`
+      );
+
+      await yieldToUi(
+        30
+      );
+
+      for (
+        let index = 0;
+        index <
+        entries.length;
+        index += 1
+      ) {
+        const entry =
+          entries[index];
+
+        setBatchBacktest(
+          (previous) => ({
+            ...previous,
+            index,
+            completed,
+            failed,
+            phaseStartedAt:
+              Date.now(),
+          })
+        );
+
+        setStatus(
+          `💾 오프라인 ${index + 1}/${entries.length} · 성공 ${completed} · 실패 ${failed} · ${entry.game?.home ?? "-"} vs ${entry.game?.away ?? "-"} · SportsAPI 0회`
+        );
+
+        // 화면에 현재 경기 진행 상태를 먼저 표시한 뒤 계산한다.
+        await yieldToUi(
+          16
+        );
+
+        try {
+          const offline =
+            createOfflinePredictionSnapshot(
+              entry
+            );
+
+          const records =
+            scoreLockedSnapshotOffline(
+              offline.snapshot,
+              cloneBacktestDatasetValue(
+                entry.truth
               )
-          )
-          .sort(
-            (a, b) =>
-              gameTimeMs(
-                b.game
-              ) -
-              gameTimeMs(
-                a.game
-              )
-          )
-          .slice(
-            0,
-            30
+            );
+
+          batchRecords.push(
+            ...records
           );
+
+          const gameNo =
+            String(
+              (entry.game as any)?.gameNo ??
+              marketRows(
+                entry.game
+              )?.[0]?.gameNo ??
+              marketRows(
+                entry.game
+              )?.[0]?.matchSeq ??
+              "-"
+            );
+
+          completed += 1;
+
+          setBatchBacktestDiagnostics(
+            (previous) => [
+              ...previous,
+              {
+                index:
+                  index + 1,
+                gameNo,
+                gameLabel:
+                  `${entry.game?.home ?? "-"} vs ${entry.game?.away ?? "-"}`,
+                status:
+                  "SUCCESS",
+                fixtureId:
+                  entry.fixtureId,
+                calibrationRows:
+                  records.length,
+                message:
+                  `OFFLINE PRE 재계산 → LOCK → 저장 VERIFY 채점 · ${records.length}행 · SportsAPI 0회${offline.snapshot.picks.some((pick: any) => String(pick.grade).includes("FALLBACK")) ? " · MARKET FALLBACK 사용" : ""}`,
+                savedAt:
+                  Date.now(),
+              },
+            ]
+          );
+        } catch (error: any) {
+          failed += 1;
+
+          setBatchBacktestDiagnostics(
+            (previous) => [
+              ...previous,
+              {
+                index:
+                  index + 1,
+                gameNo:
+                  String(
+                    (entry.game as any)?.gameNo ??
+                    marketRows(
+                      entry.game
+                    )?.[0]?.matchSeq ??
+                    "-"
+                  ),
+                gameLabel:
+                  `${entry.game?.home ?? "-"} vs ${entry.game?.away ?? "-"}`,
+                status:
+                  "FAIL",
+                fixtureId:
+                  entry.fixtureId,
+                calibrationRows:
+                  0,
+                message:
+                  `OFFLINE · ${readableError(
+                    error,
+                    "오프라인 재생 실패"
+                  )}`,
+                savedAt:
+                  Date.now(),
+              },
+            ]
+          );
+        }
+
+        setBatchBacktest(
+          (previous) => ({
+            ...previous,
+            completed,
+            failed,
+          })
+        );
+
+        setStatus(
+          `💾 오프라인 ${index + 1}/${entries.length} 완료 · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행 · SportsAPI 0회`
+        );
+
+        // 다음 경기 전에 render/사용자 입력을 처리할 시간을 준다.
+        await yieldToUi(
+          16
+        );
+      }
+
+      setSimpleBacktestRecords(
+        (previous) => {
+          const byId =
+            new Map<
+              string,
+              SimpleBacktestRecord
+            >();
+
+          for (
+            const row
+            of previous
+          ) {
+            byId.set(
+              row.id,
+              row
+            );
+          }
+
+          for (
+            const row
+            of batchRecords
+          ) {
+            byId.set(
+              row.id,
+              row
+            );
+          }
+
+          const next =
+            Array.from(
+              byId.values()
+            );
+
+          try {
+            window.localStorage.setItem(
+              SIMPLE_BACKTEST_STORAGE_KEY,
+              JSON.stringify(
+                next
+              )
+            );
+          } catch {}
+
+          return next;
+        }
+      );
+
+      setBatchBacktest({
+        running: false,
+        gameKeys:
+          entries.map(
+            (entry) =>
+              entry.id
+          ),
+        index:
+          Math.max(
+            0,
+            entries.length - 1
+          ),
+        phase:
+          "IDLE",
+        completed,
+        failed,
+        phaseStartedAt:
+          Date.now(),
+      });
+
+      setStatus(
+        `✅ 오프라인 ${entries.length}경기 완료 · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행 · SportsAPI 호출 0회`
+      );
     } catch (error: any) {
-      setStatus(
-        `오프라인 백데이터 읽기 실패 · ${readableError(
-          error,
-          "IndexedDB 오류"
-        )}`
-      );
-      return;
-    }
-
-    if (!entries.length) {
-      setStatus(
-        "저장된 오프라인 백데이터가 없습니다. 먼저 온라인 30경기 수집을 실행하세요."
-      );
-      return;
-    }
-
-    setBacktestMode(
-      true
-    );
-    setBacktestResultRevealed(
-      false
-    );
-    setBatchBacktestDiagnostics(
-      []
-    );
-
-    let completed = 0;
-    let failed = 0;
-    const batchRecords:
-      SimpleBacktestRecord[] =
-      [];
-
-    setBatchBacktest({
-      running: true,
-      gameKeys:
-        entries.map(
-          (entry) =>
-            entry.id
-        ),
-      index: 0,
-      phase: "DIRECT",
-      completed: 0,
-      failed: 0,
-      phaseStartedAt:
-        Date.now(),
-    });
-
-    for (
-      let index = 0;
-      index <
-      entries.length;
-      index += 1
-    ) {
-      const entry =
-        entries[index];
-
       setBatchBacktest(
         (previous) => ({
           ...previous,
-          index,
-          completed,
-          failed,
+          running: false,
+          phase: "IDLE",
+          phaseStartedAt:
+            Date.now(),
         })
       );
 
       setStatus(
-        `💾 오프라인 백테스트 ${index + 1}/${entries.length} · SportsAPI 호출 0회 · ${entry.game?.home ?? "-"} vs ${entry.game?.away ?? "-"}`
+        `❌ 오프라인 백테스트 실행 오류 · ${readableError(
+          error,
+          "알 수 없는 오류"
+        )}`
       );
-
-      try {
-        const offline =
-          createOfflinePredictionSnapshot(
-            entry
-          );
-
-        const records =
-          scoreLockedSnapshotOffline(
-            offline.snapshot,
-            cloneBacktestDatasetValue(
-              entry.truth
-            )
-          );
-
-        batchRecords.push(
-          ...records
-        );
-
-        const gameNo =
-          String(
-            (entry.game as any)?.gameNo ??
-            marketRows(
-              entry.game
-            )?.[0]?.gameNo ??
-            marketRows(
-              entry.game
-            )?.[0]?.matchSeq ??
-            "-"
-          );
-
-        completed += 1;
-
-        setBatchBacktestDiagnostics(
-          (previous) => [
-            ...previous,
-            {
-              index:
-                index + 1,
-              gameNo,
-              gameLabel:
-                `${entry.game?.home ?? "-"} vs ${entry.game?.away ?? "-"}`,
-              status:
-                "SUCCESS",
-              fixtureId:
-                entry.fixtureId,
-              calibrationRows:
-                records.length,
-              message:
-                `OFFLINE PRE 재계산 → LOCK → 저장 VERIFY 채점 · ${records.length}행 · SportsAPI 0회${offline.snapshot.picks.some((pick: any) => String(pick.grade).includes("FALLBACK")) ? " · MARKET FALLBACK 사용" : ""}`,
-              savedAt:
-                Date.now(),
-            },
-          ]
-        );
-      } catch (error: any) {
-        failed += 1;
-
-        setBatchBacktestDiagnostics(
-          (previous) => [
-            ...previous,
-            {
-              index:
-                index + 1,
-              gameNo:
-                String(
-                  (entry.game as any)?.gameNo ??
-                  marketRows(
-                    entry.game
-                  )?.[0]?.matchSeq ??
-                  "-"
-                ),
-              gameLabel:
-                `${entry.game?.home ?? "-"} vs ${entry.game?.away ?? "-"}`,
-              status:
-                "FAIL",
-              fixtureId:
-                entry.fixtureId,
-              calibrationRows:
-                0,
-              message:
-                readableError(
-                  error,
-                  "오프라인 재생 실패"
-                ),
-              savedAt:
-                Date.now(),
-            },
-          ]
-        );
-      }
     }
-
-    setSimpleBacktestRecords(
-      (previous) => {
-        const byId =
-          new Map<
-            string,
-            SimpleBacktestRecord
-          >();
-
-        for (
-          const row
-          of previous
-        ) {
-          byId.set(
-            row.id,
-            row
-          );
-        }
-
-        for (
-          const row
-          of batchRecords
-        ) {
-          byId.set(
-            row.id,
-            row
-          );
-        }
-
-        const next =
-          Array.from(
-            byId.values()
-          );
-
-        try {
-          window.localStorage.setItem(
-            SIMPLE_BACKTEST_STORAGE_KEY,
-            JSON.stringify(
-              next
-            )
-          );
-        } catch {}
-
-        return next;
-      }
-    );
-
-    setBatchBacktest({
-      running: false,
-      gameKeys:
-        entries.map(
-          (entry) =>
-            entry.id
-        ),
-      index:
-        Math.max(
-          0,
-          entries.length - 1
-        ),
-      phase: "IDLE",
-      completed,
-      failed,
-      phaseStartedAt:
-        Date.now(),
-    });
-
-    setStatus(
-      `💾 오프라인 ${entries.length}경기 완료 · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행 · SportsAPI 호출 0회`
-    );
   }
 
   function isDailyQuotaExceededError(error: any) {
@@ -13822,7 +13902,12 @@ export default function Home() {
             }
             title="저장된 IndexedDB 데이터만 사용해 현재 모델을 재계산합니다. SportsAPI 호출 0회."
           >
-            ▶ 오프라인 30경기
+            {batchBacktest.running
+              ? `⏳ 오프라인 ${Math.min(
+                  batchBacktest.index + 1,
+                  batchBacktest.gameKeys.length
+                )}/${batchBacktest.gameKeys.length}`
+              : "▶ 오프라인 30경기"}
           </button>
 
           <button className="btn primary" onClick={analyzeSelected} disabled={loading || batchBacktest.running || !selectedBetman}>
