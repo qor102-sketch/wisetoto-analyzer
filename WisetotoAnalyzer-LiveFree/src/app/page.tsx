@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_6_3_FIX1_RECOVERY_SCOPE_20260828
+// DEPLOY_MARKER_V13_6_4_RESUMABLE_COLLECTION_20260828
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -851,6 +851,63 @@ async function countBacktestDatasetEntries() {
   }
 }
 
+
+
+const BACKTEST_COLLECTION_CHECKPOINT_KEY =
+  "wisetoto-backtest-collection-checkpoint-v1364";
+
+function saveBacktestCollectionCheckpoint(
+  value: {
+    target: number;
+    stored: number;
+    remaining: number;
+    lastGameId?: string;
+    stoppedByQuota?: boolean;
+  }
+) {
+  try {
+    window.localStorage.setItem(
+      BACKTEST_COLLECTION_CHECKPOINT_KEY,
+      JSON.stringify({
+        ...value,
+        updatedAt: Date.now(),
+      })
+    );
+  } catch {
+    // 체크포인트는 보조정보다. IndexedDB 저장 성공 여부와 분리한다.
+  }
+}
+
+function readBacktestCollectionCheckpoint():
+  {
+    target: number;
+    stored: number;
+    remaining: number;
+    lastGameId?: string;
+    stoppedByQuota?: boolean;
+    updatedAt?: number;
+  } | null {
+  try {
+    const raw =
+      window.localStorage.getItem(
+        BACKTEST_COLLECTION_CHECKPOINT_KEY
+      );
+
+    if (!raw) {
+      return null;
+    }
+
+    const parsed =
+      JSON.parse(raw);
+
+    return parsed &&
+      typeof parsed === "object"
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 type LegacyRecoveryPreview = {
   recoverable: number;
@@ -10203,6 +10260,15 @@ export default function Home() {
 
 
   const [
+    collectionCheckpoint,
+    setCollectionCheckpoint,
+  ] =
+    useState<ReturnType<
+      typeof readBacktestCollectionCheckpoint
+    >>(null);
+
+
+  const [
     legacyRecovery,
     setLegacyRecovery,
   ] =
@@ -10386,6 +10452,9 @@ export default function Home() {
   useEffect(() => {
     void refreshOfflineDatasetCount();
     refreshLegacyRecoveryPreview();
+    setCollectionCheckpoint(
+      readBacktestCollectionCheckpoint()
+    );
   }, []);
 
   useEffect(() => {
@@ -13804,6 +13873,26 @@ export default function Home() {
           )
       );
 
+
+    const initialCheckpoint = {
+      target:
+        targetGames.length,
+      stored:
+        targetGames.length -
+        games.length,
+      remaining:
+        games.length,
+      stoppedByQuota:
+        false,
+    };
+
+    saveBacktestCollectionCheckpoint(
+      initialCheckpoint
+    );
+    setCollectionCheckpoint(
+      initialCheckpoint
+    );
+
     if (!targetGames.length) {
       setStatus(
         "자동 백테스트 대상 KBO 과거경기가 없습니다. 먼저 과거 후보를 불러오세요."
@@ -13813,7 +13902,7 @@ export default function Home() {
 
     if (!games.length) {
       setStatus(
-        `📦 최근 ${targetGames.length}경기 백데이터가 이미 저장되어 있습니다. 💾 오프라인 30경기를 실행하세요.`
+        `📦 최근 ${targetGames.length}경기 전부 영구 저장 완료 · SportsAPI 호출 0회 · ▶ 오프라인 30경기를 실행하세요.`
       );
       void refreshOfflineDatasetCount();
       return;
@@ -13843,6 +13932,10 @@ export default function Home() {
       phaseStartedAt:
         Date.now(),
     });
+
+    setStatus(
+      `📥 백데이터 이어받기 · 목표 ${targetGames.length}경기 · 기존 저장 ${targetGames.length - games.length}경기 · 신규 수집 ${games.length}경기`
+    );
 
     for (
       let index = 0;
@@ -13892,6 +13985,39 @@ export default function Home() {
           await analyzeBacktestGameDirect(
             game
           );
+
+
+        // analyzeBacktestGameDirect가 VERIFY 완료 직후 IndexedDB에 저장한다.
+        // 따라서 브라우저가 다음 경기에서 중단되어도 이 경기까지는 이어받기 가능하다.
+        const checkpoint = {
+          target:
+            targetGames.length,
+          stored:
+            targetGames.length -
+            games.length +
+            completed +
+            1,
+          remaining:
+            Math.max(
+              0,
+              games.length -
+              index -
+              1
+            ),
+          lastGameId:
+            actualGameIdentity(
+              game
+            ),
+          stoppedByQuota:
+            false,
+        };
+
+        saveBacktestCollectionCheckpoint(
+          checkpoint
+        );
+        setCollectionCheckpoint(
+          checkpoint
+        );
 
         // 이 경기의 전체 분석/결과검증이 끝난 뒤에만 UI와 누적자료를 갱신한다.
         setMatched(
@@ -14004,8 +14130,36 @@ export default function Home() {
             })
           );
 
+          const quotaCheckpoint = {
+            target:
+              targetGames.length,
+            stored:
+              targetGames.length -
+              games.length +
+              completed,
+            remaining:
+              Math.max(
+                0,
+                games.length -
+                index
+              ),
+            lastGameId:
+              actualGameIdentity(
+                game
+              ),
+            stoppedByQuota:
+              true,
+          };
+
+          saveBacktestCollectionCheckpoint(
+            quotaCheckpoint
+          );
+          setCollectionCheckpoint(
+            quotaCheckpoint
+          );
+
           setStatus(
-            `⛔ SportsAPI 일일 한도 소진 · 자동 백테스트 중단 · ${index + 1}/${games.length}에서 종료 · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행`
+            `⛔ SportsAPI 일일 한도 소진 · 여기서 안전 중단 · 영구 저장 ${quotaCheckpoint.stored}/${quotaCheckpoint.target}경기 · 다음 실행 시 남은 ${quotaCheckpoint.remaining}경기부터 자동 이어받기`
           );
 
           break;
@@ -14082,8 +14236,32 @@ export default function Home() {
     );
 
     if (!stoppedByDailyQuota) {
+      const finalCheckpoint = {
+        target:
+          targetGames.length,
+        stored:
+          targetGames.length -
+          games.length +
+          completed,
+        remaining:
+          Math.max(
+            0,
+            games.length -
+            completed
+          ),
+        stoppedByQuota:
+          false,
+      };
+
+      saveBacktestCollectionCheckpoint(
+        finalCheckpoint
+      );
+      setCollectionCheckpoint(
+        finalCheckpoint
+      );
+
       setStatus(
-        `30경기 자동 백테스트 완료 · 성공 ${completed}경기 · 실패 ${failed}경기 · 신규 Calibration ${batchRecords.length}행`
+        `📦 백데이터 수집 완료 · 영구 저장 ${finalCheckpoint.stored}/${finalCheckpoint.target}경기 · 이번 성공 ${completed} · 실패 ${failed} · 다음 실행 시 저장 경기는 API 호출 없이 건너뜀`
       );
     }
   }
@@ -14442,7 +14620,7 @@ export default function Home() {
               className="btn light"
               onClick={startBatchBacktest}
               disabled={loading || validationLoading || backtestLibraryLoading || batchBacktest.running}
-              title="아직 저장되지 않은 KBO 과거경기만 SportsAPI로 수집합니다. 저장된 경기는 자동 건너뜁니다."
+              title="IndexedDB에 없는 KBO 과거경기만 SportsAPI로 수집합니다. 저장된 경기는 API 호출 전에 제외하고, 중단 후 다시 누르면 남은 경기부터 이어받습니다."
             >
               {batchBacktest.running
                 ? `⏳ ${Math.min(batchBacktest.index + 1, batchBacktest.gameKeys.length)}/${batchBacktest.gameKeys.length} · ✅${batchBacktest.completed} ❌${batchBacktest.failed}`
@@ -14478,7 +14656,7 @@ export default function Home() {
             }}
             title="브라우저 IndexedDB에 저장된 PRE 입력 + VERIFY 결과 데이터셋 개수"
           >
-            💾 저장 데이터 {offlineDatasetCount}경기
+            💾 영구 저장 {offlineDatasetCount}경기
           </span>
 
           <span
@@ -14493,6 +14671,24 @@ export default function Home() {
             {" · "}snapshot {legacyRecovery.snapshots}
             {" · "}cal {legacyRecovery.calibrationRows}
           </span>
+
+          {collectionCheckpoint &&
+            collectionCheckpoint.remaining > 0 && (
+              <span
+                className="small"
+                style={{
+                  whiteSpace: "nowrap",
+                  color:
+                    collectionCheckpoint.stoppedByQuota
+                      ? "#b45309"
+                      : "#64748b",
+                }}
+                title="수집은 경기 저장 직후 체크포인트를 남깁니다. 다시 실행하면 IndexedDB에 저장된 경기는 API 호출 전에 제외합니다."
+              >
+                ↪ 이어받기 {collectionCheckpoint.stored}/{collectionCheckpoint.target}
+                {" · "}남음 {collectionCheckpoint.remaining}
+              </span>
+            )}
 
           <button
             className="btn light"
