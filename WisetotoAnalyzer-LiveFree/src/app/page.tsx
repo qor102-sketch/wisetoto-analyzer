@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_7_2_FIX1_DATASETSPLIT_SCOPE_20260828
+// DEPLOY_MARKER_V13_7_3_MATCH_ALIAS_CACHE_20260828
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -2495,6 +2495,61 @@ function sportsApiTeamName(value: unknown) {
   const raw = String(value ?? "").trim();
   const normalized = normalizeTeamName(raw);
   return SPORTS_API_TEAM_ALIASES[normalized] ?? raw;
+}
+
+const SPORTS_TEAM_ALIAS_GROUPS: string[][] = [
+  ["오릭스 버팔로스","오릭스","Orix Buffaloes","Orix"],
+  ["지바롯데 마린스","지바 롯데 마린스","롯데 마린스","Chiba Lotte Marines","Lotte Marines"],
+  ["소프트뱅크 호크스","후쿠오카 소프트뱅크 호크스","SoftBank Hawks","Fukuoka SoftBank Hawks"],
+  ["라쿠텐 골든이글스","도호쿠 라쿠텐 골든이글스","Rakuten Golden Eagles","Tohoku Rakuten Golden Eagles"],
+  ["세이부 라이온즈","사이타마 세이부 라이온즈","Seibu Lions","Saitama Seibu Lions"],
+  ["니혼햄 파이터스","닛폰햄 파이터스","홋카이도 닛폰햄 파이터스","Nippon Ham Fighters","Hokkaido Nippon-Ham Fighters"],
+  ["요미우리 자이언츠","Yomiuri Giants"],
+  ["한신 타이거즈","Hanshin Tigers"],
+  ["주니치 드래곤즈","Chunichi Dragons"],
+  ["야쿠르트 스왈로즈","도쿄 야쿠르트 스왈로즈","Yakult Swallows","Tokyo Yakult Swallows"],
+  ["히로시마 도요 카프","히로시마 카프","Hiroshima Toyo Carp","Hiroshima Carp"],
+  ["요코하마 DeNA 베이스타스","요코하마 베이스타스","Yokohama DeNA BayStars","DeNA BayStars"],
+  ["LG 트윈스","LG Twins"],["두산 베어스","Doosan Bears"],["삼성 라이온즈","Samsung Lions"],
+  ["KIA 타이거즈","KIA Tigers"],["롯데 자이언츠","Lotte Giants"],["한화 이글스","Hanwha Eagles"],
+  ["키움 히어로즈","Kiwoom Heroes"],["KT 위즈","KT Wiz"],["SSG 랜더스","SSG Landers"],["NC 다이노스","NC Dinos"],
+];
+
+function normalizeSportsTeamToken(value: unknown) {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[()（）]/g, " ")
+    .replace(/[\-_.]/g, " ")
+    .replace(/\b(baseball|club|team)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function sportsTeamAliases(value: unknown) {
+  const raw = String(value ?? "").trim();
+  const normalized = normalizeSportsTeamToken(raw);
+  const aliases = new Set<string>();
+
+  if (raw) aliases.add(raw);
+
+  for (const group of SPORTS_TEAM_ALIAS_GROUPS) {
+    const normalizedGroup = group.map(normalizeSportsTeamToken);
+
+    if (
+      normalizedGroup.some(
+        (alias) =>
+          alias === normalized ||
+          alias.includes(normalized) ||
+          normalized.includes(alias)
+      )
+    ) {
+      for (const alias of group) aliases.add(alias);
+    }
+  }
+
+  aliases.add(sportsApiTeamName(raw));
+  return Array.from(aliases).filter(Boolean);
 }
 
 function teamSimilarity(a: unknown, b: unknown) {
@@ -10600,6 +10655,47 @@ const BACKTEST_DATASET_SPLIT_STORAGE_KEY =
 
 const VALIDATION_TARGET_GAMES = 30;
 
+const VALIDATION_MATCH_FAILURE_CACHE_KEY =
+  "wisetoto-validation-match-failure-cache-v1373";
+
+type ValidationMatchFailureCache = Record<
+  string,
+  { savedAt: number; reason: string }
+>;
+
+function readValidationMatchFailureCache(): ValidationMatchFailureCache {
+  try {
+    const raw = window.localStorage.getItem(
+      VALIDATION_MATCH_FAILURE_CACHE_KEY
+    );
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeValidationMatchFailureCache(
+  cache: ValidationMatchFailureCache
+) {
+  try {
+    window.localStorage.setItem(
+      VALIDATION_MATCH_FAILURE_CACHE_KEY,
+      JSON.stringify(cache)
+    );
+  } catch {}
+}
+
+function validationFailureCacheKey(game: BetmanMatch) {
+  return actualGameIdentity(game);
+}
+
+function isValidationMatchFailureFresh(savedAt: number) {
+  return Number.isFinite(savedAt) &&
+    Date.now() - savedAt < 12 * 60 * 60 * 1000;
+}
+
+
 function readBacktestDatasetSplit():
   BacktestDatasetSplit | null {
   try {
@@ -13240,10 +13336,24 @@ export default function Home() {
     const matchAway =
       sportsApiTeamName(game?.away);
 
+    const homeAliases =
+      sportsTeamAliases(
+        game?.home
+      );
+
+    const awayAliases =
+      sportsTeamAliases(
+        game?.away
+      );
+
     const params = new URLSearchParams({
       mode: "selected",
       home: matchHome,
       away: matchAway,
+      homeAliases:
+        homeAliases.join("|"),
+      awayAliases:
+        awayAliases.join("|"),
       originalHome:
         String(game?.home ?? ""),
       originalAway:
@@ -13273,24 +13383,104 @@ export default function Home() {
       );
     const matchResponse =
       matchAttempt.response;
-    const matchData =
+    let matchData =
       matchAttempt.payload;
 
     if (
       !matchResponse.ok ||
       !matchData?.ok
     ) {
-      const matchDebug =
-        matchData?.debug
-          ? ` · debug=${JSON.stringify(matchData.debug)}`
-          : "";
+      let aliasMatched:
+        any =
+        null;
 
-      throw new Error(
-        `PRE_MATCH · ${readableError(
-          matchData?.error,
-          "SportsAPI 동일경기 자동매칭 실패"
-        )}${matchDebug}`
-      );
+      const aliasPairs:
+        Array<[string, string]> =
+        [];
+
+      for (
+        const homeAlias of
+        homeAliases.slice(
+          0,
+          4
+        )
+      ) {
+        for (
+          const awayAlias of
+          awayAliases.slice(
+            0,
+            4
+          )
+        ) {
+          aliasPairs.push([
+            homeAlias,
+            awayAlias,
+          ]);
+        }
+      }
+
+      for (
+        const [
+          homeAlias,
+          awayAlias,
+        ] of aliasPairs.slice(
+          0,
+          8
+        )
+      ) {
+        const retryParams =
+          new URLSearchParams(
+            params
+          );
+
+        retryParams.set(
+          "home",
+          homeAlias
+        );
+        retryParams.set(
+          "away",
+          awayAlias
+        );
+
+        const retry =
+          await fetchWithBackoff(
+            `/api/match?${retryParams.toString()}`,
+            {
+              cache:
+                "no-store",
+            },
+            `PRE_MATCH alias ${homeAlias} vs ${awayAlias}`,
+            0
+          );
+
+        if (
+          retry.response.ok &&
+          retry.payload?.ok
+        ) {
+          aliasMatched =
+            retry.payload;
+          break;
+        }
+      }
+
+      if (
+        aliasMatched
+      ) {
+        matchData =
+          aliasMatched;
+      } else {
+        const matchDebug =
+          matchData?.debug
+            ? ` · debug=${JSON.stringify(matchData.debug)}`
+            : "";
+
+        throw new Error(
+          `PRE_MATCH · ${readableError(
+            matchData?.error,
+            "SportsAPI 동일경기 자동매칭 실패"
+          )}${matchDebug}`
+        );
+      }
     }
 
     const fixtureId =
@@ -15206,6 +15396,9 @@ export default function Home() {
      * 개발셋에 속한 과거 경기와 이미 영구 저장된 경기는
      * SportsAPI 호출 전에 제외한다.
      */
+    const failureCache =
+      readValidationMatchFailureCache();
+
     const candidates =
       allGames
         .filter(
@@ -15216,6 +15409,23 @@ export default function Home() {
               )
             )
         )
+        .filter(
+          (game) => {
+            const cached =
+              failureCache[
+                validationFailureCacheKey(
+                  game
+                )
+              ];
+
+            return !(
+              cached &&
+              isValidationMatchFailureFresh(
+                cached.savedAt
+              )
+            );
+          }
+        )
         .slice(
           0,
           remainingTarget
@@ -15225,7 +15435,7 @@ export default function Home() {
       !candidates.length
     ) {
       setStatus(
-        `신규 검증 후보가 없습니다 · 현재 검증 ${existingValidation}/${VALIDATION_TARGET_GAMES} · 📚 과거 후보 불러오기로 더 최신 회차를 확보하세요.`
+        `신규 검증 후보가 없습니다 · 현재 검증 ${existingValidation}/${VALIDATION_TARGET_GAMES} · 최근 PRE_MATCH 실패 경기는 12시간 재호출하지 않습니다 · 📚 과거 후보 불러오기로 다른 후보를 확보하세요.`
       );
       return;
     }
@@ -15397,6 +15607,30 @@ export default function Home() {
             error,
             "검증셋 수집 실패"
           );
+
+        if (
+          !dailyQuotaExceeded &&
+          /PRE_MATCH|자동매칭하지 못했습니다/i.test(
+            String(errorMessage)
+          )
+        ) {
+          failureCache[
+            validationFailureCacheKey(
+              game
+            )
+          ] = {
+            savedAt: Date.now(),
+            reason:
+              String(errorMessage).slice(
+                0,
+                500
+              ),
+          };
+
+          writeValidationMatchFailureCache(
+            failureCache
+          );
+        }
 
         setBatchBacktestDiagnostics(
           (previous) => [
@@ -16498,7 +16732,7 @@ export default function Home() {
                   datasetSplitCounts.validation >=
                     VALIDATION_TARGET_GAMES
                 }
-                title="개발셋을 제외한 새 경기만 SportsAPI로 수집해 신규 검증셋에 추가합니다."
+                title="개발셋/이미 저장된 경기/최근 PRE_MATCH 실패 캐시를 제외하고 새 경기만 SportsAPI로 수집합니다."
               >
                 {batchBacktest.running
                   ? "⏳ 신규 검증 수집"
