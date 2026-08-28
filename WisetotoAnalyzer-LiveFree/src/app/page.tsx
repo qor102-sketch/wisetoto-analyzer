@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_6_5_BASELINE_COMPARE_20260828
+// DEPLOY_MARKER_V13_6_6_AUTO_BACKTEST_MODE_NO_TOGGLE_20260828
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -14729,55 +14729,56 @@ export default function Home() {
           <div className="sub">Betman 미시작 발매경기 전체 종목 → 실제 경기 단위 그룹화 → SportsAPI 분석 → 종목별 실제 시장 최적 픽</div>
         </div>
         <div className="bar">
-          <button className="btn light" onClick={loadBetmanList} disabled={loading || batchBacktest.running}>🔄 경기목록 새로고침</button>
-
           <button
-            className={`btn ${backtestMode ? "primary" : "light"}`}
+            className="btn light"
             onClick={() => {
-              setBacktestMode((value) => !value);
+              setBacktestMode(false);
               setBacktestResultRevealed(false);
               setSelectedBetmanKey(null);
               setMatched(null);
-              setBetman({
-                loading: false,
-                matched: null,
-                score: null,
-                error: null,
-              });
+              void loadBetmanList();
             }}
             disabled={loading || batchBacktest.running}
-            title="과거 경기 분석 시 경기 시작 이전 데이터만 사용합니다."
+            title="실전 발매 경기 목록으로 돌아가 새로고침합니다."
           >
-            🧪 백테스트 {backtestMode ? "ON" : "OFF"}
+            🔄 경기목록 새로고침
           </button>
-
-          {backtestMode && (
-            <button
-              className="btn light"
-              onClick={loadBacktestCandidates}
-              disabled={loading || backtestLibraryLoading}
-              title="Betman API가 현재 제공하는 응답에서 종료된 KBO 발매경기를 찾아 로컬 백테스트 라이브러리에 병합합니다."
-            >
-              {backtestLibraryLoading ? "⏳ 과거 후보 수집" : "📚 과거 후보 불러오기"}
-            </button>
-          )}
-
-          {backtestMode && (
-            <button
-              className="btn light"
-              onClick={startBatchBacktest}
-              disabled={loading || validationLoading || backtestLibraryLoading || batchBacktest.running}
-              title="IndexedDB에 없는 KBO 과거경기만 SportsAPI로 수집합니다. 저장된 경기는 API 호출 전에 제외하고, 중단 후 다시 누르면 남은 경기부터 이어받습니다."
-            >
-              {batchBacktest.running
-                ? `⏳ ${Math.min(batchBacktest.index + 1, batchBacktest.gameKeys.length)}/${batchBacktest.gameKeys.length} · ✅${batchBacktest.completed} ❌${batchBacktest.failed}`
-                : `📥 백데이터 수집${offlineDatasetCount > 0 ? ` · 저장 ${offlineDatasetCount}` : ""}`}
-            </button>
-          )}
 
           <button
             className="btn light"
-            onClick={recoverLegacyBacktestDataset}
+            onClick={() => {
+              setBacktestMode(true);
+              setBacktestResultRevealed(false);
+              void loadBacktestCandidates();
+            }}
+            disabled={loading || backtestLibraryLoading || batchBacktest.running}
+            title="과거 후보를 불러오면 자동으로 과거 분석 모드로 전환됩니다."
+          >
+            {backtestLibraryLoading ? "⏳ 과거 후보 수집" : "📚 과거 후보 불러오기"}
+          </button>
+
+          <button
+            className="btn light"
+            onClick={() => {
+              setBacktestMode(true);
+              setBacktestResultRevealed(false);
+              void startBatchBacktest();
+            }}
+            disabled={loading || validationLoading || backtestLibraryLoading || batchBacktest.running}
+            title="자동으로 과거 분석 모드로 전환해 IndexedDB에 없는 경기만 수집합니다. 저장된 경기는 API 호출 전에 제외합니다."
+          >
+            {batchBacktest.running
+              ? `⏳ ${Math.min(batchBacktest.index + 1, batchBacktest.gameKeys.length)}/${batchBacktest.gameKeys.length} · ✅${batchBacktest.completed} ❌${batchBacktest.failed}`
+              : `📥 백데이터 수집${offlineDatasetCount > 0 ? ` · 저장 ${offlineDatasetCount}` : ""}`}
+          </button>
+
+          <button
+            className="btn light"
+            onClick={() => {
+              setBacktestMode(true);
+              setBacktestResultRevealed(false);
+              void recoverLegacyBacktestDataset();
+            }}
             disabled={
               loading ||
               validationLoading ||
@@ -14839,7 +14840,11 @@ export default function Home() {
 
           <button
             className="btn light"
-            onClick={startOfflineBatchBacktest}
+            onClick={() => {
+              setBacktestMode(true);
+              setBacktestResultRevealed(false);
+              void startOfflineBatchBacktest();
+            }}
             disabled={
               loading ||
               validationLoading ||
@@ -14859,6 +14864,19 @@ export default function Home() {
           <button className="btn primary" onClick={analyzeSelected} disabled={loading || batchBacktest.running || !selectedBetman}>
             {loading ? "⏳ 분석 중" : "📊 선택 경기 분석"}
           </button>
+          <span
+            className="small"
+            style={{
+              padding: "6px 8px",
+              border: "1px solid #dbe4ef",
+              borderRadius: 8,
+              background: backtestMode ? "#eef6ff" : "#f8fafc",
+              whiteSpace: "nowrap",
+            }}
+            title="작업에 따라 실전/과거 분석 모드가 자동 전환됩니다."
+          >
+            {backtestMode ? "🧪 과거 분석" : "📡 실전 분석"}
+          </span>
           <span className={betman.error ? "small err" : "small"}>{status}</span>
         </div>
       </div>
