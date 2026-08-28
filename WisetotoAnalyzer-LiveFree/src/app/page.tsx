@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_6_2_OFFLINE_PROGRESS_YIELD_20260828
+// DEPLOY_MARKER_V13_6_3_LEGACY_DATA_RECOVERY_20260828
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -849,6 +849,397 @@ async function countBacktestDatasetEntries() {
   } finally {
     db.close();
   }
+}
+
+
+type LegacyRecoveryPreview = {
+  recoverable: number;
+  snapshots: number;
+  truths: number;
+  games: number;
+  calibrationRows: number;
+};
+
+function safeJsonParse(
+  value: string | null
+) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(
+      value
+    );
+  } catch {
+    return null;
+  }
+}
+
+function legacyLocalArray(
+  key: string
+): any[] {
+  try {
+    const parsed =
+      safeJsonParse(
+        window.localStorage.getItem(
+          key
+        )
+      );
+
+    return Array.isArray(parsed)
+      ? parsed
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function legacyLocalObject(
+  key: string
+): Record<string, any> {
+  try {
+    const parsed =
+      safeJsonParse(
+        window.localStorage.getItem(
+          key
+        )
+      );
+
+    return (
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed)
+    )
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function legacySnapshotList() {
+  const raw =
+    legacyLocalObject(
+      BACKTEST_PRE_SNAPSHOT_STORAGE_KEY
+    );
+
+  return Object.values(raw)
+    .filter(
+      (value: any) =>
+        value &&
+        typeof value === "object" &&
+        Number.isFinite(
+          Number(
+            value?.fixtureId
+          )
+        )
+    );
+}
+
+function legacyGameLibraryList() {
+  return legacyLocalArray(
+    BACKTEST_GAME_LIBRARY_STORAGE_KEY
+  );
+}
+
+function legacyCalibrationRows() {
+  return legacyLocalArray(
+    SIMPLE_BACKTEST_STORAGE_KEY
+  );
+}
+
+function legacyTruthCandidates() {
+  const result:
+    Record<string, BacktestValidationResult> =
+    {};
+
+  // 코드에 하드코딩된 검증 결과
+  for (
+    const [
+      key,
+      value,
+    ] of Object.entries(
+      BACKTEST_VALIDATION_RESULTS
+    )
+  ) {
+    result[key] =
+      value;
+  }
+
+  // localStorage에 별도 저장된 truth 후보가 있다면 함께 탐색
+  for (
+    const key of [
+      "wisetoto-backtest-validation-results",
+      "wisetoto_v13_validation_results",
+      "wisetoto_dynamic_validation_results",
+    ]
+  ) {
+    const obj =
+      legacyLocalObject(
+        key
+      );
+
+    for (
+      const [
+        k,
+        v,
+      ] of Object.entries(
+        obj
+      )
+    ) {
+      if (
+        v &&
+        typeof v === "object" &&
+        Number.isFinite(
+          Number(
+            (v as any)?.homeScore
+          )
+        ) &&
+        Number.isFinite(
+          Number(
+            (v as any)?.awayScore
+          )
+        )
+      ) {
+        result[
+          k
+        ] =
+          v as BacktestValidationResult;
+      }
+    }
+  }
+
+  return result;
+}
+
+function findLegacyGameForSnapshot(
+  snapshot: any,
+  games: BetmanMatch[]
+) {
+  const snapshotHome =
+    normalizeTeamName(
+      snapshot?.home
+    );
+
+  const snapshotAway =
+    normalizeTeamName(
+      snapshot?.away
+    );
+
+  const snapshotTime =
+    Number(
+      snapshot?.gameDateMs
+    );
+
+  let best:
+    | BetmanMatch
+    | null =
+    null;
+
+  let bestScore =
+    0;
+
+  for (
+    const game of games
+  ) {
+    const home =
+      normalizeTeamName(
+        (game as any)?.home
+      );
+
+    const away =
+      normalizeTeamName(
+        (game as any)?.away
+      );
+
+    let score =
+      0;
+
+    if (
+      snapshotHome &&
+      home &&
+      snapshotHome === home
+    ) {
+      score += 0.45;
+    }
+
+    if (
+      snapshotAway &&
+      away &&
+      snapshotAway === away
+    ) {
+      score += 0.45;
+    }
+
+    const gameTime =
+      gameTimeMs(
+        game
+      );
+
+    if (
+      Number.isFinite(
+        snapshotTime
+      ) &&
+      Number.isFinite(
+        gameTime
+      )
+    ) {
+      const diff =
+        Math.abs(
+          snapshotTime -
+          gameTime
+        );
+
+      if (
+        diff <=
+        6 * 60 * 60 * 1000
+      ) {
+        score += 0.1;
+      }
+    }
+
+    if (
+      score >
+      bestScore
+    ) {
+      bestScore =
+        score;
+      best =
+        game;
+    }
+  }
+
+  return bestScore >= 0.8
+    ? best
+    : null;
+}
+
+function findLegacyTruthForSnapshot(
+  snapshot: any,
+  game: BetmanMatch | null,
+  truths:
+    Record<
+      string,
+      BacktestValidationResult
+    >
+) {
+  const candidateKeys =
+    [
+      String(
+        snapshot?.gameKey ??
+        ""
+      ),
+      String(
+        (game as any)?.gameKey ??
+        ""
+      ),
+      String(
+        (game as any)?.key ??
+        ""
+      ),
+      String(
+        snapshot?.fixtureId ??
+        ""
+      ),
+    ].filter(
+      Boolean
+    );
+
+  for (
+    const key
+    of candidateKeys
+  ) {
+    if (
+      truths[
+        key
+      ]
+    ) {
+      return truths[
+        key
+      ];
+    }
+  }
+
+  // 기존 resolver도 활용
+  if (game) {
+    const resolved =
+      resolveBacktestValidationResult(
+        game,
+        {
+          fixtureId:
+            Number(
+              snapshot?.fixtureId
+            ),
+        }
+      );
+
+    if (
+      resolved?.truth
+    ) {
+      return resolved.truth;
+    }
+  }
+
+  return null;
+}
+
+function legacyRecoveryPreview():
+  LegacyRecoveryPreview {
+  const snapshots =
+    legacySnapshotList();
+
+  const games =
+    legacyGameLibraryList();
+
+  const calibrationRows =
+    legacyCalibrationRows();
+
+  const truths =
+    legacyTruthCandidates();
+
+  let recoverable =
+    0;
+
+  for (
+    const snapshot
+    of snapshots
+  ) {
+    const game =
+      findLegacyGameForSnapshot(
+        snapshot,
+        games
+      );
+
+    const truth =
+      findLegacyTruthForSnapshot(
+        snapshot,
+        game,
+        truths
+      );
+
+    if (
+      game &&
+      truth
+    ) {
+      recoverable +=
+        1;
+    }
+  }
+
+  return {
+    recoverable,
+    snapshots:
+      snapshots.length,
+    truths:
+      Object.keys(
+        truths
+      ).length,
+    games:
+      games.length,
+    calibrationRows:
+      calibrationRows.length,
+  };
 }
 
 type SimpleBacktestSummary = {
@@ -9810,6 +10201,35 @@ export default function Home() {
   ] =
     useState(0);
 
+
+  const [
+    legacyRecovery,
+    setLegacyRecovery,
+  ] =
+    useState<LegacyRecoveryPreview>({
+      recoverable: 0,
+      snapshots: 0,
+      truths: 0,
+      games: 0,
+      calibrationRows: 0,
+    });
+
+  function refreshLegacyRecoveryPreview() {
+    try {
+      setLegacyRecovery(
+        legacyRecoveryPreview()
+      );
+    } catch {
+      setLegacyRecovery({
+        recoverable: 0,
+        snapshots: 0,
+        truths: 0,
+        games: 0,
+        calibrationRows: 0,
+      });
+    }
+  }
+
   async function refreshOfflineDatasetCount() {
     try {
       setOfflineDatasetCount(
@@ -9965,6 +10385,7 @@ export default function Home() {
 
   useEffect(() => {
     void refreshOfflineDatasetCount();
+    refreshLegacyRecoveryPreview();
   }, []);
 
   useEffect(() => {
@@ -12802,6 +13223,159 @@ export default function Home() {
     };
   }
 
+  async function recoverLegacyBacktestDataset() {
+    if (
+      batchBacktest.running ||
+      loading ||
+      validationLoading
+    ) {
+      return;
+    }
+
+    setStatus(
+      "♻ 기존 백테스트 데이터 복구 가능 항목 확인 중…"
+    );
+
+    try {
+      const snapshots =
+        legacySnapshotList();
+
+      const games =
+        legacyGameLibraryList();
+
+      const truths =
+        legacyTruthCandidates();
+
+      let recovered =
+        0;
+
+      let skipped =
+        0;
+
+      for (
+        const snapshot
+        of snapshots
+      ) {
+        const game =
+          findLegacyGameForSnapshot(
+            snapshot,
+            games
+          );
+
+        if (!game) {
+          skipped +=
+            1;
+          continue;
+        }
+
+        const truth =
+          findLegacyTruthForSnapshot(
+            snapshot,
+            game,
+            truths
+          );
+
+        if (!truth) {
+          skipped +=
+            1;
+          continue;
+        }
+
+        /*
+         * 중요:
+         * 예전 snapshot만으로는 PRE 입력 combined 전체를 복원할 수 없는 경우가 있다.
+         * snapshot 안에 combined/preData/matched가 포함된 경우에만 오프라인 재분석 데이터로 승격한다.
+         */
+        const combined =
+          snapshot?.combined ??
+          snapshot?.preCombined ??
+          snapshot?.matched ??
+          snapshot?.preData ??
+          null;
+
+        if (!combined) {
+          skipped +=
+            1;
+          continue;
+        }
+
+        const entry:
+          BacktestDatasetEntry = {
+            id:
+              actualGameIdentity(
+                game
+              ),
+            schemaVersion: 1,
+            game:
+              cloneBacktestDatasetValue(
+                game
+              ),
+            fixtureId:
+              Number(
+                snapshot?.fixtureId
+              ),
+            cutoffMs:
+              Number(
+                snapshot?.cutoffMs ??
+                snapshot?.gameDateMs ??
+                gameTimeMs(
+                  game
+                )
+              ),
+            combined:
+              cloneBacktestDatasetValue(
+                combined
+              ),
+            truth:
+              cloneBacktestDatasetValue(
+                truth
+              ),
+            capturedAt:
+              Number(
+                snapshot?.lockedAt ??
+                Date.now()
+              ),
+          };
+
+        if (
+          !Number.isFinite(
+            entry.fixtureId
+          ) ||
+          !Number.isFinite(
+            entry.cutoffMs
+          )
+        ) {
+          skipped +=
+            1;
+          continue;
+        }
+
+        await putBacktestDatasetEntry(
+          entry
+        );
+
+        recovered +=
+          1;
+      }
+
+      await refreshOfflineDatasetCount();
+      refreshLegacyRecoveryPreview();
+
+      setStatus(
+        recovered > 0
+          ? `♻ 기존 데이터 복구 완료 · ${recovered}경기 저장 · ${skipped}건 건너뜀 · API 호출 0회`
+          : `♻ 복구 가능한 완전한 PRE 데이터가 없습니다 · snapshot ${snapshots.length}건 확인 · ${skipped}건 불완전 · API 호출 0회`
+      );
+    } catch (error: any) {
+      setStatus(
+        `❌ 기존 데이터 복구 실패 · ${readableError(
+          error,
+          "복구 오류"
+        )}`
+      );
+    }
+  }
+
   async function startOfflineBatchBacktest() {
     if (
       batchBacktest.running ||
@@ -13876,6 +14450,22 @@ export default function Home() {
             </button>
           )}
 
+          <button
+            className="btn light"
+            onClick={recoverLegacyBacktestDataset}
+            disabled={
+              loading ||
+              validationLoading ||
+              batchBacktest.running
+            }
+            title="기존 localStorage의 과거 후보/PRE snapshot/검증 결과를 검사해서 API 호출 없이 새 IndexedDB 백데이터셋으로 복구합니다."
+          >
+            ♻ 기존 데이터 복구
+            {legacyRecovery.recoverable > 0
+              ? ` (${legacyRecovery.recoverable})`
+              : ""}
+          </button>
+
           <span
             className="small"
             style={{
@@ -13889,6 +14479,19 @@ export default function Home() {
             title="브라우저 IndexedDB에 저장된 PRE 입력 + VERIFY 결과 데이터셋 개수"
           >
             💾 저장 데이터 {offlineDatasetCount}경기
+          </span>
+
+          <span
+            className="small"
+            title="기존 브라우저 저장소에서 확인된 자료"
+            style={{
+              whiteSpace: "nowrap",
+              color: "#64748b",
+            }}
+          >
+            legacy: 후보 {legacyRecovery.games}
+            {" · "}snapshot {legacyRecovery.snapshots}
+            {" · "}cal {legacyRecovery.calibrationRows}
           </span>
 
           <button
