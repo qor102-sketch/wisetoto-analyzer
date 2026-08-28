@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_7_4_CLEAN_UI_VALIDATION_POOL_20260828
+// DEPLOY_MARKER_V13_7_4_FIX1_JSX_REPAIR_20260828
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -16972,23 +16972,6 @@ export default function Home() {
                 style={{
                   margin: "0 10px 10px",
                   padding: 10,
-                  border: "1px solid #dbe4ef",
-                  borderRadius: 9,
-                  background: "#f8fbff",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: 10,
-                  }}
-                >
-                  <div
-                style={{
-                  margin: "0 10px 10px",
-                  padding: 10,
                   border: "1px solid #c7d7ee",
                   borderRadius: 9,
                   background: "#f7fbff",
@@ -17033,6 +17016,7 @@ export default function Home() {
                         {datasetSplitCounts.dev}
                       </b>
                     </div>
+
                     <div
                       className="small"
                       style={{
@@ -17076,7 +17060,24 @@ export default function Home() {
                 </div>
               </div>
 
-              <div>
+              <div
+                style={{
+                  margin: "0 10px 10px",
+                  padding: 10,
+                  border: "1px solid #dbe4ef",
+                  borderRadius: 9,
+                  background: "#f8fbff",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
+                  <div>
                     <b>🛡 FALLBACK Gate V1</b>
                     <div
                       className="small"
