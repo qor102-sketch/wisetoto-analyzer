@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_6_0_OFFLINE_DATASET_REPLAY_20260827
+// DEPLOY_MARKER_V13_6_1_OFFLINE_UI_ALWAYS_VISIBLE_20260828
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -13792,9 +13792,38 @@ export default function Home() {
             >
               {batchBacktest.running
                 ? `⏳ ${Math.min(batchBacktest.index + 1, batchBacktest.gameKeys.length)}/${batchBacktest.gameKeys.length} · ✅${batchBacktest.completed} ❌${batchBacktest.failed}`
-                : "📥 백데이터 수집"}
+                : `📥 백데이터 수집${offlineDatasetCount > 0 ? ` · 저장 ${offlineDatasetCount}` : ""}`}
             </button>
           )}
+
+          <span
+            className="small"
+            style={{
+              padding: "8px 10px",
+              border: "1px solid #dbe4ef",
+              borderRadius: 9,
+              background: "#f8fafc",
+              whiteSpace: "nowrap",
+              fontWeight: 700,
+            }}
+            title="브라우저 IndexedDB에 저장된 PRE 입력 + VERIFY 결과 데이터셋 개수"
+          >
+            💾 저장 데이터 {offlineDatasetCount}경기
+          </span>
+
+          <button
+            className="btn light"
+            onClick={startOfflineBatchBacktest}
+            disabled={
+              loading ||
+              validationLoading ||
+              batchBacktest.running ||
+              offlineDatasetCount === 0
+            }
+            title="저장된 IndexedDB 데이터만 사용해 현재 모델을 재계산합니다. SportsAPI 호출 0회."
+          >
+            ▶ 오프라인 30경기
+          </button>
 
           <button className="btn primary" onClick={analyzeSelected} disabled={loading || batchBacktest.running || !selectedBetman}>
             {loading ? "⏳ 분석 중" : "📊 선택 경기 분석"}
@@ -14120,7 +14149,7 @@ export default function Home() {
             <div className="notice" style={{ margin: "0 14px 10px" }}>
               <b>V13.6 실제 경기 단위 백테스트 라이브러리</b>
               {" · "}현재 {mergeActualGames(backtestGames).length}실제경기 / {mergeActualGames(backtestGames).reduce((sum, game) => sum + marketRows(game).length, 0)}배당행
-              {" · "}💾 오프라인 저장 {offlineDatasetCount}경기
+              {" · "}💾 저장 데이터 {offlineDatasetCount}경기
               {" · "}기본 검증 샘플 NC vs 삼성 포함
               <br />
               <span>목록은 실제 경기 1줄로 표시하고, 해당 경기의 승패·핸디·U/O·전반 등 모든 Betman 시장은 오른쪽 분석에 함께 전달합니다. 실제 결과는 분석 완료 후 별도 SportsAPI 검증 API를 호출할 때만 읽습니다.</span>
