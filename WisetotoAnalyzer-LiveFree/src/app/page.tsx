@@ -20554,7 +20554,7 @@ export default function Home() {
                         <b>LIVE DATA 수집 진단</b> · 실제 수신/계산된 항목만 정상으로 표시합니다.
                         선발/라인업은 발표 전이면 대기가 정상이며, 미연결 항목은 예측에 임의 반영하지 않습니다.
                         <br />
-                        <b>V13.8.18:</b> NPB/KBO 기존 수집은 유지하고, MLB는 네이버 당일 일정으로 gameId를 자동매칭한 뒤 game-polling의 경기/날씨/예정 선발과 preview의 실제 타순·시즌 타자 Stats·선발 상세·최근 경기를 수집합니다. 더블헤더는 경기시각으로 구분하며 V13.0/Gate V2 계산식 자체는 변경하지 않았습니다.
+                        <b>V13.8.20:</b> MLB 네이버 preview의 최근 경기 득실을 기존 λ 입력 구조에 연결하고, game-polling 날씨와 preview 선발 직전등판을 LIVE 진단에 연결했습니다. 실제 9+9 타순 발표 후 시즌 타자 Stats는 기존 pCode 매칭으로 READY 단계에 적용됩니다. V13.0/Gate V2 계산식 자체는 변경하지 않았습니다.
                         {matched?.wisetotoLive && !matched?.wisetotoLive?.ok ? (
                           <>
                             <br />
@@ -20636,8 +20636,8 @@ export default function Home() {
                         </div>
                         <div className="card">
                           선발 최근 투구
-                          <b>{Number(matched?.wisetotoLive?.coverage?.recentDetailStarterRows ?? 0) > 0 ? "✓ 최근경기" : Number(matched?.wisetotoLive?.coverage?.latestPitcherRows ?? 0) > 0 ? "✓ 직전경기" : "미연결"}</b>
-                          <div className="small">최근 상세 선발 {Number(matched?.wisetotoLive?.coverage?.recentDetailStarterRows ?? 0)}행 · IP/투구수/K/실점 수집 · 모델식은 아직 변경 없음</div>
+                          <b>{matched?.naverTodayLineup?.league === "MLB" && (matched?.naverTodayLineup?.homeStarter?.latestStart || matched?.naverTodayLineup?.awayStarter?.latestStart) ? "✓ MLB 직전등판" : Number(matched?.wisetotoLive?.coverage?.recentDetailStarterRows ?? 0) > 0 ? "✓ 최근경기" : Number(matched?.wisetotoLive?.coverage?.latestPitcherRows ?? 0) > 0 ? "✓ 직전경기" : "미연결"}</b>
+                          <div className="small">{matched?.naverTodayLineup?.league === "MLB" ? `홈 ${matched?.naverTodayLineup?.homeStarter?.latestStart?.innings ?? "-"}IP · 원정 ${matched?.naverTodayLineup?.awayStarter?.latestStart?.innings ?? "-"}IP · Naver preview` : `최근 상세 선발 ${Number(matched?.wisetotoLive?.coverage?.recentDetailStarterRows ?? 0)}행 · IP/투구수/K/실점 수집 · 모델식은 아직 변경 없음`}</div>
                         </div>
                         <div className="card">
                           타자 최근 타격감
@@ -20661,8 +20661,8 @@ export default function Home() {
                         </div>
                         <div className="card">
                           경기시각 날씨
-                          <b>미연결</b>
-                          <div className="small">기온·강수·풍속/풍향 실시간 PRE 연결 필요</div>
+                          <b>{matched?.naverTodayLineup?.game?.weatherInfo ? "✓ 네이버 수신" : "미연결"}</b>
+                          <div className="small">{matched?.naverTodayLineup?.game?.weatherInfo || "기온·강수·풍속/풍향 실시간 PRE 연결 필요"}</div>
                         </div>
                       </div>
 
