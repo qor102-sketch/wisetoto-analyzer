@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_12_WISETOTO_UNIVERSAL_PROTO_RESOLVER_20260829
+// DEPLOY_MARKER_V13_8_13_WISETOTO_VERIFIED_FOCUS_RESOLVER_20260829
 // DEPLOY_MARKER_V13_8_8_LIVE_DATA_DIAGNOSTICS_20260829
 // DEPLOY_MARKER_V13_8_6_FIXED_ODDS_3COL_GRID_20260829
 "use client";
@@ -20403,7 +20403,7 @@ export default function Home() {
                         <b>LIVE DATA 수집 진단</b> · 실제 수신/계산된 항목만 정상으로 표시합니다.
                         선발/라인업은 발표 전이면 대기가 정상이며, 미연결 항목은 예측에 임의 반영하지 않습니다.
                         <br />
-                        <b>V13.8.12:</b> 야구 LIVE 경기정보는 와이즈토토를 PRIMARY로 사용합니다. 최근 Form/H2H는 와이즈토토 최근경기 목록을 우선 사용하고, 예상 선발·시즌 타자·직전 경기 타자/투수도 와이즈토토에서 수집합니다. V13.0/Gate V2 계산식 자체는 변경하지 않았습니다.
+                        <b>V13.8.13:</b> 야구 LIVE 경기정보는 와이즈토토를 PRIMARY로 사용합니다. 최근 Form/H2H는 와이즈토토 최근경기 목록을 우선 사용하고, 예상 선발·시즌 타자·직전 경기 타자/투수도 와이즈토토에서 수집합니다. V13.0/Gate V2 계산식 자체는 변경하지 않았습니다.
                         {matched?.wisetotoLive && !matched?.wisetotoLive?.ok ? (
                           <>
                             <br />
