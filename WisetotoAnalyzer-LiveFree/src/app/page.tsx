@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_9_LIVE_DATA_V2_WISETOTO_20260829
+// DEPLOY_MARKER_V13_8_10_WISETOTO_MATCH_RESOLVER_FIX_20260829
 // DEPLOY_MARKER_V13_8_8_LIVE_DATA_DIAGNOSTICS_20260829
 // DEPLOY_MARKER_V13_8_6_FIXED_ODDS_3COL_GRID_20260829
 "use client";
@@ -17441,7 +17441,7 @@ export default function Home() {
         let wisetotoLive: any = null;
 
         /*
-         * V13.8.9 LIVE DATA V2
+         * V13.8.10 LIVE DATA V2
          * - 실전 야구에서만 와이즈토토 경기별 분석 HTML을 보조 수집한다.
          * - V13.0/Gate V2 모델 입력에는 아직 반영하지 않고 진단 전용으로 보관한다.
          * - 백테스트에서는 호출하지 않아 기존 baseline/PRE 재현성을 유지한다.
@@ -20380,7 +20380,7 @@ export default function Home() {
                         <b>LIVE DATA 수집 진단</b> · 실제 수신/계산된 항목만 정상으로 표시합니다.
                         선발/라인업은 발표 전이면 대기가 정상이며, 미연결 항목은 예측에 임의 반영하지 않습니다.
                         <br />
-                        <b>V13.8.9:</b> 와이즈토토 예상 선발·시즌 타자·최근경기 참조·직전 경기 타자/투수 기록을 진단 전용으로 추가했습니다.
+                        <b>V13.8.10:</b> 와이즈토토 예상 선발·시즌 타자·최근경기 참조·직전 경기 타자/투수 기록을 진단 전용으로 추가했습니다.
                         기존 V13.0/Gate V2 예측 계산에는 아직 반영하지 않습니다.
                         {matched?.wisetotoLive && !matched?.wisetotoLive?.ok ? (
                           <>
