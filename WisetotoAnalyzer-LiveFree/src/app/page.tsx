@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_5_FIX2_CONFIRMED_TYPED_CALLBACK_20260829
+// DEPLOY_MARKER_V13_8_6_FIXED_ODDS_3COL_GRID_20260829
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -12740,6 +12740,69 @@ export default function Home() {
     [visibleBetmanGames, sport]
   );
 
+  function fixedThreeOdds(
+    market: any
+  ) {
+    const selections =
+      Array.isArray(
+        market?.selections
+      )
+        ? market.selections
+        : [];
+
+    const values =
+      selections
+        .map(
+          (selection: any) =>
+            Number(
+              selection?.odds
+            )
+        )
+        .filter(
+          (odds: number) =>
+            Number.isFinite(
+              odds
+            ) &&
+            odds > 1
+        );
+
+    if (
+      values.length >= 3
+    ) {
+      return [
+        values[0],
+        values[1],
+        values[2],
+      ];
+    }
+
+    if (
+      values.length === 2
+    ) {
+      return [
+        values[0],
+        null,
+        values[1],
+      ];
+    }
+
+    if (
+      values.length === 1
+    ) {
+      return [
+        values[0],
+        null,
+        null,
+      ];
+    }
+
+    return [
+      null,
+      null,
+      null,
+    ];
+  }
+
   const filteredMarketRows = useMemo(
     () =>
       filteredGames.flatMap((game) => {
@@ -19118,7 +19181,7 @@ export default function Home() {
                     display:
                       "grid",
                     gridTemplateColumns:
-                      "34px 62px 98px 88px 82px minmax(210px,1fr) 132px minmax(92px,.65fr) 62px",
+                      "34px 62px 98px 88px 82px minmax(210px,1fr) 150px minmax(92px,.65fr) 62px",
                     minHeight:
                       34,
                     alignItems:
@@ -19202,23 +19265,9 @@ export default function Home() {
                       "-";
 
                     const marketOdds =
-                      (
-                        Array.isArray(market?.selections)
-                          ? market.selections
-                          : []
-                      )
-                        .map((selection: any) =>
-                          Number(selection?.odds)
-                        )
-                        .filter(
-                          (odds: number) =>
-                            Number.isFinite(odds) &&
-                            odds > 1
-                        )
-                        .map((odds: number) =>
-                          odds.toFixed(2)
-                        )
-                        .join(" / ") || "-";
+                      fixedThreeOdds(
+                        market
+                      );
 
                     const rowType =
                       marketLabel(market);
@@ -19237,7 +19286,7 @@ export default function Home() {
                         style={{
                           display: "grid",
                           gridTemplateColumns:
-                            "34px 62px 98px 88px 82px minmax(210px,1fr) 132px minmax(92px,.65fr) 62px",
+                            "34px 62px 98px 88px 82px minmax(210px,1fr) 150px minmax(92px,.65fr) 62px",
                           minHeight: 38,
                           alignItems: "center",
                           textAlign: "center",
@@ -19325,11 +19374,34 @@ export default function Home() {
 
                         <div
                           style={{
+                            display: "grid",
+                            gridTemplateColumns: "1fr 1fr 1fr",
+                            columnGap: 8,
+                            alignItems: "center",
                             fontVariantNumeric: "tabular-nums",
-                            fontWeight: 800,
+                            fontWeight: 850,
+                            textAlign: "center",
+                            padding: "0 6px",
                           }}
                         >
-                          {marketOdds}
+                          {marketOdds.map(
+                            (
+                              odds,
+                              oddsIndex
+                            ) => (
+                              <span
+                                key={oddsIndex}
+                                style={{
+                                  display: "inline-block",
+                                  minWidth: 36,
+                                }}
+                              >
+                                {odds === null
+                                  ? "-"
+                                  : odds.toFixed(2)}
+                              </span>
+                            )
+                          )}
                         </div>
 
                         <div>
