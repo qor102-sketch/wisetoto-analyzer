@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_1_LIVE_TRACKER_20260829
+// DEPLOY_MARKER_V13_8_2_SOCCER_ALIAS_MATCH_20260829
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -2562,6 +2562,30 @@ const SPORTS_API_TEAM_ALIASES: Record<string, string> = {
   "ncdinos": "NC Dinos",
   "삼성": "Samsung Lions",
   "samsung": "Samsung Lions",
+
+  // V13.8.2 soccer fast aliases
+  "미토홀리호크": "Mito HollyHock",
+  "fc마치다젤비아": "Machida Zelvia",
+  "마치다젤비아": "Machida Zelvia",
+  "가시마앤틀러스": "Kashima Antlers",
+  "우라와레드다이아몬즈": "Urawa Red Diamonds",
+  "우라와레즈": "Urawa Red Diamonds",
+  "가시와레이솔": "Kashiwa Reysol",
+  "fc도쿄": "FC Tokyo",
+  "도쿄베르디": "Tokyo Verdy",
+  "가와사키프론탈레": "Kawasaki Frontale",
+  "요코하마f마리노스": "Yokohama F. Marinos",
+  "쇼난벨마레": "Shonan Bellmare",
+  "알비렉스니가타": "Albirex Niigata",
+  "시미즈에스펄스": "Shimizu S-Pulse",
+  "나고야그램퍼스": "Nagoya Grampus",
+  "교토상가": "Kyoto Sanga",
+  "감바오사카": "Gamba Osaka",
+  "세레소오사카": "Cerezo Osaka",
+  "비셀고베": "Vissel Kobe",
+  "파지아노오카야마": "Fagiano Okayama",
+  "산프레체히로시마": "Sanfrecce Hiroshima",
+  "아비스파후쿠오카": "Avispa Fukuoka",
 };
 
 function sportsApiTeamName(value: unknown) {
@@ -2583,6 +2607,50 @@ const SPORTS_TEAM_ALIAS_GROUPS: string[][] = [
   ["야쿠르트 스왈로즈","도쿄 야쿠르트 스왈로즈","Yakult Swallows","Tokyo Yakult Swallows"],
   ["히로시마 도요 카프","히로시마 카프","Hiroshima Toyo Carp","Hiroshima Carp"],
   ["요코하마 DeNA 베이스타스","요코하마 베이스타스","Yokohama DeNA BayStars","DeNA BayStars"],
+
+  // V13.8.2 · 일본 축구 J1/J2 Betman 한글명 -> SportsAPI 영문 팀명
+  ["미토 홀리호크","미토홀리호크","Mito HollyHock","Mito Hollyhock"],
+  ["FC마치다 젤비아","마치다 젤비아","마치다","Machida Zelvia","FC Machida Zelvia"],
+  ["가시마 앤틀러스","가시마","Kashima Antlers"],
+  ["우라와 레드 다이아몬즈","우라와 레즈","우라와","Urawa Red Diamonds","Urawa Reds"],
+  ["가시와 레이솔","가시와","Kashiwa Reysol"],
+  ["FC도쿄","FC 도쿄","도쿄FC","FC Tokyo"],
+  ["도쿄 베르디","도쿄베르디","Tokyo Verdy"],
+  ["가와사키 프론탈레","가와사키","Kawasaki Frontale"],
+  ["요코하마 F 마리노스","요코하마 F.마리노스","요코하마 마리노스","Yokohama F. Marinos","Yokohama F Marinos"],
+  ["요코하마FC","요코하마 FC","Yokohama FC"],
+  ["쇼난 벨마레","쇼난","Shonan Bellmare"],
+  ["알비렉스 니가타","니가타","Albirex Niigata"],
+  ["시미즈 에스펄스","시미즈 S펄스","시미즈","Shimizu S-Pulse","Shimizu S Pulse"],
+  ["나고야 그램퍼스","나고야","Nagoya Grampus"],
+  ["교토 상가","교토 상가 FC","교토","Kyoto Sanga","Kyoto Sanga FC"],
+  ["감바 오사카","Gamba Osaka"],
+  ["세레소 오사카","Cerezo Osaka"],
+  ["비셀 고베","고베","Vissel Kobe"],
+  ["파지아노 오카야마","오카야마","Fagiano Okayama"],
+  ["산프레체 히로시마","히로시마","Sanfrecce Hiroshima"],
+  ["아비스파 후쿠오카","후쿠오카","Avispa Fukuoka"],
+
+  ["콘사도레 삿포로","홋카이도 콘사도레 삿포로","삿포로","Hokkaido Consadole Sapporo","Consadole Sapporo"],
+  ["베갈타 센다이","센다이","Vegalta Sendai"],
+  ["블라우블리츠 아키타","아키타","Blaublitz Akita"],
+  ["몬테디오 야마가타","야마가타","Montedio Yamagata"],
+  ["이와키 FC","이와키FC","Iwaki FC"],
+  ["도치기 SC","도치기SC","Tochigi SC"],
+  ["자스파 군마","더스파 군마","군마","Thespakusatsu Gunma","Thespa Gunma"],
+  ["제프 유나이티드 지바","제프 지바","지바","JEF United Chiba","JEF Chiba"],
+  ["오미야 아르디자","RB 오미야 아르디자","오미야","RB Omiya Ardija","Omiya Ardija"],
+  ["반포레 고후","고후","Ventforet Kofu"],
+  ["주빌로 이와타","이와타","Jubilo Iwata"],
+  ["후지에다 MYFC","후지에다","Fujieda MYFC"],
+  ["레노파 야마구치","야마구치","Renofa Yamaguchi"],
+  ["도쿠시마 보르티스","도쿠시마","Tokushima Vortis"],
+  ["에히메 FC","에히메FC","Ehime FC"],
+  ["V-바렌 나가사키","V바렌 나가사키","나가사키","V-Varen Nagasaki","V Varen Nagasaki"],
+  ["로아소 구마모토","구마모토","Roasso Kumamoto"],
+  ["오이타 트리니타","오이타","Oita Trinita"],
+  ["사간 도스","도스","Sagan Tosu"],
+
   ["LG 트윈스","LG Twins"],["두산 베어스","Doosan Bears"],["삼성 라이온즈","Samsung Lions"],
   ["KIA 타이거즈","KIA Tigers"],["롯데 자이언츠","Lotte Giants"],["한화 이글스","Hanwha Eagles"],
   ["키움 히어로즈","Kiwoom Heroes"],["KT 위즈","KT Wiz"],["SSG 랜더스","SSG Landers"],["NC 다이노스","NC Dinos"],
