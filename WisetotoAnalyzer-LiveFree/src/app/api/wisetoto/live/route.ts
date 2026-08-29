@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_11_WISETOTO_BASEBALL_PRIMARY_20260829
+// DEPLOY_MARKER_V13_8_12_WISETOTO_UNIVERSAL_PROTO_RESOLVER_20260829
 
 const WISETOTO_ORIGIN = "https://www.wisetoto.com";
 const WISETOTO_DETAIL = `${WISETOTO_ORIGIN}/util/gameinfo/get_detail_lineup.htm`;
@@ -331,7 +331,7 @@ async function wisetotoFetch(url: string) {
       "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.7",
       Referer: `${WISETOTO_ORIGIN}/`,
       "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 WisetotoAnalyzer/13.8.10",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 WisetotoAnalyzer/13.8.12",
     },
   });
   return { response, text: await response.text() };
@@ -359,12 +359,30 @@ export async function GET(request: Request) {
     if (!scheduleInfoSeq) {
       const now = new Date();
       const currentYear = now.getUTCFullYear();
+      /*
+       * Betman에서 선택한 #xxxx는 야구토토(bs1)가 아니라 프로토 승부식(pt1)의 경기번호다.
+       * V13.8.11은 bs1 목록만 우선 조회해 다른 경기에서 focus를 못 찾았다.
+       * 현재 프로토 페이지를 desktop/mobile 양쪽에서 먼저 조회하고, 최근 회차도 좁게 보조 탐색한다.
+       * game_round는 와이즈토토 URL상 표시 회차보다 1 작은 값(예: 101회차 -> 100)이다.
+       */
+      const estimatedDisplayRound = Math.max(1, Math.floor((Date.UTC(currentYear, now.getUTCMonth(), now.getUTCDate()) - Date.UTC(currentYear, 0, 1)) / 86400000 / 3) + 1);
+      const protoRoundCandidates = Array.from(new Set([
+        estimatedDisplayRound - 1, estimatedDisplayRound, estimatedDisplayRound - 2,
+        100, 101, 99,
+      ].filter((value) => value >= 1)));
+      const protoBase = [
+        `${WISETOTO_ORIGIN}/index.htm?game_category=pt1&game_type=pt&game_year=${currentYear}&pn=p&tab_type=proto`,
+        `https://mw.wisetoto.com/index.htm?game_category=pt1&game_type=pt&game_year=${currentYear}&pn=p&tab_type=proto`,
+      ];
+      const protoRounds = protoRoundCandidates.flatMap((round) => [
+        `${WISETOTO_ORIGIN}/index.htm?game_category=pt1&game_round=${round}&game_type=pt&game_year=${currentYear}&pn=p&tab_type=proto`,
+        `https://mw.wisetoto.com/index.htm?game_category=pt1&game_round=${round}&game_type=pt&game_year=${currentYear}&pn=p&tab_type=proto`,
+      ]);
       const listUrls = [
-        /* 야구 화면을 우선: 기본 index는 다른 종목/탭을 서버 렌더링할 수 있다. */
-        `${WISETOTO_ORIGIN}/index.htm?game_category=bs1&game_type=bs`,
+        ...protoBase,
+        ...protoRounds,
+        /* 마지막 fallback: 야구토토 페이지와 기본 페이지 */
         `${WISETOTO_ORIGIN}/index.htm?game_category=bs1&game_type=bs&game_year=${currentYear}`,
-        `${WISETOTO_ORIGIN}/index.htm?game_category=bs1`,
-        `${WISETOTO_ORIGIN}/index.htm?game_type=bs`,
         `${WISETOTO_ORIGIN}/index.htm`,
       ];
 
@@ -391,7 +409,7 @@ export async function GET(request: Request) {
         {
           ok: false,
           error: "와이즈토토 schedule_info_seq 자동 매칭에 실패했습니다.",
-          debug: { matchSeq, home, away, resolverMethod, resolverStatus },
+          debug: { matchSeq, home, away, resolverMethod, resolverStatus, resolverVersion: "V13.8.12_PROTO_FIRST" },
         },
         { status: 404 }
       );
