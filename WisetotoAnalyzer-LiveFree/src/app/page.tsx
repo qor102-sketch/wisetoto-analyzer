@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_17_KBO_LIVE_DATA_20260829
+// DEPLOY_MARKER_V13_8_18_MLB_LIVE_DATA_20260829
 // DEPLOY_MARKER_V13_8_8_LIVE_DATA_DIAGNOSTICS_20260829
 // DEPLOY_MARKER_V13_8_6_FIXED_ODDS_3COL_GRID_20260829
 "use client";
@@ -17552,9 +17552,13 @@ export default function Home() {
             }
           : null;
 
+        const naverLineupSource = naverTodayLineup?.league === "MLB"
+          ? "NAVER_MLB_PREVIEW"
+          : "NAVER_GAME_POLLING";
+
         const naverConfirmedLineups = naverTodayLineup?.ok && Number(naverTodayLineup?.coverage?.total ?? 0) >= 14
           ? {
-              source: "NAVER_GAME_POLLING",
+              source: naverLineupSource,
               homeStarter: naverTodayLineup?.homeStarter ?? wisetotoStarterLineups?.homeStarter ?? null,
               awayStarter: naverTodayLineup?.awayStarter ?? wisetotoStarterLineups?.awayStarter ?? null,
               homeTeamLineUp: { fullLineUp: Array.isArray(naverTodayLineup?.home) ? naverTodayLineup.home : [] },
@@ -17574,7 +17578,20 @@ export default function Home() {
             }
           : null;
 
-        const liveBaseballLineups = naverConfirmedLineups ?? wisetotoStarterLineups;
+        const naverMlbStarterOnly = naverTodayLineup?.ok &&
+          naverTodayLineup?.league === "MLB" &&
+          (naverTodayLineup?.homeStarter || naverTodayLineup?.awayStarter)
+          ? {
+              source: "NAVER_MLB_PREVIEW",
+              homeStarter: naverTodayLineup?.homeStarter ?? wisetotoStarterLineups?.homeStarter ?? null,
+              awayStarter: naverTodayLineup?.awayStarter ?? wisetotoStarterLineups?.awayStarter ?? null,
+              homeTeamLineUp: { fullLineUp: [] },
+              awayTeamLineUp: { fullLineUp: [] },
+              confirmedBattingLineup: false,
+            }
+          : null;
+
+        const liveBaseballLineups = naverConfirmedLineups ?? naverMlbStarterOnly ?? wisetotoStarterLineups;
 
 
         const combinedRaw = {
@@ -17593,7 +17610,9 @@ export default function Home() {
           recentSummary:
             (wisetotoBaseballPrimary && wisetotoLive?.recentSummary?.home?.form?.played > 0 && wisetotoLive?.recentSummary?.away?.form?.played > 0
               ? wisetotoLive.recentSummary
-              : detailData?.recentSummary ?? data?.recentSummary ?? null),
+              : naverTodayLineup?.league === "MLB" && naverTodayLineup?.recentSummary?.home?.form?.played > 0 && naverTodayLineup?.recentSummary?.away?.form?.played > 0
+                ? naverTodayLineup.recentSummary
+                : detailData?.recentSummary ?? data?.recentSummary ?? null),
           statistics:
             detailData?.statistics ??
             data?.statistics ??
@@ -17604,10 +17623,12 @@ export default function Home() {
             data?.lineups ??
             null,
           lineupsSource: naverConfirmedLineups
-            ? "NAVER_GAME_POLLING"
-            : wisetotoStarterLineups
-              ? "WISETOTO_EXPECTED_STARTERS"
-              : (detailData?.lineups ? "SPORTSAPI" : null),
+            ? naverLineupSource
+            : naverMlbStarterOnly
+              ? "NAVER_MLB_PREVIEW"
+              : wisetotoStarterLineups
+                ? "WISETOTO_EXPECTED_STARTERS"
+                : (detailData?.lineups ? "SPORTSAPI" : null),
           detailDebug: {
             detail:
               detailData?.debug ??
@@ -20466,7 +20487,7 @@ export default function Home() {
                         <b>LIVE DATA 수집 진단</b> · 실제 수신/계산된 항목만 정상으로 표시합니다.
                         선발/라인업은 발표 전이면 대기가 정상이며, 미연결 항목은 예측에 임의 반영하지 않습니다.
                         <br />
-                        <b>V13.8.17:</b> NPB는 기존 네이버 batterLineup.home/away를 유지하고, KBO는 당일 일정에서 gameId를 자동매칭한 뒤 homeLineup/awayLineup의 확정 타순·선발·시즌 타율을 수집합니다. V13.0/Gate V2 계산식 자체는 변경하지 않았습니다.
+                        <b>V13.8.18:</b> NPB/KBO 기존 수집은 유지하고, MLB는 네이버 당일 일정으로 gameId를 자동매칭한 뒤 game-polling의 경기/날씨/예정 선발과 preview의 실제 타순·시즌 타자 Stats·선발 상세·최근 경기를 수집합니다. 더블헤더는 경기시각으로 구분하며 V13.0/Gate V2 계산식 자체는 변경하지 않았습니다.
                         {matched?.wisetotoLive && !matched?.wisetotoLive?.ok ? (
                           <>
                             <br />
@@ -20506,15 +20527,26 @@ export default function Home() {
                           </div>
                         </div>
                         <div className="card">
-                          실제 선발 라인업 · 네이버 NPB/KBO
+                          실제 선발 라인업 · 네이버 NPB/KBO/MLB
                           <b>{Number(matched?.naverTodayLineup?.coverage?.total ?? 0) >= 18 ? "✓ 수신" : Number(matched?.naverTodayLineup?.coverage?.total ?? 0) > 0 ? "부분 수신" : "대기"}</b>
                           <div className="small">
                             {Number(matched?.naverTodayLineup?.coverage?.total ?? 0)}/18명
                             {matched?.naverTodayLineup?.league ? ` · ${matched.naverTodayLineup.league}` : ""}
                             {matched?.naverTodayLineup?.gameId ? ` · ${matched.naverTodayLineup.gameId}` : ""}
-                            {matched?.lineupsSource === "NAVER_GAME_POLLING" ? " · 분석 라인업 적용" : ""}
+                            {matched?.lineupsSource === "NAVER_GAME_POLLING" || matched?.lineupsSource === "NAVER_MLB_PREVIEW" ? " · 분석 라인업 적용" : ""}
                           </div>
                         </div>
+                        {matched?.naverTodayLineup?.league === "MLB" && (
+                          <div className="card">
+                            MLB PREVIEW 데이터
+                            <b>{matched?.naverTodayLineup?.mlbPreview?.ok ? "✓ 수신" : "대기"}</b>
+                            <div className="small">
+                              시즌타자 {Number(matched?.naverTodayLineup?.mlbPreview?.homeSeasonBatters ?? 0)}/{Number(matched?.naverTodayLineup?.mlbPreview?.awaySeasonBatters ?? 0)}행
+                              {matched?.naverTodayLineup?.coverage?.starters ? ` · 선발 ${matched.naverTodayLineup.coverage.starters}/2` : ""}
+                              {matched?.naverTodayLineup?.previewEndpoint ? " · preview" : ""}
+                            </div>
+                          </div>
+                        )}
                         <div className="card">
                           라인업 선수 Stats
                           <b>{analysisFactors.lineupStatsCoverage > 0 ? "✓ 수신" : "대기"}</b>
