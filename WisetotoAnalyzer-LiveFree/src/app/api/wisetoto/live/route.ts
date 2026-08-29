@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_12_WISETOTO_UNIVERSAL_PROTO_RESOLVER_20260829
+// DEPLOY_MARKER_V13_8_13_WISETOTO_VERIFIED_FOCUS_RESOLVER_20260829
 
 const WISETOTO_ORIGIN = "https://www.wisetoto.com";
 const WISETOTO_DETAIL = `${WISETOTO_ORIGIN}/util/gameinfo/get_detail_lineup.htm`;
@@ -10,6 +10,7 @@ const WISETOTO_DETAIL = `${WISETOTO_ORIGIN}/util/gameinfo/get_detail_lineup.htm`
  */
 const VERIFIED_FOCUS_MAP: Record<string, string> = {
   "7272": "464233",
+  "7348": "464232",
 };
 
 type AnyObj = Record<string, any>;
@@ -331,7 +332,7 @@ async function wisetotoFetch(url: string) {
       "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.7",
       Referer: `${WISETOTO_ORIGIN}/`,
       "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 WisetotoAnalyzer/13.8.12",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 WisetotoAnalyzer/13.8.13",
     },
   });
   return { response, text: await response.text() };
@@ -409,7 +410,7 @@ export async function GET(request: Request) {
         {
           ok: false,
           error: "와이즈토토 schedule_info_seq 자동 매칭에 실패했습니다.",
-          debug: { matchSeq, home, away, resolverMethod, resolverStatus, resolverVersion: "V13.8.12_PROTO_FIRST" },
+          debug: { matchSeq, home, away, resolverMethod, resolverStatus, resolverVersion: "V13.8.13_VERIFIED_FOCUS" },
         },
         { status: 404 }
       );
