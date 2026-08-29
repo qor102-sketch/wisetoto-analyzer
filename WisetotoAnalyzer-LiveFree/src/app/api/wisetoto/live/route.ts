@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_10_WISETOTO_MATCH_RESOLVER_FIX_20260829
+// DEPLOY_MARKER_V13_8_11_WISETOTO_BASEBALL_PRIMARY_20260829
 
 const WISETOTO_ORIGIN = "https://www.wisetoto.com";
 const WISETOTO_DETAIL = `${WISETOTO_ORIGIN}/util/gameinfo/get_detail_lineup.htm`;
@@ -158,6 +158,88 @@ function parseRecentGameRefs(html: string, side: "home" | "away") {
     secondTeam: textOf(m[8]),
     secondScore: textOf(m[9]),
   }));
+}
+
+
+function inferRecentTeamName(refs: AnyObj[]) {
+  const counts = new Map<string, number>();
+  for (const ref of refs) {
+    for (const name of [ref?.firstTeam, ref?.secondTeam]) {
+      const key = String(name ?? "").trim();
+      if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
+
+function recentSummaryFromWisetoto(refs: AnyObj[], side: "home" | "away") {
+  const teamName = inferRecentTeamName(refs);
+  let wins = 0, draws = 0, losses = 0, scored = 0, conceded = 0, played = 0;
+  const fixtures = refs.map((ref) => {
+    const firstScore = Number(ref?.firstScore);
+    const secondScore = Number(ref?.secondScore);
+    const firstIsTeam = teamName ? String(ref?.firstTeam ?? "") === teamName : false;
+    const teamScore = firstIsTeam ? firstScore : secondScore;
+    const opponentScore = firstIsTeam ? secondScore : firstScore;
+    let result: "W" | "D" | "L" | null = null;
+    if (Number.isFinite(teamScore) && Number.isFinite(opponentScore)) {
+      played += 1;
+      scored += teamScore;
+      conceded += opponentScore;
+      if (teamScore > opponentScore) { wins += 1; result = "W"; }
+      else if (teamScore < opponentScore) { losses += 1; result = "L"; }
+      else { draws += 1; result = "D"; }
+    }
+    return {
+      id: Number(ref?.scheduleInfoSeq) || ref?.scheduleInfoSeq || null,
+      startTime: null,
+      league: "Wisetoto",
+      home: ref?.firstTeam ?? null,
+      away: ref?.secondTeam ?? null,
+      homeScore: Number.isFinite(firstScore) ? firstScore : null,
+      awayScore: Number.isFinite(secondScore) ? secondScore : null,
+      result,
+      source: "WISETOTO",
+    };
+  });
+  const formPercent = played > 0 ? Number((((wins * 3 + draws) / (played * 3)) * 100).toFixed(1)) : null;
+  return {
+    teamId: null,
+    teamName,
+    side,
+    fixtures,
+    form: { played, wins, draws, losses, scored, conceded, formPercent },
+    source: "WISETOTO",
+  };
+}
+
+function h2hFromWisetoto(homeRefs: AnyObj[], awayRefs: AnyObj[]) {
+  const homeTeam = inferRecentTeamName(homeRefs);
+  const awayTeam = inferRecentTeamName(awayRefs);
+  const all = [...homeRefs, ...awayRefs];
+  const unique = new Map<string, AnyObj>();
+  for (const ref of all) {
+    const seq = String(ref?.scheduleInfoSeq ?? "");
+    if (!seq || unique.has(seq)) continue;
+    const teams = [String(ref?.firstTeam ?? ""), String(ref?.secondTeam ?? "")];
+    if (homeTeam && awayTeam && teams.includes(homeTeam) && teams.includes(awayTeam)) unique.set(seq, ref);
+  }
+  let homeWins = 0, awayWins = 0, draws = 0;
+  for (const ref of unique.values()) {
+    const a = Number(ref?.firstScore), b = Number(ref?.secondScore);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+    if (a === b) { draws += 1; continue; }
+    const winner = a > b ? String(ref?.firstTeam ?? "") : String(ref?.secondTeam ?? "");
+    if (winner === homeTeam) homeWins += 1;
+    else if (winner === awayTeam) awayWins += 1;
+  }
+  return {
+    homeWins, awayWins, draws,
+    sample: homeWins + awayWins + draws,
+    homeTeam, awayTeam,
+    source: "WISETOTO_RECENT_OVERLAP",
+    limitation: "홈/원정 최근 5경기 목록의 교집합에서 확인되는 맞대결만 집계",
+  };
 }
 
 function findHeadingTable(html: string, headingPattern: RegExp) {
@@ -344,6 +426,11 @@ export async function GET(request: Request) {
       away: parseRecentGameRefs(detail.text, "away"),
     };
     const latestPrevious = parseLatestPreviousRecords(detail.text);
+    const wisetotoRecentSummary = {
+      home: recentSummaryFromWisetoto(recentGames.home, "home"),
+      away: recentSummaryFromWisetoto(recentGames.away, "away"),
+    };
+    const wisetotoH2H = h2hFromWisetoto(recentGames.home, recentGames.away);
     const absenteeSection = sectionBetween(
       detail.text,
       /<!--\s*결장자 정보\s*-->/i,
@@ -368,6 +455,8 @@ export async function GET(request: Request) {
       expectedStarters,
       seasonBatters,
       recentGames,
+      recentSummary: wisetotoRecentSummary,
+      h2h: wisetotoH2H,
       latestPrevious,
       absentee: {
         available: Boolean(absenteeText),
@@ -386,7 +475,7 @@ export async function GET(request: Request) {
         previousGameRefs: "최근 경기 탭의 schedule_info_seq는 확보됨",
         previousGameDetail:
           "현재 V2 1단계는 기본 응답에 포함된 직전 경기 타자/투수 세부기록까지 수집. 과거 탭 전환 XHR은 별도 확인 후 확장.",
-        modelApplied: false,
+        modelApplied: "Wisetoto recent Form/H2H is exposed as the baseball LIVE primary feed; V13.0 formulas are unchanged.",
       },
     });
   } catch (error: any) {
