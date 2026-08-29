@@ -12755,7 +12755,7 @@ export default function Home() {
           );
 
         return marketRows(game).map(
-          (market, marketIndex) => ({
+          (market: any, marketIndex: number) => ({
             game,
             gameKey: key,
             market,
