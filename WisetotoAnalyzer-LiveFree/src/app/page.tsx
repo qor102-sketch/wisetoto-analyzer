@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_16_NAVER_TODAY_LINEUP_20260829
+// DEPLOY_MARKER_V13_8_17_KBO_LIVE_DATA_20260829
 // DEPLOY_MARKER_V13_8_8_LIVE_DATA_DIAGNOSTICS_20260829
 // DEPLOY_MARKER_V13_8_6_FIXED_ODDS_3COL_GRID_20260829
 "use client";
@@ -17555,8 +17555,8 @@ export default function Home() {
         const naverConfirmedLineups = naverTodayLineup?.ok && Number(naverTodayLineup?.coverage?.total ?? 0) >= 14
           ? {
               source: "NAVER_GAME_POLLING",
-              homeStarter: wisetotoStarterLineups?.homeStarter ?? naverTodayLineup?.homeStarter ?? null,
-              awayStarter: wisetotoStarterLineups?.awayStarter ?? naverTodayLineup?.awayStarter ?? null,
+              homeStarter: naverTodayLineup?.homeStarter ?? wisetotoStarterLineups?.homeStarter ?? null,
+              awayStarter: naverTodayLineup?.awayStarter ?? wisetotoStarterLineups?.awayStarter ?? null,
               homeTeamLineUp: { fullLineUp: Array.isArray(naverTodayLineup?.home) ? naverTodayLineup.home : [] },
               awayTeamLineUp: { fullLineUp: Array.isArray(naverTodayLineup?.away) ? naverTodayLineup.away : [] },
               confirmedBattingLineup: Number(naverTodayLineup?.coverage?.total ?? 0) >= 18,
@@ -20466,7 +20466,7 @@ export default function Home() {
                         <b>LIVE DATA 수집 진단</b> · 실제 수신/계산된 항목만 정상으로 표시합니다.
                         선발/라인업은 발표 전이면 대기가 정상이며, 미연결 항목은 예측에 임의 반영하지 않습니다.
                         <br />
-                        <b>V13.8.16:</b> 최근 5경기 상세는 와이즈토토 XHR을 유지하고, 당일 확정 타순은 네이버 game-polling의 batterLineup.home/away를 사용합니다. V13.0/Gate V2 계산식 자체는 변경하지 않았습니다.
+                        <b>V13.8.17:</b> NPB는 기존 네이버 batterLineup.home/away를 유지하고, KBO는 당일 일정에서 gameId를 자동매칭한 뒤 homeLineup/awayLineup의 확정 타순·선발·시즌 타율을 수집합니다. V13.0/Gate V2 계산식 자체는 변경하지 않았습니다.
                         {matched?.wisetotoLive && !matched?.wisetotoLive?.ok ? (
                           <>
                             <br />
@@ -20506,10 +20506,11 @@ export default function Home() {
                           </div>
                         </div>
                         <div className="card">
-                          실제 선발 라인업 · 네이버
+                          실제 선발 라인업 · 네이버 NPB/KBO
                           <b>{Number(matched?.naverTodayLineup?.coverage?.total ?? 0) >= 18 ? "✓ 수신" : Number(matched?.naverTodayLineup?.coverage?.total ?? 0) > 0 ? "부분 수신" : "대기"}</b>
                           <div className="small">
                             {Number(matched?.naverTodayLineup?.coverage?.total ?? 0)}/18명
+                            {matched?.naverTodayLineup?.league ? ` · ${matched.naverTodayLineup.league}` : ""}
                             {matched?.naverTodayLineup?.gameId ? ` · ${matched.naverTodayLineup.gameId}` : ""}
                             {matched?.lineupsSource === "NAVER_GAME_POLLING" ? " · 분석 라인업 적용" : ""}
                           </div>
