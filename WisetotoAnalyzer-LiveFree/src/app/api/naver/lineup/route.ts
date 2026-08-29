@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_18_MLB_LIVE_DATA_20260829
+// DEPLOY_MARKER_V13_8_20_MLB_DATA_WIRING_20260829
 
 const NAVER_API = "https://api-gw.sports.naver.com/schedule/games";
 
@@ -180,7 +180,7 @@ async function resolveKboGameId(date: string, home: string, away: string) {
     headers: {
       accept: "application/json, text/plain, */*",
       referer: "https://m.sports.naver.com/kbaseball/schedule/index",
-      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.18",
+      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.20",
     },
   });
   const payload = await response.json().catch(() => null);
@@ -212,7 +212,7 @@ async function resolveMlbGameId(date: string, home: string, away: string, startR
     headers: {
       accept: "application/json, text/plain, */*",
       referer: "https://m.sports.naver.com/wbaseball/schedule/index",
-      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.18",
+      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.20",
     },
   });
   const payload = await response.json().catch(() => null);
@@ -385,28 +385,52 @@ function normalizeMlbStarter(starter: any, fallbackName: any, lineupPitchers: an
   };
 }
 
-function summarizeMlbPreviousGames(rows: any) {
+function summarizeMlbPreviousGames(rows: any, teamName: string) {
   const games = Array.isArray(rows) ? rows.slice(0, 5) : [];
   const wins = games.filter((g: AnyObj) => String(g?.result ?? "").trim() === "승").length;
   const losses = games.filter((g: AnyObj) => String(g?.result ?? "").trim() === "패").length;
   const played = games.length;
+  let scored = 0;
+  let conceded = 0;
+  const fixtures = games.map((g: AnyObj) => {
+    const homeScore = Number.isFinite(Number(g?.hScore)) ? Number(g.hScore) : null;
+    const awayScore = Number.isFinite(Number(g?.aScore)) ? Number(g.aScore) : null;
+    const isHome = teamMatches(String(g?.hName ?? ""), teamName);
+    if (homeScore !== null && awayScore !== null) {
+      scored += isHome ? homeScore : awayScore;
+      conceded += isHome ? awayScore : homeScore;
+    }
+    const rawDate = String(g?.gdate ?? "");
+    const date = /^20\d{6}$/.test(rawDate)
+      ? `${rawDate.slice(0,4)}-${rawDate.slice(4,6)}-${rawDate.slice(6,8)}T00:00:00+09:00`
+      : rawDate || null;
+    return {
+      gameId: g?.gameId ?? g?.ognGameId ?? null,
+      date,
+      startTime: date,
+      result: g?.result ?? null,
+      home: g?.hName ?? null,
+      away: g?.aName ?? null,
+      homeScore,
+      awayScore,
+      score: { home: homeScore, away: awayScore },
+      source: "NAVER_MLB_PREVIEW",
+    };
+  });
   return {
+    teamName,
     form: {
       played,
       wins,
       draws: Math.max(0, played - wins - losses),
       losses,
+      scored,
+      conceded,
+      goalDifference: scored - conceded,
       formPercent: played > 0 ? wins / played : 0,
     },
-    games: games.map((g: AnyObj) => ({
-      gameId: g?.gameId ?? g?.ognGameId ?? null,
-      date: g?.gdate ?? null,
-      result: g?.result ?? null,
-      home: g?.hName ?? null,
-      away: g?.aName ?? null,
-      homeScore: Number.isFinite(Number(g?.hScore)) ? Number(g.hScore) : null,
-      awayScore: Number.isFinite(Number(g?.aScore)) ? Number(g.aScore) : null,
-    })),
+    fixtures,
+    games: fixtures,
   };
 }
 
@@ -477,7 +501,7 @@ export async function GET(request: Request) {
       headers: {
         accept: "application/json, text/plain, */*",
         referer: `https://m.sports.naver.com/game/${gameId}`,
-        "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.18",
+        "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.20",
       },
     });
 
@@ -507,7 +531,7 @@ export async function GET(request: Request) {
         headers: {
           accept: "application/json, text/plain, */*",
           referer: `https://m.sports.naver.com/game/${gameId}`,
-          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.18",
+          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.20",
         },
       });
       previewStatus = previewResponse.status;
@@ -579,8 +603,8 @@ export async function GET(request: Request) {
       home: homeLineup,
       away: awayLineup,
       recentSummary: league === "MLB" && previewData ? {
-        home: summarizeMlbPreviousGames(previewData?.homeTeamPreviousGames),
-        away: summarizeMlbPreviousGames(previewData?.awayTeamPreviousGames),
+        home: summarizeMlbPreviousGames(previewData?.homeTeamPreviousGames, String(previewData?.gameInfo?.hName ?? game?.homeTeamName ?? home)),
+        away: summarizeMlbPreviousGames(previewData?.awayTeamPreviousGames, String(previewData?.gameInfo?.aName ?? game?.awayTeamName ?? away)),
       } : null,
       mlbPreview: league === "MLB" ? {
         ok: Boolean(previewData),
