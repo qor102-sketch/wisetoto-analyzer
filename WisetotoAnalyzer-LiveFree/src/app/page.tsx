@@ -1,3 +1,4 @@
+// DEPLOY_MARKER_V13_8_8_LIVE_DATA_DIAGNOSTICS_20260829
 // DEPLOY_MARKER_V13_8_6_FIXED_ODDS_3COL_GRID_20260829
 "use client";
 
@@ -20312,7 +20313,75 @@ export default function Home() {
                     <div className="section" style={{ marginTop: 0 }}>
                       <h3>V12.0 야구 데이터 가용성 · 선발투수/라인업 복원</h3>
 
+                      <div className="notice" style={{ margin: "8px 0" }}>
+                        <b>LIVE DATA 수집 진단</b> · 실제 수신/계산된 항목만 정상으로 표시합니다.
+                        선발/라인업은 발표 전이면 대기가 정상이며, 미연결 항목은 예측에 임의 반영하지 않습니다.
+                      </div>
+
                       <div className="cards">
+                        <div className="card">
+                          최근 경기 폼
+                          <b>{analysisFactors.homeRecentSample > 0 && analysisFactors.awayRecentSample > 0 ? "✓ 수신" : "✕ 미수신"}</b>
+                          <div className="small">홈 {analysisFactors.homeRecentSample} · 원정 {analysisFactors.awayRecentSample}</div>
+                        </div>
+                        <div className="card">
+                          H2H
+                          <b>{analysisFactors.h2hSample > 0 ? "✓ 수신" : "✕ 미수신"}</b>
+                          <div className="small">표본 {analysisFactors.h2hSample}경기</div>
+                        </div>
+                        <div className="card">
+                          홈/원정 장소 표본
+                          <b>{analysisFactors.homeVenueSample > 0 || analysisFactors.awayVenueSample > 0 ? "✓ 수신" : "✕ 미수신"}</b>
+                          <div className="small">홈 {analysisFactors.homeVenueSample} · 원정 {analysisFactors.awayVenueSample}</div>
+                        </div>
+                        <div className="card">
+                          선발투수
+                          <b>{analysisFactors.baseballStarterCount >= 2 ? "✓ 수신" : "대기"}</b>
+                          <div className="small">{analysisFactors.baseballStarterCount}/2 · 발표 전 대기 정상</div>
+                        </div>
+                        <div className="card">
+                          실제 선발 라인업
+                          <b>{analysisFactors.baseballLineupPlayerCount >= 18 ? "✓ 수신" : "대기"}</b>
+                          <div className="small">감지 {analysisFactors.baseballLineupPlayerCount}/18명 · 발표 전 대기 정상</div>
+                        </div>
+                        <div className="card">
+                          라인업 선수 Stats
+                          <b>{analysisFactors.lineupStatsCoverage > 0 ? "✓ 수신" : "대기"}</b>
+                          <div className="small">Coverage {(analysisFactors.lineupStatsCoverage * 100).toFixed(0)}%</div>
+                        </div>
+                        <div className="card">
+                          선발 최근 투구
+                          <b>미연결</b>
+                          <div className="small">최근 3~5경기 투구 세부자료 별도 연결 필요</div>
+                        </div>
+                        <div className="card">
+                          타자 최근 타격감
+                          <b>미연결</b>
+                          <div className="small">선수별 최근 경기 타격 세부자료 별도 연결 필요</div>
+                        </div>
+                        <div className="card">
+                          불펜 소모도
+                          <b>미연결</b>
+                          <div className="small">최근 등판·투구수·연투 자료 별도 연결 필요</div>
+                        </div>
+                        <div className="card">
+                          부상/결장
+                          <b>미연결</b>
+                          <div className="small">실전 PRE 부상/결장 피드 별도 연결 필요</div>
+                        </div>
+                        <div className="card">
+                          구장 상세
+                          <b>미연결</b>
+                          <div className="small">구장 특성/파크팩터는 아직 모델 미연결</div>
+                        </div>
+                        <div className="card">
+                          경기시각 날씨
+                          <b>미연결</b>
+                          <div className="small">기온·강수·풍속/풍향 실시간 PRE 연결 필요</div>
+                        </div>
+                      </div>
+
+                      <div className="cards" style={{ marginTop: 7 }}>
                         <div className="card">
                           분석 단계
                           <b>{analysisFactors.baseballAnalysisStageLabel}</b>
