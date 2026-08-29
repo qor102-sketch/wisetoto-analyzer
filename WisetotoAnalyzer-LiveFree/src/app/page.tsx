@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_7_5_VALIDATION_POOL_150_20260828
+// DEPLOY_MARKER_V13_7_7_FALLBACK_GATE_V2_20260829
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -6961,12 +6961,12 @@ function buildZeroPickMarketFallback(
   return result;
 }
 
-type FallbackGateV1Result = {
+type FallbackGateV2Result = {
   allowed: MarketPick[];
   blocked: MarketPick[];
 };
 
-function isFallbackGateV1Blocked(
+function isFallbackGateV2Blocked(
   pick: MarketPick
 ) {
   if (
@@ -6985,29 +6985,19 @@ function isFallbackGateV1Blocked(
     return false;
   }
 
-  const group =
-    backtestMarketGroup(
-      String(
-        pick.market ??
-        ""
-      )
-    );
-
   /*
-   * V1은 동일 30경기에서 0%였던 시장 단위만 차단한다.
-   * 전반 0/18, 핸디캡 0/7, U/O 0/7.
-   * 승패/승1패/SUM은 유지하여 과적합을 줄인다.
+   * Gate V2:
+   * 독립 검증 30경기에서 MARKET FALLBACK은 5/18 = 27.8%,
+   * NORMAL은 108/192 = 56.3%였다.
+   * 시장별 추가 튜닝 없이 모든 MARKET FALLBACK을 차단한다.
+   * V13.0 예측 엔진/λ/확률 보정은 변경하지 않는다.
    */
-  return (
-    group === "전반" ||
-    group === "핸디캡" ||
-    group === "U/O"
-  );
+  return true;
 }
 
-function applyFallbackGateV1(
+function applyFallbackGateV2(
   picks: MarketPick[]
-): FallbackGateV1Result {
+): FallbackGateV2Result {
   const allowed:
     MarketPick[] = [];
 
@@ -7018,7 +7008,7 @@ function applyFallbackGateV1(
     const pick of picks
   ) {
     if (
-      isFallbackGateV1Blocked(
+      isFallbackGateV2Blocked(
         pick
       )
     ) {
@@ -10646,7 +10636,7 @@ function formatPerformanceDelta(
 type BacktestDatasetSplit = {
   version: 1;
   lockedAt: number;
-  gateVersion: "FALLBACK_GATE_V1";
+  gateVersion: "FALLBACK_GATE_V1" | "FALLBACK_GATE_V2";
   devFixtureIds: number[];
 };
 
@@ -10713,8 +10703,10 @@ function readBacktestDatasetSplit():
 
     if (
       parsed?.version === 1 &&
-      parsed?.gateVersion ===
-        "FALLBACK_GATE_V1" &&
+      (
+        parsed?.gateVersion === "FALLBACK_GATE_V1" ||
+        parsed?.gateVersion === "FALLBACK_GATE_V2"
+      ) &&
       Array.isArray(
         parsed?.devFixtureIds
       )
@@ -10776,8 +10768,8 @@ export default function Home() {
 
 
   const [
-    fallbackGateV1Stats,
-    setFallbackGateV1Stats,
+    fallbackGateV2Stats,
+    setFallbackGateV2Stats,
   ] =
     useState({
       blocked: 0,
@@ -10887,7 +10879,7 @@ export default function Home() {
           lockedAt:
             Date.now(),
           gateVersion:
-            "FALLBACK_GATE_V1",
+            "FALLBACK_GATE_V2",
           devFixtureIds:
             fixtureIds,
         };
@@ -11141,7 +11133,7 @@ export default function Home() {
       const importedSplit =
         parsed?.datasetSplit &&
         parsed.datasetSplit.version === 1 &&
-        parsed.datasetSplit.gateVersion === "FALLBACK_GATE_V1" &&
+        (parsed.datasetSplit.gateVersion === "FALLBACK_GATE_V1" || parsed.datasetSplit.gateVersion === "FALLBACK_GATE_V2") &&
         Array.isArray(parsed.datasetSplit.devFixtureIds)
           ? parsed.datasetSplit as BacktestDatasetSplit
           : null;
@@ -13652,7 +13644,7 @@ export default function Home() {
         : picksRaw;
 
     const fallbackGate =
-      applyFallbackGateV1(
+      applyFallbackGateV2(
         picksBeforeFallbackGate
       );
 
@@ -14557,7 +14549,7 @@ export default function Home() {
         : picksRaw;
 
     const fallbackGate =
-      applyFallbackGateV1(
+      applyFallbackGateV2(
         picksBeforeFallbackGate
       );
 
@@ -14566,7 +14558,7 @@ export default function Home() {
 
     if (!picks.length) {
       throw new Error(
-        `OFFLINE_PREDICT · Fixture #${entry.fixtureId} 현재 모델에서 픽이 생성되지 않았습니다. · FALLBACK Gate V1 차단 ${fallbackGate.blocked.length}픽`
+        `OFFLINE_PREDICT · Fixture #${entry.fixtureId} 현재 모델에서 픽이 생성되지 않았습니다. · FALLBACK Gate V2 차단 ${fallbackGate.blocked.length}픽`
       );
     }
 
@@ -14996,7 +14988,7 @@ export default function Home() {
         []
       );
 
-      setFallbackGateV1Stats({
+      setFallbackGateV2Stats({
         blocked: 0,
         allowedFallback: 0,
       });
@@ -15081,7 +15073,7 @@ export default function Home() {
           fallbackGateAllowed +=
             offline.fallbackGateAllowed;
 
-          setFallbackGateV1Stats({
+          setFallbackGateV2Stats({
             blocked:
               fallbackGateBlocked,
             allowedFallback:
@@ -15130,7 +15122,7 @@ export default function Home() {
                 calibrationRows:
                   records.length,
                 message:
-                  `OFFLINE PRE 재계산 → LOCK → 저장 VERIFY 채점 · ${records.length}행 · SportsAPI 0회${offline.snapshot.picks.some((pick: any) => String(pick.grade).includes("FALLBACK")) ? " · MARKET FALLBACK 사용" : ""}${offline.fallbackGateBlocked > 0 ? ` · Gate V1 차단 ${offline.fallbackGateBlocked}픽` : ""}`,
+                  `OFFLINE PRE 재계산 → LOCK → 저장 VERIFY 채점 · ${records.length}행 · SportsAPI 0회${offline.snapshot.picks.some((pick: any) => String(pick.grade).includes("FALLBACK")) ? " · MARKET FALLBACK 사용" : ""}${offline.fallbackGateBlocked > 0 ? ` · Gate V2 차단 ${offline.fallbackGateBlocked}픽` : ""}`,
                 savedAt:
                   Date.now(),
               },
@@ -15258,7 +15250,7 @@ export default function Home() {
       });
 
       setStatus(
-        `✅ ${datasetModeLabel} 오프라인 ${entries.length}경기 완료 · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행 · Gate V1 차단 ${fallbackGateBlocked}픽 · SportsAPI 호출 0회`
+        `✅ ${datasetModeLabel} 오프라인 ${entries.length}경기 완료 · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행 · Gate V2 차단 ${fallbackGateBlocked}픽 · SportsAPI 호출 0회`
       );
     } catch (error: any) {
       setBatchBacktest(
@@ -16680,7 +16672,7 @@ export default function Home() {
                 batchBacktest.running ||
                 offlineDatasetCount === 0
               }
-              title="현재 영구 저장 데이터를 FALLBACK Gate V1 개발셋으로 고정합니다. 이후 신규 데이터는 검증셋으로 분리됩니다."
+              title="현재 영구 저장 데이터를 FALLBACK Gate V2 개발셋으로 고정합니다. 이후 신규 데이터는 검증셋으로 분리됩니다."
             >
               🔒 현재 {offlineDatasetCount}경기 개발셋 고정
             </button>
@@ -16693,7 +16685,7 @@ export default function Home() {
                   fontWeight: 700,
                   color: "#334155",
                 }}
-                title="Gate V1 개발셋은 고정되어 이후 신규 경기와 섞이지 않습니다."
+                title="Gate V2 개발셋은 고정되어 이후 신규 경기와 섞이지 않습니다."
               >
                 🔒 개발 {datasetSplitCounts.dev}
                 {" · "}검증 {datasetSplitCounts.validation}/{VALIDATION_TARGET_GAMES}
@@ -17195,7 +17187,7 @@ export default function Home() {
                   }}
                 >
                   <div>
-                    <b>🧪 Gate V1 과적합 방지 검증</b>
+                    <b>🧪 Gate V2 독립 검증</b>
                     <div
                       className="small"
                       style={{
@@ -17260,7 +17252,7 @@ export default function Home() {
                     color: "#475569",
                   }}
                 >
-                  Gate 버전: FALLBACK_GATE_V1
+                  Gate 버전: FALLBACK_GATE_V2
                   {datasetSplit
                     ? ` · 고정 ${new Date(datasetSplit.lockedAt).toLocaleString()}`
                     : " · 아직 개발셋 미고정"}
@@ -17269,14 +17261,14 @@ export default function Home() {
               </div>
 
               <div>
-                    <b>🛡 FALLBACK Gate V1</b>
+                    <b>🛡 FALLBACK Gate V2</b>
                     <div
                       className="small"
                       style={{
                         marginTop: 3,
                       }}
                     >
-                      전반 · 핸디캡 · U/O의 MARKET FALLBACK만 차단. 승패 · 승1패 · SUM은 유지.
+                      독립 검증 결과에 따라 모든 MARKET FALLBACK 차단. NORMAL 모델은 그대로 유지.
                     </div>
                   </div>
 
@@ -17292,7 +17284,7 @@ export default function Home() {
                         차단
                       </div>
                       <b>
-                        {fallbackGateV1Stats.blocked}픽
+                        {fallbackGateV2Stats.blocked}픽
                       </b>
                     </div>
 
@@ -17301,7 +17293,7 @@ export default function Home() {
                         유지 FALLBACK
                       </div>
                       <b>
-                        {fallbackGateV1Stats.allowedFallback}픽
+                        {fallbackGateV2Stats.allowedFallback}픽
                       </b>
                     </div>
 
