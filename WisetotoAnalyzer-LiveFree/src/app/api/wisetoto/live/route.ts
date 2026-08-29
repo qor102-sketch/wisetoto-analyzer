@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_13_WISETOTO_VERIFIED_FOCUS_RESOLVER_20260829
+// DEPLOY_MARKER_V13_8_14_WISETOTO_BASEBALL_DETAIL_STAGE1_20260829
 
 const WISETOTO_ORIGIN = "https://www.wisetoto.com";
 const WISETOTO_DETAIL = `${WISETOTO_ORIGIN}/util/gameinfo/get_detail_lineup.htm`;
@@ -279,6 +279,69 @@ function parseLatestPreviousRecords(html: string) {
   };
 }
 
+
+function numericCell(row: AnyObj, patterns: RegExp[]) {
+  for (const [key, value] of Object.entries(row ?? {})) {
+    if (patterns.some((pattern) => pattern.test(String(key)))) {
+      const number = Number(String(value ?? "").replace(/[^0-9.\-]/g, ""));
+      if (Number.isFinite(number)) return number;
+    }
+  }
+  return null;
+}
+
+function summarizeLatestBatters(rows: AnyObj[]) {
+  let atBats = 0, hits = 0, rbi = 0, runs = 0, homeRuns = 0;
+  for (const row of rows) {
+    atBats += numericCell(row, [/타수/, /^AB$/i]) ?? 0;
+    hits += numericCell(row, [/안타/, /^H$/i]) ?? 0;
+    rbi += numericCell(row, [/타점/, /^RBI$/i]) ?? 0;
+    runs += numericCell(row, [/득점/, /^R$/i]) ?? 0;
+    homeRuns += numericCell(row, [/홈런/, /^HR$/i]) ?? 0;
+  }
+  return {
+    players: rows.length, atBats, hits, rbi, runs, homeRuns,
+    battingAverage: atBats > 0 ? Number((hits / atBats).toFixed(3)) : null,
+  };
+}
+
+function summarizeLatestPitchers(rows: AnyObj[]) {
+  const parsed = rows.map((row, index) => ({
+    index,
+    name: String(Object.values(row ?? {})[0] ?? "").trim() || null,
+    innings: numericCell(row, [/이닝/, /^IP$/i]),
+    pitches: numericCell(row, [/투구수/, /투구/, /^P$/i]),
+    strikeouts: numericCell(row, [/삼진/, /^SO$/i, /^K$/i]),
+    runs: numericCell(row, [/실점/, /^R$/i]),
+    earnedRuns: numericCell(row, [/자책/, /^ER$/i]),
+  }));
+  const starter = parsed[0] ?? null;
+  const bullpen = parsed.slice(1);
+  return {
+    pitchers: parsed,
+    starter,
+    bullpen: {
+      pitchersUsed: bullpen.length,
+      pitches: bullpen.reduce((sum, row) => sum + (row.pitches ?? 0), 0),
+      innings: Number(bullpen.reduce((sum, row) => sum + (row.innings ?? 0), 0).toFixed(1)),
+    },
+  };
+}
+
+function parseCurrentLineupIfPresent(html: string) {
+  /* '이전 경기 라인업' 이후 영역은 과거 경기이므로 현재 라인업으로 절대 오인하지 않는다. */
+  const previousIndex = html.search(/<!--\s*이전 경기 라인업\s*-->/i);
+  const currentOnly = previousIndex >= 0 ? html.slice(0, previousIndex) : html;
+  const heading = currentOnly.search(/(?:선발\s*라인업|금일\s*라인업|오늘\s*라인업|starting\s*lineup)/i);
+  if (heading < 0) return { detected: false, home: [], away: [], reason: "current-lineup-heading-not-found" };
+  const area = currentOnly.slice(heading);
+  const tables = tableBlocks(area).slice(0, 2).map(parseTable).map(rowObjects);
+  const plausible = tables.filter((rows) => rows.length >= 7 && rows.length <= 15);
+  return plausible.length >= 2
+    ? { detected: true, home: plausible[0], away: plausible[1], reason: "current-lineup-table-detected" }
+    : { detected: false, home: [], away: [], reason: "current-lineup-table-not-confirmed" };
+}
+
 function normalizeName(value: string) {
   return String(value ?? "")
     .toLowerCase()
@@ -332,7 +395,7 @@ async function wisetotoFetch(url: string) {
       "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.7",
       Referer: `${WISETOTO_ORIGIN}/`,
       "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 WisetotoAnalyzer/13.8.13",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 WisetotoAnalyzer/13.8.14",
     },
   });
   return { response, text: await response.text() };
@@ -410,7 +473,7 @@ export async function GET(request: Request) {
         {
           ok: false,
           error: "와이즈토토 schedule_info_seq 자동 매칭에 실패했습니다.",
-          debug: { matchSeq, home, away, resolverMethod, resolverStatus, resolverVersion: "V13.8.13_VERIFIED_FOCUS" },
+          debug: { matchSeq, home, away, resolverMethod, resolverStatus, resolverVersion: "V13.8.14_BASEBALL_DETAIL_STAGE1" },
         },
         { status: 404 }
       );
@@ -445,6 +508,17 @@ export async function GET(request: Request) {
       away: parseRecentGameRefs(detail.text, "away"),
     };
     const latestPrevious = parseLatestPreviousRecords(detail.text);
+    const currentLineup = parseCurrentLineupIfPresent(detail.text);
+    const latestDetailSummary = {
+      home: {
+        batters: summarizeLatestBatters(latestPrevious.home.batters),
+        pitching: summarizeLatestPitchers(latestPrevious.home.pitchers),
+      },
+      away: {
+        batters: summarizeLatestBatters(latestPrevious.away.batters),
+        pitching: summarizeLatestPitchers(latestPrevious.away.pitchers),
+      },
+    };
     const wisetotoRecentSummary = {
       home: recentSummaryFromWisetoto(recentGames.home, "home"),
       away: recentSummaryFromWisetoto(recentGames.away, "away"),
@@ -477,6 +551,8 @@ export async function GET(request: Request) {
       recentSummary: wisetotoRecentSummary,
       h2h: wisetotoH2H,
       latestPrevious,
+      latestDetailSummary,
+      currentLineup,
       absentee: {
         available: Boolean(absenteeText),
         text: absenteeText || null,
@@ -489,11 +565,15 @@ export async function GET(request: Request) {
           recentGames.home.length + recentGames.away.length,
         latestBatterRows,
         latestPitcherRows,
+        currentLineupBatters: currentLineup.home.length + currentLineup.away.length,
+        absenteeDetected: Boolean(absenteeText),
       },
       limitations: {
         previousGameRefs: "최근 경기 탭의 schedule_info_seq는 확보됨",
         previousGameDetail:
-          "현재 V2 1단계는 기본 응답에 포함된 직전 경기 타자/투수 세부기록까지 수집. 과거 탭 전환 XHR은 별도 확인 후 확장.",
+          "직전 경기 타자/투수 세부기록은 집계까지 완료. 최근 3~5경기 전체는 change_record XHR의 실제 URL 확인 후 확장.",
+        currentLineup:
+          "현재 경기 영역에서 당일 라인업 heading/table이 실제 존재할 때만 감지하며, 이전 경기 라인업은 현재 라인업으로 사용하지 않음.",
         modelApplied: "Wisetoto recent Form/H2H is exposed as the baseball LIVE primary feed; V13.0 formulas are unchanged.",
       },
     });
