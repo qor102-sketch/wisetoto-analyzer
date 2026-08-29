@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_13_WISETOTO_VERIFIED_FOCUS_RESOLVER_20260829
+// DEPLOY_MARKER_V13_8_14_WISETOTO_BASEBALL_DETAIL_STAGE1_20260829
 // DEPLOY_MARKER_V13_8_8_LIVE_DATA_DIAGNOSTICS_20260829
 // DEPLOY_MARKER_V13_8_6_FIXED_ODDS_3COL_GRID_20260829
 "use client";
@@ -20403,7 +20403,7 @@ export default function Home() {
                         <b>LIVE DATA 수집 진단</b> · 실제 수신/계산된 항목만 정상으로 표시합니다.
                         선발/라인업은 발표 전이면 대기가 정상이며, 미연결 항목은 예측에 임의 반영하지 않습니다.
                         <br />
-                        <b>V13.8.13:</b> 야구 LIVE 경기정보는 와이즈토토를 PRIMARY로 사용합니다. 최근 Form/H2H는 와이즈토토 최근경기 목록을 우선 사용하고, 예상 선발·시즌 타자·직전 경기 타자/투수도 와이즈토토에서 수집합니다. V13.0/Gate V2 계산식 자체는 변경하지 않았습니다.
+                        <b>V13.8.14:</b> 와이즈토토 PRIMARY에 직전 경기 타격/투구 집계, 불펜 1경기 소모도, 결장자 감지, 당일 라인업 안전 감지를 추가했습니다. 이전 경기 라인업은 당일 라인업으로 오인하지 않습니다. V13.0/Gate V2 계산식 자체는 변경하지 않았습니다.
                         {matched?.wisetotoLive && !matched?.wisetotoLive?.ok ? (
                           <>
                             <br />
@@ -20444,8 +20444,8 @@ export default function Home() {
                         </div>
                         <div className="card">
                           실제 선발 라인업 · 와이즈토토
-                          <b>대기</b>
-                          <div className="small">현재 확인된 상세 응답은 예상 선발/이전 경기 라인업 제공 · 당일 1~9번 확정 라인업은 실제 응답 확인 후 연결</div>
+                          <b>{Number(matched?.wisetotoLive?.coverage?.currentLineupBatters ?? 0) >= 18 ? "✓ 수신" : "대기"}</b>
+                          <div className="small">{Number(matched?.wisetotoLive?.coverage?.currentLineupBatters ?? 0)}/18명 · 현재 경기 영역에서 실제 당일 라인업 표가 확인될 때만 수신 처리</div>
                         </div>
                         <div className="card">
                           라인업 선수 Stats
@@ -20464,23 +20464,23 @@ export default function Home() {
                         </div>
                         <div className="card">
                           선발 최근 투구
-                          <b>{Number(matched?.wisetotoLive?.coverage?.latestPitcherRows ?? 0) > 0 ? "부분 수신" : "미연결"}</b>
-                          <div className="small">직전 경기 투수 {Number(matched?.wisetotoLive?.coverage?.latestPitcherRows ?? 0)}행 · 3~5경기 탭 상세는 다음 확장</div>
+                          <b>{Number(matched?.wisetotoLive?.coverage?.latestPitcherRows ?? 0) > 0 ? "✓ 직전경기" : "미연결"}</b>
+                          <div className="small">직전 경기 투수 {Number(matched?.wisetotoLive?.coverage?.latestPitcherRows ?? 0)}행 · 선발 IP/투구수/K/실점 집계 · 3~5경기는 XHR 확인 후 확장</div>
                         </div>
                         <div className="card">
                           타자 최근 타격감
-                          <b>{Number(matched?.wisetotoLive?.coverage?.latestBatterRows ?? 0) > 0 ? "부분 수신" : "미연결"}</b>
-                          <div className="small">직전 경기 타자 {Number(matched?.wisetotoLive?.coverage?.latestBatterRows ?? 0)}행 · 타수/안타/타점/득점/홈런</div>
+                          <b>{Number(matched?.wisetotoLive?.coverage?.latestBatterRows ?? 0) > 0 ? "✓ 직전경기" : "미연결"}</b>
+                          <div className="small">직전 경기 타자 {Number(matched?.wisetotoLive?.coverage?.latestBatterRows ?? 0)}행 · AB/H/RBI/R/HR 및 팀 타율 집계</div>
                         </div>
                         <div className="card">
                           불펜 소모도
-                          <b>{Number(matched?.wisetotoLive?.coverage?.latestPitcherRows ?? 0) > 2 ? "부분 수신" : "미연결"}</b>
-                          <div className="small">직전 경기 투구수/이닝 수신 · 연투 판정은 3~5경기 상세 확장 후 적용</div>
+                          <b>{Number(matched?.wisetotoLive?.coverage?.latestPitcherRows ?? 0) > 2 ? "✓ 1경기 집계" : "미연결"}</b>
+                          <div className="small">홈 불펜 {Number(matched?.wisetotoLive?.latestDetailSummary?.home?.pitching?.bullpen?.pitchersUsed ?? 0)}명/{Number(matched?.wisetotoLive?.latestDetailSummary?.home?.pitching?.bullpen?.pitches ?? 0)}구 · 원정 {Number(matched?.wisetotoLive?.latestDetailSummary?.away?.pitching?.bullpen?.pitchersUsed ?? 0)}명/{Number(matched?.wisetotoLive?.latestDetailSummary?.away?.pitching?.bullpen?.pitches ?? 0)}구 · 연투는 3~5경기 확장 후</div>
                         </div>
                         <div className="card">
                           부상/결장
-                          <b>미연결</b>
-                          <div className="small">실전 PRE 부상/결장 피드 별도 연결 필요</div>
+                          <b>{matched?.wisetotoLive?.coverage?.absenteeDetected ? "✓ 수신" : "대기/없음"}</b>
+                          <div className="small">와이즈토토 결장자 영역 감지 · 비어 있으면 임의 결장자를 만들지 않음</div>
                         </div>
                         <div className="card">
                           구장 상세
