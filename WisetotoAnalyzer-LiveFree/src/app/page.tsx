@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_7_7_FALLBACK_GATE_V2_20260829
+// DEPLOY_MARKER_V13_7_8_GATE_V2_SKIP_BASELINE_20260829
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -10543,7 +10543,7 @@ type BatchBacktestDiagnostic = {
   index: number;
   gameNo: string;
   gameLabel: string;
-  status: "SUCCESS" | "FAIL";
+  status: "SUCCESS" | "FAIL" | "SKIP";
   fixtureId: number | null;
   calibrationRows: number;
   message: string;
@@ -10553,6 +10553,7 @@ type BatchBacktestDiagnostic = {
 
 type BacktestBaselineSnapshot = {
   savedAt: number;
+  gateVersion?: "FALLBACK_GATE_V2";
   total: BacktestPerformanceRow;
   byModel: BacktestPerformanceRow[];
   byMarket: BacktestPerformanceRow[];
@@ -14995,6 +14996,7 @@ export default function Home() {
 
       let completed = 0;
       let failed = 0;
+      let skipped = 0;
       let fallbackGateBlocked = 0;
       let fallbackGateAllowed = 0;
 
@@ -15053,7 +15055,7 @@ export default function Home() {
         );
 
         setStatus(
-          `💾 ${datasetModeLabel} ${index + 1}/${entries.length} · 성공 ${completed} · 실패 ${failed} · ${entry.game?.home ?? "-"} vs ${entry.game?.away ?? "-"} · SportsAPI 0회`
+          `💾 ${datasetModeLabel} ${index + 1}/${entries.length} · 성공 ${completed} · SKIP ${skipped} · 실패 ${failed} · ${entry.game?.home ?? "-"} vs ${entry.game?.away ?? "-"} · SportsAPI 0회`
         );
 
         // 화면에 현재 경기 진행 상태를 먼저 표시한 뒤 계산한다.
@@ -15129,7 +15131,58 @@ export default function Home() {
             ]
           );
         } catch (error: any) {
-          failed += 1;
+          const errorMessage =
+            readableError(
+              error,
+              "오프라인 재생 실패"
+            );
+
+          const gateV2SkipMatch =
+            String(
+              errorMessage
+            ).match(
+              /FALLBACK Gate V2 차단\s+(\d+)픽/i
+            );
+
+          const isGateV2Skip =
+            /OFFLINE_PREDICT/i.test(
+              String(
+                errorMessage
+              )
+            ) &&
+            Boolean(
+              gateV2SkipMatch
+            );
+
+          if (
+            isGateV2Skip
+          ) {
+            skipped += 1;
+
+            const blockedCount =
+              Number(
+                gateV2SkipMatch?.[1] ??
+                0
+              );
+
+            if (
+              Number.isFinite(
+                blockedCount
+              )
+            ) {
+              fallbackGateBlocked +=
+                blockedCount;
+
+              setFallbackGateV2Stats({
+                blocked:
+                  fallbackGateBlocked,
+                allowedFallback:
+                  fallbackGateAllowed,
+              });
+            }
+          } else {
+            failed += 1;
+          }
 
           setBatchBacktestDiagnostics(
             (previous) => [
@@ -15148,16 +15201,17 @@ export default function Home() {
                 gameLabel:
                   `${entry.game?.home ?? "-"} vs ${entry.game?.away ?? "-"}`,
                 status:
-                  "FAIL",
+                  isGateV2Skip
+                    ? "SKIP"
+                    : "FAIL",
                 fixtureId:
                   entry.fixtureId,
                 calibrationRows:
                   0,
                 message:
-                  `OFFLINE · ${readableError(
-                    error,
-                    "오프라인 재생 실패"
-                  )}`,
+                  isGateV2Skip
+                    ? `SKIP · Gate V2가 MARKET FALLBACK ${Number(gateV2SkipMatch?.[1] ?? 0)}픽 전부 차단 · 정상적인 무추천 경기`
+                    : `OFFLINE · ${errorMessage}`,
                 savedAt:
                   Date.now(),
               },
@@ -15174,7 +15228,7 @@ export default function Home() {
         );
 
         setStatus(
-          `💾 ${datasetModeLabel} ${index + 1}/${entries.length} 완료 · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행 · SportsAPI 0회`
+          `💾 ${datasetModeLabel} ${index + 1}/${entries.length} 완료 · 성공 ${completed} · SKIP ${skipped} · 실패 ${failed} · Calibration ${batchRecords.length}행 · SportsAPI 0회`
         );
 
         // 다음 경기 전에 render/사용자 입력을 처리할 시간을 준다.
@@ -15250,7 +15304,7 @@ export default function Home() {
       });
 
       setStatus(
-        `✅ ${datasetModeLabel} 오프라인 ${entries.length}경기 완료 · 성공 ${completed} · 실패 ${failed} · Calibration ${batchRecords.length}행 · Gate V2 차단 ${fallbackGateBlocked}픽 · SportsAPI 호출 0회`
+        `✅ ${datasetModeLabel} 오프라인 ${entries.length}경기 완료 · 성공 ${completed} · SKIP ${skipped} · 실패 ${failed} · Calibration ${batchRecords.length}행 · Gate V2 차단 ${fallbackGateBlocked}픽 · SportsAPI 호출 0회`
       );
     } catch (error: any) {
       setBatchBacktest(
@@ -16816,6 +16870,7 @@ export default function Home() {
             <b>🧾 자동 백테스트 진단 로그</b>
             <span className="small">
               성공 {batchBacktestDiagnostics.filter((row) => row.status === "SUCCESS").length}
+              {" · "}SKIP {batchBacktestDiagnostics.filter((row) => row.status === "SKIP").length}
               {" · "}실패 {batchBacktestDiagnostics.filter((row) => row.status === "FAIL").length}
               {" · "}Calibration {batchBacktestDiagnostics.reduce((sum, row) => sum + row.calibrationRows, 0)}행
               {batchBacktestDiagnostics.some((row) => row.message.includes("API 일일 한도 소진"))
@@ -16959,7 +17014,7 @@ export default function Home() {
                         currentBatchPerformance.total.records <= 0
                       }
                     >
-                      현재 결과를 Baseline 저장
+                      Gate V2 결과를 Baseline 저장
                     </button>
 
                     {backtestBaseline && (
@@ -16975,7 +17030,7 @@ export default function Home() {
 
                 {!backtestBaseline ? (
                   <div className="small">
-                    현재 30경기 결과를 Baseline으로 저장한 뒤 모델을 수정하고 다시 오프라인 테스트하면 전/후 차이를 자동 비교합니다.
+                    현재 Gate V2 결과를 Baseline으로 저장한 뒤 이후 변경 결과와 전/후 차이를 자동 비교합니다.
                   </div>
                 ) : (
                   <>
@@ -17594,15 +17649,33 @@ export default function Home() {
               >
                 <b>#{row.index}</b>
                 <span>{row.gameNo}</span>
-                <b style={{color: row.status === "SUCCESS" ? "#15803d" : "#dc2626"}}>
-                  {row.status === "SUCCESS" ? "성공" : "실패"}
+                <b
+                  style={{
+                    color:
+                      row.status === "SUCCESS"
+                        ? "#15803d"
+                        : row.status === "SKIP"
+                          ? "#b45309"
+                          : "#dc2626",
+                  }}
+                >
+                  {row.status === "SUCCESS"
+                    ? "성공"
+                    : row.status === "SKIP"
+                      ? "SKIP"
+                      : "실패"}
                 </b>
                 <span>
                   {row.gameLabel}
                   {row.fixtureId !== null ? ` · F#${row.fixtureId}` : ""}
                 </span>
                 <span style={{
-                  color: row.status === "SUCCESS" ? "#166534" : "#991b1b",
+                  color:
+                    row.status === "SUCCESS"
+                      ? "#166534"
+                      : row.status === "SKIP"
+                        ? "#92400e"
+                        : "#991b1b",
                   overflowWrap: "anywhere",
                 }}>
                   {row.message}
