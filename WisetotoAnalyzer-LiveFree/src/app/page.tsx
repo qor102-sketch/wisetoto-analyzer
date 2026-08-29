@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_2_SOCCER_ALIAS_MATCH_20260829
+// DEPLOY_MARKER_V13_8_3_BATCH_ANALYSIS_PICK_COLORS_20260829
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -612,6 +612,7 @@ type LiveTrackerRecord = {
   id: string;
   fixtureId: number;
   fixtureKey: string;
+  betmanIdentity?: string;
   home: string;
   away: string;
   league: string;
@@ -1674,6 +1675,46 @@ function backtestMarketGroup(
   return "승패";
 }
 
+function friendlyMarketPickLabel(
+  market: string,
+  pick: string
+) {
+  const marketText = String(market ?? "").trim();
+  const pickText = String(pick ?? "").trim();
+  const group = backtestMarketGroup(marketText);
+  const lineMatch = marketText.match(/([+-]?\d+(?:\.\d+)?)/);
+  const line = lineMatch ? Number(lineMatch[1]) : null;
+  const signed = (value: number) =>
+    `${value > 0 ? "+" : ""}${Number.isInteger(value) ? value.toFixed(0) : value}`;
+
+  if (group === "핸디캡" && line !== null && Number.isFinite(line)) {
+    if (/원정|away/i.test(pickText)) {
+      return `핸디 ${signed(line)} 기준 → 원정 ${signed(-line)} 선택`;
+    }
+    if (/홈|home/i.test(pickText)) {
+      return `핸디 ${signed(line)} 기준 → 홈 ${signed(line)} 선택`;
+    }
+    return `핸디 ${signed(line)} 기준 → ${pickText}`;
+  }
+
+  if (group === "U/O") return `${marketText || "U/O"} → ${pickText}`;
+  if (group === "승1패") return `승1패 → ${pickText}`;
+
+  if (group === "승패") {
+    const normalized =
+      /^(승|홈|home)/i.test(pickText)
+        ? "홈 승"
+        : /^(무|draw|x)$/i.test(pickText)
+          ? "무승부"
+          : /^(패|원정|away)/i.test(pickText)
+            ? "원정 승"
+            : pickText;
+    return `승/무/패 → ${normalized}`;
+  }
+
+  return `${marketText} → ${pickText}`;
+}
+
 function isMarketFallbackRecord(
   row: SimpleBacktestRecord
 ) {
@@ -2586,6 +2627,28 @@ const SPORTS_API_TEAM_ALIASES: Record<string, string> = {
   "파지아노오카야마": "Fagiano Okayama",
   "산프레체히로시마": "Sanfrecce Hiroshima",
   "아비스파후쿠오카": "Avispa Fukuoka",
+
+  // V13.8.3 · NPB 12구단 direct alias
+  "요미우리자이언츠": "Yomiuri Giants",
+  "한신타이거즈": "Hanshin Tigers",
+  "주니치드래곤즈": "Chunichi Dragons",
+  "도쿄야쿠르트스왈로즈": "Tokyo Yakult Swallows",
+  "야쿠르트스왈로즈": "Tokyo Yakult Swallows",
+  "히로시마도요카프": "Hiroshima Toyo Carp",
+  "히로시마카프": "Hiroshima Toyo Carp",
+  "요코하마dena베이스타스": "Yokohama DeNA BayStars",
+  "요코하마베이스타스": "Yokohama DeNA BayStars",
+  "오릭스버팔로스": "Orix Buffaloes",
+  "지바롯데마린스": "Chiba Lotte Marines",
+  "소프트뱅크호크스": "Fukuoka SoftBank Hawks",
+  "후쿠오카소프트뱅크호크스": "Fukuoka SoftBank Hawks",
+  "라쿠텐골든이글스": "Tohoku Rakuten Golden Eagles",
+  "도호쿠라쿠텐골든이글스": "Tohoku Rakuten Golden Eagles",
+  "세이부라이온즈": "Saitama Seibu Lions",
+  "사이타마세이부라이온즈": "Saitama Seibu Lions",
+  "니혼햄파이터스": "Hokkaido Nippon-Ham Fighters",
+  "닛폰햄파이터스": "Hokkaido Nippon-Ham Fighters",
+  "홋카이도닛폰햄파이터스": "Hokkaido Nippon-Ham Fighters",
 };
 
 function sportsApiTeamName(value: unknown) {
@@ -10692,6 +10755,20 @@ type BatchBacktestDiagnostic = {
 };
 
 
+type LiveBatchAnalysisState = {
+  running: boolean;
+  gameKeys: string[];
+  index: number;
+  phase: "IDLE" | "SELECT" | "ANALYZE" | "WAIT";
+  completed: number;
+  failed: number;
+};
+
+type LiveBatchOutcome = {
+  status: "SUCCESS" | "FAIL";
+  message: string;
+};
+
 type BacktestBaselineSnapshot = {
   savedAt: number;
   gateVersion?: "FALLBACK_GATE_V2";
@@ -11463,6 +11540,21 @@ export default function Home() {
   const [betmanGames, setBetmanGames] = useState<BetmanMatch[]>([]);
   const [betmanDiagnostics, setBetmanDiagnostics] = useState<any>(null);
   const [selectedBetmanKey, setSelectedBetmanKey] = useState<string | null>(null);
+
+  const [liveBatchSelectedKeys, setLiveBatchSelectedKeys] =
+    useState<string[]>([]);
+  const [liveBatchAnalysis, setLiveBatchAnalysis] =
+    useState<LiveBatchAnalysisState>({
+      running: false,
+      gameKeys: [],
+      index: 0,
+      phase: "IDLE",
+      completed: 0,
+      failed: 0,
+    });
+  const [liveBatchOutcomes, setLiveBatchOutcomes] =
+    useState<Record<string, LiveBatchOutcome>>({});
+  const liveBatchWorkerRef = useRef(false);
 
   const [baseballSnapshots, setBaseballSnapshots] =
     useState<Record<string, BaseballAnalysisSnapshot[]>>({});
@@ -13428,6 +13520,8 @@ export default function Home() {
           (selectedBetman as any)?.key ??
           recordId
         ),
+        betmanIdentity:
+          actualGameIdentity(selectedBetman),
         home: String(
           selectedFixtureForTracker?.home ??
           selectedBetman?.home ??
@@ -16753,6 +16847,72 @@ export default function Home() {
     });
   }
 
+  function visibleGameKey(game: BetmanMatch) {
+    const index = visibleBetmanGames.indexOf(game);
+    return gameKey(game, index >= 0 ? index : 0);
+  }
+
+  function toggleLiveBatchSelection(key: string) {
+    if (liveBatchAnalysis.running) return;
+    setLiveBatchSelectedKeys((previous) =>
+      previous.includes(key)
+        ? previous.filter((value) => value !== key)
+        : [...previous, key]
+    );
+  }
+
+  function selectAllVisibleUpcomingGames() {
+    if (liveBatchAnalysis.running) return;
+
+    const now = Date.now();
+    const keys = filteredGames
+      .filter((game) => {
+        const startMs = gameTimeMs(game);
+        return Number.isFinite(startMs) && startMs > now;
+      })
+      .map((game) => visibleGameKey(game));
+
+    setLiveBatchSelectedKeys(keys);
+    setStatus(`실전 일괄 분석 · 현재 목록 경기 ${keys.length}개 선택`);
+  }
+
+  function clearLiveBatchSelection() {
+    if (liveBatchAnalysis.running) return;
+    setLiveBatchSelectedKeys([]);
+    setStatus("실전 일괄 분석 · 선택 해제");
+  }
+
+  function startLiveBatchAnalysis() {
+    if (loading || liveBatchAnalysis.running) return;
+
+    const now = Date.now();
+    const keys = liveBatchSelectedKeys.filter((key) => {
+      const game = visibleBetmanGames.find(
+        (candidate) => visibleGameKey(candidate) === key
+      );
+      if (!game) return false;
+      const startMs = gameTimeMs(game);
+      return Number.isFinite(startMs) && startMs > now;
+    });
+
+    if (!keys.length) {
+      setStatus("일괄 분석할 경기 시작 전 경기를 먼저 체크하세요.");
+      return;
+    }
+
+    liveBatchWorkerRef.current = false;
+    setLiveBatchOutcomes({});
+    setLiveBatchAnalysis({
+      running: true,
+      gameKeys: keys,
+      index: 0,
+      phase: "SELECT",
+      completed: 0,
+      failed: 0,
+    });
+    setStatus(`실전 일괄 분석 시작 · ${keys.length}경기 · 순차 처리`);
+  }
+
   function chooseGame(game: BetmanMatch, index: number) {
     const selectedTime =
       gameTimeMs(game);
@@ -17119,6 +17279,113 @@ export default function Home() {
   }
 
 
+  useEffect(() => {
+    if (!liveBatchAnalysis.running) {
+      liveBatchWorkerRef.current = false;
+      return;
+    }
+
+    const key = liveBatchAnalysis.gameKeys[liveBatchAnalysis.index];
+    if (!key) return;
+
+    const game = visibleBetmanGames.find(
+      (candidate) => visibleGameKey(candidate) === key
+    );
+
+    if (!game) {
+      setLiveBatchOutcomes((previous) => ({
+        ...previous,
+        [key]: {
+          status: "FAIL",
+          message: "목록에서 경기를 찾지 못했습니다.",
+        },
+      }));
+      setLiveBatchAnalysis((previous) => {
+        const nextIndex = previous.index + 1;
+        const done = nextIndex >= previous.gameKeys.length;
+        return {
+          ...previous,
+          failed: previous.failed + 1,
+          index: nextIndex,
+          phase: done ? "IDLE" : "SELECT",
+          running: !done,
+        };
+      });
+      return;
+    }
+
+    if (liveBatchAnalysis.phase === "SELECT") {
+      const index = visibleBetmanGames.indexOf(game);
+      chooseGame(game, index >= 0 ? index : 0);
+      setLiveBatchAnalysis((previous) => ({
+        ...previous,
+        phase: "ANALYZE",
+      }));
+      return;
+    }
+
+    if (
+      liveBatchAnalysis.phase !== "ANALYZE" ||
+      loading ||
+      selectedBetmanKey !== key ||
+      liveBatchWorkerRef.current
+    ) {
+      return;
+    }
+
+    liveBatchWorkerRef.current = true;
+    setLiveBatchAnalysis((previous) => ({
+      ...previous,
+      phase: "WAIT",
+    }));
+
+    void (async () => {
+      const success = await analyzeSelected();
+
+      setLiveBatchOutcomes((previous) => ({
+        ...previous,
+        [key]: {
+          status: success ? "SUCCESS" : "FAIL",
+          message: success ? "분석 완료" : "매칭/분석 실패",
+        },
+      }));
+
+      // LIVE TRACKER effect가 PRE를 저장하고 API 연속호출 압력을 낮출 시간.
+      await new Promise((resolve) =>
+        window.setTimeout(resolve, 1800)
+      );
+
+      liveBatchWorkerRef.current = false;
+
+      setLiveBatchAnalysis((previous) => {
+        const nextIndex = previous.index + 1;
+        const done = nextIndex >= previous.gameKeys.length;
+        const completed = previous.completed + (success ? 1 : 0);
+        const failed = previous.failed + (success ? 0 : 1);
+
+        if (done) {
+          setStatus(
+            `실전 일괄 분석 완료 · 성공 ${completed} · 실패 ${failed} · LIVE TRACKER PRE 자동 저장`
+          );
+        }
+
+        return {
+          ...previous,
+          completed,
+          failed,
+          index: nextIndex,
+          phase: done ? "IDLE" : "SELECT",
+          running: !done,
+        };
+      });
+    })();
+  }, [
+    liveBatchAnalysis,
+    loading,
+    selectedBetmanKey,
+    visibleBetmanGames,
+  ]);
+
   async function revealBacktestResult(): Promise<boolean> {
     if (!backtestMode || validationLoading || !actualMarketPicks.length) return false;
 
@@ -17175,6 +17442,11 @@ export default function Home() {
         .compactMarketRow{border-top:1px solid #edf1f6;font-size:10px;min-height:31px}
         .compactMarketRow:hover{background:#f7faff}.compactMarketRow.bestRow{background:#eaf8f0;box-shadow:inset 3px 0 0 var(--ui-green)}
         .cmName,.cmPick{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:850}.cmNum{text-align:right;font-variant-numeric:tabular-nums}.cmPos{color:var(--ui-green);font-weight:900}.cmNeg{color:var(--ui-red);font-weight:900}.cmGrade{display:inline-block;background:#edf2f7;border-radius:999px;padding:2px 5px;font-weight:900}
+        .livePickChip{display:inline-block;border-radius:999px;padding:3px 7px;margin:2px 3px 2px 0;font-size:9px;font-weight:950;line-height:1.25}
+        .livePickChip.value{background:#dcfce7;color:#087a39;border:1px solid #86efac}
+        .livePickChip.pass{background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1}
+        .livePickChip.fail{background:#fee2e2;color:#b42318;border:1px solid #fecaca}
+        .batchTools{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#f8fafc;border-top:1px solid var(--ui-line)}
         .quickStats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin:7px 0}
         .quickStat{background:#f8fafc;border:1px solid var(--ui-line);border-radius:9px;padding:6px 7px;min-width:0}.quickStat span{display:block;font-size:9px;color:var(--ui-muted);font-weight:800}.quickStat b{display:block;font-size:11px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         details.uiDetail{margin-top:7px;border:1px solid var(--ui-line);border-radius:10px;overflow:hidden;background:#fff}details.uiDetail>summary{cursor:pointer;padding:7px 9px;background:#f7f9fc;font-size:11px;font-weight:900;list-style:none}details.uiDetail>summary:after{content:"＋";float:right;color:var(--ui-blue)}details.uiDetail[open]>summary:after{content:"－"}.uiDetailBody{padding:8px}
@@ -18621,6 +18893,44 @@ export default function Home() {
             </div>
           )}
 
+          {!!filteredGames.length && !backtestMode && (
+            <div className="batchTools">
+              <button
+                className="btn light"
+                onClick={selectAllVisibleUpcomingGames}
+                disabled={liveBatchAnalysis.running}
+              >
+                ☑ 현재 목록 전체 선택
+              </button>
+              <button
+                className="btn light"
+                onClick={clearLiveBatchSelection}
+                disabled={liveBatchAnalysis.running}
+              >
+                ☐ 선택 해제
+              </button>
+              <button
+                className="btn primary"
+                onClick={startLiveBatchAnalysis}
+                disabled={
+                  loading ||
+                  liveBatchAnalysis.running ||
+                  liveBatchSelectedKeys.length === 0
+                }
+              >
+                {liveBatchAnalysis.running
+                  ? `⏳ 일괄 분석 ${Math.min(
+                      liveBatchAnalysis.index + 1,
+                      liveBatchAnalysis.gameKeys.length
+                    )}/${liveBatchAnalysis.gameKeys.length} · ✅${liveBatchAnalysis.completed} ❌${liveBatchAnalysis.failed}`
+                  : `▶ 선택 ${liveBatchSelectedKeys.length}경기 일괄 분석`}
+              </button>
+              <span className="small">
+                한 경기씩 순차 처리 · 1.8초 간격 · 실패 경기는 건너뜀 · PRE 최초 기록 유지
+              </span>
+            </div>
+          )}
+
           {!!filteredGames.length && (
             <div
               style={{
@@ -18648,7 +18958,7 @@ export default function Home() {
                     display:
                       "grid",
                     gridTemplateColumns:
-                      "58px 96px 92px 70px minmax(190px,1fr) 58px 58px 58px 58px",
+                      "34px 58px 96px 92px 70px minmax(190px,1fr) 116px 86px 86px minmax(190px,1.4fr) 58px",
                     minHeight:
                       34,
                     alignItems:
@@ -18669,6 +18979,7 @@ export default function Home() {
                       "1px solid #9aa6b2",
                   }}
                 >
+                  <div>선택</div>
                   <div>대표번호</div>
                   <div>일시</div>
                   <div>리그</div>
@@ -18677,7 +18988,8 @@ export default function Home() {
                   <div>주요배당</div>
                   <div>핸디</div>
                   <div>U/O</div>
-                  <div>선택</div>
+                  <div>분석 결과</div>
+                  <div>보기</div>
                 </div>
 
                 {filteredGames.map(
@@ -18685,10 +18997,15 @@ export default function Home() {
                     game,
                     gameIndex
                   ) => {
+                    const visibleIndex =
+                      visibleBetmanGames.indexOf(game);
+
                     const key =
                       gameKey(
                         game,
-                        gameIndex
+                        visibleIndex >= 0
+                          ? visibleIndex
+                          : gameIndex
                       );
 
                     const selected =
@@ -18721,6 +19038,21 @@ export default function Home() {
                           .match(/U\/O|(^|\s)U\s|언더|오버|total/i)
                       );
 
+                    const identity =
+                      actualGameIdentity(game);
+
+                    const trackerRecord =
+                      liveTrackerRecords.find(
+                        (record) =>
+                          record.betmanIdentity === identity
+                      ) ?? null;
+
+                    const batchOutcome =
+                      liveBatchOutcomes[key] ?? null;
+
+                    const batchChecked =
+                      liveBatchSelectedKeys.includes(key);
+
                     const oddsText = (row:any) => {
                       if (!row) return "-";
                       const values = [
@@ -18740,7 +19072,7 @@ export default function Home() {
                           display:
                             "grid",
                           gridTemplateColumns:
-                            "58px 96px 92px 70px minmax(190px,1fr) 116px 86px 86px 58px",
+                            "34px 58px 96px 92px 70px minmax(190px,1fr) 116px 86px 86px minmax(190px,1.4fr) 58px",
                           minHeight:
                             42,
                           alignItems:
@@ -18752,9 +19084,28 @@ export default function Home() {
                           background:
                             selected
                               ? "#e8f2ff"
-                              : "#fff",
+                              : batchOutcome?.status === "FAIL"
+                                ? "#fff5f5"
+                                : trackerRecord?.decision === "PICK"
+                                  ? "#f0fdf4"
+                                  : trackerRecord?.decision === "PASS"
+                                    ? "#f8fafc"
+                                    : "#fff",
                         }}
                       >
+                        <div>
+                          {!backtestMode ? (
+                            <input
+                              type="checkbox"
+                              checked={batchChecked}
+                              disabled={liveBatchAnalysis.running}
+                              onChange={() =>
+                                toggleLiveBatchSelection(key)
+                              }
+                              title="일괄 분석 대상 선택"
+                            />
+                          ) : null}
+                        </div>
                         <div>
                           {String(
                             firstRow?.gameNo ??
@@ -18799,16 +19150,44 @@ export default function Home() {
                         <div>
                           {(() => { const u = chooseBetmanTotal(game); return u ? `U/O ${u.line}` : "-"; })()}
                         </div>
+                        <div style={{ textAlign: "left", padding: "3px 5px" }}>
+                          {batchOutcome?.status === "FAIL" ? (
+                            <span className="livePickChip fail">
+                              매칭/분석 실패
+                            </span>
+                          ) : trackerRecord?.decision === "PICK" ? (
+                            <>
+                              {(trackerRecord.picks ?? []).slice(0, 4).map((pick) => (
+                                <span
+                                  className="livePickChip value"
+                                  key={`${trackerRecord.id}:${pick.key}`}
+                                  title={`모델 ${pick.probability.toFixed(1)}% · EV ${
+                                    pick.expectedValue === null
+                                      ? "-"
+                                      : `${pick.expectedValue >= 0 ? "+" : ""}${pick.expectedValue.toFixed(1)}%`
+                                  } · ${pick.grade}`}
+                                >
+                                  {friendlyMarketPickLabel(pick.market, pick.pick)}
+                                </span>
+                              ))}
+                            </>
+                          ) : trackerRecord?.decision === "PASS" ? (
+                            <span className="livePickChip pass">
+                              PASS · 가치픽 없음
+                            </span>
+                          ) : batchOutcome?.status === "SUCCESS" ? (
+                            <span className="livePickChip pass">
+                              분석 완료 · PRE 반영 중
+                            </span>
+                          ) : (
+                            <span className="small">미분석</span>
+                          )}
+                        </div>
                         <div>
                           <button
                             className="btn light"
                             onClick={() =>
-                              setSelectedBetmanKey(
-                                gameKey(
-                                  game,
-                                  gameIndex
-                                )
-                              )
+                              setSelectedBetmanKey(key)
                             }
                             style={{
                               padding:
@@ -18818,8 +19197,8 @@ export default function Home() {
                             }}
                           >
                             {selected
-                              ? "선택됨"
-                              : "경기전"}
+                              ? "보기중"
+                              : "보기"}
                           </button>
                         </div>
                       </div>
@@ -18858,7 +19237,7 @@ export default function Home() {
                 </div>
                 <div className="pickName">
                   {analysisFactors.hasRealData
-                    ? (bestActualPick ? `${bestActualPick.market} ${bestActualPick.pick}` : actualMarketPicks.length ? "가치픽 없음" : bestPick?.[1])
+                    ? (bestActualPick ? friendlyMarketPickLabel(bestActualPick.market, bestActualPick.pick) : actualMarketPicks.length ? "가치픽 없음" : bestPick?.[1])
                     : "분석 대기"}
                 </div>
                 <div className="pickPct">
@@ -18971,6 +19350,22 @@ export default function Home() {
               </div>
             )}
 
+            <div
+              className="notice"
+              style={{
+                margin: "0 0 7px",
+                background: "#f0fdf4",
+                border: "1px solid #bbf7d0",
+                color: "#166534",
+              }}
+            >
+              <b>표시 읽는 법</b>
+              {" · "}초록 = 실제 가치 추천
+              {" · "}회색 PASS = 분석했지만 베팅 기준 미달
+              {" · "}핸디는 `Betman 홈 기준 → 실제 선택팀 라인`으로 표시합니다.
+              예: <b>핸디 -2.5 기준 → 원정 +2.5 선택</b>
+            </div>
+
             <div className="analysisTitleRow">
               <h3>게임유형별 분석 요약</h3>
               <div className="legend">
@@ -18991,7 +19386,22 @@ export default function Home() {
                     return (
                       <div className={`compactMarketRow ${isBest ? "bestRow" : ""}`} key={pick.key} title={`${pick.detail} · 홈팀 기준 핸디 · 원모델 ${pick.rawProbability.toFixed(1)}% · 데이터보정 ${pick.preProbabilityBefore === null || pick.preProbabilityBefore === undefined ? pick.probability.toFixed(1) : pick.preProbabilityBefore.toFixed(1)}% · 최종 ${pick.probability.toFixed(1)}% · EV ${pick.expectedValue === null ? "-" : pick.expectedValue.toFixed(1) + "%"} · ${pick.valueGrade} · ${pick.valueGradeReason}`}>
                         <div className="cmName">{pick.market}</div>
-                        <div className="cmPick">{pick.pick}</div>
+                        <div
+                          className="cmPick"
+                          style={{
+                            color:
+                              pick.valueGrade === "STRONG VALUE" ||
+                              pick.valueGrade === "VALUE"
+                                ? "#087a39"
+                                : pick.valueGrade === "WATCH"
+                                  ? "#9a6200"
+                                  : "#64748b",
+                            fontWeight: 950,
+                          }}
+                          title={friendlyMarketPickLabel(pick.market, pick.pick)}
+                        >
+                          {friendlyMarketPickLabel(pick.market, pick.pick)}
+                        </div>
                         <div className="cmNum"><b>{pick.probability.toFixed(1)}%</b></div>
                         <div className="cmNum">{pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`}</div>
                         <div className={`cmNum ${pick.edge !== null && pick.edge >= 0 ? "cmPos" : "cmNeg"}`}>{pick.edge === null ? "-" : `${pick.edge >= 0 ? "+" : ""}${pick.edge.toFixed(1)}`}</div>
