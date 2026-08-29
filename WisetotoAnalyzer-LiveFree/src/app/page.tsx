@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_3_BATCH_ANALYSIS_PICK_COLORS_20260829
+// DEPLOY_MARKER_V13_8_4_COMPACT_BETMAN_RESULT_BADGES_20260829
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -1673,6 +1673,78 @@ function backtestMarketGroup(
   }
 
   return "승패";
+}
+
+function compactBetmanPickLabel(
+  market: string,
+  pick: string
+) {
+  const marketText = String(market ?? "").trim();
+  const pickText = String(pick ?? "").trim();
+  const group = backtestMarketGroup(marketText);
+
+  const isHome =
+    /^(승|홈|home)/i.test(pickText) ||
+    /홈\s*승/i.test(pickText);
+
+  const isAway =
+    /^(패|원정|away)/i.test(pickText) ||
+    /원정\s*승/i.test(pickText);
+
+  const isDraw =
+    /^(무|draw|x)$/i.test(pickText) ||
+    /무승부/i.test(pickText);
+
+  if (group === "핸디캡") {
+    if (isHome) return "핸디승";
+    if (isDraw) return "핸디무";
+    if (isAway) return "핸디패";
+    if (/승/i.test(pickText) && !/패/i.test(pickText)) return "핸디승";
+    if (/무/i.test(pickText)) return "핸디무";
+    if (/패/i.test(pickText)) return "핸디패";
+    return `핸디 ${pickText}`;
+  }
+
+  if (group === "U/O") {
+    if (/over|오버/i.test(pickText)) return "오버";
+    if (/under|언더/i.test(pickText)) return "언더";
+    return pickText;
+  }
+
+  if (group === "SUM") {
+    if (/odd|홀/i.test(pickText)) return "홀";
+    if (/even|짝/i.test(pickText)) return "짝";
+    return pickText;
+  }
+
+  if (group === "승1패") {
+    if (isHome) return "승";
+    if (isDraw) return "1";
+    if (isAway) return "패";
+    if (/^1$/.test(pickText)) return "1";
+    return pickText;
+  }
+
+  if (group === "승패") {
+    if (isHome) return "승";
+    if (isDraw) return "무";
+    if (isAway) return "패";
+    return pickText;
+  }
+
+  return pickText || "-";
+}
+
+function compactBetmanPickTone(
+  market: string,
+  pick: string
+) {
+  const label = compactBetmanPickLabel(market, pick);
+
+  if (/오버|짝|핸디패|패$/.test(label)) return "red";
+  if (/언더|홀|핸디승|승$/.test(label)) return "blue";
+  if (/무|^1$/.test(label)) return "gray";
+  return "green";
 }
 
 function friendlyMarketPickLabel(
@@ -17442,10 +17514,15 @@ export default function Home() {
         .compactMarketRow{border-top:1px solid #edf1f6;font-size:10px;min-height:31px}
         .compactMarketRow:hover{background:#f7faff}.compactMarketRow.bestRow{background:#eaf8f0;box-shadow:inset 3px 0 0 var(--ui-green)}
         .cmName,.cmPick{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:850}.cmNum{text-align:right;font-variant-numeric:tabular-nums}.cmPos{color:var(--ui-green);font-weight:900}.cmNeg{color:var(--ui-red);font-weight:900}.cmGrade{display:inline-block;background:#edf2f7;border-radius:999px;padding:2px 5px;font-weight:900}
-        .livePickChip{display:inline-block;border-radius:999px;padding:3px 7px;margin:2px 3px 2px 0;font-size:9px;font-weight:950;line-height:1.25}
-        .livePickChip.value{background:#dcfce7;color:#087a39;border:1px solid #86efac}
+        .livePickChip{display:inline-block;border-radius:4px;padding:4px 8px;margin:2px 3px 2px 0;font-size:10px;font-weight:950;line-height:1.15;min-width:42px;text-align:center}
+        .livePickChip.value{box-shadow:inset 0 0 0 1px rgba(255,255,255,.25)}
+        .livePickChip.value.blue{background:#0b69a3;color:#fff;border:1px solid #075985}
+        .livePickChip.value.red{background:#d90404;color:#fff;border:1px solid #b91c1c}
+        .livePickChip.value.gray{background:#666;color:#fff;border:1px solid #4b5563}
+        .livePickChip.value.green{background:#07884a;color:#fff;border:1px solid #04743f}
         .livePickChip.pass{background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1}
         .livePickChip.fail{background:#fee2e2;color:#b42318;border:1px solid #fecaca}
+        .livePickMeta{display:block;font-size:8px;color:#64748b;margin-top:2px;font-weight:800}
         .batchTools{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#f8fafc;border-top:1px solid var(--ui-line)}
         .quickStats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin:7px 0}
         .quickStat{background:#f8fafc;border:1px solid var(--ui-line);border-radius:9px;padding:6px 7px;min-width:0}.quickStat span{display:block;font-size:9px;color:var(--ui-muted);font-weight:800}.quickStat b{display:block;font-size:11px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -19153,31 +19230,64 @@ export default function Home() {
                         <div style={{ textAlign: "left", padding: "3px 5px" }}>
                           {batchOutcome?.status === "FAIL" ? (
                             <span className="livePickChip fail">
-                              매칭/분석 실패
+                              실패
                             </span>
                           ) : trackerRecord?.decision === "PICK" ? (
                             <>
-                              {(trackerRecord.picks ?? []).slice(0, 4).map((pick) => (
-                                <span
-                                  className="livePickChip value"
-                                  key={`${trackerRecord.id}:${pick.key}`}
-                                  title={`모델 ${pick.probability.toFixed(1)}% · EV ${
-                                    pick.expectedValue === null
-                                      ? "-"
-                                      : `${pick.expectedValue >= 0 ? "+" : ""}${pick.expectedValue.toFixed(1)}%`
-                                  } · ${pick.grade}`}
-                                >
-                                  {friendlyMarketPickLabel(pick.market, pick.pick)}
-                                </span>
-                              ))}
+                              {(trackerRecord.picks ?? []).slice(0, 5).map((pick) => {
+                                const compactLabel =
+                                  compactBetmanPickLabel(
+                                    pick.market,
+                                    pick.pick
+                                  );
+                                const tone =
+                                  compactBetmanPickTone(
+                                    pick.market,
+                                    pick.pick
+                                  );
+                                const marketGroup =
+                                  backtestMarketGroup(
+                                    pick.market
+                                  );
+
+                                return (
+                                  <span
+                                    key={`${trackerRecord.id}:${pick.key}`}
+                                    style={{
+                                      display: "inline-block",
+                                      marginRight: 4,
+                                      marginBottom: 3,
+                                    }}
+                                    title={`${friendlyMarketPickLabel(
+                                      pick.market,
+                                      pick.pick
+                                    )} · 모델 ${pick.probability.toFixed(1)}% · EV ${
+                                      pick.expectedValue === null
+                                        ? "-"
+                                        : `${pick.expectedValue >= 0 ? "+" : ""}${pick.expectedValue.toFixed(1)}%`
+                                    } · ${pick.grade}`}
+                                  >
+                                    <span
+                                      className={`livePickChip value ${tone}`}
+                                    >
+                                      {compactLabel}
+                                    </span>
+                                    <span className="livePickMeta">
+                                      {marketGroup}
+                                      {" · "}
+                                      {pick.probability.toFixed(1)}%
+                                    </span>
+                                  </span>
+                                );
+                              })}
                             </>
                           ) : trackerRecord?.decision === "PASS" ? (
                             <span className="livePickChip pass">
-                              PASS · 가치픽 없음
+                              PASS
                             </span>
                           ) : batchOutcome?.status === "SUCCESS" ? (
                             <span className="livePickChip pass">
-                              분석 완료 · PRE 반영 중
+                              완료
                             </span>
                           ) : (
                             <span className="small">미분석</span>
@@ -19237,7 +19347,7 @@ export default function Home() {
                 </div>
                 <div className="pickName">
                   {analysisFactors.hasRealData
-                    ? (bestActualPick ? friendlyMarketPickLabel(bestActualPick.market, bestActualPick.pick) : actualMarketPicks.length ? "가치픽 없음" : bestPick?.[1])
+                    ? (bestActualPick ? `${backtestMarketGroup(bestActualPick.market)} · ${compactBetmanPickLabel(bestActualPick.market, bestActualPick.pick)}` : actualMarketPicks.length ? "가치픽 없음" : bestPick?.[1])
                     : "분석 대기"}
                 </div>
                 <div className="pickPct">
@@ -19360,10 +19470,10 @@ export default function Home() {
               }}
             >
               <b>표시 읽는 법</b>
-              {" · "}초록 = 실제 가치 추천
+              {" · "}결과는 전부 홈팀 기준
+              {" · "}<b>승/무/패 · 핸디승/핸디무/핸디패 · 오버/언더 · 홀/짝</b>
+              {" · "}진한 색 = 실제 가치 추천
               {" · "}회색 PASS = 분석했지만 베팅 기준 미달
-              {" · "}핸디는 `Betman 홈 기준 → 실제 선택팀 라인`으로 표시합니다.
-              예: <b>핸디 -2.5 기준 → 원정 +2.5 선택</b>
             </div>
 
             <div className="analysisTitleRow">
@@ -19388,19 +19498,25 @@ export default function Home() {
                         <div className="cmName">{pick.market}</div>
                         <div
                           className="cmPick"
-                          style={{
-                            color:
+                          title={friendlyMarketPickLabel(pick.market, pick.pick)}
+                          style={{ overflow: "visible" }}
+                        >
+                          <span
+                            className={`livePickChip ${
                               pick.valueGrade === "STRONG VALUE" ||
                               pick.valueGrade === "VALUE"
-                                ? "#087a39"
-                                : pick.valueGrade === "WATCH"
-                                  ? "#9a6200"
-                                  : "#64748b",
-                            fontWeight: 950,
-                          }}
-                          title={friendlyMarketPickLabel(pick.market, pick.pick)}
-                        >
-                          {friendlyMarketPickLabel(pick.market, pick.pick)}
+                                ? `value ${compactBetmanPickTone(
+                                    pick.market,
+                                    pick.pick
+                                  )}`
+                                : "pass"
+                            }`}
+                          >
+                            {compactBetmanPickLabel(
+                              pick.market,
+                              pick.pick
+                            )}
+                          </span>
                         </div>
                         <div className="cmNum"><b>{pick.probability.toFixed(1)}%</b></div>
                         <div className="cmNum">{pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`}</div>
