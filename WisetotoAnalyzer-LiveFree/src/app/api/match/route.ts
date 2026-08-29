@@ -1,4 +1,5 @@
-// DEPLOY_MARKER_V13_4_6_PROPAGATE_RATE_LIMIT_20260827
+// DEPLOY_MARKER_V13_7_6_PAST_FIXTURE_PAGINATION_20260829
+// DEPLOY_MARKER_V12_9_STARTER_BAYESIAN_20260825
 // WISETOTO_MATCH_SELECTED_V1_20260823
 const BASE = "https://api.sportsapi.app/v2";
 
@@ -45,70 +46,6 @@ let lastRequestAt = 0;
  * 프로세스 내부에서도 기억합니다.
  */
 let rateLimitBlockedUntil = 0;
-
-const SEARCH_CACHE_TTL_MS =
-  24 * 60 * 60 * 1000;
-
-const FIXTURE_CACHE_TTL_MS =
-  30 * 60 * 1000;
-
-type CacheEntry<T> = {
-  value: T;
-  expiresAt: number;
-};
-
-const searchCache =
-  new Map<
-    string,
-    CacheEntry<any>
-  >();
-
-const teamFixtureCache =
-  new Map<
-    string,
-    CacheEntry<{
-      fixtures: AnyObj[];
-      debug: AnyObj[];
-    }>
-  >();
-
-function cacheGet<T>(
-  map: Map<string, CacheEntry<T>>,
-  key: string
-): T | null {
-  const entry =
-    map.get(key);
-
-  if (!entry) {
-    return null;
-  }
-
-  if (
-    entry.expiresAt <=
-    Date.now()
-  ) {
-    map.delete(key);
-    return null;
-  }
-
-  return entry.value;
-}
-
-function cacheSet<T>(
-  map: Map<string, CacheEntry<T>>,
-  key: string,
-  value: T,
-  ttlMs: number
-) {
-  map.set(
-    key,
-    {
-      value,
-      expiresAt:
-        Date.now() + ttlMs,
-    }
-  );
-}
 
 function arr(x: any): any[] {
   if (Array.isArray(x)) return x;
@@ -702,8 +639,10 @@ async function discoverTeams(
   ) {
     try {
       const result =
-        await cachedTeamSearch(
-          query,
+        await api(
+          `/search?q=${encodeURIComponent(
+            query
+          )}`,
           key
         );
 
@@ -803,94 +742,191 @@ async function discoverTeams(
 async function getTeamFixtures(
   teamId: number,
   key: string,
-  type: "recent" | "upcoming" = "upcoming"
-) {
-  const cacheKey =
-    `${teamId}|${type}`;
-
-  const cached =
-    cacheGet(
-      teamFixtureCache,
-      cacheKey
-    );
-
-  if (cached) {
-    return {
-      fixtures:
-        cached.fixtures,
-      debug: [
-        {
-          cacheHit: true,
-          teamId,
-          type,
-          count:
-            cached.fixtures.length,
-        },
-        ...cached.debug,
-      ],
-    };
+  type: "recent" | "upcoming" = "upcoming",
+  options?: {
+    targetTimeMs?: number | null;
+    maxPages?: number;
   }
-
+) {
   const debug: AnyObj[] = [];
+  const fixtures: AnyObj[] = [];
 
-  try {
-    const result =
-      await api(
-        `/teams/${teamId}/fixtures?type=${type}&page=0`,
-        key
+  const targetTimeMs =
+    Number.isFinite(Number(options?.targetTimeMs))
+      ? Number(options?.targetTimeMs)
+      : null;
+
+  /*
+   * upcoming은 기존처럼 page=0 한 번만 조회한다.
+   * recent는 과거 백테스트 날짜가 page=0의 최근 30경기보다 오래될 수 있으므로
+   * 목표 경기시각을 찾을 때까지만 페이지를 뒤로 넘긴다.
+   *
+   * SportsAPI 호출량 보호:
+   * - 기본 recent 최대 4페이지
+   * - selected backtest는 호출부에서 최대 6페이지 허용
+   * - 목표 날짜보다 충분히 오래된 fixture가 나오면 즉시 중단
+   */
+  const maxPages =
+    type === "recent"
+      ? Math.max(
+          1,
+          Math.min(
+            6,
+            Number(options?.maxPages ?? 4)
+          )
+        )
+      : 1;
+
+  for (
+    let page = 0;
+    page < maxPages;
+    page += 1
+  ) {
+    try {
+      const result =
+        await api(
+          `/teams/${teamId}/fixtures?type=${type}&page=${page}`,
+          key
+        );
+
+      const pageFixtures =
+        arr(result.data);
+
+      fixtures.push(
+        ...pageFixtures
       );
 
-    const fixtures =
-      arr(result.data);
+      const pageTimes =
+        pageFixtures
+          .map(
+            (fixture: AnyObj) =>
+              new Date(
+                summarizeFixture(
+                  fixture
+                ).startTime
+              ).getTime()
+          )
+          .filter(
+            (value: number) =>
+              Number.isFinite(
+                value
+              )
+          );
 
-    debug.push({
-      page: 0,
-      ok: true,
-      count:
-        fixtures.length,
-      cacheHit: false,
-      rateLimit:
-        result.headers,
-    });
+      const newestTime =
+        pageTimes.length
+          ? Math.max(
+              ...pageTimes
+            )
+          : null;
 
-    const value = {
-      fixtures,
-      debug,
-    };
+      const oldestTime =
+        pageTimes.length
+          ? Math.min(
+              ...pageTimes
+            )
+          : null;
 
-    cacheSet(
-      teamFixtureCache,
-      cacheKey,
-      value,
-      FIXTURE_CACHE_TTL_MS
-    );
+      debug.push({
+        page,
+        ok: true,
+        count:
+          pageFixtures.length,
+        newestTime:
+          newestTime === null
+            ? null
+            : new Date(
+                newestTime
+              ).toISOString(),
+        oldestTime:
+          oldestTime === null
+            ? null
+            : new Date(
+                oldestTime
+              ).toISOString(),
+        targetTime:
+          targetTimeMs === null
+            ? null
+            : new Date(
+                targetTimeMs
+              ).toISOString(),
+        rateLimit:
+          result.headers,
+      });
 
-    return value;
-  } catch (e: any) {
-    debug.push({
-      page: 0,
-      ok: false,
-      count: 0,
-      cacheHit: false,
-      error:
-        e?.message ||
-        "fixture 조회 실패",
-      status:
-        e?.status ??
-        null,
-      retryAfterMs:
-        e?.retryAfterMs ??
-        null,
-      rateLimit:
-        e?.rateLimit ??
-        null,
-    });
+      /*
+       * 빈 페이지면 더 이상 과거 fixture가 없다.
+       */
+      if (
+        pageFixtures.length === 0
+      ) {
+        break;
+      }
 
-    return {
-      fixtures: [],
-      debug,
-    };
+      /*
+       * 과거 fixture는 보통 최신 → 과거 순이다.
+       * 현재 페이지의 가장 오래된 경기가 목표시각보다 12시간 이상 과거라면
+       * 목표 날짜 구간을 이미 통과한 것이므로 추가 API 호출을 중단한다.
+       *
+       * 12시간 여유는 SportsAPI/Betman 시간대 표기 차이를 흡수하기 위한 범위다.
+       */
+      if (
+        type === "recent" &&
+        targetTimeMs !== null &&
+        oldestTime !== null &&
+        oldestTime <
+          targetTimeMs -
+            12 *
+              60 *
+              60 *
+              1000
+      ) {
+        break;
+      }
+
+      /*
+       * page 크기보다 적게 반환되면 다음 페이지가 없다고 본다.
+       */
+      if (
+        pageFixtures.length <
+        30
+      ) {
+        break;
+      }
+    } catch (e: any) {
+      debug.push({
+        page,
+        ok: false,
+        count: 0,
+        error:
+          e?.message ||
+          "fixture 조회 실패",
+        status:
+          e?.status ??
+          null,
+        retryAfterMs:
+          e?.retryAfterMs ??
+          null,
+        rateLimit:
+          e?.rateLimit ??
+          null,
+      });
+
+      /*
+       * rate limit은 즉시 중단.
+       * 그 외 페이지 오류도 뒤 페이지 연속 호출을 하지 않는다.
+       */
+      break;
+    }
   }
+
+  return {
+    fixtures:
+      uniqueFixtures(
+        fixtures
+      ),
+    debug,
+  };
 }
 
 async function getUpcoming(
@@ -1355,7 +1391,6 @@ const TEAM_SEARCH_ALIASES: Record<string, string[]> = {
 
   "롯데": ["Lotte Giants", "Lotte", "Lotte Giants Baseball Club"],
   "롯데자이언츠": ["Lotte Giants", "Lotte", "Lotte Giants Baseball Club"],
-  "lottegiants": ["Lotte Giants", "Lotte", "Lotte Giants Baseball Club"],
 
   "삼성": ["Samsung Lions", "Samsung", "Samsung Lions Baseball Club"],
   "삼성라이온즈": ["Samsung Lions", "Samsung", "Samsung Lions Baseball Club"],
@@ -1370,7 +1405,6 @@ const TEAM_SEARCH_ALIASES: Record<string, string[]> = {
 
   "kia": ["KIA Tigers", "Kia Tigers", "KIA Tigers Baseball Club", "KIA"],
   "kia타이거즈": ["KIA Tigers", "Kia Tigers", "KIA Tigers Baseball Club", "KIA"],
-  "kiatigers": ["KIA Tigers", "Kia Tigers", "KIA Tigers Baseball Club", "KIA"],
   "기아": ["KIA Tigers", "Kia Tigers", "KIA Tigers Baseball Club", "KIA"],
   "기아타이거즈": ["KIA Tigers", "Kia Tigers", "KIA Tigers Baseball Club", "KIA"],
 
@@ -1379,53 +1413,6 @@ const TEAM_SEARCH_ALIASES: Record<string, string[]> = {
 
   "키움": ["Kiwoom Heroes", "Kiwoom", "Kiwoom Heroes Baseball Club"],
   "키움히어로즈": ["Kiwoom Heroes", "Kiwoom", "Kiwoom Heroes Baseball Club"],
-
-  // NPB
-  "지바롯데마린스": ["Chiba Lotte Marines", "Lotte Marines", "Chiba Lotte", "Marines"],
-  "chibalottemarines": ["Chiba Lotte Marines", "Lotte Marines", "Chiba Lotte", "Marines"],
-  "소프트뱅크호크스": ["Fukuoka SoftBank Hawks", "SoftBank Hawks", "Softbank Hawks", "Fukuoka Softbank Hawks", "Hawks"],
-  "fuku오카소프트뱅크호크스": ["Fukuoka SoftBank Hawks", "SoftBank Hawks", "Softbank Hawks", "Fukuoka Softbank Hawks", "Hawks"],
-  "fukuokasoftbankhawks": ["Fukuoka SoftBank Hawks", "SoftBank Hawks", "Softbank Hawks", "Fukuoka Softbank Hawks", "Hawks"],
-  "softbankhawks": ["Fukuoka SoftBank Hawks", "SoftBank Hawks", "Softbank Hawks", "Fukuoka Softbank Hawks", "Hawks"],
-
-  "닛폰햄파이터스": ["Hokkaido Nippon-Ham Fighters", "Nippon Ham Fighters", "Nippon-Ham Fighters", "Fighters"],
-  "홋카이도닛폰햄파이터스": ["Hokkaido Nippon-Ham Fighters", "Nippon Ham Fighters", "Nippon-Ham Fighters", "Fighters"],
-  "hokkaidonipponhamfighters": ["Hokkaido Nippon-Ham Fighters", "Nippon Ham Fighters", "Nippon-Ham Fighters", "Fighters"],
-  "nipponhamfighters": ["Hokkaido Nippon-Ham Fighters", "Nippon Ham Fighters", "Nippon-Ham Fighters", "Fighters"],
-
-  "라쿠텐골든이글스": ["Tohoku Rakuten Golden Eagles", "Rakuten Golden Eagles", "Rakuten Eagles", "Golden Eagles"],
-  "도호쿠라쿠텐골든이글스": ["Tohoku Rakuten Golden Eagles", "Rakuten Golden Eagles", "Rakuten Eagles", "Golden Eagles"],
-  "tohokurakutengoldeneagles": ["Tohoku Rakuten Golden Eagles", "Rakuten Golden Eagles", "Rakuten Eagles", "Golden Eagles"],
-  "rakutengoldeneagles": ["Tohoku Rakuten Golden Eagles", "Rakuten Golden Eagles", "Rakuten Eagles", "Golden Eagles"],
-
-  "세이부라이온즈": ["Saitama Seibu Lions", "Seibu Lions", "Lions"],
-  "사이타마세이부라이온즈": ["Saitama Seibu Lions", "Seibu Lions", "Lions"],
-  "saitamaseibulions": ["Saitama Seibu Lions", "Seibu Lions", "Lions"],
-  "seibulions": ["Saitama Seibu Lions", "Seibu Lions", "Lions"],
-
-  "오릭스버팔로즈": ["Orix Buffaloes", "ORIX Buffaloes", "Buffaloes"],
-  "orixbuffaloes": ["Orix Buffaloes", "ORIX Buffaloes", "Buffaloes"],
-
-  "요미우리자이언츠": ["Yomiuri Giants", "Giants"],
-  "yomiurigiants": ["Yomiuri Giants", "Giants"],
-
-  "한신타이거즈": ["Hanshin Tigers", "Tigers"],
-  "hanshintigers": ["Hanshin Tigers", "Tigers"],
-
-  "히로시마도요카프": ["Hiroshima Toyo Carp", "Hiroshima Carp", "Carp"],
-  "hiroshimatoyocarp": ["Hiroshima Toyo Carp", "Hiroshima Carp", "Carp"],
-
-  "주니치드래곤즈": ["Chunichi Dragons", "Dragons"],
-  "chunichidragons": ["Chunichi Dragons", "Dragons"],
-
-  "야쿠르트스왈로즈": ["Tokyo Yakult Swallows", "Yakult Swallows", "Swallows"],
-  "도쿄야쿠르트스왈로즈": ["Tokyo Yakult Swallows", "Yakult Swallows", "Swallows"],
-  "tokyoyakultswallows": ["Tokyo Yakult Swallows", "Yakult Swallows", "Swallows"],
-
-  "요코하마dena베이스타스": ["Yokohama DeNA BayStars", "Yokohama BayStars", "DeNA BayStars", "BayStars"],
-  "요코하마디엔에이베이스타스": ["Yokohama DeNA BayStars", "Yokohama BayStars", "DeNA BayStars", "BayStars"],
-  "yokohamadenabaystars": ["Yokohama DeNA BayStars", "Yokohama BayStars", "DeNA BayStars", "BayStars"],
-
 
   // K League
   "대전하나시티즌": ["Daejeon Hana Citizen", "Daejeon Citizen"],
@@ -1456,23 +1443,9 @@ const TEAM_SEARCH_ALIASES: Record<string, string[]> = {
 };
 
 function teamAliases(name: string) {
-  const normalized =
-    normalizeMatchName(name);
-
-  const aliases =
-    TEAM_SEARCH_ALIASES[
-      normalized
-    ] ??
-    [];
-
-  return Array.from(
-    new Set(
-      [
-        name,
-        ...aliases,
-      ].filter(Boolean)
-    )
-  );
+  const normalized = normalizeMatchName(name);
+  const aliases = TEAM_SEARCH_ALIASES[normalized] ?? [];
+  return [name, ...aliases].filter(Boolean);
 }
 
 function searchQueryForTeam(name: string, aliases: string[]) {
@@ -1542,8 +1515,9 @@ function fixtureMatchScore(
       : 999999;
 
   // 선택 경기 매칭은 시간도 강한 조건으로 사용한다.
-  // 6시간 이상 다르면 같은 경기 후보에서 제외한다.
-  if (timeDiffMinutes > 360) {
+  // 과거 Betman/SportsAPI 시간대 표기 차이를 고려해 최대 12시간까지만 허용한다.
+  // 양 팀 이름 유사도 조건은 그대로 유지되므로 날짜만 비슷한 다른 경기는 통과하지 않는다.
+  if (timeDiffMinutes > 720) {
     return { score: 0, timeDiffMinutes, direct, reverse };
   }
 
@@ -1562,50 +1536,6 @@ function fixtureMatchScore(
     direct,
     reverse,
   };
-}
-
-async function cachedTeamSearch(
-  query: string,
-  key: string
-) {
-  const cacheKey =
-    normalizeMatchName(query);
-
-  const cached =
-    cacheGet(
-      searchCache,
-      cacheKey
-    );
-
-  if (cached) {
-    return {
-      ...cached,
-      cacheHit: true,
-    };
-  }
-
-  const result =
-    await api(
-      `/search?q=${encodeURIComponent(
-        query
-      )}`,
-      key
-    );
-
-  const value = {
-    data: result.data,
-    headers: result.headers,
-    cacheHit: false,
-  };
-
-  cacheSet(
-    searchCache,
-    cacheKey,
-    value,
-    SEARCH_CACHE_TTL_MS
-  );
-
-  return value;
 }
 
 async function findSportsFixtureForBetman(
@@ -1645,11 +1575,10 @@ async function findSportsFixtureForBetman(
     let searchResult: any;
 
     try {
-      searchResult =
-        await cachedTeamSearch(
-          plan.query,
-          key
-        );
+      searchResult = await api(
+        `/search?q=${encodeURIComponent(plan.query)}`,
+        key
+      );
     } catch (e: any) {
       debug.push({
         stage: "search",
@@ -1690,10 +1619,6 @@ async function findSportsFixtureForBetman(
         sport: x?.sport ?? null,
       })),
       rateLimit: searchResult.headers,
-      cacheHit:
-        Boolean(
-          searchResult.cacheHit
-        ),
     });
 
     if (!chosen) continue;
@@ -1709,7 +1634,19 @@ async function findSportsFixtureForBetman(
     const fixtureType: "recent" | "upcoming" =
       isPastSelectedGame ? "recent" : "upcoming";
 
-    const teamFixtures = await getTeamFixtures(teamId, key, fixtureType);
+    const teamFixtures =
+      await getTeamFixtures(
+        teamId,
+        key,
+        fixtureType,
+        fixtureType === "recent"
+          ? {
+              targetTimeMs:
+                betmanTime,
+              maxPages: 6,
+            }
+          : undefined
+      );
     const fixtures =
       fixtureType === "upcoming"
         ? teamFixtures.fixtures.filter(isFutureNotStartedFixture)
@@ -2995,115 +2932,6 @@ async function getNaverPregameLineups(args: {
   };
 }
 
-function findNestedApiLimit(
-  value: any
-): {
-  status: number;
-  error: string;
-  retryAfterMs: number | null;
-} | null {
-  const seen =
-    new Set<any>();
-
-  function walk(
-    node: any,
-    depth = 0
-  ): {
-    status: number;
-    error: string;
-    retryAfterMs: number | null;
-  } | null {
-    if (
-      node === null ||
-      node === undefined ||
-      depth > 7
-    ) {
-      return null;
-    }
-
-    if (
-      typeof node !== "object"
-    ) {
-      return null;
-    }
-
-    if (seen.has(node)) {
-      return null;
-    }
-
-    seen.add(node);
-
-    const status =
-      Number(
-        node?.status ??
-        node?.httpStatus
-      );
-
-    const error =
-      String(
-        node?.error ??
-        node?.message ??
-        ""
-      );
-
-    if (
-      status === 429 ||
-      /rate limit|daily quota|too many requests/i.test(
-        error
-      )
-    ) {
-      return {
-        status: 429,
-        error:
-          error ||
-          "SportsAPI rate limit exceeded",
-        retryAfterMs:
-          Number.isFinite(
-            Number(
-              node?.retryAfterMs
-            )
-          )
-            ? Number(
-                node.retryAfterMs
-              )
-            : null,
-      };
-    }
-
-    if (Array.isArray(node)) {
-      for (const item of node) {
-        const found =
-          walk(
-            item,
-            depth + 1
-          );
-        if (found) {
-          return found;
-        }
-      }
-      return null;
-    }
-
-    for (
-      const key
-      of Object.keys(node)
-    ) {
-      const found =
-        walk(
-          node[key],
-          depth + 1
-        );
-      if (found) {
-        return found;
-      }
-    }
-
-    return null;
-  }
-
-  return walk(value);
-}
-
 async function runSelectedMode(
   req: Request,
   key: string
@@ -3126,56 +2954,6 @@ async function runSelectedMode(
   }, key);
 
   if (!result.fixture) {
-    const apiLimit =
-      findNestedApiLimit(
-        result.debug
-      );
-
-    if (apiLimit) {
-      return Response.json(
-        {
-          ok: false,
-          mode: "selected",
-          matched: false,
-          error:
-            apiLimit.error,
-          retryAfterMs:
-            apiLimit.retryAfterMs,
-          selectedBetman: {
-            home,
-            away,
-            sport,
-            gameDateMs:
-              Number.isFinite(
-                gameDateMs
-              )
-                ? gameDateMs
-                : null,
-          },
-          debug:
-            result.debug,
-        },
-        {
-          status: 429,
-          headers:
-            apiLimit.retryAfterMs
-              ? {
-                  "Retry-After":
-                    String(
-                      Math.max(
-                        1,
-                        Math.ceil(
-                          apiLimit.retryAfterMs /
-                            1000
-                        )
-                      )
-                    ),
-                }
-              : undefined,
-        }
-      );
-    }
-
     return Response.json({
       ok:false,
       mode:"selected",
