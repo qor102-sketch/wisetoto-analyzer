@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_15_WISETOTO_RECENT_5GAME_DETAIL_20260829
+// DEPLOY_MARKER_V13_8_16_NAVER_TODAY_LINEUP_20260829
 // DEPLOY_MARKER_V13_8_8_LIVE_DATA_DIAGNOSTICS_20260829
 // DEPLOY_MARKER_V13_8_6_FIXED_ODDS_3COL_GRID_20260829
 "use client";
@@ -4211,7 +4211,7 @@ function lineupBatters(
       ).trim().toLowerCase();
 
       const pitcher =
-        index === 0 ||
+        (index === 0 && lineup.length >= 10) ||
         position === "1" ||
         /pitcher|투수/.test(position) ||
         Boolean(
@@ -4268,6 +4268,12 @@ function resolvePregameBatterStats(player: any, index: ReturnType<typeof buildPr
   if (id && index.byId.has(id)) return index.byId.get(id);
   const name = normalizeTeamName(objectName(player) ?? "");
   if (name && index.byName.has(name)) return index.byName.get(name);
+  if (name && name.length >= 2) {
+    const fuzzy = Array.from(index.byName.entries()).filter(([candidate]) =>
+      candidate.length >= 2 && (candidate.includes(name) || name.includes(candidate))
+    );
+    if (fuzzy.length === 1) return fuzzy[0][1];
+  }
   return player;
 }
 
@@ -17499,6 +17505,33 @@ export default function Home() {
           }
         }
 
+        let naverTodayLineup: any = null;
+        if (
+          !backtestMode &&
+          koreanSport(String((selectedBetman as any)?.sport ?? "")) === "야구"
+        ) {
+          try {
+            const fixtureStart =
+              detailData?.selectedFixture?.startTime ??
+              data?.selectedFixture?.startTime ??
+              detailData?.fixture?.startTime ??
+              data?.fixture?.startTime ??
+              "";
+            const naverParams = new URLSearchParams({
+              date: String(fixtureStart ?? ""),
+              home: String(detailData?.selectedFixture?.home ?? data?.selectedFixture?.home ?? selectedBetman?.home ?? ""),
+              away: String(detailData?.selectedFixture?.away ?? data?.selectedFixture?.away ?? selectedBetman?.away ?? ""),
+            });
+            const naverResponse = await fetch(`/api/naver/lineup?${naverParams.toString()}`, { cache: "no-store" });
+            const naverPayload = await readApiResponse(naverResponse, "네이버 당일 선발 라인업");
+            naverTodayLineup = naverResponse.ok && naverPayload?.ok
+              ? naverPayload
+              : { ok: false, error: readableError(naverPayload?.error, "네이버 당일 라인업 미수신"), debug: naverPayload?.debug ?? null };
+          } catch (naverError: any) {
+            naverTodayLineup = { ok: false, error: readableError(naverError, "네이버 당일 라인업 수집 실패") };
+          }
+        }
+
         const wisetotoBaseballPrimary =
           !backtestMode &&
           koreanSport(String((selectedBetman as any)?.sport ?? "")) === "야구" &&
@@ -17519,9 +17552,35 @@ export default function Home() {
             }
           : null;
 
+        const naverConfirmedLineups = naverTodayLineup?.ok && Number(naverTodayLineup?.coverage?.total ?? 0) >= 14
+          ? {
+              source: "NAVER_GAME_POLLING",
+              homeStarter: wisetotoStarterLineups?.homeStarter ?? naverTodayLineup?.homeStarter ?? null,
+              awayStarter: wisetotoStarterLineups?.awayStarter ?? naverTodayLineup?.awayStarter ?? null,
+              homeTeamLineUp: { fullLineUp: Array.isArray(naverTodayLineup?.home) ? naverTodayLineup.home : [] },
+              awayTeamLineUp: { fullLineUp: Array.isArray(naverTodayLineup?.away) ? naverTodayLineup.away : [] },
+              confirmedBattingLineup: Number(naverTodayLineup?.coverage?.total ?? 0) >= 18,
+              wisetotoSeasonStats: [
+                ...(Array.isArray(wisetotoLive?.seasonBatters?.home) ? wisetotoLive.seasonBatters.home : []),
+                ...(Array.isArray(wisetotoLive?.seasonBatters?.away) ? wisetotoLive.seasonBatters.away : []),
+              ].map((row: any) => ({
+                name: String(row?.["타자명"] ?? row?.name ?? "").trim(),
+                currentSeasonStats: {
+                  avg: row?.["타율"] ?? null,
+                  slg: row?.["장타율"] ?? null,
+                },
+                source: "WISETOTO_SEASON_BATTERS",
+              })),
+            }
+          : null;
+
+        const liveBaseballLineups = naverConfirmedLineups ?? wisetotoStarterLineups;
+
+
         const combinedRaw = {
           ...data,
           wisetotoLive,
+          naverTodayLineup,
           liveDataPrimarySource: wisetotoBaseballPrimary ? "WISETOTO" : "SPORTSAPI",
           pregameAudit,
           fixture: detailData?.fixture ?? data?.fixture,
@@ -17540,11 +17599,15 @@ export default function Home() {
             data?.statistics ??
             null,
           lineups:
-            wisetotoStarterLineups ??
+            liveBaseballLineups ??
             detailData?.lineups ??
             data?.lineups ??
             null,
-          lineupsSource: wisetotoStarterLineups ? "WISETOTO_EXPECTED_STARTERS" : (detailData?.lineups ? "SPORTSAPI" : null),
+          lineupsSource: naverConfirmedLineups
+            ? "NAVER_GAME_POLLING"
+            : wisetotoStarterLineups
+              ? "WISETOTO_EXPECTED_STARTERS"
+              : (detailData?.lineups ? "SPORTSAPI" : null),
           detailDebug: {
             detail:
               detailData?.debug ??
@@ -20403,7 +20466,7 @@ export default function Home() {
                         <b>LIVE DATA 수집 진단</b> · 실제 수신/계산된 항목만 정상으로 표시합니다.
                         선발/라인업은 발표 전이면 대기가 정상이며, 미연결 항목은 예측에 임의 반영하지 않습니다.
                         <br />
-                        <b>V13.8.15:</b> 실제 확인된 get_detail_lineup_bs XHR로 홈/원정 최근 최대 5경기 타격·투구 상세와 불펜 누적/연투를 수집합니다. 실패 경기는 임의 보간하지 않으며 V13.0/Gate V2 계산식 자체는 변경하지 않았습니다.
+                        <b>V13.8.16:</b> 최근 5경기 상세는 와이즈토토 XHR을 유지하고, 당일 확정 타순은 네이버 game-polling의 batterLineup.home/away를 사용합니다. V13.0/Gate V2 계산식 자체는 변경하지 않았습니다.
                         {matched?.wisetotoLive && !matched?.wisetotoLive?.ok ? (
                           <>
                             <br />
@@ -20443,9 +20506,13 @@ export default function Home() {
                           </div>
                         </div>
                         <div className="card">
-                          실제 선발 라인업 · 와이즈토토
-                          <b>{Number(matched?.wisetotoLive?.coverage?.currentLineupBatters ?? 0) >= 18 ? "✓ 수신" : "대기"}</b>
-                          <div className="small">{Number(matched?.wisetotoLive?.coverage?.currentLineupBatters ?? 0)}/18명 · 현재 경기 영역에서 실제 당일 라인업 표가 확인될 때만 수신 처리</div>
+                          실제 선발 라인업 · 네이버
+                          <b>{Number(matched?.naverTodayLineup?.coverage?.total ?? 0) >= 18 ? "✓ 수신" : Number(matched?.naverTodayLineup?.coverage?.total ?? 0) > 0 ? "부분 수신" : "대기"}</b>
+                          <div className="small">
+                            {Number(matched?.naverTodayLineup?.coverage?.total ?? 0)}/18명
+                            {matched?.naverTodayLineup?.gameId ? ` · ${matched.naverTodayLineup.gameId}` : ""}
+                            {matched?.lineupsSource === "NAVER_GAME_POLLING" ? " · 분석 라인업 적용" : ""}
+                          </div>
                         </div>
                         <div className="card">
                           라인업 선수 Stats
