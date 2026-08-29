@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_7_8_GATE_V2_SKIP_BASELINE_20260829
+// DEPLOY_MARKER_V13_7_9_CLEAN_LIVE_UI_20260829
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -16593,6 +16593,60 @@ export default function Home() {
             🔄 경기목록 새로고침
           </button>
 
+
+
+          <button className="btn primary" onClick={analyzeSelected} disabled={loading || batchBacktest.running || !selectedBetman}>
+            {loading ? "⏳ 분석 중" : "📊 선택 경기 분석"}
+          </button>
+          <span
+            className="small"
+            style={{
+              padding: "6px 8px",
+              border: "1px solid #dbe4ef",
+              borderRadius: 8,
+              background: backtestMode ? "#eef6ff" : "#f8fafc",
+              whiteSpace: "nowrap",
+            }}
+            title="작업에 따라 실전/과거 분석 모드가 자동 전환됩니다."
+          >
+            {backtestMode ? "🧪 과거 분석" : "📡 실전 분석"}
+          </span>
+          <span className={betman.error ? "small err" : "small"}>{status}</span>
+        </div>
+      </div>
+
+      <details
+        style={{
+          margin: "8px 0 0",
+          border: "1px solid #dbe4ef",
+          borderRadius: 12,
+          background: "#fff",
+          overflow: "hidden",
+        }}
+      >
+        <summary
+          style={{
+            cursor: "pointer",
+            padding: "9px 12px",
+            fontSize: 11,
+            fontWeight: 900,
+            background: "#f8fafc",
+            color: "#475569",
+          }}
+        >
+          🧪 검증 · 데이터 관리
+          {" · "}개발 {datasetSplitCounts.dev}
+          {" · "}검증 {datasetSplitCounts.validation}/{VALIDATION_TARGET_GAMES}
+          {" · "}영구 {offlineDatasetCount}
+        </summary>
+
+        <div
+          className="bar"
+          style={{
+            padding: "10px 12px",
+            borderTop: "1px solid #e2e8f0",
+          }}
+        >
           <button
             className="btn light"
             onClick={() => {
@@ -16831,26 +16885,9 @@ export default function Home() {
                 )}/${batchBacktest.gameKeys.length}`
               : "▶ 오프라인 30경기"}
           </button>
-
-          <button className="btn primary" onClick={analyzeSelected} disabled={loading || batchBacktest.running || !selectedBetman}>
-            {loading ? "⏳ 분석 중" : "📊 선택 경기 분석"}
-          </button>
-          <span
-            className="small"
-            style={{
-              padding: "6px 8px",
-              border: "1px solid #dbe4ef",
-              borderRadius: 8,
-              background: backtestMode ? "#eef6ff" : "#f8fafc",
-              whiteSpace: "nowrap",
-            }}
-            title="작업에 따라 실전/과거 분석 모드가 자동 전환됩니다."
-          >
-            {backtestMode ? "🧪 과거 분석" : "📡 실전 분석"}
-          </span>
-          <span className={betman.error ? "small err" : "small"}>{status}</span>
         </div>
-      </div>
+      </details>
+
 
       {backtestMode && batchBacktestDiagnostics.length > 0 && (
         <div style={{
