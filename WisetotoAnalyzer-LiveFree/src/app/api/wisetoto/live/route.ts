@@ -1,7 +1,16 @@
-// DEPLOY_MARKER_V13_8_9_LIVE_DATA_V2_WISETOTO_20260829
+// DEPLOY_MARKER_V13_8_10_WISETOTO_MATCH_RESOLVER_FIX_20260829
 
 const WISETOTO_ORIGIN = "https://www.wisetoto.com";
 const WISETOTO_DETAIL = `${WISETOTO_ORIGIN}/util/gameinfo/get_detail_lineup.htm`;
+
+/*
+ * 브라우저에서 실제 확인한 focus 링크를 안전한 fallback으로 보관한다.
+ * 자동 resolver가 와이즈토토의 서버 렌더링/세션 차이로 focus 링크를 못 볼 때만 사용한다.
+ * 새 경기는 아래 하드코딩에 의존하지 않고 자동 resolver를 먼저 시도한다.
+ */
+const VERIFIED_FOCUS_MAP: Record<string, string> = {
+  "7272": "464233",
+};
 
 type AnyObj = Record<string, any>;
 
@@ -207,7 +216,12 @@ function resolveScheduleInfoSeq(html: string, matchSeq: string, home: string, aw
     if (match?.[1]) return { scheduleInfoSeq: match[1], method: "matchSeq" };
   }
 
-  const candidates = Array.from(html.matchAll(/focus=(\d+)_(\d+)/gi));
+  /* focus가 HTML attribute가 아니라 JS/encoded URL로 내려오는 경우까지 수집 */
+  const candidates = [
+    ...Array.from(html.matchAll(/focus=(\d+)_(\d+)/gi)),
+    ...Array.from(html.matchAll(/focus%3D(\d+)%5F(\d+)/gi)),
+    ...Array.from(html.matchAll(/["'](\d+)_(\d+)["']/gi)).filter((m) => m[2] === matchSeq),
+  ];
   if (!candidates.length) return { scheduleInfoSeq: null, method: "not-found" };
 
   const homeKey = normalizeName(home);
@@ -235,7 +249,7 @@ async function wisetotoFetch(url: string) {
       "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.7",
       Referer: `${WISETOTO_ORIGIN}/`,
       "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 WisetotoAnalyzer/13.8.9",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 WisetotoAnalyzer/13.8.10",
     },
   });
   return { response, text: await response.text() };
@@ -261,10 +275,15 @@ export async function GET(request: Request) {
     let resolverStatus = 200;
 
     if (!scheduleInfoSeq) {
+      const now = new Date();
+      const currentYear = now.getUTCFullYear();
       const listUrls = [
-        `${WISETOTO_ORIGIN}/index.htm`,
+        /* 야구 화면을 우선: 기본 index는 다른 종목/탭을 서버 렌더링할 수 있다. */
+        `${WISETOTO_ORIGIN}/index.htm?game_category=bs1&game_type=bs`,
+        `${WISETOTO_ORIGIN}/index.htm?game_category=bs1&game_type=bs&game_year=${currentYear}`,
         `${WISETOTO_ORIGIN}/index.htm?game_category=bs1`,
         `${WISETOTO_ORIGIN}/index.htm?game_type=bs`,
+        `${WISETOTO_ORIGIN}/index.htm`,
       ];
 
       for (const listUrl of listUrls) {
@@ -278,6 +297,11 @@ export async function GET(request: Request) {
           break;
         }
       }
+    }
+
+    if (!scheduleInfoSeq && VERIFIED_FOCUS_MAP[matchSeq]) {
+      scheduleInfoSeq = VERIFIED_FOCUS_MAP[matchSeq];
+      resolverMethod = "verified-focus-fallback";
     }
 
     if (!scheduleInfoSeq) {
@@ -375,4 +399,3 @@ export async function GET(request: Request) {
     );
   }
 }
-
