@@ -1,3 +1,4 @@
+// DEPLOY_MARKER_V13_8_9_LIVE_DATA_V2_WISETOTO_20260829
 // DEPLOY_MARKER_V13_8_8_LIVE_DATA_DIAGNOSTICS_20260829
 // DEPLOY_MARKER_V13_8_6_FIXED_ODDS_3COL_GRID_20260829
 "use client";
@@ -17437,8 +17438,70 @@ export default function Home() {
               })
             : null;
 
+        let wisetotoLive: any = null;
+
+        /*
+         * V13.8.9 LIVE DATA V2
+         * - 실전 야구에서만 와이즈토토 경기별 분석 HTML을 보조 수집한다.
+         * - V13.0/Gate V2 모델 입력에는 아직 반영하지 않고 진단 전용으로 보관한다.
+         * - 백테스트에서는 호출하지 않아 기존 baseline/PRE 재현성을 유지한다.
+         */
+        if (
+          !backtestMode &&
+          koreanSport(String((selectedBetman as any)?.sport ?? "")) === "야구"
+        ) {
+          try {
+            const firstMarket = marketRows(selectedBetman)?.[0] as any;
+            const wisetotoMatchSeq = String(
+              firstMarket?.matchSeq ??
+              firstMarket?.gameNo ??
+              (selectedBetman as any)?.matchSeq ??
+              (selectedBetman as any)?.gameNo ??
+              ""
+            ).trim();
+
+            if (wisetotoMatchSeq) {
+              const wisetotoParams = new URLSearchParams({
+                matchSeq: wisetotoMatchSeq,
+                home: String(selectedBetman?.home ?? ""),
+                away: String(selectedBetman?.away ?? ""),
+              });
+
+              const wisetotoResponse = await fetch(
+                `/api/wisetoto/live?${wisetotoParams.toString()}`,
+                { cache: "no-store" }
+              );
+              const wisetotoPayload = await readApiResponse(
+                wisetotoResponse,
+                "와이즈토토 LIVE DATA V2"
+              );
+
+              wisetotoLive = wisetotoResponse.ok && wisetotoPayload?.ok
+                ? wisetotoPayload
+                : {
+                    ok: false,
+                    error: readableError(
+                      wisetotoPayload?.error,
+                      "와이즈토토 LIVE DATA 자동매칭/수집 실패"
+                    ),
+                    debug: wisetotoPayload?.debug ?? null,
+                    matchSeq: wisetotoMatchSeq,
+                  };
+            }
+          } catch (wisetotoError: any) {
+            wisetotoLive = {
+              ok: false,
+              error: readableError(
+                wisetotoError,
+                "와이즈토토 LIVE DATA 수집 실패"
+              ),
+            };
+          }
+        }
+
         const combinedRaw = {
           ...data,
+          wisetotoLive,
           pregameAudit,
           fixture: detailData?.fixture ?? data?.fixture,
           detail: detailData?.fixture ?? data?.detail,
@@ -20316,6 +20379,15 @@ export default function Home() {
                       <div className="notice" style={{ margin: "8px 0" }}>
                         <b>LIVE DATA 수집 진단</b> · 실제 수신/계산된 항목만 정상으로 표시합니다.
                         선발/라인업은 발표 전이면 대기가 정상이며, 미연결 항목은 예측에 임의 반영하지 않습니다.
+                        <br />
+                        <b>V13.8.9:</b> 와이즈토토 예상 선발·시즌 타자·최근경기 참조·직전 경기 타자/투수 기록을 진단 전용으로 추가했습니다.
+                        기존 V13.0/Gate V2 예측 계산에는 아직 반영하지 않습니다.
+                        {matched?.wisetotoLive && !matched?.wisetotoLive?.ok ? (
+                          <>
+                            <br />
+                            <b>와이즈토토:</b> {String(matched?.wisetotoLive?.error ?? "수집 실패")}
+                          </>
+                        ) : null}
                       </div>
 
                       <div className="cards">
@@ -20335,9 +20407,17 @@ export default function Home() {
                           <div className="small">홈 {analysisFactors.homeVenueSample} · 원정 {analysisFactors.awayVenueSample}</div>
                         </div>
                         <div className="card">
-                          선발투수
+                          선발투수 (SportsAPI)
                           <b>{analysisFactors.baseballStarterCount >= 2 ? "✓ 수신" : "대기"}</b>
                           <div className="small">{analysisFactors.baseballStarterCount}/2 · 발표 전 대기 정상</div>
+                        </div>
+                        <div className="card">
+                          와이즈토토 예상 선발
+                          <b>{Number(matched?.wisetotoLive?.coverage?.expectedStarters ?? 0) >= 2 ? "✓ 수신" : matched?.wisetotoLive?.ok ? "대기" : "✕ 미수신"}</b>
+                          <div className="small">
+                            {Number(matched?.wisetotoLive?.coverage?.expectedStarters ?? 0)}/2
+                            {matched?.wisetotoLive?.scheduleInfoSeq ? ` · seq ${matched.wisetotoLive.scheduleInfoSeq}` : ""}
+                          </div>
                         </div>
                         <div className="card">
                           실제 선발 라인업
@@ -20350,19 +20430,29 @@ export default function Home() {
                           <div className="small">Coverage {(analysisFactors.lineupStatsCoverage * 100).toFixed(0)}%</div>
                         </div>
                         <div className="card">
+                          시즌 타자 Stats · 와이즈토토
+                          <b>{Number(matched?.wisetotoLive?.coverage?.seasonBatters ?? 0) > 0 ? "✓ 수신" : "✕ 미수신"}</b>
+                          <div className="small">선수 {Number(matched?.wisetotoLive?.coverage?.seasonBatters ?? 0)}행</div>
+                        </div>
+                        <div className="card">
+                          최근 경기 라인업 참조
+                          <b>{Number(matched?.wisetotoLive?.coverage?.recentGameRefs ?? 0) >= 10 ? "✓ 수신" : Number(matched?.wisetotoLive?.coverage?.recentGameRefs ?? 0) > 0 ? "부분 수신" : "✕ 미수신"}</b>
+                          <div className="small">최근 경기 ID {Number(matched?.wisetotoLive?.coverage?.recentGameRefs ?? 0)}/10 · 홈/원정 각 5경기 목표</div>
+                        </div>
+                        <div className="card">
                           선발 최근 투구
-                          <b>미연결</b>
-                          <div className="small">최근 3~5경기 투구 세부자료 별도 연결 필요</div>
+                          <b>{Number(matched?.wisetotoLive?.coverage?.latestPitcherRows ?? 0) > 0 ? "부분 수신" : "미연결"}</b>
+                          <div className="small">직전 경기 투수 {Number(matched?.wisetotoLive?.coverage?.latestPitcherRows ?? 0)}행 · 3~5경기 탭 상세는 다음 확장</div>
                         </div>
                         <div className="card">
                           타자 최근 타격감
-                          <b>미연결</b>
-                          <div className="small">선수별 최근 경기 타격 세부자료 별도 연결 필요</div>
+                          <b>{Number(matched?.wisetotoLive?.coverage?.latestBatterRows ?? 0) > 0 ? "부분 수신" : "미연결"}</b>
+                          <div className="small">직전 경기 타자 {Number(matched?.wisetotoLive?.coverage?.latestBatterRows ?? 0)}행 · 타수/안타/타점/득점/홈런</div>
                         </div>
                         <div className="card">
                           불펜 소모도
-                          <b>미연결</b>
-                          <div className="small">최근 등판·투구수·연투 자료 별도 연결 필요</div>
+                          <b>{Number(matched?.wisetotoLive?.coverage?.latestPitcherRows ?? 0) > 2 ? "부분 수신" : "미연결"}</b>
+                          <div className="small">직전 경기 투구수/이닝 수신 · 연투 판정은 3~5경기 상세 확장 후 적용</div>
                         </div>
                         <div className="card">
                           부상/결장
