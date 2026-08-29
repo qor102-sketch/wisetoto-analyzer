@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_7_9_CLEAN_LIVE_UI_20260829
+// DEPLOY_MARKER_V13_8_0_LIVE_ALIAS_MATCH_RETRY_20260829
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -16334,15 +16334,78 @@ export default function Home() {
     setBetman({ loading:false, matched:selectedBetman, score:1, error:null });
     setStatus(`${selectedBetman?.home ?? "-"} vs ${selectedBetman?.away ?? "-"} · SportsAPI 매칭 중…`);
     try {
-      const matchHome = sportsApiTeamName(selectedBetman?.home);
-      const matchAway = sportsApiTeamName(selectedBetman?.away);
+      const homeAliases =
+        sportsTeamAliases(
+          selectedBetman?.home
+        );
+
+      const awayAliases =
+        sportsTeamAliases(
+          selectedBetman?.away
+        );
+
+      /*
+       * 실전 선택 경기에서도 과거 검증과 동일한 alias 정책을 사용한다.
+       * NPB/KBO 한글 팀명은 SportsAPI search가 0건을 반환하는 경우가 있으므로
+       * 영문 alias를 먼저 시도하고, 실패할 때만 alias 조합을 순차 재시도한다.
+       */
+      const prioritizeSportsAliases = (
+        aliases: string[]
+      ) => {
+        const english =
+          aliases.filter(
+            (alias) =>
+              /[A-Za-z]/.test(
+                alias
+              )
+          );
+
+        const local =
+          aliases.filter(
+            (alias) =>
+              !/[A-Za-z]/.test(
+                alias
+              )
+          );
+
+        return Array.from(
+          new Set([
+            ...english,
+            ...local,
+          ])
+        );
+      };
+
+      const orderedHomeAliases =
+        prioritizeSportsAliases(
+          homeAliases
+        );
+
+      const orderedAwayAliases =
+        prioritizeSportsAliases(
+          awayAliases
+        );
+
+      const matchHome =
+        orderedHomeAliases[0] ??
+        sportsApiTeamName(
+          selectedBetman?.home
+        );
+
+      const matchAway =
+        orderedAwayAliases[0] ??
+        sportsApiTeamName(
+          selectedBetman?.away
+        );
 
       const params = new URLSearchParams({
         mode:"selected",
-        // SportsAPI 쪽에서는 영문/정식 팀명으로 검색해 과거 KBO fixture 매칭률을 높입니다.
         home: matchHome,
         away: matchAway,
-        // 원본명도 함께 전달합니다. 서버가 아직 사용하지 않아도 무해하며 진단에 활용할 수 있습니다.
+        homeAliases:
+          orderedHomeAliases.join("|"),
+        awayAliases:
+          orderedAwayAliases.join("|"),
         originalHome:String(selectedBetman?.home ?? ""),
         originalAway:String(selectedBetman?.away ?? ""),
         gameDateMs:String(gameTimeMs(selectedBetman)),
@@ -16350,9 +16413,155 @@ export default function Home() {
         league:String((selectedBetman as any)?.league ?? ""),
         backtest:backtestMode ? "1" : "0",
       });
-      const response = await fetch(`/api/match?${params.toString()}`, { cache:"no-store" });
-      const data = await readApiResponse(response,"선택 경기 매칭 API");
-      if (!response.ok || !data?.ok) throw new Error(readableError(data?.error,"SportsAPI 동일경기 자동매칭 실패"));
+
+      let response =
+        await fetch(
+          `/api/match?${params.toString()}`,
+          {
+            cache:
+              "no-store",
+          }
+        );
+
+      let data =
+        await readApiResponse(
+          response,
+          "선택 경기 매칭 API"
+        );
+
+      if (
+        !response.ok ||
+        !data?.ok
+      ) {
+        const aliasPairs:
+          Array<
+            [string, string]
+          > = [];
+
+        for (
+          const homeAlias of
+          orderedHomeAliases.slice(
+            0,
+            4
+          )
+        ) {
+          for (
+            const awayAlias of
+            orderedAwayAliases.slice(
+              0,
+              4
+            )
+          ) {
+            if (
+              homeAlias ===
+                matchHome &&
+              awayAlias ===
+                matchAway
+            ) {
+              continue;
+            }
+
+            aliasPairs.push([
+              homeAlias,
+              awayAlias,
+            ]);
+          }
+        }
+
+        for (
+          const [
+            homeAlias,
+            awayAlias,
+          ] of aliasPairs.slice(
+            0,
+            8
+          )
+        ) {
+          const retryParams =
+            new URLSearchParams(
+              params
+            );
+
+          retryParams.set(
+            "home",
+            homeAlias
+          );
+
+          retryParams.set(
+            "away",
+            awayAlias
+          );
+
+          setStatus(
+            `${selectedBetman?.home ?? "-"} vs ${selectedBetman?.away ?? "-"} · alias 매칭 ${homeAlias} / ${awayAlias}`
+          );
+
+          const retryResponse =
+            await fetch(
+              `/api/match?${retryParams.toString()}`,
+              {
+                cache:
+                  "no-store",
+              }
+            );
+
+          const retryData =
+            await readApiResponse(
+              retryResponse,
+              `선택 경기 alias ${homeAlias} vs ${awayAlias}`
+            );
+
+          if (
+            retryResponse.ok &&
+            retryData?.ok
+          ) {
+            response =
+              retryResponse;
+
+            data =
+              retryData;
+
+            break;
+          }
+
+          /*
+           * rate limit / quota 계열은 alias를 더 반복해도 의미가 없으므로 중단한다.
+           */
+          const retryError =
+            readableError(
+              retryData?.error,
+              ""
+            );
+
+          if (
+            retryResponse.status ===
+              429 ||
+            /daily quota|rate limit/i.test(
+              retryError
+            )
+          ) {
+            break;
+          }
+        }
+      }
+
+      if (
+        !response.ok ||
+        !data?.ok
+      ) {
+        const matchDebug =
+          data?.debug
+            ? ` · debug=${JSON.stringify(data.debug)}`
+            : "";
+
+        throw new Error(
+          `${readableError(
+            data?.error,
+            "SportsAPI 동일경기 자동매칭 실패"
+          )}${matchDebug}`
+        );
+      }
+
       const fixtureId = Number(data?.fixtureId);
       if (!Number.isFinite(fixtureId)) throw new Error("SportsAPI Fixture ID를 받지 못했습니다.");
       setMatched(data);
