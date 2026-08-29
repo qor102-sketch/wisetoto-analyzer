@@ -5,6 +5,8 @@ type AnyObj = Record<string, any>;
 const REQUEST_INTERVAL_MS = 6500;
 const RECENT_LIMIT = 5;
 
+// DEPLOY_MARKER_V13_8_7_LIVE_DATA_V1_LINEUPS_20260829
+
 function arr(x: any): any[] {
   if (Array.isArray(x)) return x;
   if (Array.isArray(x?.data)) return x.data;
@@ -373,139 +375,11 @@ async function optionalEndpoint(
   }
 }
 
-function scoreNodeValue(
-  node: any
-): number | null {
-  const direct =
-    Number(node);
-
-  if (
-    Number.isFinite(direct) &&
-    direct >= 0
-  ) {
-    return direct;
-  }
-
-  if (
-    !node ||
-    typeof node !== "object" ||
-    Array.isArray(node)
-  ) {
-    return null;
-  }
-
-  for (
-    const key
-    of [
-      "current",
-      "display",
-      "total",
-      "overall",
-      "score",
-      "runs",
-      "goals",
-      "points",
-    ]
-  ) {
-    const value =
-      Number(
-        node?.[key]
-      );
-
-    if (
-      Number.isFinite(value) &&
-      value >= 0
-    ) {
-      return value;
-    }
-  }
-
-  const periods =
-    node?.periods &&
-    typeof node.periods === "object" &&
-    !Array.isArray(node.periods)
-      ? node.periods
-      : null;
-
-  if (periods) {
-    const values =
-      Object.entries(periods)
-        .filter(([key]) =>
-          /^period[1-9]\d*$/i.test(key)
-        )
-        .map(([, value]) =>
-          Number(value)
-        )
-        .filter((value) =>
-          Number.isFinite(value) &&
-          value >= 0
-        );
-
-    if (values.length) {
-      return values.reduce(
-        (sum, value) =>
-          sum + value,
-        0
-      );
-    }
-  }
-
-  return null;
-}
-
-function fixtureScorePair(
-  fixture: AnyObj
-): {
-  homeScore: number;
-  awayScore: number;
-} | null {
-  const homeScore =
-    scoreNodeValue(
-      fixture?.homeScore
-    );
-
-  const awayScore =
-    scoreNodeValue(
-      fixture?.awayScore
-    );
-
-  if (
-    homeScore === null ||
-    awayScore === null
-  ) {
-    return null;
-  }
-
-  return {
-    homeScore,
-    awayScore,
-  };
-}
-
 /*
  * --------------------------------------------------
  * 최근 경기에서 팀의 W / D / L 판정
  * --------------------------------------------------
  */
-function fixtureTeamIds(
-  fixture: AnyObj
-) {
-  return {
-    homeId:
-      Number(
-        fixture?.home?.id ??
-        fixture?.homeTeam?.id ??
-        fixture?.localteam?.id
-      ),
-    awayId:
-      Number(
-        fixture?.away?.id ??
-        fixture?.awayTeam?.id ??
-        fixture?.visitorteam?.id
-      ),
-  };
-}
-
 function getTeamResult(
   fixture: AnyObj,
   teamId: number
@@ -524,19 +398,28 @@ function getTeamResult(
       fixture?.away?.id
     );
 
-  const scorePair =
-    fixtureScorePair(
-      fixture
+  const homeScore =
+    Number(
+      fixture?.homeScore
+        ?.current
     );
 
-  if (!scorePair) {
+  const awayScore =
+    Number(
+      fixture?.awayScore
+        ?.current
+    );
+
+  if (
+    !Number.isFinite(
+      homeScore
+    ) ||
+    !Number.isFinite(
+      awayScore
+    )
+  ) {
     return null;
   }
-
-  const {
-    homeScore,
-    awayScore,
-  } = scorePair;
 
   if (
     homeScore ===
@@ -613,15 +496,15 @@ function summarizeRecentFixture(
       null,
 
     homeScore:
-      fixtureScorePair(
-        fixture
-      )?.homeScore ??
+      fixture
+        ?.homeScore
+        ?.current ??
       null,
 
     awayScore:
-      fixtureScorePair(
-        fixture
-      )?.awayScore ??
+      fixture
+        ?.awayScore
+        ?.current ??
       null,
 
     result:
@@ -670,19 +553,30 @@ function summarizeForm(
           ?.home?.id
       );
 
-    const scorePair =
-      fixtureScorePair(
+    const homeScore =
+      Number(
         fixture
+          ?.homeScore
+          ?.current
       );
 
-    if (!scorePair) {
+    const awayScore =
+      Number(
+        fixture
+          ?.awayScore
+          ?.current
+      );
+
+    if (
+      !Number.isFinite(
+        homeScore
+      ) ||
+      !Number.isFinite(
+        awayScore
+      )
+    ) {
       continue;
     }
-
-    const {
-      homeScore,
-      awayScore,
-    } = scorePair;
 
     counted++;
 
@@ -775,127 +669,39 @@ function summarizeForm(
 async function getRecentFixtures(
   teamId: number,
   key: string,
-  label: string,
-  cutoffMs: number | null = null,
-  maxPages = 3
+  label: string
 ) {
-  const allFixtures: AnyObj[] =
-    [];
-
-  const pageStatus:
-    AnyObj[] =
-    [];
-
-  /*
-   * 백테스트 시점보다 최신 경기만 page=0에 몰려 있으면
-   * 단순 cutoff 필터 후 표본이 0이 될 수 있다.
-   * 필요한 5경기가 채워질 때까지만 과거 page를 추가 조회한다.
-   *
-   * API 절약:
-   * - 최대 3페이지
-   * - 이미 5경기 확보되면 즉시 중단
-   * - 429/실패 시 추가 페이지 요청 중단
-   */
-  for (
-    let page = 0;
-    page < maxPages;
-    page += 1
-  ) {
-    const result =
-      await optionalEndpoint(
-        `/teams/${teamId}/fixtures?type=recent&page=${page}`,
-        key,
-        `${label} page ${page}`
-      );
-
-    pageStatus.push({
-      page,
-      ...result.status,
-    });
-
-    if (!result.data) {
-      break;
-    }
-
-    const rows =
-      arr(
-        result.data
-      );
-
-    allFixtures.push(
-      ...rows
+  const result =
+    await optionalEndpoint(
+      `/teams/${teamId}/fixtures?type=recent&page=0`,
+      key,
+      label
     );
 
-    const usableCount =
-      allFixtures
-        .filter(
-          (fixture) => {
-            if (
-              cutoffMs !== null &&
-              Number.isFinite(
-                cutoffMs
-              )
-            ) {
-              const fixtureMs =
-                new Date(
-                  fixture?.startTime
-                ).getTime();
-
-              if (
-                !Number.isFinite(
-                  fixtureMs
-                ) ||
-                fixtureMs >=
-                  cutoffMs
-              ) {
-                return false;
-              }
-            }
-
-            return (
-              getTeamResult(
-                fixture,
-                teamId
-              ) !== null
-            );
-          }
-        )
-        .length;
-
-    if (
-      usableCount >=
-      RECENT_LIMIT
-    ) {
-      break;
-    }
-
-    /*
-     * 더 이상 페이지가 없다고 판단 가능한 경우 중단.
-     */
-    if (
-      rows.length === 0
-    ) {
-      break;
-    }
+  if (!result.data) {
+    return {
+      fixtures: [],
+      summary:
+        summarizeForm(
+          [],
+          teamId
+        ),
+      status:
+        result.status,
+    };
   }
 
-  const deduped =
-    Array.from(
-      new Map(
-        allFixtures.map(
-          (fixture) => [
-            String(
-              fixture?.id ??
-              `${fixture?.startTime}|${fixture?.home?.id}|${fixture?.away?.id}`
-            ),
-            fixture,
-          ]
-        )
-      ).values()
+  const rawFixtures =
+    arr(
+      result.data
     );
 
+  /*
+   * 최신 경기부터 정렬한 뒤
+   * 최근 5경기만 사용
+   */
   const fixtures =
-    deduped
+    [...rawFixtures]
       .sort(
         (a, b) =>
           new Date(
@@ -906,36 +712,11 @@ async function getRecentFixtures(
           ).getTime()
       )
       .filter(
-        (fixture) => {
-          if (
-            cutoffMs !== null &&
-            Number.isFinite(
-              cutoffMs
-            )
-          ) {
-            const fixtureMs =
-              new Date(
-                fixture?.startTime
-              ).getTime();
-
-            if (
-              !Number.isFinite(
-                fixtureMs
-              ) ||
-              fixtureMs >=
-                cutoffMs
-            ) {
-              return false;
-            }
-          }
-
-          return (
-            getTeamResult(
-              fixture,
-              teamId
-            ) !== null
-          );
-        }
+        (fixture) =>
+          getTeamResult(
+            fixture,
+            teamId
+          ) !== null
       )
       .slice(
         0,
@@ -958,204 +739,8 @@ async function getRecentFixtures(
         teamId
       ),
 
-    status: {
-      ok:
-        fixtures.length > 0,
-      error:
-        fixtures.length > 0
-          ? null
-          : (
-              pageStatus
-                .find(
-                  (row) =>
-                    row?.error
-                )
-                ?.error ??
-              "cutoff 이전 최근 경기 표본 없음"
-            ),
-      httpStatus:
-        pageStatus
-          .find(
-            (row) =>
-              row?.httpStatus
-          )
-          ?.httpStatus ??
-        null,
-      pages:
-        pageStatus,
-      fetched:
-        allFixtures.length,
-      deduped:
-        deduped.length,
-      beforeCutoff:
-        deduped.filter(
-          (fixture) => {
-            if (
-              cutoffMs === null ||
-              !Number.isFinite(
-                cutoffMs
-              )
-            ) {
-              return true;
-            }
-
-            const fixtureMs =
-              new Date(
-                fixture?.startTime
-              ).getTime();
-
-            return (
-              Number.isFinite(
-                fixtureMs
-              ) &&
-              fixtureMs <
-                cutoffMs
-            );
-          }
-        ).length,
-      teamIdMatched:
-        deduped.filter(
-          (fixture) => {
-            const ids =
-              fixtureTeamIds(
-                fixture
-              );
-
-            return (
-              ids.homeId ===
-                teamId ||
-              ids.awayId ===
-                teamId
-            );
-          }
-        ).length,
-      scoreParsed:
-        deduped.filter(
-          (fixture) =>
-            fixtureScorePair(
-              fixture
-            ) !== null
-        ).length,
-      resultParsed:
-        deduped.filter(
-          (fixture) =>
-            getTeamResult(
-              fixture,
-              teamId
-            ) !== null
-        ).length,
-      cutoffAndResultParsed:
-        deduped.filter(
-          (fixture) => {
-            if (
-              cutoffMs !== null &&
-              Number.isFinite(
-                cutoffMs
-              )
-            ) {
-              const fixtureMs =
-                new Date(
-                  fixture?.startTime
-                ).getTime();
-
-              if (
-                !Number.isFinite(
-                  fixtureMs
-                ) ||
-                fixtureMs >=
-                  cutoffMs
-              ) {
-                return false;
-              }
-            }
-
-            return (
-              getTeamResult(
-                fixture,
-                teamId
-              ) !== null
-            );
-          }
-        ).length,
-      usable:
-        fixtures.length,
-      samplePreview:
-        deduped
-          .slice(
-            0,
-            8
-          )
-          .map(
-            (fixture) => {
-              const ids =
-                fixtureTeamIds(
-                  fixture
-                );
-
-              const score =
-                fixtureScorePair(
-                  fixture
-                );
-
-              const fixtureMs =
-                new Date(
-                  fixture?.startTime
-                ).getTime();
-
-              return {
-                id:
-                  fixture?.id ??
-                  null,
-                startTime:
-                  fixture?.startTime ??
-                  null,
-                beforeCutoff:
-                  cutoffMs === null ||
-                  !Number.isFinite(
-                    cutoffMs
-                  )
-                    ? true
-                    : (
-                        Number.isFinite(
-                          fixtureMs
-                        ) &&
-                        fixtureMs <
-                          cutoffMs
-                      ),
-                homeId:
-                  Number.isFinite(
-                    ids.homeId
-                  )
-                    ? ids.homeId
-                    : null,
-                awayId:
-                  Number.isFinite(
-                    ids.awayId
-                  )
-                    ? ids.awayId
-                    : null,
-                targetTeamMatched:
-                  ids.homeId ===
-                    teamId ||
-                  ids.awayId ===
-                    teamId,
-                scoreParsed:
-                  Boolean(score),
-                homeScore:
-                  score?.homeScore ??
-                  null,
-                awayScore:
-                  score?.awayScore ??
-                  null,
-                result:
-                  getTeamResult(
-                    fixture,
-                    teamId
-                  ),
-              };
-            }
-          ),
-    },
+    status:
+      result.status,
   };
 }
 
@@ -1167,10 +752,6 @@ export async function GET(
     }>;
   }
 ) {
-  const url = new URL(req.url);
-  const cutoffRaw = Number(url.searchParams.get("cutoffMs"));
-  const cutoffMs = Number.isFinite(cutoffRaw) && cutoffRaw > 0 ? cutoffRaw : null;
-
   const key =
     process.env
       .SPORTSAPI_KEY;
@@ -1315,8 +896,7 @@ export async function GET(
         await getRecentFixtures(
           homeId,
           key,
-          "Home Recent",
-          cutoffMs
+          "Home Recent"
         );
     }
 
@@ -1354,70 +934,8 @@ export async function GET(
         await getRecentFixtures(
           awayId,
           key,
-          "Away Recent",
-          cutoffMs
+          "Away Recent"
         );
-    }
-
-    /*
-     * ==========================================
-     * 4.5 한쪽 recent 0건 fallback
-     * ==========================================
-     */
-    const homeUsable =
-      Number(
-        homeRecent?.status?.usable ??
-        homeRecent?.fixtures?.length ??
-        0
-      );
-
-    const awayUsable =
-      Number(
-        awayRecent?.status?.usable ??
-        awayRecent?.fixtures?.length ??
-        0
-      );
-
-    let homeFallbackUsed =
-      false;
-
-    let awayFallbackUsed =
-      false;
-
-    if (
-      homeUsable === 0 &&
-      awayUsable > 0 &&
-      Number.isFinite(homeId)
-    ) {
-      homeRecent =
-        await getRecentFixtures(
-          homeId,
-          key,
-          "Home Recent Extended",
-          cutoffMs,
-          6
-        );
-
-      homeFallbackUsed =
-        true;
-    }
-
-    if (
-      awayUsable === 0 &&
-      homeUsable > 0 &&
-      Number.isFinite(awayId)
-    ) {
-      awayRecent =
-        await getRecentFixtures(
-          awayId,
-          key,
-          "Away Recent Extended",
-          cutoffMs,
-          6
-        );
-
-      awayFallbackUsed =
-        true;
     }
 
     /*
@@ -1450,19 +968,25 @@ export async function GET(
      * 미래 경기는 현재 호출하지 않음
      */
 
-    const lineupsResult = {
-      data: null,
+    const lineupsResult = future
+      ? await optionalEndpoint(
+          `/fixtures/${id}/lineups`,
+          key,
+          "PRE Lineups"
+        )
+      : {
+          data: null,
 
-      status: {
-        ok: false,
+          status: {
+            ok: false,
 
-        error:
-          "현재 미래 경기에서는 호출하지 않음",
+            error:
+              "LIVE DATA V1은 미래 경기에서만 라인업을 조회함",
 
-        httpStatus:
-          null,
-      },
-    };
+            httpStatus:
+              null,
+          },
+        };
 
     /*
      * ==========================================
@@ -1515,15 +1039,6 @@ export async function GET(
           form:
             homeRecent
               .summary,
-
-          backtestSafeForm:
-            cutoffMs !== null,
-
-          backtestCutoffMs:
-            cutoffMs,
-
-          fallbackUsed:
-            homeFallbackUsed,
         },
 
         away: {
@@ -1543,15 +1058,6 @@ export async function GET(
           form:
             awayRecent
               .summary,
-
-          backtestSafeForm:
-            cutoffMs !== null,
-
-          backtestCutoffMs:
-            cutoffMs,
-
-          fallbackUsed:
-            awayFallbackUsed,
         },
       },
 
@@ -1593,9 +1099,7 @@ export async function GET(
         },
 
         note:
-          cutoffMs !== null
-            ? `백테스트 Form은 cutoff(${cutoffMs}) 이전 fixture 중 실제 점수 판정 가능한 최신 5경기로 계산합니다.`
-            : "최근 경기 Form은 각 팀의 recent fixture 중 실제 점수 판정이 가능한 최신 5경기를 기준으로 계산합니다.",
+          "최근 경기 Form은 각 팀의 recent fixture 중 실제 점수 판정이 가능한 최신 5경기를 기준으로 계산합니다.",
       },
     });
   } catch (e: any) {
