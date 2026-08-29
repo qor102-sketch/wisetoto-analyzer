@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_14_WISETOTO_BASEBALL_DETAIL_STAGE1_20260829
+// DEPLOY_MARKER_V13_8_15_WISETOTO_RECENT_5GAME_DETAIL_20260829
 // DEPLOY_MARKER_V13_8_8_LIVE_DATA_DIAGNOSTICS_20260829
 // DEPLOY_MARKER_V13_8_6_FIXED_ODDS_3COL_GRID_20260829
 "use client";
@@ -20403,7 +20403,7 @@ export default function Home() {
                         <b>LIVE DATA 수집 진단</b> · 실제 수신/계산된 항목만 정상으로 표시합니다.
                         선발/라인업은 발표 전이면 대기가 정상이며, 미연결 항목은 예측에 임의 반영하지 않습니다.
                         <br />
-                        <b>V13.8.14:</b> 와이즈토토 PRIMARY에 직전 경기 타격/투구 집계, 불펜 1경기 소모도, 결장자 감지, 당일 라인업 안전 감지를 추가했습니다. 이전 경기 라인업은 당일 라인업으로 오인하지 않습니다. V13.0/Gate V2 계산식 자체는 변경하지 않았습니다.
+                        <b>V13.8.15:</b> 실제 확인된 get_detail_lineup_bs XHR로 홈/원정 최근 최대 5경기 타격·투구 상세와 불펜 누적/연투를 수집합니다. 실패 경기는 임의 보간하지 않으며 V13.0/Gate V2 계산식 자체는 변경하지 않았습니다.
                         {matched?.wisetotoLive && !matched?.wisetotoLive?.ok ? (
                           <>
                             <br />
@@ -20463,19 +20463,24 @@ export default function Home() {
                           <div className="small">최근 경기 ID {Number(matched?.wisetotoLive?.coverage?.recentGameRefs ?? 0)}/10 · 홈/원정 각 5경기 목표</div>
                         </div>
                         <div className="card">
+                          최근 경기 상세 · 와이즈토토 XHR
+                          <b>{Number(matched?.wisetotoLive?.coverage?.recentDetailGamesTotal ?? 0) >= 10 ? "✓ 10/10" : Number(matched?.wisetotoLive?.coverage?.recentDetailGamesTotal ?? 0) > 0 ? "부분 수신" : "미수신"}</b>
+                          <div className="small">홈 {Number(matched?.wisetotoLive?.coverage?.recentDetailGamesHome ?? 0)}/5 · 원정 {Number(matched?.wisetotoLive?.coverage?.recentDetailGamesAway ?? 0)}/5 · 실패 경기 임의 보간 없음</div>
+                        </div>
+                        <div className="card">
                           선발 최근 투구
-                          <b>{Number(matched?.wisetotoLive?.coverage?.latestPitcherRows ?? 0) > 0 ? "✓ 직전경기" : "미연결"}</b>
-                          <div className="small">직전 경기 투수 {Number(matched?.wisetotoLive?.coverage?.latestPitcherRows ?? 0)}행 · 선발 IP/투구수/K/실점 집계 · 3~5경기는 XHR 확인 후 확장</div>
+                          <b>{Number(matched?.wisetotoLive?.coverage?.recentDetailStarterRows ?? 0) > 0 ? "✓ 최근경기" : Number(matched?.wisetotoLive?.coverage?.latestPitcherRows ?? 0) > 0 ? "✓ 직전경기" : "미연결"}</b>
+                          <div className="small">최근 상세 선발 {Number(matched?.wisetotoLive?.coverage?.recentDetailStarterRows ?? 0)}행 · IP/투구수/K/실점 수집 · 모델식은 아직 변경 없음</div>
                         </div>
                         <div className="card">
                           타자 최근 타격감
-                          <b>{Number(matched?.wisetotoLive?.coverage?.latestBatterRows ?? 0) > 0 ? "✓ 직전경기" : "미연결"}</b>
-                          <div className="small">직전 경기 타자 {Number(matched?.wisetotoLive?.coverage?.latestBatterRows ?? 0)}행 · AB/H/RBI/R/HR 및 팀 타율 집계</div>
+                          <b>{Number(matched?.wisetotoLive?.coverage?.recentDetailBatterRows ?? 0) > 0 ? "✓ 최근 5경기" : Number(matched?.wisetotoLive?.coverage?.latestBatterRows ?? 0) > 0 ? "✓ 직전경기" : "미연결"}</b>
+                          <div className="small">최근 상세 타자 {Number(matched?.wisetotoLive?.coverage?.recentDetailBatterRows ?? 0)}행 · AB/H/RBI/R/HR 누적 집계</div>
                         </div>
                         <div className="card">
                           불펜 소모도
-                          <b>{Number(matched?.wisetotoLive?.coverage?.latestPitcherRows ?? 0) > 2 ? "✓ 1경기 집계" : "미연결"}</b>
-                          <div className="small">홈 불펜 {Number(matched?.wisetotoLive?.latestDetailSummary?.home?.pitching?.bullpen?.pitchersUsed ?? 0)}명/{Number(matched?.wisetotoLive?.latestDetailSummary?.home?.pitching?.bullpen?.pitches ?? 0)}구 · 원정 {Number(matched?.wisetotoLive?.latestDetailSummary?.away?.pitching?.bullpen?.pitchersUsed ?? 0)}명/{Number(matched?.wisetotoLive?.latestDetailSummary?.away?.pitching?.bullpen?.pitches ?? 0)}구 · 연투는 3~5경기 확장 후</div>
+                          <b>{Number(matched?.wisetotoLive?.coverage?.recentDetailGamesTotal ?? 0) > 0 ? "✓ 최근경기 누적" : Number(matched?.wisetotoLive?.coverage?.latestPitcherRows ?? 0) > 2 ? "✓ 1경기 집계" : "미연결"}</b>
+                          <div className="small">최근3경기 홈 {Number(matched?.wisetotoLive?.recentDetailSummary?.home?.bullpen?.last3?.pitches ?? 0)}구 · 원정 {Number(matched?.wisetotoLive?.recentDetailSummary?.away?.bullpen?.last3?.pitches ?? 0)}구 · 2경기+ 연속등판 홈 {Number(matched?.wisetotoLive?.recentDetailSummary?.home?.bullpen?.backToBack?.length ?? 0)}명 / 원정 {Number(matched?.wisetotoLive?.recentDetailSummary?.away?.bullpen?.backToBack?.length ?? 0)}명</div>
                         </div>
                         <div className="card">
                           부상/결장
