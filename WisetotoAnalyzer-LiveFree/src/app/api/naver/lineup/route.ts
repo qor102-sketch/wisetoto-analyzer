@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_17_KBO_LIVE_DATA_20260829
+// DEPLOY_MARKER_V13_8_18_MLB_LIVE_DATA_20260829
 
 const NAVER_API = "https://api-gw.sports.naver.com/schedule/games";
 
@@ -33,6 +33,39 @@ const KBO_TEAM_ALIASES: Record<string, string[]> = {
   HT: ["kia", "kia타이거즈", "기아", "기아타이거즈", "kiatigers", "ht"],
 };
 
+const MLB_TEAM_ALIASES: Record<string, string[]> = {
+  AZ: ["애리조나", "애리조나다이아몬드백스", "arizona", "arizonadiamondbacks", "diamondbacks"],
+  AT: ["애틀랜타", "애틀랜타브레이브스", "atlanta", "atlantabraves", "braves"],
+  BA: ["볼티모어", "볼티모어오리올스", "baltimore", "baltimoreorioles", "orioles"],
+  BO: ["보스턴", "보스턴레드삭스", "boston", "bostonredsox", "redsox"],
+  CC: ["시카고컵스", "시카고컵스", "chicagocubs", "cubs"],
+  CW: ["시카고화이트삭스", "시카고w", "화이트삭스", "chicagowhitesox", "whitesox"],
+  CI: ["신시내티", "신시내티레즈", "cincinnati", "cincinnatireds", "reds"],
+  CL: ["클리블랜드", "클리블랜드가디언스", "cleveland", "clevelandguardians", "guardians"],
+  CO: ["콜로라도", "콜로라도로키스", "colorado", "coloradorockies", "rockies"],
+  DE: ["디트로이트", "디트로이트타이거스", "디트로이트타이거즈", "detroit", "detroittigers"],
+  HO: ["휴스턴", "휴스턴애스트로스", "houston", "houstonastros", "astros"],
+  KC: ["캔자스시티", "캔자스시티로열스", "kansascity", "kansascityroyals", "royals"],
+  LA: ["la다저스", "la다저스", "로스앤젤레스다저스", "losangelesdodgers", "ladodgers", "dodgers"],
+  AA: ["la에인절스", "에인절스", "로스앤젤레스에인절스", "losangelesangels", "laangels", "angels"],
+  MI: ["밀워키", "밀워키브루어스", "milwaukee", "milwaukeebrewers", "brewers"],
+  MN: ["미네소타", "미네소타트윈스", "minnesota", "minnesotatwins", "twins"],
+  NM: ["뉴욕메츠", "뉴욕메츠", "newyorkmets", "nymets", "mets"],
+  NY: ["뉴욕양키스", "뉴욕양키스", "newyorkyankees", "nyyankees", "yankees"],
+  OA: ["오클랜드", "오클랜드애슬레틱스", "oakland", "oaklandathletics", "athletics", "as"],
+  PH: ["필라델피아", "필라델피아필리스", "philadelphia", "philadelphiaphillies", "phillies"],
+  PI: ["피츠버그", "피츠버그파이리츠", "pittsburgh", "pittsburghpirates", "pirates"],
+  SD: ["샌디에이고", "샌디에이고파드리스", "sandiego", "sandiegopadres", "padres"],
+  SF: ["샌프란시스코", "샌프란시스코자이언츠", "sanfrancisco", "sanfranciscogiants"],
+  SE: ["시애틀", "시애틀매리너스", "seattle", "seattlemariners", "mariners"],
+  SL: ["세인트루이스", "세인트루이스카디널스", "stlouis", "stlouiscardinals", "cardinals"],
+  TB: ["탬파베이", "탬파베이레이스", "tampabay", "tampabayrays", "rays"],
+  TE: ["텍사스", "텍사스레인저스", "texas", "texasrangers", "rangers"],
+  TO: ["토론토", "토론토블루제이스", "toronto", "torontobluejays", "bluejays"],
+  MO: ["워싱턴", "워싱턴내셔널스", "washington", "washingtonnationals", "nationals"],
+  FL: ["마이애미", "마이애미말린스", "miami", "miamimarlins", "marlins"],
+};
+
 function norm(value: string) {
   return String(value ?? "")
     .toLowerCase()
@@ -63,8 +96,26 @@ function normalizedKboName(name: string) {
   return null;
 }
 
+function normalizedMlbName(name: string) {
+  const target = norm(name);
+  for (const [code, aliases] of Object.entries(MLB_TEAM_ALIASES)) {
+    if (aliases.some((alias) => {
+      const a = norm(alias);
+      return target === a || target.includes(a) || a.includes(target);
+    })) return code;
+  }
+  return null;
+}
+
 function dateKey(value: string) {
   const raw = String(value ?? "").trim();
+  if (/T/.test(raw) && /(Z|[+-]\d{2}:?\d{2})$/i.test(raw)) {
+    const parsed = new Date(raw);
+    if (Number.isFinite(parsed.getTime())) {
+      const kst = new Date(parsed.getTime() + 9 * 60 * 60 * 1000);
+      return kst.toISOString().slice(0, 10).replace(/-/g, "");
+    }
+  }
   const m = raw.match(/(20\d{2})[-/.]?(\d{2})[-/.]?(\d{2})/);
   if (m) return `${m[1]}${m[2]}${m[3]}`;
   const numeric = Number(raw);
@@ -78,6 +129,23 @@ function dateKey(value: string) {
 
 function isoDate(key: string) {
   return `${key.slice(0, 4)}-${key.slice(4, 6)}-${key.slice(6, 8)}`;
+}
+
+function requestedStartMs(value: string) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  let d: Date;
+  if (/T/.test(raw) && /(Z|[+-]\d{2}:?\d{2})$/i.test(raw)) d = new Date(raw);
+  else if (/^20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}/.test(raw)) d = new Date(`${raw}+09:00`);
+  else return null;
+  return Number.isFinite(d.getTime()) ? d.getTime() : null;
+}
+
+function naverLocalGameMs(value: any) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const d = new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : `${raw}+09:00`);
+  return Number.isFinite(d.getTime()) ? d.getTime() : null;
 }
 
 function allObjects(value: any, out: AnyObj[] = []) {
@@ -96,9 +164,12 @@ function teamMatches(candidate: string, requested: string) {
   const r = norm(requested);
   if (!c || !r) return false;
   if (c === r || c.includes(r) || r.includes(c)) return true;
-  const cc = normalizedKboName(candidate);
-  const rr = normalizedKboName(requested);
-  return Boolean(cc && rr && cc === rr);
+  const kc = normalizedKboName(candidate);
+  const kr = normalizedKboName(requested);
+  if (kc && kr && kc === kr) return true;
+  const mc = normalizedMlbName(candidate);
+  const mr = normalizedMlbName(requested);
+  return Boolean(mc && mr && mc === mr);
 }
 
 async function resolveKboGameId(date: string, home: string, away: string) {
@@ -109,7 +180,7 @@ async function resolveKboGameId(date: string, home: string, away: string) {
     headers: {
       accept: "application/json, text/plain, */*",
       referer: "https://m.sports.naver.com/kbaseball/schedule/index",
-      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.17",
+      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.18",
     },
   });
   const payload = await response.json().catch(() => null);
@@ -130,6 +201,63 @@ async function resolveKboGameId(date: string, home: string, away: string) {
     endpoint,
     status: response.status,
     candidateCount: candidates.length,
+  };
+}
+
+async function resolveMlbGameId(date: string, home: string, away: string, startRaw: string) {
+  const d = isoDate(date);
+  const endpoint = `${NAVER_API}?upperCategoryId=wbaseball&fromDate=${encodeURIComponent(d)}&toDate=${encodeURIComponent(d)}`;
+  const response = await fetch(endpoint, {
+    cache: "no-store",
+    headers: {
+      accept: "application/json, text/plain, */*",
+      referer: "https://m.sports.naver.com/wbaseball/schedule/index",
+      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.18",
+    },
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload) return { gameId: null, endpoint, status: response.status };
+
+  const homeCode = normalizedMlbName(home);
+  const awayCode = normalizedMlbName(away);
+  const candidates = allObjects(payload).filter((obj) => {
+    const gameId = String(obj?.gameId ?? obj?.game_id ?? "").trim();
+    if (!gameId || !gameId.startsWith(date)) return false;
+    const category = String(obj?.categoryId ?? obj?.category ?? obj?.upperCategoryId ?? "").toLowerCase();
+    if (category && !/mlb|wbaseball/.test(category)) return false;
+    const h = String(obj?.homeTeamName ?? obj?.homeTeamShortName ?? obj?.homeTeamFullName ?? obj?.homeName ?? "");
+    const a = String(obj?.awayTeamName ?? obj?.awayTeamShortName ?? obj?.awayTeamFullName ?? obj?.awayName ?? "");
+    const hCode = String(obj?.homeTeamCode ?? obj?.hCode ?? "").trim().toUpperCase();
+    const aCode = String(obj?.awayTeamCode ?? obj?.aCode ?? "").trim().toUpperCase();
+    const homeOk = teamMatches(h, home) || Boolean(homeCode && hCode === homeCode);
+    const awayOk = teamMatches(a, away) || Boolean(awayCode && aCode === awayCode);
+    return homeOk && awayOk;
+  });
+
+  const requestedMs = requestedStartMs(startRaw);
+  let selected: AnyObj | null = candidates.length === 1 ? candidates[0] : null;
+  let closestDiffMinutes: number | null = null;
+  if (!selected && candidates.length > 1 && requestedMs !== null) {
+    const ranked = candidates
+      .map((obj) => {
+        const candidateMs = naverLocalGameMs(obj?.gameDateTime);
+        return { obj, diff: candidateMs === null ? Number.POSITIVE_INFINITY : Math.abs(candidateMs - requestedMs) };
+      })
+      .sort((a, b) => a.diff - b.diff);
+    if (ranked[0] && Number.isFinite(ranked[0].diff)) {
+      selected = ranked[0].obj;
+      closestDiffMinutes = Math.round(ranked[0].diff / 60000);
+    }
+  }
+
+  return {
+    gameId: selected ? String(selected.gameId ?? selected.game_id) : null,
+    endpoint,
+    status: response.status,
+    candidateCount: candidates.length,
+    closestDiffMinutes,
+    homeCode,
+    awayCode,
   };
 }
 
@@ -170,6 +298,118 @@ function normalizeKboPlayers(players: any) {
     : [];
 }
 
+function mlbSeasonStatsMap(rows: any) {
+  const out = new Map<string, AnyObj>();
+  if (!Array.isArray(rows)) return out;
+  for (const row of rows) {
+    const id = String(row?.pCode ?? row?.pcode ?? "").trim();
+    if (id && !out.has(id)) out.set(id, row);
+  }
+  return out;
+}
+
+function normalizeMlbPlayers(players: any, seasonRows: any) {
+  if (!Array.isArray(players)) return [];
+  const season = mlbSeasonStatsMap(seasonRows);
+  const byOrder = new Map<number, AnyObj>();
+  for (const p of players) {
+    const order = Number(p?.batOrder ?? 0);
+    if (order < 1 || order > 9) continue;
+    const existing = byOrder.get(order);
+    const seq = Number(p?.seqno ?? 99);
+    const existingSeq = Number(existing?.seqno ?? 99);
+    if (!existing || seq < existingSeq) byOrder.set(order, p);
+  }
+  return Array.from(byOrder.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([order, p]) => {
+      const id = String(p?.pCode ?? p?.pcode ?? "").trim() || null;
+      const stats = id ? season.get(id) : null;
+      const avgRaw = stats?.hra ?? p?.hra;
+      const obpRaw = stats?.bra ?? null;
+      return {
+        battingOrder: order,
+        position: String(p?.posName ?? p?.pos ?? "").trim() || null,
+        pcode: id,
+        playerId: id,
+        name: String(p?.firstName ?? p?.name ?? "").trim() || null,
+        shortName: String(p?.name ?? "").trim() || null,
+        hitType: String(p?.hitType ?? "").trim() || null,
+        backnum: String(p?.backnum ?? "").trim() || null,
+        currentSeasonStats: {
+          avg: Number.isFinite(Number(avgRaw)) ? Number(avgRaw) : null,
+          obp: Number.isFinite(Number(obpRaw)) ? Number(obpRaw) : null,
+          ab: Number.isFinite(Number(stats?.ab)) ? Number(stats?.ab) : null,
+          hit: Number.isFinite(Number(stats?.hit)) ? Number(stats?.hit) : null,
+          rbi: Number.isFinite(Number(stats?.rbi)) ? Number(stats?.rbi) : null,
+          hr: Number.isFinite(Number(stats?.hr)) ? Number(stats?.hr) : null,
+        },
+        source: "NAVER_MLB_PREVIEW",
+      };
+    })
+    .filter((p: AnyObj) => Boolean(p.name));
+}
+
+function normalizeMlbStarter(starter: any, fallbackName: any, lineupPitchers: any, confirmed: boolean) {
+  const info = starter?.playerInfo ?? {};
+  const firstPitcher = Array.isArray(lineupPitchers) ? lineupPitchers.find((p: AnyObj) => Number(p?.seqno ?? 99) === 1) ?? lineupPitchers[0] : null;
+  const name = String(info?.firstName ?? firstPitcher?.firstName ?? firstPitcher?.name ?? fallbackName ?? "").trim();
+  if (!name) return null;
+  const id = String(info?.pCode ?? firstPitcher?.pCode ?? firstPitcher?.pcode ?? "").trim() || null;
+  const season = starter?.currentSeasonStats ?? {};
+  const recent = starter?.latelyGamePitcherStat ?? null;
+  return {
+    name,
+    playerId: id,
+    pcode: id,
+    era: Number.isFinite(Number(season?.era ?? firstPitcher?.seasonEra)) ? Number(season?.era ?? firstPitcher?.seasonEra) : null,
+    status: confirmed ? "CONFIRMED" : "EXPECTED",
+    latestStart: recent ? {
+      date: recent?.gdate ?? null,
+      opponent: recent?.name ?? null,
+      innings: recent?.inn ?? null,
+      era: Number.isFinite(Number(recent?.era)) ? Number(recent.era) : null,
+      earnedRuns: Number.isFinite(Number(recent?.er)) ? Number(recent.er) : null,
+      decision: recent?.wls ?? null,
+    } : null,
+    currentSeasonStats: {
+      era: Number.isFinite(Number(season?.era)) ? Number(season.era) : null,
+      games: Number.isFinite(Number(season?.gameCount)) ? Number(season.gameCount) : null,
+      wins: Number.isFinite(Number(season?.w)) ? Number(season.w) : null,
+      losses: Number.isFinite(Number(season?.l)) ? Number(season.l) : null,
+      innings: season?.inn ?? null,
+      strikeouts: Number.isFinite(Number(season?.kk)) ? Number(season.kk) : null,
+      walks: Number.isFinite(Number(season?.bb)) ? Number(season.bb) : null,
+    },
+    source: "NAVER_MLB_PREVIEW",
+  };
+}
+
+function summarizeMlbPreviousGames(rows: any) {
+  const games = Array.isArray(rows) ? rows.slice(0, 5) : [];
+  const wins = games.filter((g: AnyObj) => String(g?.result ?? "").trim() === "승").length;
+  const losses = games.filter((g: AnyObj) => String(g?.result ?? "").trim() === "패").length;
+  const played = games.length;
+  return {
+    form: {
+      played,
+      wins,
+      draws: Math.max(0, played - wins - losses),
+      losses,
+      formPercent: played > 0 ? wins / played : 0,
+    },
+    games: games.map((g: AnyObj) => ({
+      gameId: g?.gameId ?? g?.ognGameId ?? null,
+      date: g?.gdate ?? null,
+      result: g?.result ?? null,
+      home: g?.hName ?? null,
+      away: g?.aName ?? null,
+      homeScore: Number.isFinite(Number(g?.hScore)) ? Number(g.hScore) : null,
+      awayScore: Number.isFinite(Number(g?.aScore)) ? Number(g.aScore) : null,
+    })),
+  };
+}
+
 function normalizeKboStarter(value: any, fallbackName: any) {
   const p = Array.isArray(value) ? value[0] : null;
   const name = String(p?.name ?? fallbackName ?? "").trim();
@@ -191,19 +431,33 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const home = url.searchParams.get("home") ?? "";
     const away = url.searchParams.get("away") ?? "";
-    const date = dateKey(url.searchParams.get("date") ?? "");
+    const startRaw = url.searchParams.get("date") ?? "";
+    const date = dateKey(startRaw);
     if (!date || !home || !away) {
       return Response.json({ ok: false, error: "네이버 gameId 생성에 필요한 날짜/팀 정보 없음", debug: { date, home, away } }, { status: 400 });
     }
 
     const homeNpb = npbTeamCode(home);
     const awayNpb = npbTeamCode(away);
-    let league: "NPB" | "KBO" = homeNpb && awayNpb ? "NPB" : "KBO";
+    const homeMlb = normalizedMlbName(home);
+    const awayMlb = normalizedMlbName(away);
+    let league: "NPB" | "KBO" | "MLB" = homeNpb && awayNpb ? "NPB" : homeMlb && awayMlb ? "MLB" : "KBO";
     let gameId: string | null = null;
     let resolverDebug: any = null;
 
     if (league === "NPB") {
       gameId = `${date}${awayNpb}${homeNpb}0`;
+    } else if (league === "MLB") {
+      const resolved = await resolveMlbGameId(date, home, away, startRaw);
+      gameId = resolved.gameId;
+      resolverDebug = resolved;
+      if (!gameId) {
+        return Response.json({
+          ok: false,
+          error: "네이버 MLB 당일 일정에서 경기 gameId 자동매칭 실패",
+          debug: { date, home, away, resolver: resolved },
+        }, { status: 404 });
+      }
     } else {
       const resolved = await resolveKboGameId(date, home, away);
       gameId = resolved.gameId;
@@ -223,7 +477,7 @@ export async function GET(request: Request) {
       headers: {
         accept: "application/json, text/plain, */*",
         referer: `https://m.sports.naver.com/game/${gameId}`,
-        "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.17",
+        "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.18",
       },
     });
 
@@ -241,13 +495,40 @@ export async function GET(request: Request) {
     const game = result?.game ?? {};
     const detectedCategory = String(result?.textRelayData?.category ?? game?.categoryId ?? "").toLowerCase();
     if (detectedCategory === "kbo") league = "KBO";
+    if (detectedCategory === "mlb") league = "MLB";
+
+    let previewData: AnyObj | null = null;
+    let previewEndpoint: string | null = null;
+    let previewStatus: number | null = null;
+    if (league === "MLB") {
+      previewEndpoint = `${NAVER_API}/${gameId}/preview`;
+      const previewResponse = await fetch(previewEndpoint, {
+        cache: "no-store",
+        headers: {
+          accept: "application/json, text/plain, */*",
+          referer: `https://m.sports.naver.com/game/${gameId}`,
+          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.18",
+        },
+      });
+      previewStatus = previewResponse.status;
+      const previewPayload = await previewResponse.json().catch(() => null);
+      if (previewResponse.ok && previewPayload?.success && previewPayload?.code === 200) {
+        previewData = previewPayload?.result?.previewData ?? null;
+      }
+    }
 
     let homeLineup: AnyObj[] = [];
     let awayLineup: AnyObj[] = [];
     let homeStarter: AnyObj | null = null;
     let awayStarter: AnyObj | null = null;
 
-    if (league === "KBO") {
+    if (league === "MLB") {
+      homeLineup = normalizeMlbPlayers(previewData?.homeTeamLineUp?.batter, previewData?.homeBattersSeasonStats);
+      awayLineup = normalizeMlbPlayers(previewData?.awayTeamLineUp?.batter, previewData?.awayBattersSeasonStats);
+      const confirmed = homeLineup.length >= 9 && awayLineup.length >= 9;
+      homeStarter = normalizeMlbStarter(previewData?.homeStarter, game?.homeStarterName, previewData?.homeTeamLineUp?.pitcher, confirmed);
+      awayStarter = normalizeMlbStarter(previewData?.awayStarter, game?.awayStarterName, previewData?.awayTeamLineUp?.pitcher, confirmed);
+    } else if (league === "KBO") {
       homeLineup = normalizeKboPlayers(result?.textRelayData?.homeLineup?.batter);
       awayLineup = normalizeKboPlayers(result?.textRelayData?.awayLineup?.batter);
       homeStarter = normalizeKboStarter(result?.textRelayData?.homeLineup?.pitcher, game?.homeStarterName);
@@ -280,6 +561,7 @@ export async function GET(request: Request) {
       categoryId: game?.categoryId ?? detectedCategory ?? null,
       capturedAt: Date.now(),
       endpoint,
+      previewEndpoint,
       gameId,
       game: {
         gameDateTime: game?.gameDateTime ?? null,
@@ -296,14 +578,28 @@ export async function GET(request: Request) {
       awayStarter,
       home: homeLineup,
       away: awayLineup,
+      recentSummary: league === "MLB" && previewData ? {
+        home: summarizeMlbPreviousGames(previewData?.homeTeamPreviousGames),
+        away: summarizeMlbPreviousGames(previewData?.awayTeamPreviousGames),
+      } : null,
+      mlbPreview: league === "MLB" ? {
+        ok: Boolean(previewData),
+        status: previewStatus,
+        generatedDate: previewData?.generateDate ?? null,
+        homeSeasonBatters: Array.isArray(previewData?.homeBattersSeasonStats) ? previewData.homeBattersSeasonStats.length : 0,
+        awaySeasonBatters: Array.isArray(previewData?.awayBattersSeasonStats) ? previewData.awayBattersSeasonStats.length : 0,
+        homePreviousGames: Array.isArray(previewData?.homeTeamPreviousGames) ? previewData.homeTeamPreviousGames.length : 0,
+        awayPreviousGames: Array.isArray(previewData?.awayTeamPreviousGames) ? previewData.awayTeamPreviousGames.length : 0,
+      } : null,
       coverage: {
         home: homeLineup.length,
         away: awayLineup.length,
         total: homeLineup.length + awayLineup.length,
         homeStats: homeLineup.filter((p: AnyObj) => p?.currentSeasonStats?.avg !== null && p?.currentSeasonStats?.avg !== undefined).length,
         awayStats: awayLineup.filter((p: AnyObj) => p?.currentSeasonStats?.avg !== null && p?.currentSeasonStats?.avg !== undefined).length,
+        starters: Number(Boolean(homeStarter)) + Number(Boolean(awayStarter)),
       },
-      debug: resolverDebug ? { kboResolver: resolverDebug } : undefined,
+      debug: resolverDebug ? { resolver: resolverDebug } : undefined,
     });
   } catch (error: any) {
     return Response.json({ ok: false, error: error?.message || "네이버 당일 라인업 수집 중 오류" }, { status: 500 });
