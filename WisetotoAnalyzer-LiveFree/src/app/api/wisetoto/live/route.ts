@@ -1,7 +1,8 @@
-// DEPLOY_MARKER_V13_8_14_WISETOTO_BASEBALL_DETAIL_STAGE1_20260829
+// DEPLOY_MARKER_V13_8_15_WISETOTO_RECENT_5GAME_DETAIL_20260829
 
 const WISETOTO_ORIGIN = "https://www.wisetoto.com";
 const WISETOTO_DETAIL = `${WISETOTO_ORIGIN}/util/gameinfo/get_detail_lineup.htm`;
+const WISETOTO_RECENT_DETAIL = `${WISETOTO_ORIGIN}/util/gameinfo/get_detail_lineup_bs.htm`;
 
 /*
  * 브라우저에서 실제 확인한 focus 링크를 안전한 fallback으로 보관한다.
@@ -342,6 +343,139 @@ function parseCurrentLineupIfPresent(html: string) {
     : { detected: false, home: [], away: [], reason: "current-lineup-table-not-confirmed" };
 }
 
+
+function parseHistoricalTeamDetail(html: string) {
+  const tables = tableBlocks(html).map(parseTable);
+  let batterTable: ParsedTable | null = null;
+  let pitcherTable: ParsedTable | null = null;
+
+  for (const table of tables) {
+    const headerText = table.headers.join(" ");
+    if (!batterTable && /(?:타자|타율|타수|안타|타점|득점|홈런|AB|RBI|HR)/i.test(headerText)) {
+      batterTable = table;
+    }
+    if (!pitcherTable && /(?:투수|ERA|이닝|투구수|삼진|자책|IP|ER)/i.test(headerText)) {
+      pitcherTable = table;
+    }
+  }
+
+  /* heading이 살아있는 응답이면 header 판별보다 heading 인접 table을 우선한다. */
+  const headingBat = findHeadingTable(html, /<h5>\s*[^<]*타자기록\s*<\/h5>/i);
+  const pitchHeading = /<h5>\s*[^<]*투수기록\s*<\/h5>/i.exec(html);
+  const headingPitch = pitchHeading
+    ? parseTable(html.slice(pitchHeading.index).match(/<table\b[^>]*>[\s\S]*?<\/table>/i)?.[0] ?? "")
+    : null;
+
+  const batters = rowObjects(headingBat && headingBat.rows.length ? headingBat : batterTable ?? { headers: [], rows: [] });
+  const pitchers = rowObjects(headingPitch && headingPitch.rows.length ? headingPitch : pitcherTable ?? { headers: [], rows: [] });
+  return { batters, pitchers };
+}
+
+async function fetchHistoricalTeamDetail(ref: AnyObj) {
+  const scheduleInfoSeq = String(ref?.scheduleInfoSeq ?? "").trim();
+  const teamInfoSeq = String(ref?.teamInfoSeq ?? "").trim();
+  const homeAway = String(ref?.side ?? "").trim();
+  if (!scheduleInfoSeq || !teamInfoSeq || !/^(home|away)$/.test(homeAway)) {
+    return { ok: false, ref, status: 0, error: "invalid-recent-game-ref", batters: [], pitchers: [] };
+  }
+
+  const detailUrl = new URL(WISETOTO_RECENT_DETAIL);
+  detailUrl.searchParams.set("schedule_info_seq", scheduleInfoSeq);
+  detailUrl.searchParams.set("team_info_seq", teamInfoSeq);
+  detailUrl.searchParams.set("record_page_value", "");
+  detailUrl.searchParams.set("home_away", homeAway);
+  detailUrl.searchParams.set("state", "e");
+
+  try {
+    const detail = await wisetotoFetch(detailUrl.toString());
+    if (!detail.response.ok) {
+      return { ok: false, ref, status: detail.response.status, error: `http-${detail.response.status}`, batters: [], pitchers: [] };
+    }
+    const parsed = parseHistoricalTeamDetail(detail.text);
+    const ok = parsed.batters.length > 0 || parsed.pitchers.length > 0;
+    return {
+      ok, ref, status: detail.response.status,
+      error: ok ? null : "detail-tables-not-found",
+      batters: parsed.batters, pitchers: parsed.pitchers,
+      summary: { batters: summarizeLatestBatters(parsed.batters), pitching: summarizeLatestPitchers(parsed.pitchers) },
+    };
+  } catch (error: any) {
+    return { ok: false, ref, status: 0, error: error?.message || "recent-detail-fetch-failed", batters: [], pitchers: [] };
+  }
+}
+
+function aggregateRecentTeamDetails(details: AnyObj[]) {
+  const successful = details.filter((item) => item?.ok);
+  const batterRows = successful.flatMap((item) => Array.isArray(item?.batters) ? item.batters : []);
+  const batterSummary = summarizeLatestBatters(batterRows);
+
+  const games = successful.map((item, gameIndex) => {
+    const pitching = summarizeLatestPitchers(Array.isArray(item?.pitchers) ? item.pitchers : []);
+    return {
+      gameIndex,
+      scheduleInfoSeq: item?.ref?.scheduleInfoSeq ?? null,
+      date: item?.ref?.date ?? null,
+      starter: pitching.starter,
+      bullpen: pitching.bullpen,
+      relievers: pitching.pitchers.slice(1),
+    };
+  });
+
+  const usage = new Map<string, AnyObj>();
+  for (const game of games) {
+    for (const reliever of game.relievers) {
+      const name = String(reliever?.name ?? "").trim();
+      if (!name) continue;
+      const current = usage.get(name) ?? { name, games: 0, pitches: 0, innings: 0, appearances: [] as number[] };
+      current.games += 1;
+      current.pitches += Number(reliever?.pitches ?? 0);
+      current.innings += Number(reliever?.innings ?? 0);
+      current.appearances.push(game.gameIndex);
+      usage.set(name, current);
+    }
+  }
+
+  const relieverUsage = Array.from(usage.values()).map((item: AnyObj) => {
+    const set = new Set<number>(item.appearances);
+    let consecutiveGames = 0;
+    while (set.has(consecutiveGames)) consecutiveGames += 1;
+    return {
+      name: item.name,
+      games: item.games,
+      pitches: item.pitches,
+      innings: Number(Number(item.innings).toFixed(1)),
+      consecutiveGames,
+    };
+  }).sort((a: AnyObj, b: AnyObj) => b.consecutiveGames - a.consecutiveGames || b.pitches - a.pitches);
+
+  const firstN = (n: number) => games.slice(0, n).reduce((acc, game) => {
+    acc.pitchersUsed += Number(game?.bullpen?.pitchersUsed ?? 0);
+    acc.pitches += Number(game?.bullpen?.pitches ?? 0);
+    acc.innings += Number(game?.bullpen?.innings ?? 0);
+    return acc;
+  }, { pitchersUsed: 0, pitches: 0, innings: 0 });
+
+  const last2 = firstN(2);
+  const last3 = firstN(3);
+  const last5 = firstN(5);
+  last2.innings = Number(last2.innings.toFixed(1));
+  last3.innings = Number(last3.innings.toFixed(1));
+  last5.innings = Number(last5.innings.toFixed(1));
+
+  return {
+    requestedGames: details.length,
+    successfulGames: successful.length,
+    batterRows: batterRows.length,
+    batterSummary,
+    starters: games.map((game) => ({ scheduleInfoSeq: game.scheduleInfoSeq, date: game.date, ...game.starter })).filter((row) => row.name),
+    bullpen: {
+      last2, last3, last5,
+      relieverUsage,
+      backToBack: relieverUsage.filter((row: AnyObj) => row.consecutiveGames >= 2),
+    },
+  };
+}
+
 function normalizeName(value: string) {
   return String(value ?? "")
     .toLowerCase()
@@ -395,7 +529,7 @@ async function wisetotoFetch(url: string) {
       "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.7",
       Referer: `${WISETOTO_ORIGIN}/`,
       "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 WisetotoAnalyzer/13.8.14",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 WisetotoAnalyzer/13.8.15",
     },
   });
   return { response, text: await response.text() };
@@ -473,7 +607,7 @@ export async function GET(request: Request) {
         {
           ok: false,
           error: "와이즈토토 schedule_info_seq 자동 매칭에 실패했습니다.",
-          debug: { matchSeq, home, away, resolverMethod, resolverStatus, resolverVersion: "V13.8.14_BASEBALL_DETAIL_STAGE1" },
+          debug: { matchSeq, home, away, resolverMethod, resolverStatus, resolverVersion: "V13.8.15_RECENT_5GAME_DETAIL" },
         },
         { status: 404 }
       );
@@ -509,6 +643,21 @@ export async function GET(request: Request) {
     };
     const latestPrevious = parseLatestPreviousRecords(detail.text);
     const currentLineup = parseCurrentLineupIfPresent(detail.text);
+
+    /*
+     * 실제 DevTools에서 확인된 최근경기 상세 XHR:
+     * get_detail_lineup_bs.htm?schedule_info_seq=...&team_info_seq=...&record_page_value=&home_away=home|away&state=e
+     * 홈/원정 각 최근 5개 ref를 그대로 사용하며, 실패한 경기는 0값으로 보간하지 않는다.
+     */
+    const [homeRecentDetails, awayRecentDetails] = await Promise.all([
+      Promise.all(recentGames.home.slice(0, 5).map((ref: AnyObj) => fetchHistoricalTeamDetail(ref))),
+      Promise.all(recentGames.away.slice(0, 5).map((ref: AnyObj) => fetchHistoricalTeamDetail(ref))),
+    ]);
+    const recentDetailSummary = {
+      home: aggregateRecentTeamDetails(homeRecentDetails),
+      away: aggregateRecentTeamDetails(awayRecentDetails),
+    };
+
     const latestDetailSummary = {
       home: {
         batters: summarizeLatestBatters(latestPrevious.home.batters),
@@ -552,6 +701,8 @@ export async function GET(request: Request) {
       h2h: wisetotoH2H,
       latestPrevious,
       latestDetailSummary,
+      recentDetails: { home: homeRecentDetails, away: awayRecentDetails },
+      recentDetailSummary,
       currentLineup,
       absentee: {
         available: Boolean(absenteeText),
@@ -565,13 +716,18 @@ export async function GET(request: Request) {
           recentGames.home.length + recentGames.away.length,
         latestBatterRows,
         latestPitcherRows,
+        recentDetailGamesHome: recentDetailSummary.home.successfulGames,
+        recentDetailGamesAway: recentDetailSummary.away.successfulGames,
+        recentDetailGamesTotal: recentDetailSummary.home.successfulGames + recentDetailSummary.away.successfulGames,
+        recentDetailBatterRows: recentDetailSummary.home.batterRows + recentDetailSummary.away.batterRows,
+        recentDetailStarterRows: recentDetailSummary.home.starters.length + recentDetailSummary.away.starters.length,
         currentLineupBatters: currentLineup.home.length + currentLineup.away.length,
         absenteeDetected: Boolean(absenteeText),
       },
       limitations: {
         previousGameRefs: "최근 경기 탭의 schedule_info_seq는 확보됨",
         previousGameDetail:
-          "직전 경기 타자/투수 세부기록은 집계까지 완료. 최근 3~5경기 전체는 change_record XHR의 실제 URL 확인 후 확장.",
+          "DevTools에서 확인된 get_detail_lineup_bs.htm XHR로 홈/원정 최근 최대 5경기 상세를 수집. 응답 실패 경기는 임의 보간하지 않음.",
         currentLineup:
           "현재 경기 영역에서 당일 라인업 heading/table이 실제 존재할 때만 감지하며, 이전 경기 라인업은 현재 라인업으로 사용하지 않음.",
         modelApplied: "Wisetoto recent Form/H2H is exposed as the baseball LIVE primary feed; V13.0 formulas are unchanged.",
