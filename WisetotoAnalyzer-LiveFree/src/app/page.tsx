@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_4_COMPACT_BETMAN_RESULT_BADGES_20260829
+// DEPLOY_MARKER_V13_8_5_WISETOTO_MARKET_ROWS_20260829
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -622,6 +622,7 @@ type LiveTrackerRecord = {
   gateVersion: "FALLBACK_GATE_V2";
   decision: "PICK" | "PASS";
   picks: LiveTrackerPick[];
+  marketResults?: LiveTrackerPick[];
   verificationStatus: "PENDING" | "VERIFIED";
   verifiedAt: number | null;
   result: BacktestValidationResult | null;
@@ -12739,6 +12740,40 @@ export default function Home() {
     [visibleBetmanGames, sport]
   );
 
+  const filteredMarketRows = useMemo(
+    () =>
+      filteredGames.flatMap((game) => {
+        const visibleIndex =
+          visibleBetmanGames.indexOf(game);
+
+        const key =
+          gameKey(
+            game,
+            visibleIndex >= 0
+              ? visibleIndex
+              : 0
+          );
+
+        return marketRows(game).map(
+          (market, marketIndex) => ({
+            game,
+            gameKey: key,
+            market,
+            marketIndex,
+            marketKey:
+              marketStableKey(
+                market,
+                marketIndex
+              ),
+          })
+        );
+      }),
+    [
+      filteredGames,
+      visibleBetmanGames,
+    ]
+  );
+
   const uiMarketRowCount = useMemo(
     () =>
       visibleBetmanGames.reduce(
@@ -13581,6 +13616,52 @@ export default function Home() {
           };
         });
 
+      const trackerMarketResults: LiveTrackerPick[] =
+        actualMarketPicks.map((pick) => {
+          const marketIndex =
+            markets.findIndex(
+              (market: any, index: number) =>
+                marketStableKey(market, index) === pick.key
+            );
+
+          const market =
+            marketIndex >= 0
+              ? markets[marketIndex]
+              : null;
+
+          return {
+            key: pick.key,
+            market: pick.market,
+            pick: pick.pick,
+            probability: pick.probability,
+            odds: pick.odds,
+            marketProbability: pick.marketProbability,
+            edge: pick.edge,
+            expectedValue: pick.expectedValue,
+            grade: pick.valueGrade,
+            confidenceGrade: pick.confidenceGrade,
+            recommendationScore: pick.recommendationScore,
+            modelSnapshot: { ...pick },
+            marketSnapshot: market
+              ? {
+                  type: market?.type ?? null,
+                  betName: market?.betName ?? null,
+                  displayName: market?.displayName ?? null,
+                  betTypeName: market?.betTypeName ?? null,
+                  line: market?.line ?? null,
+                  handicap: market?.handicap ?? null,
+                  baseValue: market?.baseValue ?? null,
+                  value: market?.value ?? null,
+                  matchSeq: market?.matchSeq ?? null,
+                  gameNo: market?.gameNo ?? null,
+                }
+              : { betName: pick.market },
+            resultStatus: "PENDING",
+            actualLabel: null,
+            resultNote: null,
+          };
+        });
+
       const selectedFixtureForTracker =
         matched?.selectedFixture ?? matched?.fixture ?? null;
 
@@ -13615,6 +13696,7 @@ export default function Home() {
         gateVersion: "FALLBACK_GATE_V2",
         decision: trackerPicks.length ? "PICK" : "PASS",
         picks: trackerPicks,
+        marketResults: trackerMarketResults,
         verificationStatus: "PENDING",
         verifiedAt: null,
         result: null,
@@ -13631,6 +13713,7 @@ export default function Home() {
     analysisFactors.hasRealData,
     currentSport,
     eligibleMarketPicks,
+    actualMarketPicks,
   ]);
 
   async function verifyLiveTrackerResults() {
@@ -18882,7 +18965,7 @@ export default function Home() {
               >
                 {backtestMode
                   ? "경기 전 Betman 배당만 저장 · 실제 경기결과는 데이터에 포함하지 않음"
-                  : "경기번호 · 시간 · 리그 · 게임유형 · Betman 실제 배당 · 전체 목록 스크롤"}
+                  : "경기번호별 발매행 전체 표시 · 승무패/승1패/핸디/U/O/SUM · 실제 경기는 1회만 분석"}
               </div>
 
               <div
@@ -19026,7 +19109,7 @@ export default function Home() {
               <div
                 style={{
                   minWidth:
-                    760,
+                    940,
                   fontSize: 12,
                 }}
               >
@@ -19035,7 +19118,7 @@ export default function Home() {
                     display:
                       "grid",
                     gridTemplateColumns:
-                      "34px 58px 96px 92px 70px minmax(190px,1fr) 116px 86px 86px minmax(190px,1.4fr) 58px",
+                      "34px 62px 98px 88px 82px minmax(210px,1fr) 132px minmax(92px,.65fr) 62px",
                     minHeight:
                       34,
                     alignItems:
@@ -19057,63 +19140,26 @@ export default function Home() {
                   }}
                 >
                   <div>선택</div>
-                  <div>대표번호</div>
+                  <div>번호</div>
                   <div>일시</div>
                   <div>리그</div>
-                  <div>시장수</div>
-                  <div>대상경기</div>
-                  <div>주요배당</div>
-                  <div>핸디</div>
-                  <div>U/O</div>
-                  <div>분석 결과</div>
+                  <div>유형</div>
+                  <div>홈팀 vs 원정팀</div>
+                  <div>배당</div>
+                  <div>결과</div>
                   <div>보기</div>
                 </div>
 
-                {filteredGames.map(
-                  (
+                {filteredMarketRows.map(
+                  ({
                     game,
-                    gameIndex
-                  ) => {
-                    const visibleIndex =
-                      visibleBetmanGames.indexOf(game);
-
-                    const key =
-                      gameKey(
-                        game,
-                        visibleIndex >= 0
-                          ? visibleIndex
-                          : gameIndex
-                      );
-
+                    gameKey: key,
+                    market,
+                    marketIndex,
+                    marketKey,
+                  }) => {
                     const selected =
-                      key ===
-                      selectedBetmanKey;
-
-                    const rows =
-                      marketRows(
-                        game
-                      );
-
-                    const firstRow =
-                      rows[0];
-
-                    const moneyline =
-                      rows.find((row:any) =>
-                        String(row?.label ?? row?.marketName ?? row?.type ?? "")
-                          .match(/승패|승1패|moneyline/i)
-                      );
-
-                    const handicap =
-                      rows.find((row:any) =>
-                        String(row?.label ?? row?.marketName ?? row?.type ?? "")
-                          .match(/(^|\s)H\s|핸디|handicap/i)
-                      );
-
-                    const total =
-                      rows.find((row:any) =>
-                        String(row?.label ?? row?.marketName ?? row?.type ?? "")
-                          .match(/U\/O|(^|\s)U\s|언더|오버|total/i)
-                      );
+                      key === selectedBetmanKey;
 
                     const identity =
                       actualGameIdentity(game);
@@ -19130,44 +19176,79 @@ export default function Home() {
                     const batchChecked =
                       liveBatchSelectedKeys.includes(key);
 
-                    const oddsText = (row:any) => {
-                      if (!row) return "-";
-                      const values = [
-                        row?.homeOdds ?? row?.oddsHome ?? row?.selections?.[0]?.odds,
-                        row?.drawOdds ?? row?.oddsDraw ?? row?.selections?.[1]?.odds,
-                        row?.awayOdds ?? row?.oddsAway ?? row?.selections?.[2]?.odds,
-                      ].filter((v:any) => Number(v) > 0);
-                      return values.length
-                        ? values.map((v:any) => Number(v).toFixed(2)).join(" / ")
-                        : "-";
-                    };
+                    const marketResult =
+                      (
+                        trackerRecord?.marketResults ??
+                        trackerRecord?.picks ??
+                        []
+                      ).find(
+                        (pick) =>
+                          pick.key === marketKey
+                      ) ?? null;
+
+                    const recommended =
+                      Boolean(
+                        trackerRecord?.picks?.some(
+                          (pick) =>
+                            pick.key === marketKey
+                        )
+                      );
+
+                    const marketNo =
+                      market?.matchSeq ??
+                      market?.gameNo ??
+                      market?.gameSeq ??
+                      market?.seq ??
+                      "-";
+
+                    const marketOdds =
+                      (
+                        Array.isArray(market?.selections)
+                          ? market.selections
+                          : []
+                      )
+                        .map((selection: any) =>
+                          Number(selection?.odds)
+                        )
+                        .filter(
+                          (odds: number) =>
+                            Number.isFinite(odds) &&
+                            odds > 1
+                        )
+                        .map((odds: number) =>
+                          odds.toFixed(2)
+                        )
+                        .join(" / ") || "-";
+
+                    const rowType =
+                      marketLabel(market);
+
+                    const rowTone =
+                      marketResult
+                        ? compactBetmanPickTone(
+                            marketResult.market,
+                            marketResult.pick
+                          )
+                        : "gray";
 
                     return (
                       <div
-                        key={key}
+                        key={`${key}:${marketKey}`}
                         style={{
-                          display:
-                            "grid",
+                          display: "grid",
                           gridTemplateColumns:
-                            "34px 58px 96px 92px 70px minmax(190px,1fr) 116px 86px 86px minmax(190px,1.4fr) 58px",
-                          minHeight:
-                            42,
-                          alignItems:
-                            "center",
-                          textAlign:
-                            "center",
+                            "34px 62px 98px 88px 82px minmax(210px,1fr) 132px minmax(92px,.65fr) 62px",
+                          minHeight: 38,
+                          alignItems: "center",
+                          textAlign: "center",
                           borderBottom:
-                            "1px solid #cfd6dc",
+                            "1px solid #d7dde5",
                           background:
                             selected
-                              ? "#e8f2ff"
+                              ? "#eef6ff"
                               : batchOutcome?.status === "FAIL"
-                                ? "#fff5f5"
-                                : trackerRecord?.decision === "PICK"
-                                  ? "#f0fdf4"
-                                  : trackerRecord?.decision === "PASS"
-                                    ? "#f8fafc"
-                                    : "#fff",
+                                ? "#fff7f7"
+                                : "#fff",
                         }}
                       >
                         <div>
@@ -19179,23 +19260,28 @@ export default function Home() {
                               onChange={() =>
                                 toggleLiveBatchSelection(key)
                               }
-                              title="일괄 분석 대상 선택"
+                              title="같은 실제 경기의 모든 발매행을 한 번에 분석"
                             />
                           ) : null}
                         </div>
-                        <div>
-                          {String(
-                            firstRow?.gameNo ??
-                            firstRow?.matchSeq ??
-                            (game as any)?.gameNo ??
-                            "-"
-                          )}
+
+                        <div style={{ fontWeight: 900 }}>
+                          {String(marketNo)}
                         </div>
+
                         <div>
                           {(() => {
-                            const raw = game?.gameDateMs ?? game?.gameDate ?? game?.startTime;
-                            const d = new Date(raw as any);
-                            if (!Number.isFinite(d.getTime())) return String(raw ?? "-");
+                            const raw =
+                              game?.gameDateMs ??
+                              game?.gameDate ??
+                              game?.startTime;
+                            const d =
+                              new Date(raw as any);
+
+                            if (!Number.isFinite(d.getTime())) {
+                              return String(raw ?? "-");
+                            }
+
                             return d.toLocaleString("ko-KR", {
                               month: "2-digit",
                               day: "2-digit",
@@ -19205,83 +19291,90 @@ export default function Home() {
                             });
                           })()}
                         </div>
+
                         <div>
                           {String(
                             (game as any)?.league ??
-                            koreanSport(String((game as any)?.sport ?? "")) ??
+                            koreanSport(
+                              String((game as any)?.sport ?? "")
+                            ) ??
                             "-"
                           )}
                         </div>
-                        <div style={{fontWeight:800}}>
-                          {rows.length}개
+
+                        <div
+                          style={{
+                            fontWeight: 950,
+                            color: marketLabelColor(market),
+                          }}
+                        >
+                          {rowType}
                         </div>
-                        <div style={{fontWeight:800}}>
-                          {betmanTeam(game,"home")} : {betmanTeam(game,"away")}
+
+                        <div
+                          style={{
+                            fontWeight: 850,
+                            textAlign: "left",
+                            padding: "0 8px",
+                          }}
+                        >
+                          {betmanTeam(game, "home")}
+                          {" : "}
+                          {betmanTeam(game, "away")}
                         </div>
+
+                        <div
+                          style={{
+                            fontVariantNumeric: "tabular-nums",
+                            fontWeight: 800,
+                          }}
+                        >
+                          {marketOdds}
+                        </div>
+
                         <div>
-                          {oddsText(moneyline)}
-                        </div>
-                        <div>
-                          {(() => { const h = chooseBetmanHandicap(game); return h ? `H ${h.line > 0 ? "+" : ""}${h.line}` : "-"; })()}
-                        </div>
-                        <div>
-                          {(() => { const u = chooseBetmanTotal(game); return u ? `U/O ${u.line}` : "-"; })()}
-                        </div>
-                        <div style={{ textAlign: "left", padding: "3px 5px" }}>
                           {batchOutcome?.status === "FAIL" ? (
                             <span className="livePickChip fail">
                               실패
                             </span>
-                          ) : trackerRecord?.decision === "PICK" ? (
+                          ) : marketResult ? (
                             <>
-                              {(trackerRecord.picks ?? []).slice(0, 5).map((pick) => {
-                                const compactLabel =
-                                  compactBetmanPickLabel(
-                                    pick.market,
-                                    pick.pick
-                                  );
-                                const tone =
-                                  compactBetmanPickTone(
-                                    pick.market,
-                                    pick.pick
-                                  );
-                                const marketGroup =
-                                  backtestMarketGroup(
-                                    pick.market
-                                  );
+                              <span
+                                className={`livePickChip ${
+                                  recommended
+                                    ? `value ${rowTone}`
+                                    : "pass"
+                                }`}
+                                title={`${friendlyMarketPickLabel(
+                                  marketResult.market,
+                                  marketResult.pick
+                                )} · 모델 ${marketResult.probability.toFixed(1)}% · EV ${
+                                  marketResult.expectedValue === null
+                                    ? "-"
+                                    : `${marketResult.expectedValue >= 0 ? "+" : ""}${marketResult.expectedValue.toFixed(1)}%`
+                                } · ${marketResult.grade}`}
+                              >
+                                {compactBetmanPickLabel(
+                                  marketResult.market,
+                                  marketResult.pick
+                                )}
+                              </span>
 
-                                return (
-                                  <span
-                                    key={`${trackerRecord.id}:${pick.key}`}
-                                    style={{
-                                      display: "inline-block",
-                                      marginRight: 4,
-                                      marginBottom: 3,
-                                    }}
-                                    title={`${friendlyMarketPickLabel(
-                                      pick.market,
-                                      pick.pick
-                                    )} · 모델 ${pick.probability.toFixed(1)}% · EV ${
-                                      pick.expectedValue === null
-                                        ? "-"
-                                        : `${pick.expectedValue >= 0 ? "+" : ""}${pick.expectedValue.toFixed(1)}%`
-                                    } · ${pick.grade}`}
-                                  >
-                                    <span
-                                      className={`livePickChip value ${tone}`}
-                                    >
-                                      {compactLabel}
-                                    </span>
-                                    <span className="livePickMeta">
-                                      {marketGroup}
-                                      {" · "}
-                                      {pick.probability.toFixed(1)}%
-                                    </span>
-                                  </span>
-                                );
-                              })}
+                              {!recommended && (
+                                <span
+                                  style={{
+                                    display: "block",
+                                    marginTop: 1,
+                                    fontSize: 8,
+                                    color: "#94a3b8",
+                                    fontWeight: 850,
+                                  }}
+                                >
+                                  PASS
+                                </span>
+                              )}
                             </>
-                          ) : trackerRecord?.decision === "PASS" ? (
+                          ) : trackerRecord ? (
                             <span className="livePickChip pass">
                               PASS
                             </span>
@@ -19290,9 +19383,12 @@ export default function Home() {
                               완료
                             </span>
                           ) : (
-                            <span className="small">미분석</span>
+                            <span className="small">
+                              미분석
+                            </span>
                           )}
                         </div>
+
                         <div>
                           <button
                             className="btn light"
@@ -19300,15 +19396,11 @@ export default function Home() {
                               setSelectedBetmanKey(key)
                             }
                             style={{
-                              padding:
-                                "5px 7px",
-                              minWidth:
-                                50,
+                              padding: "5px 7px",
+                              minWidth: 50,
                             }}
                           >
-                            {selected
-                              ? "보기중"
-                              : "보기"}
+                            {selected ? "보기중" : "보기"}
                           </button>
                         </div>
                       </div>
