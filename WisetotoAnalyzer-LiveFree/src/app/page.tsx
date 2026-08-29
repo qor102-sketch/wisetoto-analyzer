@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_0_LIVE_ALIAS_MATCH_RETRY_20260829
+// DEPLOY_MARKER_V13_8_1_LIVE_TRACKER_20260829
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -587,6 +587,43 @@ type BacktestMarketValidation = {
     | "MISS"
     | "PENDING";
   note: string;
+};
+
+type LiveTrackerPick = {
+  key: string;
+  market: string;
+  pick: string;
+  probability: number;
+  odds: number | null;
+  marketProbability: number | null;
+  edge: number | null;
+  expectedValue: number | null;
+  grade: string;
+  confidenceGrade: string;
+  recommendationScore: number;
+  modelSnapshot: any;
+  marketSnapshot: any;
+  resultStatus: "PENDING" | "HIT" | "MISS";
+  actualLabel: string | null;
+  resultNote: string | null;
+};
+
+type LiveTrackerRecord = {
+  id: string;
+  fixtureId: number;
+  fixtureKey: string;
+  home: string;
+  away: string;
+  league: string;
+  sport: string;
+  startMs: number;
+  capturedAt: number;
+  gateVersion: "FALLBACK_GATE_V2";
+  decision: "PICK" | "PASS";
+  picks: LiveTrackerPick[];
+  verificationStatus: "PENDING" | "VERIFIED";
+  verifiedAt: number | null;
+  result: BacktestValidationResult | null;
 };
 
 
@@ -1427,6 +1464,42 @@ function calibrationBiasLabel(summary: CalibrationAuditSummary) {
 const SIMPLE_BACKTEST_STORAGE_KEY =
   "wisetoto-backtest-v12";
 const BACKTEST_PRE_SNAPSHOT_STORAGE_KEY = "wisetoto_v13_3_9_pre_prediction_snapshots";
+
+const LIVE_TRACKER_STORAGE_KEY =
+  "wisetoto_v13_8_1_live_tracker";
+
+function readLiveTrackerRecords(): LiveTrackerRecord[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(LIVE_TRACKER_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    const rows = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.records)
+        ? parsed.records
+        : [];
+    return rows
+      .filter((row: any) =>
+        row &&
+        Number.isFinite(Number(row.fixtureId)) &&
+        Number.isFinite(Number(row.startMs))
+      )
+      .slice(0, 300);
+  } catch {
+    return [];
+  }
+}
+
+function saveLiveTrackerRecords(rows: LiveTrackerRecord[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      LIVE_TRACKER_STORAGE_KEY,
+      JSON.stringify(rows.slice(0, 300))
+    );
+  } catch {}
+}
 
 const BACKTEST_GAME_LIBRARY_STORAGE_KEY =
   "wisetoto-backtest-game-library-v1321";
@@ -10939,6 +11012,15 @@ export default function Home() {
     );
   }, []);
 
+  const [liveTrackerRecords, setLiveTrackerRecords] =
+    useState<LiveTrackerRecord[]>([]);
+  const liveTrackerImportInputRef =
+    useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setLiveTrackerRecords(readLiveTrackerRecords());
+  }, []);
+
 
   useEffect(() => {
     const split =
@@ -13153,6 +13235,319 @@ export default function Home() {
   const awayForm = recentSummary?.away?.form ?? null;
   const hasH2H = Boolean(h2h && (Number(h2h?.homeWins ?? 0) + Number(h2h?.awayWins ?? 0) + Number(h2h?.draws ?? 0) > 0));
   const hasRecent = Boolean((recentSummary?.home?.fixtures?.length ?? 0) || (recentSummary?.away?.fixtures?.length ?? 0));
+
+  const liveTrackerSummary = useMemo(() => {
+    let picks = 0;
+    let hits = 0;
+    let misses = 0;
+    let pending = 0;
+    let pickGames = 0;
+    let passGames = 0;
+
+    for (const record of liveTrackerRecords) {
+      if (record.decision === "PICK") pickGames += 1;
+      else passGames += 1;
+
+      for (const pick of record.picks ?? []) {
+        picks += 1;
+        if (pick.resultStatus === "HIT") hits += 1;
+        else if (pick.resultStatus === "MISS") misses += 1;
+        else pending += 1;
+      }
+    }
+
+    const settled = hits + misses;
+    return {
+      games: liveTrackerRecords.length,
+      pickGames,
+      passGames,
+      picks,
+      hits,
+      misses,
+      pending,
+      settled,
+      hitRate: settled > 0 ? (hits / settled) * 100 : null,
+    };
+  }, [liveTrackerRecords]);
+
+  /*
+   * V13.8.1 LIVE TRACKER
+   * 실전 분석이 완전히 끝난 경기의 시작 전 PRE 판단만 최초 1회 잠근다.
+   * 이 effect에서는 실제 결과 API를 절대 호출하지 않는다.
+   */
+  useEffect(() => {
+    if (
+      backtestMode ||
+      !selectedBetman ||
+      !analysisFactors.hasRealData ||
+      !matched?.detailDebug
+    ) {
+      return;
+    }
+
+    const fixtureId = Number(
+      matched?.fixtureId ??
+      matched?.selectedFixture?.id ??
+      matched?.fixture?.id
+    );
+    const startMs = gameTimeMs(selectedBetman);
+
+    if (
+      !Number.isFinite(fixtureId) ||
+      !Number.isFinite(startMs) ||
+      startMs <= Date.now()
+    ) {
+      return;
+    }
+
+    const recordId = `live:${fixtureId}:${startMs}`;
+
+    setLiveTrackerRecords((previous) => {
+      if (previous.some((record) => record.id === recordId)) {
+        return previous;
+      }
+
+      const markets = marketRows(selectedBetman);
+      const trackerPicks: LiveTrackerPick[] =
+        eligibleMarketPicks.map((pick) => {
+          const marketIndex = markets.findIndex(
+            (market: any, index: number) =>
+              marketStableKey(market, index) === pick.key
+          );
+          const market = marketIndex >= 0 ? markets[marketIndex] : null;
+
+          const marketSnapshot = market
+            ? {
+                type: market?.type ?? null,
+                betName: market?.betName ?? null,
+                displayName: market?.displayName ?? null,
+                betTypeName: market?.betTypeName ?? null,
+                line: market?.line ?? null,
+                handicap: market?.handicap ?? null,
+                baseValue: market?.baseValue ?? null,
+                value: market?.value ?? null,
+              }
+            : { betName: pick.market };
+
+          return {
+            key: pick.key,
+            market: pick.market,
+            pick: pick.pick,
+            probability: pick.probability,
+            odds: pick.odds,
+            marketProbability: pick.marketProbability,
+            edge: pick.edge,
+            expectedValue: pick.expectedValue,
+            grade: pick.valueGrade,
+            confidenceGrade: pick.confidenceGrade,
+            recommendationScore: pick.recommendationScore,
+            modelSnapshot: { ...pick },
+            marketSnapshot,
+            resultStatus: "PENDING",
+            actualLabel: null,
+            resultNote: null,
+          };
+        });
+
+      const selectedFixtureForTracker =
+        matched?.selectedFixture ?? matched?.fixture ?? null;
+
+      const nextRecord: LiveTrackerRecord = {
+        id: recordId,
+        fixtureId,
+        fixtureKey: String(
+          (selectedBetman as any)?.gameKey ??
+          (selectedBetman as any)?.key ??
+          recordId
+        ),
+        home: String(
+          selectedFixtureForTracker?.home ??
+          selectedBetman?.home ??
+          "-"
+        ),
+        away: String(
+          selectedFixtureForTracker?.away ??
+          selectedBetman?.away ??
+          "-"
+        ),
+        league: String(
+          selectedFixtureForTracker?.league ??
+          (selectedBetman as any)?.league ??
+          "-"
+        ),
+        sport: currentSport,
+        startMs,
+        capturedAt: Date.now(),
+        gateVersion: "FALLBACK_GATE_V2",
+        decision: trackerPicks.length ? "PICK" : "PASS",
+        picks: trackerPicks,
+        verificationStatus: "PENDING",
+        verifiedAt: null,
+        result: null,
+      };
+
+      const next = [nextRecord, ...previous].slice(0, 300);
+      saveLiveTrackerRecords(next);
+      return next;
+    });
+  }, [
+    backtestMode,
+    selectedBetman,
+    matched,
+    analysisFactors.hasRealData,
+    currentSport,
+    eligibleMarketPicks,
+  ]);
+
+  async function verifyLiveTrackerResults() {
+    if (validationLoading) return;
+
+    const due = liveTrackerRecords
+      .filter(
+        (record) =>
+          record.verificationStatus === "PENDING" &&
+          record.startMs < Date.now() - 2 * 60 * 60 * 1000
+      )
+      .slice(0, 10);
+
+    if (!due.length) {
+      setStatus("실전 추적 · 지금 확인할 종료 경기 결과가 없습니다.");
+      return;
+    }
+
+    setValidationLoading(true);
+    setStatus(`실전 추적 · 종료 경기 ${due.length}건 결과 확인 중…`);
+
+    let next = [...liveTrackerRecords];
+    let verified = 0;
+    let unavailable = 0;
+
+    try {
+      for (const record of due) {
+        try {
+          const response = await fetch(
+            `/api/fixture/result?id=${encodeURIComponent(String(record.fixtureId))}`,
+            { cache: "no-store" }
+          );
+          const payload = await readApiResponse(
+            response,
+            `실전 추적 Fixture #${record.fixtureId}`
+          );
+
+          if (!response.ok || !payload?.ok || !payload?.result) {
+            unavailable += 1;
+            if (response.status === 429) break;
+            continue;
+          }
+
+          const truth: BacktestValidationResult = {
+            homeScore: Number(payload.result.homeScore),
+            awayScore: Number(payload.result.awayScore),
+            firstHalfHomeScore: Number.isFinite(Number(payload.result.firstHalfHomeScore))
+              ? Number(payload.result.firstHalfHomeScore)
+              : null,
+            firstHalfAwayScore: Number.isFinite(Number(payload.result.firstHalfAwayScore))
+              ? Number(payload.result.firstHalfAwayScore)
+              : null,
+            sourceLabel: `SportsAPI Fixture #${record.fixtureId} · 실전 PRE 잠금 후 검증`,
+          };
+
+          const settledPicks = (record.picks ?? []).map((pick) => {
+            const validation = validateBacktestMarket(
+              pick.marketSnapshot,
+              pick.modelSnapshot as MarketPick,
+              truth
+            );
+            return {
+              ...pick,
+              resultStatus: validation.status,
+              actualLabel: validation.actualLabel,
+              resultNote: validation.note,
+            };
+          });
+
+          next = next.map((candidate) =>
+            candidate.id === record.id
+              ? {
+                  ...candidate,
+                  picks: settledPicks,
+                  verificationStatus: "VERIFIED",
+                  verifiedAt: Date.now(),
+                  result: truth,
+                }
+              : candidate
+          );
+          verified += 1;
+        } catch {
+          unavailable += 1;
+        }
+      }
+
+      saveLiveTrackerRecords(next);
+      setLiveTrackerRecords(next);
+      setStatus(
+        `실전 추적 결과 확인 완료 · 검증 ${verified}경기 · 아직 결과 없음 ${unavailable}경기`
+      );
+    } finally {
+      setValidationLoading(false);
+    }
+  }
+
+  function downloadLiveTrackerBackup() {
+    const payload = {
+      schemaVersion: "V13.8.1-LIVE-TRACKER",
+      exportedAt: Date.now(),
+      gateVersion: "FALLBACK_GATE_V2",
+      records: liveTrackerRecords,
+    };
+
+    const blob = new Blob(
+      [JSON.stringify(payload, null, 2)],
+      { type: "application/json" }
+    );
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download =
+      `wisetoto-live-tracker-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+
+    setStatus(`실전 추적 백업 완료 · ${liveTrackerRecords.length}경기`);
+  }
+
+  async function restoreLiveTrackerBackup(file: File | null) {
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      const rows = Array.isArray(parsed) ? parsed : parsed?.records;
+
+      if (!Array.isArray(rows)) {
+        throw new Error("실전 추적 records 배열이 없습니다.");
+      }
+
+      const restored = rows
+        .filter(
+          (row: any) =>
+            row &&
+            Number.isFinite(Number(row.fixtureId)) &&
+            Number.isFinite(Number(row.startMs))
+        )
+        .slice(0, 300) as LiveTrackerRecord[];
+
+      saveLiveTrackerRecords(restored);
+      setLiveTrackerRecords(restored);
+      setStatus(`실전 추적 복원 완료 · ${restored.length}경기`);
+    } catch (error) {
+      setStatus(
+        `실전 추적 복원 실패 · ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
 
   function isKboBacktestGame(game: BetmanMatch) {
     const league = String((game as any)?.league ?? (game as any)?.leagueName ?? "").toLowerCase();
@@ -17931,6 +18326,89 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      <details
+        style={{
+          margin: "7px 0 0",
+          border: "1px solid #dbe4ef",
+          borderRadius: 12,
+          background: "#fff",
+          overflow: "hidden",
+        }}
+      >
+        <summary
+          style={{
+            cursor: "pointer",
+            padding: "8px 12px",
+            fontSize: 11,
+            fontWeight: 900,
+            background: "#f8fafc",
+            color: "#475569",
+          }}
+        >
+          📈 실전 성과 추적
+          {" · "}기록 {liveTrackerSummary.games}
+          {" · "}추천 {liveTrackerSummary.picks}픽
+          {" · "}HIT {liveTrackerSummary.hits}
+          / MISS {liveTrackerSummary.misses}
+          {" · "}적중률{" "}
+          {liveTrackerSummary.hitRate === null
+            ? "-"
+            : `${liveTrackerSummary.hitRate.toFixed(1)}%`}
+          {" · "}PASS {liveTrackerSummary.passGames}경기
+        </summary>
+
+        <div
+          className="bar"
+          style={{
+            padding: "9px 12px",
+            borderTop: "1px solid #e2e8f0",
+          }}
+        >
+          <button
+            className="btn light"
+            onClick={() => void verifyLiveTrackerResults()}
+            disabled={validationLoading}
+            title="경기 시작 후 충분한 시간이 지난 실전 PRE 기록만 결과 API로 검증합니다. PRE 저장 단계에서는 결과 API를 호출하지 않습니다."
+          >
+            {validationLoading ? "⏳ 결과 확인 중" : "✅ 종료 경기 결과 확인"}
+          </button>
+
+          <button
+            className="btn light"
+            onClick={downloadLiveTrackerBackup}
+          >
+            💾 실전 추적 백업
+          </button>
+
+          <button
+            className="btn light"
+            onClick={() => liveTrackerImportInputRef.current?.click()}
+          >
+            ↑ 실전 추적 복원
+          </button>
+
+          <input
+            ref={liveTrackerImportInputRef}
+            type="file"
+            accept="application/json,.json"
+            style={{ display: "none" }}
+            onChange={(event) => {
+              const file = event.target.files?.[0] ?? null;
+              void restoreLiveTrackerBackup(file);
+              event.currentTarget.value = "";
+            }}
+          />
+
+          <span className="small" style={{ whiteSpace: "normal" }}>
+            PRE 자동 잠금 {liveTrackerSummary.games}경기
+            {" · "}추천경기 {liveTrackerSummary.pickGames}
+            {" · "}PASS {liveTrackerSummary.passGames}
+            {" · "}미결 추천 {liveTrackerSummary.pending}픽
+            {" · "}Gate V2 고정
+          </span>
+        </div>
+      </details>
 
       <div className="tabs">
         {(["전체","축구","야구","농구","배구"] as Sport[]).map((s) => (
