@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_10_WISETOTO_MATCH_RESOLVER_FIX_20260829
+// DEPLOY_MARKER_V13_8_11_WISETOTO_BASEBALL_PRIMARY_20260829
 // DEPLOY_MARKER_V13_8_8_LIVE_DATA_DIAGNOSTICS_20260829
 // DEPLOY_MARKER_V13_8_6_FIXED_ODDS_3COL_GRID_20260829
 "use client";
@@ -17499,29 +17499,52 @@ export default function Home() {
           }
         }
 
+        const wisetotoBaseballPrimary =
+          !backtestMode &&
+          koreanSport(String((selectedBetman as any)?.sport ?? "")) === "야구" &&
+          Boolean(wisetotoLive?.ok);
+
+        const wisetotoStarterLineups = wisetotoBaseballPrimary
+          ? {
+              source: "WISETOTO_EXPECTED_STARTERS",
+              homeStarter: (() => {
+                const p = wisetotoLive?.expectedStarters?.find((x: any) => x?.side === "left");
+                return p ? { name: p.name, era: Number(p.era), status: "EXPECTED", source: "WISETOTO" } : null;
+              })(),
+              awayStarter: (() => {
+                const p = wisetotoLive?.expectedStarters?.find((x: any) => x?.side === "right");
+                return p ? { name: p.name, era: Number(p.era), status: "EXPECTED", source: "WISETOTO" } : null;
+              })(),
+              confirmedBattingLineup: false,
+            }
+          : null;
+
         const combinedRaw = {
           ...data,
           wisetotoLive,
+          liveDataPrimarySource: wisetotoBaseballPrimary ? "WISETOTO" : "SPORTSAPI",
           pregameAudit,
           fixture: detailData?.fixture ?? data?.fixture,
           detail: detailData?.fixture ?? data?.detail,
           selectedFixture: detailData?.selectedFixture ?? data?.selectedFixture,
           h2h:
-            detailData?.h2h ??
-            data?.h2h ??
-            null,
+            (wisetotoBaseballPrimary && wisetotoLive?.h2h?.sample > 0
+              ? wisetotoLive.h2h
+              : detailData?.h2h ?? data?.h2h ?? null),
           recentSummary:
-            detailData?.recentSummary ??
-            data?.recentSummary ??
-            null,
+            (wisetotoBaseballPrimary && wisetotoLive?.recentSummary?.home?.form?.played > 0 && wisetotoLive?.recentSummary?.away?.form?.played > 0
+              ? wisetotoLive.recentSummary
+              : detailData?.recentSummary ?? data?.recentSummary ?? null),
           statistics:
             detailData?.statistics ??
             data?.statistics ??
             null,
           lineups:
+            wisetotoStarterLineups ??
             detailData?.lineups ??
             data?.lineups ??
             null,
+          lineupsSource: wisetotoStarterLineups ? "WISETOTO_EXPECTED_STARTERS" : (detailData?.lineups ? "SPORTSAPI" : null),
           detailDebug: {
             detail:
               detailData?.debug ??
@@ -20380,8 +20403,7 @@ export default function Home() {
                         <b>LIVE DATA 수집 진단</b> · 실제 수신/계산된 항목만 정상으로 표시합니다.
                         선발/라인업은 발표 전이면 대기가 정상이며, 미연결 항목은 예측에 임의 반영하지 않습니다.
                         <br />
-                        <b>V13.8.10:</b> 와이즈토토 예상 선발·시즌 타자·최근경기 참조·직전 경기 타자/투수 기록을 진단 전용으로 추가했습니다.
-                        기존 V13.0/Gate V2 예측 계산에는 아직 반영하지 않습니다.
+                        <b>V13.8.11:</b> 야구 LIVE 경기정보는 와이즈토토를 PRIMARY로 사용합니다. 최근 Form/H2H는 와이즈토토 최근경기 목록을 우선 사용하고, 예상 선발·시즌 타자·직전 경기 타자/투수도 와이즈토토에서 수집합니다. V13.0/Gate V2 계산식 자체는 변경하지 않았습니다.
                         {matched?.wisetotoLive && !matched?.wisetotoLive?.ok ? (
                           <>
                             <br />
@@ -20407,9 +20429,9 @@ export default function Home() {
                           <div className="small">홈 {analysisFactors.homeVenueSample} · 원정 {analysisFactors.awayVenueSample}</div>
                         </div>
                         <div className="card">
-                          선발투수 (SportsAPI)
-                          <b>{analysisFactors.baseballStarterCount >= 2 ? "✓ 수신" : "대기"}</b>
-                          <div className="small">{analysisFactors.baseballStarterCount}/2 · 발표 전 대기 정상</div>
+                          LIVE 경기정보 PRIMARY
+                          <b>{matched?.liveDataPrimarySource === "WISETOTO" ? "✓ WISETOTO" : "FALLBACK"}</b>
+                          <div className="small">야구 PRE 정보는 와이즈토토 우선 · SportsAPI는 누락 시 fallback</div>
                         </div>
                         <div className="card">
                           와이즈토토 예상 선발
@@ -20417,12 +20439,13 @@ export default function Home() {
                           <div className="small">
                             {Number(matched?.wisetotoLive?.coverage?.expectedStarters ?? 0)}/2
                             {matched?.wisetotoLive?.scheduleInfoSeq ? ` · seq ${matched.wisetotoLive.scheduleInfoSeq}` : ""}
+                            {matched?.lineupsSource === "WISETOTO_EXPECTED_STARTERS" ? " · 분석 선발소스 적용" : ""}
                           </div>
                         </div>
                         <div className="card">
-                          실제 선발 라인업
-                          <b>{analysisFactors.baseballLineupPlayerCount >= 18 ? "✓ 수신" : "대기"}</b>
-                          <div className="small">감지 {analysisFactors.baseballLineupPlayerCount}/18명 · 발표 전 대기 정상</div>
+                          실제 선발 라인업 · 와이즈토토
+                          <b>대기</b>
+                          <div className="small">현재 확인된 상세 응답은 예상 선발/이전 경기 라인업 제공 · 당일 1~9번 확정 라인업은 실제 응답 확인 후 연결</div>
                         </div>
                         <div className="card">
                           라인업 선수 Stats
@@ -21706,7 +21729,7 @@ export default function Home() {
               <div className="section">
                 <h3>V11.7 지표 해석</h3>
                 <div className="notice" style={{ margin: 0 }}>
-                  원모델확률은 SportsAPI Form/H2H 및 최근 득실점에서 계산하고, 화면의 보정확률은 데이터 신뢰도에 따라 시장 사전값을 일부 혼합한 값입니다.
+                  원모델확률은 야구 LIVE에서는 와이즈토토 우선 Form/H2H 및 최근 득실점에서 계산하고, 화면의 보정확률은 데이터 신뢰도에 따라 시장 사전값을 일부 혼합한 값입니다.
                   시장확률은 Betman 배당의 마진(오버라운드)을 제거한 공정 내재확률이고,
                   엣지는 모델확률 - 시장확률입니다.
                   V11.7은 U/O·SUM 마켓 해석을 유지하면서 최근경기 시간가중치, 홈/원정 분리, 표본수 수축을 추가합니다.
@@ -21740,7 +21763,7 @@ export default function Home() {
             </details>
 
             {betman.error && <div className="notice">{betman.error}</div>}
-            <div className="notice">실전 화면은 Betman에서 현재 배당이 제공되는 모든 미시작 발매경기를 표시합니다. 왼쪽에서 경기를 직접 선택한 뒤 분석 버튼을 누르면 SportsAPI H2H/Form 계산이 시작됩니다.</div>
+            <div className="notice">실전 화면은 Betman에서 현재 배당이 제공되는 모든 미시작 발매경기를 표시합니다. 야구 LIVE 경기정보는 와이즈토토를 우선 수집하며, 와이즈토토 누락 시에만 SportsAPI 데이터를 fallback으로 사용합니다.</div>
           </>}
         </section>
       </div>
