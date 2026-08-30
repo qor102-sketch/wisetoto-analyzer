@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_22_MLB_GAME_POLLING_LINEUP_20260830
+// DEPLOY_MARKER_V13_8_23_MLB_RESOLVER_FALLBACK_20260830
 
 const NAVER_API = "https://api-gw.sports.naver.com/schedule/games";
 
@@ -47,12 +47,12 @@ const MLB_TEAM_ALIASES: Record<string, string[]> = {
   HO: ["휴스턴", "휴스턴애스트로스", "houston", "houstonastros", "astros"],
   KC: ["캔자스시티", "캔자스시티로열스", "kansascity", "kansascityroyals", "royals"],
   LA: ["la다저스", "la다저스", "로스앤젤레스다저스", "losangelesdodgers", "ladodgers", "dodgers"],
-  AA: ["la에인절스", "에인절스", "로스앤젤레스에인절스", "losangelesangels", "laangels", "angels"],
+  AN: ["la에인절스", "에인절스", "로스앤젤레스에인절스", "losangelesangels", "laangels", "angels"],
   MI: ["밀워키", "밀워키브루어스", "milwaukee", "milwaukeebrewers", "brewers"],
   MN: ["미네소타", "미네소타트윈스", "minnesota", "minnesotatwins", "twins"],
   NM: ["뉴욕메츠", "뉴욕메츠", "newyorkmets", "nymets", "mets"],
   NY: ["뉴욕양키스", "뉴욕양키스", "newyorkyankees", "nyyankees", "yankees"],
-  OA: ["오클랜드", "오클랜드애슬레틱스", "oakland", "oaklandathletics", "athletics", "as"],
+  OA: ["애슬레틱스", "어슬레틱스", "오클랜드", "오클랜드애슬레틱스", "oakland", "oaklandathletics", "athletics", "as"],
   PH: ["필라델피아", "필라델피아필리스", "philadelphia", "philadelphiaphillies", "phillies"],
   PI: ["피츠버그", "피츠버그파이리츠", "pittsburgh", "pittsburghpirates", "pirates"],
   SD: ["샌디에이고", "샌디에이고파드리스", "sandiego", "sandiegopadres", "padres"],
@@ -180,7 +180,7 @@ async function resolveKboGameId(date: string, home: string, away: string) {
     headers: {
       accept: "application/json, text/plain, */*",
       referer: "https://m.sports.naver.com/kbaseball/schedule/index",
-      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.22",
+      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.23",
     },
   });
   const payload = await response.json().catch(() => null);
@@ -212,7 +212,7 @@ async function resolveMlbGameId(date: string, home: string, away: string, startR
     headers: {
       accept: "application/json, text/plain, */*",
       referer: "https://m.sports.naver.com/wbaseball/schedule/index",
-      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.22",
+      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.23",
     },
   });
   const payload = await response.json().catch(() => null);
@@ -233,6 +233,38 @@ async function resolveMlbGameId(date: string, home: string, away: string, startR
     const awayOk = teamMatches(a, away) || Boolean(awayCode && aCode === awayCode);
     return homeOk && awayOk;
   });
+
+  // Naver schedule 응답이 비거나 팀명 표기가 달라도, MLB gameId 규칙
+  // YYYYMMDD + awayCode + homeCode + (0/1/2)을 이용해 선택 경기만 안전하게 재확인한다.
+  // 각 후보는 game-polling 응답의 날짜/홈/원정 코드가 모두 일치할 때만 채택한다.
+  if (candidates.length === 0 && homeCode && awayCode) {
+    const prefix = `${date}${awayCode}${homeCode}`;
+    for (const suffix of ["0", "1", "2"]) {
+      const probeGameId = `${prefix}${suffix}`;
+      const probeEndpoint = `${NAVER_API}/${encodeURIComponent(probeGameId)}/game-polling?inning=1&isHighlight=false`;
+      try {
+        const probeResponse = await fetch(probeEndpoint, {
+          cache: "no-store",
+          headers: {
+            accept: "application/json, text/plain, */*",
+            referer: `https://m.sports.naver.com/game/${probeGameId}`,
+            "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.23",
+          },
+        });
+        if (!probeResponse.ok) continue;
+        const probePayload = await probeResponse.json().catch(() => null);
+        const game = probePayload?.result?.game;
+        if (!game) continue;
+        const probeDate = String(game?.gameDate ?? "").replace(/-/g, "");
+        const probeHomeCode = String(game?.homeTeamCode ?? "").trim().toUpperCase();
+        const probeAwayCode = String(game?.awayTeamCode ?? "").trim().toUpperCase();
+        if (probeDate !== date || probeHomeCode !== homeCode || probeAwayCode !== awayCode) continue;
+        candidates.push(game);
+      } catch {
+        // 후보 하나의 네트워크 실패는 다른 suffix 확인을 막지 않는다.
+      }
+    }
+  }
 
   const requestedMs = requestedStartMs(startRaw);
   let selected: AnyObj | null = candidates.length === 1 ? candidates[0] : null;
@@ -565,7 +597,7 @@ export async function GET(request: Request) {
       headers: {
         accept: "application/json, text/plain, */*",
         referer: `https://m.sports.naver.com/game/${gameId}`,
-        "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.22",
+        "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.23",
       },
     });
 
@@ -595,7 +627,7 @@ export async function GET(request: Request) {
         headers: {
           accept: "application/json, text/plain, */*",
           referer: `https://m.sports.naver.com/game/${gameId}`,
-          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.22",
+          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.23",
         },
       });
       previewStatus = previewResponse.status;
