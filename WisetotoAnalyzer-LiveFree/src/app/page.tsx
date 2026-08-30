@@ -20569,7 +20569,7 @@ export default function Home() {
                         <b>LIVE DATA 수집 진단</b> · 실제 수신/계산된 항목만 정상으로 표시합니다.
                         선발/라인업은 발표 전이면 대기가 정상이며, 미연결 항목은 예측에 임의 반영하지 않습니다.
                         <br />
-                        <b>V13.8.22:</b> MLB 네이버 preview의 최근 경기 득실을 기존 λ 입력 구조에 연결하고, game-polling 날씨와 preview 선발 직전등판을 LIVE 진단에 연결했습니다. 실제 9+9 타순 발표 후 시즌 타자 Stats는 기존 pCode 매칭으로 READY 단계에 적용됩니다. V13.0/Gate V2 계산식 자체는 변경하지 않았습니다.
+                        <b>V13.8.26:</b> MLB 네이버 preview의 최근 경기 득실을 기존 λ 입력 구조에 연결하고, game-polling 날씨와 preview 선발 직전등판을 LIVE 진단에 연결했습니다. 실제 9+9 타순 발표 후 시즌 타자 Stats는 기존 pCode 매칭으로 READY 단계에 적용됩니다. V13.0/Gate V2 계산식 자체는 변경하지 않았습니다.
                         {matched?.wisetotoLive && !matched?.wisetotoLive?.ok ? (
                           <>
                             <br />
@@ -20677,7 +20677,9 @@ export default function Home() {
                         <div className="card">
                           경기시각 날씨
                           <b>{matched?.naverTodayLineup?.game?.weatherInfo ? "✓ 네이버 수신" : "미연결"}</b>
-                          <div className="small">{matched?.naverTodayLineup?.game?.weatherInfo || "기온·강수·풍속/풍향 실시간 PRE 연결 필요"}</div>
+                          <div className="small">{typeof matched?.naverTodayLineup?.game?.weatherInfo === "string"
+                            ? matched.naverTodayLineup.game.weatherInfo
+                            : matched?.naverTodayLineup?.game?.weatherInfo?.weather || "기온·강수·풍속/풍향 실시간 PRE 연결 필요"}</div>
                         </div>
                       </div>
 
