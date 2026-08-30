@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_20_MLB_DATA_WIRING_20260829
+// DEPLOY_MARKER_V13_8_21_MLB_GAME_POLLING_LINEUP_20260830
 
 const NAVER_API = "https://api-gw.sports.naver.com/schedule/games";
 
@@ -180,7 +180,7 @@ async function resolveKboGameId(date: string, home: string, away: string) {
     headers: {
       accept: "application/json, text/plain, */*",
       referer: "https://m.sports.naver.com/kbaseball/schedule/index",
-      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.20",
+      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.21",
     },
   });
   const payload = await response.json().catch(() => null);
@@ -212,7 +212,7 @@ async function resolveMlbGameId(date: string, home: string, away: string, startR
     headers: {
       accept: "application/json, text/plain, */*",
       referer: "https://m.sports.naver.com/wbaseball/schedule/index",
-      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.20",
+      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.21",
     },
   });
   const payload = await response.json().catch(() => null);
@@ -348,6 +348,70 @@ function normalizeMlbPlayers(players: any, seasonRows: any) {
       };
     })
     .filter((p: AnyObj) => Boolean(p.name));
+}
+
+
+function normalizeMlbPollingPlayers(players: any, seasonRows: any) {
+  const season = mlbSeasonStatsMap(seasonRows);
+  return Array.isArray(players)
+    ? players.slice(0, 9).map((p: AnyObj, index: number) => {
+        const id = String(p?.pCode ?? p?.pcode ?? "").trim() || null;
+        const stats = id ? season.get(id) : null;
+        const avgRaw = stats?.hra ?? null;
+        const obpRaw = stats?.bra ?? null;
+        return {
+          battingOrder: index + 1,
+          position: String(p?.position ?? "").trim() || null,
+          pcode: id,
+          playerId: id,
+          name: String(p?.name ?? "").trim() || null,
+          currentSeasonStats: {
+            avg: Number.isFinite(Number(avgRaw)) ? Number(avgRaw) : null,
+            obp: Number.isFinite(Number(obpRaw)) ? Number(obpRaw) : null,
+            ab: Number.isFinite(Number(stats?.ab)) ? Number(stats?.ab) : null,
+            hit: Number.isFinite(Number(stats?.hit)) ? Number(stats?.hit) : null,
+            rbi: Number.isFinite(Number(stats?.rbi)) ? Number(stats?.rbi) : null,
+            hr: Number.isFinite(Number(stats?.hr)) ? Number(stats?.hr) : null,
+          },
+          source: "NAVER_GAME_POLLING_MLB",
+        };
+      }).filter((p: AnyObj) => Boolean(p.name))
+    : [];
+}
+
+function normalizeMlbPollingStarter(nameRaw: any, idRaw: any, previewStarter: any, confirmed: boolean) {
+  const name = String(nameRaw ?? "").trim();
+  if (!name) return null;
+  const id = String(idRaw ?? "").trim() || null;
+  const previewName = String(previewStarter?.playerInfo?.firstName ?? "").trim();
+  const samePitcher = !previewName || teamMatches(previewName, name) || norm(previewName) === norm(name);
+  const season = samePitcher ? (previewStarter?.currentSeasonStats ?? {}) : {};
+  const recent = samePitcher ? (previewStarter?.latelyGamePitcherStat ?? null) : null;
+  return {
+    name,
+    playerId: id,
+    pcode: id,
+    era: Number.isFinite(Number(season?.era)) ? Number(season.era) : null,
+    status: confirmed ? "CONFIRMED" : "EXPECTED",
+    latestStart: recent ? {
+      date: recent?.gdate ?? null,
+      opponent: recent?.name ?? null,
+      innings: recent?.inn ?? null,
+      era: Number.isFinite(Number(recent?.era)) ? Number(recent.era) : null,
+      earnedRuns: Number.isFinite(Number(recent?.er)) ? Number(recent.er) : null,
+      decision: recent?.wls ?? null,
+    } : null,
+    currentSeasonStats: {
+      era: Number.isFinite(Number(season?.era)) ? Number(season.era) : null,
+      games: Number.isFinite(Number(season?.gameCount)) ? Number(season.gameCount) : null,
+      wins: Number.isFinite(Number(season?.w)) ? Number(season.w) : null,
+      losses: Number.isFinite(Number(season?.l)) ? Number(season.l) : null,
+      innings: season?.inn ?? null,
+      strikeouts: Number.isFinite(Number(season?.kk)) ? Number(season.kk) : null,
+      walks: Number.isFinite(Number(season?.bb)) ? Number(season.bb) : null,
+    },
+    source: "NAVER_GAME_POLLING_MLB",
+  };
 }
 
 function normalizeMlbStarter(starter: any, fallbackName: any, lineupPitchers: any, confirmed: boolean) {
@@ -501,7 +565,7 @@ export async function GET(request: Request) {
       headers: {
         accept: "application/json, text/plain, */*",
         referer: `https://m.sports.naver.com/game/${gameId}`,
-        "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.20",
+        "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.21",
       },
     });
 
@@ -531,7 +595,7 @@ export async function GET(request: Request) {
         headers: {
           accept: "application/json, text/plain, */*",
           referer: `https://m.sports.naver.com/game/${gameId}`,
-          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.20",
+          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.21",
         },
       });
       previewStatus = previewResponse.status;
@@ -547,11 +611,30 @@ export async function GET(request: Request) {
     let awayStarter: AnyObj | null = null;
 
     if (league === "MLB") {
-      homeLineup = normalizeMlbPlayers(previewData?.homeTeamLineUp?.batter, previewData?.homeBattersSeasonStats);
-      awayLineup = normalizeMlbPlayers(previewData?.awayTeamLineUp?.batter, previewData?.awayBattersSeasonStats);
+      const baseInfo = result?.textRelayData?.baseInfo ?? {};
+      const pollingLineup = baseInfo?.batterLineup ?? {};
+      const pollingHome = normalizeMlbPollingPlayers(pollingLineup?.home, previewData?.homeBattersSeasonStats);
+      const pollingAway = normalizeMlbPollingPlayers(pollingLineup?.away, previewData?.awayBattersSeasonStats);
+      const previewHome = normalizeMlbPlayers(previewData?.homeTeamLineUp?.batter, previewData?.homeBattersSeasonStats);
+      const previewAway = normalizeMlbPlayers(previewData?.awayTeamLineUp?.batter, previewData?.awayBattersSeasonStats);
+      homeLineup = pollingHome.length >= 7 ? pollingHome : previewHome;
+      awayLineup = pollingAway.length >= 7 ? pollingAway : previewAway;
       const confirmed = homeLineup.length >= 9 && awayLineup.length >= 9;
-      homeStarter = normalizeMlbStarter(previewData?.homeStarter, game?.homeStarterName, previewData?.homeTeamLineUp?.pitcher, confirmed);
-      awayStarter = normalizeMlbStarter(previewData?.awayStarter, game?.awayStarterName, previewData?.awayTeamLineUp?.pitcher, confirmed);
+
+      // MLB 당일 확정 선발은 game-polling baseInfo를 최우선으로 사용한다.
+      // preview는 시즌/직전등판 수치 보강에만 사용하고, 홈/원정 이름을 덮어쓰지 않는다.
+      homeStarter = normalizeMlbPollingStarter(
+        baseInfo?.homePitcher ?? game?.homeStarterName,
+        baseInfo?.homePitcherId,
+        previewData?.homeStarter,
+        confirmed,
+      );
+      awayStarter = normalizeMlbPollingStarter(
+        baseInfo?.awayPitcher ?? game?.awayStarterName,
+        baseInfo?.awayPitcherId,
+        previewData?.awayStarter,
+        confirmed,
+      );
     } else if (league === "KBO") {
       homeLineup = normalizeKboPlayers(result?.textRelayData?.homeLineup?.batter);
       awayLineup = normalizeKboPlayers(result?.textRelayData?.awayLineup?.batter);
@@ -614,6 +697,10 @@ export async function GET(request: Request) {
         awaySeasonBatters: Array.isArray(previewData?.awayBattersSeasonStats) ? previewData.awayBattersSeasonStats.length : 0,
         homePreviousGames: Array.isArray(previewData?.homeTeamPreviousGames) ? previewData.homeTeamPreviousGames.length : 0,
         awayPreviousGames: Array.isArray(previewData?.awayTeamPreviousGames) ? previewData.awayTeamPreviousGames.length : 0,
+        gamePollingLineup: {
+          home: Array.isArray(result?.textRelayData?.baseInfo?.batterLineup?.home) ? result.textRelayData.baseInfo.batterLineup.home.length : 0,
+          away: Array.isArray(result?.textRelayData?.baseInfo?.batterLineup?.away) ? result.textRelayData.baseInfo.batterLineup.away.length : 0,
+        },
       } : null,
       coverage: {
         home: homeLineup.length,
