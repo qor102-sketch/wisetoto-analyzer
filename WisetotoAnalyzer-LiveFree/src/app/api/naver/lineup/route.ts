@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_27_NPB_RECORD_LINEUP_20260830
+// DEPLOY_MARKER_V13_8_28_FOOTBALL_NAVER_LINEUP_V1_20260830
 
 const NAVER_API = "https://api-gw.sports.naver.com/schedule/games";
 
@@ -31,6 +31,12 @@ const KBO_TEAM_ALIASES: Record<string, string[]> = {
   SK: ["ssg", "ssg랜더스", "에스에스지", "에스에스지랜더스", "ssglanders", "sk"],
   WO: ["키움", "키움히어로즈", "kiwoom", "kiwoomheroes", "wo"],
   HT: ["kia", "kia타이거즈", "기아", "기아타이거즈", "kiatigers", "ht"],
+};
+
+
+const FOOTBALL_TEAM_ALIASES: Record<string, string[]> = {
+  FEYENOORD: ["페예노르트", "페예노르", "feyenoord", "feyenoordrotterdam"],
+  ADO_DEN_HAAG: ["ado덴하그", "ado덴하흐", "덴하그", "덴하흐", "adodenhaag", "denhaag"],
 };
 
 const MLB_TEAM_ALIASES: Record<string, string[]> = {
@@ -192,6 +198,87 @@ function teamMatches(candidate: string, requested: string) {
   return Boolean(mc && mr && mc === mr);
 }
 
+function normalizedFootballName(name: string) {
+  const target = normMlb(name);
+  if (!target) return null;
+  for (const [code, aliases] of Object.entries(FOOTBALL_TEAM_ALIASES)) {
+    if (aliases.some((alias) => {
+      const a = normMlb(alias);
+      return a === target || (a.length >= 4 && target.length >= 4 && (a.includes(target) || target.includes(a)));
+    })) return code;
+  }
+  return target;
+}
+
+function footballTeamMatches(candidate: string, requested: string) {
+  const c = normalizedFootballName(candidate);
+  const r = normalizedFootballName(requested);
+  if (!c || !r) return false;
+  return c === r || (c.length >= 4 && r.length >= 4 && (c.includes(r) || r.includes(c)));
+}
+
+async function resolveFootballGameId(date: string, home: string, away: string, startRaw: string) {
+  const d = isoDate(date);
+  const endpoint = `${NAVER_API}?upperCategoryId=wfootball&fromDate=${encodeURIComponent(d)}&toDate=${encodeURIComponent(d)}`;
+  const response = await fetch(endpoint, {
+    cache: "no-store",
+    headers: {
+      accept: "application/json, text/plain, */*",
+      referer: "https://m.sports.naver.com/wfootball/schedule/index",
+      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.28",
+    },
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload) return { gameId: null, endpoint, status: response.status, candidateCount: 0 };
+
+  const all = allObjects(payload).filter((obj) => {
+    const gameId = String(obj?.gameId ?? obj?.game_id ?? "").trim();
+    const superCategory = String(obj?.superCategoryId ?? "").toLowerCase();
+    const upperCategory = String(obj?.upperCategoryId ?? "").toLowerCase();
+    const gameDate = String(obj?.gameDate ?? "").replace(/-/g, "");
+    return Boolean(gameId) && gameDate === date && (superCategory === "football" || upperCategory === "wfootball");
+  });
+
+  let candidates = all.filter((obj) => {
+    const h = String(obj?.homeTeamName ?? obj?.homeTeamShortName ?? obj?.homeTeamFullName ?? "");
+    const a = String(obj?.awayTeamName ?? obj?.awayTeamShortName ?? obj?.awayTeamFullName ?? "");
+    return footballTeamMatches(h, home) && footballTeamMatches(a, away);
+  });
+
+  const requestedMs = requestedStartMs(startRaw);
+  if (candidates.length === 0 && requestedMs !== null) {
+    const sameTime = all.filter((obj) => {
+      const ms = naverLocalGameMs(obj?.gameDateTime);
+      return ms !== null && Math.abs(ms - requestedMs) <= 5 * 60 * 1000;
+    });
+    // 시간만 같은 경기가 여러 개면 절대 임의 선택하지 않는다.
+    if (sameTime.length === 1) candidates = sameTime;
+  }
+
+  let selected: AnyObj | null = candidates.length === 1 ? candidates[0] : null;
+  let closestDiffMinutes: number | null = null;
+  if (!selected && candidates.length > 1 && requestedMs !== null) {
+    const ranked = candidates.map((obj) => {
+      const ms = naverLocalGameMs(obj?.gameDateTime);
+      return { obj, diff: ms === null ? Number.POSITIVE_INFINITY : Math.abs(ms - requestedMs) };
+    }).sort((a, b) => a.diff - b.diff);
+    if (ranked[0] && Number.isFinite(ranked[0].diff) && (ranked[1]?.diff ?? Number.POSITIVE_INFINITY) !== ranked[0].diff) {
+      selected = ranked[0].obj;
+      closestDiffMinutes = Math.round(ranked[0].diff / 60000);
+    }
+  }
+
+  return {
+    gameId: selected ? String(selected?.gameId ?? selected?.game_id) : null,
+    endpoint,
+    status: response.status,
+    candidateCount: candidates.length,
+    closestDiffMinutes,
+    selectedCategoryId: selected?.categoryId ?? null,
+    build: "V13.8.28_FOOTBALL_NAVER_LINEUP_V1",
+  };
+}
+
 async function resolveKboGameId(date: string, home: string, away: string) {
   const d = isoDate(date);
   const endpoint = `${NAVER_API}?upperCategoryId=kbaseball&fromDate=${encodeURIComponent(d)}&toDate=${encodeURIComponent(d)}`;
@@ -312,6 +399,28 @@ async function resolveMlbGameId(date: string, home: string, away: string, startR
     awayCode,
     build: "V13.8.25_MLB_EXACT_ALIAS_RESOLVER",
   };
+}
+
+function normalizeFootballPlayers(players: any, teamCode: any, substitute: boolean) {
+  const code = String(teamCode ?? "").trim();
+  if (!Array.isArray(players) || !code) return [];
+  return players
+    .filter((p: AnyObj) => String(p?.teamId ?? "").trim() === code && Boolean(p?.substitute) === substitute)
+    .sort((a: AnyObj, b: AnyObj) => Number(a?.formationPlace ?? 99) - Number(b?.formationPlace ?? 99))
+    .map((p: AnyObj) => ({
+      playerId: String(p?.playerId ?? "").trim() || null,
+      pcode: String(p?.playerId ?? "").trim() || null,
+      name: String(p?.playerName ?? "").trim() || null,
+      position: String(p?.position ?? "").trim() || null,
+      formationPlace: Number.isFinite(Number(p?.formationPlace)) ? Number(p.formationPlace) : null,
+      shirtNumber: Number.isFinite(Number(p?.shirtNumber)) ? Number(p.shirtNumber) : null,
+      substitute,
+      matchPlayed: Boolean(p?.matchPlayed),
+      playerPlayType: String(p?.playerPlayType ?? "").trim() || null,
+      countryName: String(p?.countryName ?? "").trim() || null,
+      source: "NAVER_FOOTBALL_PLAYERS",
+    }))
+    .filter((p: AnyObj) => Boolean(p.name));
 }
 
 function normalizeNpbPlayers(players: any) {
@@ -614,6 +723,7 @@ export async function GET(request: Request) {
     const home = url.searchParams.get("home") ?? "";
     const away = url.searchParams.get("away") ?? "";
     const startRaw = url.searchParams.get("date") ?? "";
+    const sport = url.searchParams.get("sport") ?? "";
     const date = dateKey(startRaw);
     if (!date || !home || !away) {
       return Response.json({ ok: false, error: "네이버 gameId 생성에 필요한 날짜/팀 정보 없음", debug: { date, home, away } }, { status: 400 });
@@ -623,11 +733,23 @@ export async function GET(request: Request) {
     const awayNpb = npbTeamCode(away);
     const homeMlb = normalizedMlbName(home);
     const awayMlb = normalizedMlbName(away);
-    let league: "NPB" | "KBO" | "MLB" = homeNpb && awayNpb ? "NPB" : homeMlb && awayMlb ? "MLB" : "KBO";
+    const isFootball = /축구|football|soccer/i.test(String(sport));
+    let league: "NPB" | "KBO" | "MLB" | "FOOTBALL" = isFootball ? "FOOTBALL" : homeNpb && awayNpb ? "NPB" : homeMlb && awayMlb ? "MLB" : "KBO";
     let gameId: string | null = null;
     let resolverDebug: any = null;
 
-    if (league === "NPB") {
+    if (league === "FOOTBALL") {
+      const resolved = await resolveFootballGameId(date, home, away, startRaw);
+      gameId = resolved.gameId;
+      resolverDebug = resolved;
+      if (!gameId) {
+        return Response.json({
+          ok: false,
+          error: "네이버 해외축구 당일 일정에서 경기 gameId 자동매칭 실패",
+          debug: { date, home, away, resolver: resolved },
+        }, { status: 404 });
+      }
+    } else if (league === "NPB") {
       gameId = `${date}${awayNpb}${homeNpb}0`;
     } else if (league === "MLB") {
       const resolved = await resolveMlbGameId(date, home, away, startRaw);
@@ -676,15 +798,34 @@ export async function GET(request: Request) {
     const result = payload?.result ?? {};
     const game = result?.game ?? {};
     const detectedCategory = String(result?.textRelayData?.category ?? game?.categoryId ?? "").toLowerCase();
-    if (detectedCategory === "kbo") league = "KBO";
-    if (detectedCategory === "mlb") league = "MLB";
+    if (league !== "FOOTBALL" && detectedCategory === "kbo") league = "KBO";
+    if (league !== "FOOTBALL" && detectedCategory === "mlb") league = "MLB";
 
     let previewData: AnyObj | null = null;
     let previewEndpoint: string | null = null;
     let previewStatus: number | null = null;
+    let footballPlayers: AnyObj[] = [];
+    let footballPlayersEndpoint: string | null = null;
+    let footballPlayersStatus: number | null = null;
     let npbRecordData: AnyObj | null = null;
     let npbRecordEndpoint: string | null = null;
     let npbRecordStatus: number | null = null;
+    if (league === "FOOTBALL") {
+      footballPlayersEndpoint = `${NAVER_API}/${gameId}/players`;
+      const playersResponse = await fetch(footballPlayersEndpoint, {
+        cache: "no-store",
+        headers: {
+          accept: "application/json, text/plain, */*",
+          referer: `https://m.sports.naver.com/game/${gameId}`,
+          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.28",
+        },
+      });
+      footballPlayersStatus = playersResponse.status;
+      const playersPayload = await playersResponse.json().catch(() => null);
+      if (playersResponse.ok && playersPayload?.success && playersPayload?.code === 200 && Array.isArray(playersPayload?.result?.players)) {
+        footballPlayers = playersPayload.result.players;
+      }
+    }
     if (league === "NPB") {
       npbRecordEndpoint = `${NAVER_API}/${gameId}/record`;
       const recordResponse = await fetch(npbRecordEndpoint, {
@@ -723,7 +864,10 @@ export async function GET(request: Request) {
     let homeStarter: AnyObj | null = null;
     let awayStarter: AnyObj | null = null;
 
-    if (league === "MLB") {
+    if (league === "FOOTBALL") {
+      homeLineup = normalizeFootballPlayers(footballPlayers, game?.homeTeamCode, false).slice(0, 11);
+      awayLineup = normalizeFootballPlayers(footballPlayers, game?.awayTeamCode, false).slice(0, 11);
+    } else if (league === "MLB") {
       const baseInfo = result?.textRelayData?.baseInfo ?? {};
       const pollingLineup = baseInfo?.batterLineup ?? {};
       const pollingHome = normalizeMlbPollingPlayers(pollingLineup?.home, previewData?.homeBattersSeasonStats);
@@ -793,6 +937,7 @@ export async function GET(request: Request) {
       endpoint,
       previewEndpoint,
       npbRecordEndpoint,
+      footballPlayersEndpoint,
       gameId,
       game: {
         gameDateTime: game?.gameDateTime ?? null,
@@ -809,6 +954,18 @@ export async function GET(request: Request) {
       awayStarter,
       home: homeLineup,
       away: awayLineup,
+      bench: league === "FOOTBALL" ? {
+        home: normalizeFootballPlayers(footballPlayers, game?.homeTeamCode, true),
+        away: normalizeFootballPlayers(footballPlayers, game?.awayTeamCode, true),
+      } : null,
+      footballPlayers: league === "FOOTBALL" ? {
+        ok: footballPlayers.length > 0,
+        status: footballPlayersStatus,
+        total: footballPlayers.length,
+        startingHome: homeLineup.length,
+        startingAway: awayLineup.length,
+        startingTotal: homeLineup.length + awayLineup.length,
+      } : null,
       recentSummary: league === "MLB" && previewData ? {
         home: summarizeMlbPreviousGames(previewData?.homeTeamPreviousGames, String(previewData?.gameInfo?.hName ?? game?.homeTeamName ?? home)),
         away: summarizeMlbPreviousGames(previewData?.awayTeamPreviousGames, String(previewData?.gameInfo?.aName ?? game?.awayTeamName ?? away)),
@@ -841,6 +998,7 @@ export async function GET(request: Request) {
         homeStats: homeLineup.filter((p: AnyObj) => p?.currentSeasonStats?.avg !== null && p?.currentSeasonStats?.avg !== undefined).length,
         awayStats: awayLineup.filter((p: AnyObj) => p?.currentSeasonStats?.avg !== null && p?.currentSeasonStats?.avg !== undefined).length,
         starters: Number(Boolean(homeStarter)) + Number(Boolean(awayStarter)),
+        startingPlayers: league === "FOOTBALL" ? homeLineup.length + awayLineup.length : null,
       },
       debug: resolverDebug ? { resolver: resolverDebug } : undefined,
     });
