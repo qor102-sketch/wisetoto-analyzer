@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_24_MLB_ALIAS_EMPTY_GUARD_20260830
+// DEPLOY_MARKER_V13_8_25_MLB_EXACT_ALIAS_RESOLVER_20260830
 
 const NAVER_API = "https://api-gw.sports.naver.com/schedule/games";
 
@@ -98,16 +98,33 @@ function normalizedKboName(name: string) {
   return null;
 }
 
+function normMlb(value: string) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[\s._'’\-–—()\[\]{}]/g, "");
+}
+
 function normalizedMlbName(name: string) {
-  const target = norm(name);
+  const target = normMlb(name);
+  if (!target) return null;
+
+  // MLB는 팀 별칭을 정확 일치 우선으로 판정한다.
+  // 공용 norm()처럼 팀명 토큰(twins 등)을 제거하지 않아 다른 팀으로 오인하지 않는다.
   for (const [code, aliases] of Object.entries(MLB_TEAM_ALIASES)) {
-    if (aliases.some((alias) => {
-      const a = norm(alias);
-      if (!a) return false;
-      return target === a || target.includes(a) || a.includes(target);
-    })) return code;
+    if (aliases.some((alias) => normMlb(alias) === target)) return code;
   }
-  return null;
+
+  // 전체 구단명/도시명처럼 한쪽이 명확히 더 긴 경우에만 보조 매칭.
+  const matches: string[] = [];
+  for (const [code, aliases] of Object.entries(MLB_TEAM_ALIASES)) {
+    const matched = aliases.some((alias) => {
+      const a = normMlb(alias);
+      if (!a || a.length < 4 || target.length < 4) return false;
+      return target.includes(a) || a.includes(target);
+    });
+    if (matched) matches.push(code);
+  }
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function dateKey(value: string) {
@@ -293,6 +310,7 @@ async function resolveMlbGameId(date: string, home: string, away: string, startR
     closestDiffMinutes,
     homeCode,
     awayCode,
+    build: "V13.8.25_MLB_EXACT_ALIAS_RESOLVER",
   };
 }
 
