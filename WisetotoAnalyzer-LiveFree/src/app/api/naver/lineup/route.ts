@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_21_MLB_GAME_POLLING_LINEUP_20260830
+// DEPLOY_MARKER_V13_8_22_MLB_GAME_POLLING_LINEUP_20260830
 
 const NAVER_API = "https://api-gw.sports.naver.com/schedule/games";
 
@@ -180,7 +180,7 @@ async function resolveKboGameId(date: string, home: string, away: string) {
     headers: {
       accept: "application/json, text/plain, */*",
       referer: "https://m.sports.naver.com/kbaseball/schedule/index",
-      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.21",
+      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.22",
     },
   });
   const payload = await response.json().catch(() => null);
@@ -212,7 +212,7 @@ async function resolveMlbGameId(date: string, home: string, away: string, startR
     headers: {
       accept: "application/json, text/plain, */*",
       referer: "https://m.sports.naver.com/wbaseball/schedule/index",
-      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.21",
+      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.22",
     },
   });
   const payload = await response.json().catch(() => null);
@@ -559,13 +559,13 @@ export async function GET(request: Request) {
       }
     }
 
-    const endpoint = `${NAVER_API}/${gameId}/game-polling`;
+    const endpoint = `${NAVER_API}/${gameId}/game-polling?inning=1&isHighlight=false`;
     const response = await fetch(endpoint, {
       cache: "no-store",
       headers: {
         accept: "application/json, text/plain, */*",
         referer: `https://m.sports.naver.com/game/${gameId}`,
-        "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.21",
+        "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.22",
       },
     });
 
@@ -595,7 +595,7 @@ export async function GET(request: Request) {
         headers: {
           accept: "application/json, text/plain, */*",
           referer: `https://m.sports.naver.com/game/${gameId}`,
-          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.21",
+          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.22",
         },
       });
       previewStatus = previewResponse.status;
