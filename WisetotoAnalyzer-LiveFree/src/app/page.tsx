@@ -1,3 +1,4 @@
+// DEPLOY_MARKER_V13_8_28_FOOTBALL_NAVER_LINEUP_V1_20260830
 // DEPLOY_MARKER_V13_8_19_MLB_SPORTSAPI_ALIAS_FIX_20260829
 // DEPLOY_MARKER_V13_8_8_LIVE_DATA_DIAGNOSTICS_20260829
 // DEPLOY_MARKER_V13_8_6_FIXED_ODDS_3COL_GRID_20260829
@@ -17575,7 +17576,7 @@ export default function Home() {
         let naverTodayLineup: any = null;
         if (
           !backtestMode &&
-          koreanSport(String((selectedBetman as any)?.sport ?? "")) === "야구"
+          ["야구", "축구"].includes(koreanSport(String((selectedBetman as any)?.sport ?? "")))
         ) {
           try {
             const fixtureStart =
@@ -17586,8 +17587,9 @@ export default function Home() {
               "";
             const naverParams = new URLSearchParams({
               date: String(fixtureStart ?? ""),
-              home: String(detailData?.selectedFixture?.home ?? data?.selectedFixture?.home ?? selectedBetman?.home ?? ""),
-              away: String(detailData?.selectedFixture?.away ?? data?.selectedFixture?.away ?? selectedBetman?.away ?? ""),
+              home: String(selectedBetman?.home ?? detailData?.selectedFixture?.home ?? data?.selectedFixture?.home ?? ""),
+              away: String(selectedBetman?.away ?? detailData?.selectedFixture?.away ?? data?.selectedFixture?.away ?? ""),
+              sport: koreanSport(String((selectedBetman as any)?.sport ?? "")),
             });
             const naverResponse = await fetch(`/api/naver/lineup?${naverParams.toString()}`, { cache: "no-store" });
             const naverPayload = await readApiResponse(naverResponse, "네이버 당일 선발 라인업");
@@ -17621,7 +17623,9 @@ export default function Home() {
 
         const naverLineupSource = naverTodayLineup?.league === "MLB"
           ? "NAVER_GAME_POLLING_MLB"
-          : "NAVER_GAME_POLLING";
+          : naverTodayLineup?.league === "FOOTBALL"
+            ? "NAVER_FOOTBALL_PLAYERS"
+            : "NAVER_GAME_POLLING";
 
         // V13.8.22: coverage 숫자만 믿지 않고 실제 home/away 배열을 기준으로 확정 라인업을 판정한다.
         // MLB game-polling의 game.home/awayStarterName도 side-safe fallback으로 사용해
@@ -17638,7 +17642,7 @@ export default function Home() {
             ? { name: naverTodayLineup.game.awayStarterName, status: "CONFIRMED", source: naverLineupSource }
             : null) ?? wisetotoStarterLineups?.awayStarter ?? null;
 
-        const naverConfirmedLineups = naverTodayLineup?.ok && naverActualLineupTotal >= 14
+        const naverConfirmedLineups = naverTodayLineup?.ok && naverTodayLineup?.league !== "FOOTBALL" && naverActualLineupTotal >= 14
           ? {
               source: naverLineupSource,
               homeStarter: naverHomeStarter,
@@ -17660,6 +17664,19 @@ export default function Home() {
             }
           : null;
 
+        const naverFootballLineups = naverTodayLineup?.ok &&
+          naverTodayLineup?.league === "FOOTBALL" &&
+          naverHomeLineupRows.length >= 11 && naverAwayLineupRows.length >= 11
+          ? {
+              source: "NAVER_FOOTBALL_PLAYERS",
+              homeTeamLineUp: { fullLineUp: naverHomeLineupRows },
+              awayTeamLineUp: { fullLineUp: naverAwayLineupRows },
+              confirmedStartingLineup: true,
+              homeFormationPlayers: naverHomeLineupRows,
+              awayFormationPlayers: naverAwayLineupRows,
+            }
+          : null;
+
         const naverMlbStarterOnly = naverTodayLineup?.ok &&
           naverTodayLineup?.league === "MLB" &&
           (naverTodayLineup?.homeStarter || naverTodayLineup?.awayStarter)
@@ -17674,6 +17691,7 @@ export default function Home() {
           : null;
 
         const liveBaseballLineups = naverConfirmedLineups ?? naverMlbStarterOnly ?? wisetotoStarterLineups;
+        const liveFootballLineups = naverFootballLineups;
 
 
         const combinedRaw = {
@@ -17700,13 +17718,16 @@ export default function Home() {
             data?.statistics ??
             null,
           lineups:
+            liveFootballLineups ??
             liveBaseballLineups ??
             detailData?.lineups ??
             data?.lineups ??
             null,
-          lineupsSource: naverConfirmedLineups
-            ? naverLineupSource
-            : naverMlbStarterOnly
+          lineupsSource: naverFootballLineups
+            ? "NAVER_FOOTBALL_PLAYERS"
+            : naverConfirmedLineups
+              ? naverLineupSource
+              : naverMlbStarterOnly
               ? "NAVER_MLB_PREVIEW"
               : wisetotoStarterLineups
                 ? "WISETOTO_EXPECTED_STARTERS"
@@ -20557,6 +20578,38 @@ export default function Home() {
                         score/result/winner/statistics/boxscore 등 경기 결과 관련 필드는 탐색 단계에서 제외하며,
                         팀·리그·시즌·fixture 객체를 선수 후보로 오인하지 않도록 필터링했습니다.
                         실제 player/starter/roster/lineup 구조가 확인된 경우에만 다음 단계에서 분석 엔진에 연결합니다.
+                      </div>
+                    </div>
+                  )}
+
+                  {currentSport === "축구" && (
+                    <div className="section" style={{ marginTop: 0 }}>
+                      <h3>V13.8.28 축구 LIVE DATA · Naver 실제 선발</h3>
+                      <div className="notice" style={{ margin: "8px 0" }}>
+                        네이버 Sports의 경기별 players 응답에서 <b>substitute:false</b> 선수를 실제 선발로 수집합니다.
+                        현재 단계에서는 선발 11+11을 READY 진단과 경기전 스냅샷에만 연결하며 V13.0 축구 λ/Poisson 계산식은 변경하지 않습니다.
+                      </div>
+                      <div className="cards">
+                        <div className="card">
+                          Naver 경기 매칭
+                          <b>{matched?.naverTodayLineup?.ok && matched?.naverTodayLineup?.league === "FOOTBALL" ? "✓ 수신" : "대기"}</b>
+                          <div className="small">{matched?.naverTodayLineup?.gameId ?? "gameId 대기"}</div>
+                        </div>
+                        <div className="card">
+                          실제 선발 라인업
+                          <b>{Number(matched?.naverTodayLineup?.coverage?.startingPlayers ?? 0) >= 22 ? "✓ 22/22" : `${Number(matched?.naverTodayLineup?.coverage?.startingPlayers ?? 0)}/22`}</b>
+                          <div className="small">홈 {Array.isArray(matched?.naverTodayLineup?.home) ? matched.naverTodayLineup.home.length : 0}/11 · 원정 {Array.isArray(matched?.naverTodayLineup?.away) ? matched.naverTodayLineup.away.length : 0}/11{matched?.lineupsSource === "NAVER_FOOTBALL_PLAYERS" ? " · 분석 데이터 연결" : ""}</div>
+                        </div>
+                        <div className="card">
+                          선수 ID / 포지션
+                          <b>{Number(matched?.naverTodayLineup?.coverage?.startingPlayers ?? 0) >= 22 ? "✓ 수신" : "대기"}</b>
+                          <div className="small">playerId · GK/DF/MF/FW · formationPlace 저장</div>
+                        </div>
+                        <div className="card">
+                          선발 기반 모델 보정
+                          <b>아직 미적용</b>
+                          <div className="small">실전 READY 표본을 먼저 축적한 뒤 포지션별 영향 검증</div>
+                        </div>
                       </div>
                     </div>
                   )}
