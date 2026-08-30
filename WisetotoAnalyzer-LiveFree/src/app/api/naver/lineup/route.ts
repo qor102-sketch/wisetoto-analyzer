@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_25_MLB_EXACT_ALIAS_RESOLVER_20260830
+// DEPLOY_MARKER_V13_8_27_NPB_RECORD_LINEUP_20260830
 
 const NAVER_API = "https://api-gw.sports.naver.com/schedule/games";
 
@@ -327,6 +327,47 @@ function normalizeNpbPlayers(players: any) {
     : [];
 }
 
+function normalizeNpbRecordPlayers(players: any) {
+  return Array.isArray(players)
+    ? players
+        .filter((p: AnyObj) => Number(p?.batOrder ?? 0) >= 1 && Number(p?.batOrder ?? 0) <= 9)
+        .sort((a: AnyObj, b: AnyObj) => Number(a?.batOrder ?? 99) - Number(b?.batOrder ?? 99))
+        .slice(0, 9)
+        .map((p: AnyObj) => {
+          const id = String(p?.playerId ?? p?.pCode ?? p?.pcode ?? "").trim() || null;
+          return {
+            battingOrder: Number(p?.batOrder ?? 0) || null,
+            position: String(p?.posName ?? p?.position ?? "").trim() || null,
+            pcode: id,
+            playerId: id,
+            name: String(p?.name ?? "").trim() || null,
+            currentSeasonStats: {
+              avg: Number.isFinite(Number(p?.avg)) ? Number(p.avg) : null,
+            },
+            source: "NAVER_RECORD_NPB",
+          };
+        })
+        .filter((p: AnyObj) => Boolean(p.name))
+    : [];
+}
+
+function normalizeNpbRecordStarter(value: any, fallbackName: any) {
+  const p = Array.isArray(value) ? value[0] : value;
+  const name = String(p?.name ?? fallbackName ?? "").trim();
+  if (!name) return null;
+  const id = String(p?.playerId ?? p?.pCode ?? p?.pcode ?? "").trim() || null;
+  const era = Number.isFinite(Number(p?.era)) ? Number(p.era) : null;
+  return {
+    name,
+    playerId: id,
+    pcode: id,
+    era,
+    status: "CONFIRMED",
+    currentSeasonStats: { era },
+    source: "NAVER_RECORD_NPB",
+  };
+}
+
 function normalizeKboPlayers(players: any) {
   return Array.isArray(players)
     ? players
@@ -641,6 +682,25 @@ export async function GET(request: Request) {
     let previewData: AnyObj | null = null;
     let previewEndpoint: string | null = null;
     let previewStatus: number | null = null;
+    let npbRecordData: AnyObj | null = null;
+    let npbRecordEndpoint: string | null = null;
+    let npbRecordStatus: number | null = null;
+    if (league === "NPB") {
+      npbRecordEndpoint = `${NAVER_API}/${gameId}/record`;
+      const recordResponse = await fetch(npbRecordEndpoint, {
+        cache: "no-store",
+        headers: {
+          accept: "application/json, text/plain, */*",
+          referer: `https://m.sports.naver.com/game/${gameId}`,
+          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.27",
+        },
+      });
+      npbRecordStatus = recordResponse.status;
+      const recordPayload = await recordResponse.json().catch(() => null);
+      if (recordResponse.ok && recordPayload?.success && recordPayload?.code === 200) {
+        npbRecordData = recordPayload?.result?.recordData ?? null;
+      }
+    }
     if (league === "MLB") {
       previewEndpoint = `${NAVER_API}/${gameId}/preview`;
       const previewResponse = await fetch(previewEndpoint, {
@@ -694,24 +754,34 @@ export async function GET(request: Request) {
       homeStarter = normalizeKboStarter(result?.textRelayData?.homeLineup?.pitcher, game?.homeStarterName);
       awayStarter = normalizeKboStarter(result?.textRelayData?.awayLineup?.pitcher, game?.awayStarterName);
     } else {
+      // NPB pregame confirmed lineup lives in /record even while game-polling.textRelayData is null.
+      // Prefer /record; retain the old game-polling shape only as a compatibility fallback.
+      const recordHome = normalizeNpbRecordPlayers(npbRecordData?.homeBatter);
+      const recordAway = normalizeNpbRecordPlayers(npbRecordData?.awayBatter);
       const baseInfo = result?.textRelayData?.baseInfo ?? {};
       const batterLineup = baseInfo?.batterLineup ?? {};
-      homeLineup = normalizeNpbPlayers(batterLineup?.home);
-      awayLineup = normalizeNpbPlayers(batterLineup?.away);
-      homeStarter = baseInfo?.homePitcher ? {
-        name: baseInfo.homePitcher,
-        playerId: String(baseInfo?.homePitcherId ?? "").trim() || null,
-        pcode: String(baseInfo?.homePitcherId ?? "").trim() || null,
-        status: "CONFIRMED",
-        source: "NAVER_GAME_POLLING",
-      } : null;
-      awayStarter = baseInfo?.awayPitcher ? {
-        name: baseInfo.awayPitcher,
-        playerId: String(baseInfo?.awayPitcherId ?? "").trim() || null,
-        pcode: String(baseInfo?.awayPitcherId ?? "").trim() || null,
-        status: "CONFIRMED",
-        source: "NAVER_GAME_POLLING",
-      } : null;
+      homeLineup = recordHome.length >= 7 ? recordHome : normalizeNpbPlayers(batterLineup?.home);
+      awayLineup = recordAway.length >= 7 ? recordAway : normalizeNpbPlayers(batterLineup?.away);
+      homeStarter = normalizeNpbRecordStarter(npbRecordData?.homePitcher, game?.homeStarterName);
+      awayStarter = normalizeNpbRecordStarter(npbRecordData?.awayPitcher, game?.awayStarterName);
+      if (!homeStarter && baseInfo?.homePitcher) {
+        homeStarter = {
+          name: baseInfo.homePitcher,
+          playerId: String(baseInfo?.homePitcherId ?? "").trim() || null,
+          pcode: String(baseInfo?.homePitcherId ?? "").trim() || null,
+          status: "CONFIRMED",
+          source: "NAVER_GAME_POLLING",
+        };
+      }
+      if (!awayStarter && baseInfo?.awayPitcher) {
+        awayStarter = {
+          name: baseInfo.awayPitcher,
+          playerId: String(baseInfo?.awayPitcherId ?? "").trim() || null,
+          pcode: String(baseInfo?.awayPitcherId ?? "").trim() || null,
+          status: "CONFIRMED",
+          source: "NAVER_GAME_POLLING",
+        };
+      }
     }
 
     return Response.json({
@@ -722,6 +792,7 @@ export async function GET(request: Request) {
       capturedAt: Date.now(),
       endpoint,
       previewEndpoint,
+      npbRecordEndpoint,
       gameId,
       game: {
         gameDateTime: game?.gameDateTime ?? null,
@@ -741,6 +812,14 @@ export async function GET(request: Request) {
       recentSummary: league === "MLB" && previewData ? {
         home: summarizeMlbPreviousGames(previewData?.homeTeamPreviousGames, String(previewData?.gameInfo?.hName ?? game?.homeTeamName ?? home)),
         away: summarizeMlbPreviousGames(previewData?.awayTeamPreviousGames, String(previewData?.gameInfo?.aName ?? game?.awayTeamName ?? away)),
+      } : null,
+      npbRecord: league === "NPB" ? {
+        ok: Boolean(npbRecordData),
+        status: npbRecordStatus,
+        homeBatters: Array.isArray(npbRecordData?.homeBatter) ? npbRecordData.homeBatter.length : 0,
+        awayBatters: Array.isArray(npbRecordData?.awayBatter) ? npbRecordData.awayBatter.length : 0,
+        starters: Number(Array.isArray(npbRecordData?.homePitcher) && npbRecordData.homePitcher.length > 0)
+          + Number(Array.isArray(npbRecordData?.awayPitcher) && npbRecordData.awayPitcher.length > 0),
       } : null,
       mlbPreview: league === "MLB" ? {
         ok: Boolean(previewData),
