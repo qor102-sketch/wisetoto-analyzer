@@ -17620,17 +17620,32 @@ export default function Home() {
           : null;
 
         const naverLineupSource = naverTodayLineup?.league === "MLB"
-          ? "NAVER_MLB_PREVIEW"
+          ? "NAVER_GAME_POLLING_MLB"
           : "NAVER_GAME_POLLING";
 
-        const naverConfirmedLineups = naverTodayLineup?.ok && Number(naverTodayLineup?.coverage?.total ?? 0) >= 14
+        // V13.8.22: coverage 숫자만 믿지 않고 실제 home/away 배열을 기준으로 확정 라인업을 판정한다.
+        // MLB game-polling의 game.home/awayStarterName도 side-safe fallback으로 사용해
+        // preview의 잘못된 홈/원정 선발 덮어쓰기를 차단한다.
+        const naverHomeLineupRows = Array.isArray(naverTodayLineup?.home) ? naverTodayLineup.home : [];
+        const naverAwayLineupRows = Array.isArray(naverTodayLineup?.away) ? naverTodayLineup.away : [];
+        const naverActualLineupTotal = naverHomeLineupRows.length + naverAwayLineupRows.length;
+        const naverHomeStarter = naverTodayLineup?.homeStarter ??
+          (naverTodayLineup?.game?.homeStarterName
+            ? { name: naverTodayLineup.game.homeStarterName, status: "CONFIRMED", source: naverLineupSource }
+            : null) ?? wisetotoStarterLineups?.homeStarter ?? null;
+        const naverAwayStarter = naverTodayLineup?.awayStarter ??
+          (naverTodayLineup?.game?.awayStarterName
+            ? { name: naverTodayLineup.game.awayStarterName, status: "CONFIRMED", source: naverLineupSource }
+            : null) ?? wisetotoStarterLineups?.awayStarter ?? null;
+
+        const naverConfirmedLineups = naverTodayLineup?.ok && naverActualLineupTotal >= 14
           ? {
               source: naverLineupSource,
-              homeStarter: naverTodayLineup?.homeStarter ?? wisetotoStarterLineups?.homeStarter ?? null,
-              awayStarter: naverTodayLineup?.awayStarter ?? wisetotoStarterLineups?.awayStarter ?? null,
-              homeTeamLineUp: { fullLineUp: Array.isArray(naverTodayLineup?.home) ? naverTodayLineup.home : [] },
-              awayTeamLineUp: { fullLineUp: Array.isArray(naverTodayLineup?.away) ? naverTodayLineup.away : [] },
-              confirmedBattingLineup: Number(naverTodayLineup?.coverage?.total ?? 0) >= 18,
+              homeStarter: naverHomeStarter,
+              awayStarter: naverAwayStarter,
+              homeTeamLineUp: { fullLineUp: naverHomeLineupRows },
+              awayTeamLineUp: { fullLineUp: naverAwayLineupRows },
+              confirmedBattingLineup: naverActualLineupTotal >= 18,
               wisetotoSeasonStats: [
                 ...(Array.isArray(wisetotoLive?.seasonBatters?.home) ? wisetotoLive.seasonBatters.home : []),
                 ...(Array.isArray(wisetotoLive?.seasonBatters?.away) ? wisetotoLive.seasonBatters.away : []),
@@ -17650,8 +17665,8 @@ export default function Home() {
           (naverTodayLineup?.homeStarter || naverTodayLineup?.awayStarter)
           ? {
               source: "NAVER_MLB_PREVIEW",
-              homeStarter: naverTodayLineup?.homeStarter ?? wisetotoStarterLineups?.homeStarter ?? null,
-              awayStarter: naverTodayLineup?.awayStarter ?? wisetotoStarterLineups?.awayStarter ?? null,
+              homeStarter: naverHomeStarter,
+              awayStarter: naverAwayStarter,
               homeTeamLineUp: { fullLineUp: [] },
               awayTeamLineUp: { fullLineUp: [] },
               confirmedBattingLineup: false,
@@ -20554,7 +20569,7 @@ export default function Home() {
                         <b>LIVE DATA 수집 진단</b> · 실제 수신/계산된 항목만 정상으로 표시합니다.
                         선발/라인업은 발표 전이면 대기가 정상이며, 미연결 항목은 예측에 임의 반영하지 않습니다.
                         <br />
-                        <b>V13.8.20:</b> MLB 네이버 preview의 최근 경기 득실을 기존 λ 입력 구조에 연결하고, game-polling 날씨와 preview 선발 직전등판을 LIVE 진단에 연결했습니다. 실제 9+9 타순 발표 후 시즌 타자 Stats는 기존 pCode 매칭으로 READY 단계에 적용됩니다. V13.0/Gate V2 계산식 자체는 변경하지 않았습니다.
+                        <b>V13.8.22:</b> MLB 네이버 preview의 최근 경기 득실을 기존 λ 입력 구조에 연결하고, game-polling 날씨와 preview 선발 직전등판을 LIVE 진단에 연결했습니다. 실제 9+9 타순 발표 후 시즌 타자 Stats는 기존 pCode 매칭으로 READY 단계에 적용됩니다. V13.0/Gate V2 계산식 자체는 변경하지 않았습니다.
                         {matched?.wisetotoLive && !matched?.wisetotoLive?.ok ? (
                           <>
                             <br />
