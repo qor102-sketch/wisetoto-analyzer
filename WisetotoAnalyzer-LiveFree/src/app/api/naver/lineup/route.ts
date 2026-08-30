@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_23_MLB_RESOLVER_FALLBACK_20260830
+// DEPLOY_MARKER_V13_8_24_MLB_ALIAS_EMPTY_GUARD_20260830
 
 const NAVER_API = "https://api-gw.sports.naver.com/schedule/games";
 
@@ -79,6 +79,7 @@ function npbTeamCode(name: string) {
   for (const entry of NPB_TEAM_CODES) {
     for (const alias of entry.aliases) {
       const a = norm(alias);
+      if (!a) continue;
       if (target === a || target.includes(a) || a.includes(target)) return entry.code;
     }
   }
@@ -90,6 +91,7 @@ function normalizedKboName(name: string) {
   for (const [code, aliases] of Object.entries(KBO_TEAM_ALIASES)) {
     if (aliases.some((alias) => {
       const a = norm(alias);
+      if (!a) return false;
       return target === a || target.includes(a) || a.includes(target);
     })) return code;
   }
@@ -101,6 +103,7 @@ function normalizedMlbName(name: string) {
   for (const [code, aliases] of Object.entries(MLB_TEAM_ALIASES)) {
     if (aliases.some((alias) => {
       const a = norm(alias);
+      if (!a) return false;
       return target === a || target.includes(a) || a.includes(target);
     })) return code;
   }
@@ -180,7 +183,7 @@ async function resolveKboGameId(date: string, home: string, away: string) {
     headers: {
       accept: "application/json, text/plain, */*",
       referer: "https://m.sports.naver.com/kbaseball/schedule/index",
-      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.23",
+      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.24",
     },
   });
   const payload = await response.json().catch(() => null);
@@ -212,7 +215,7 @@ async function resolveMlbGameId(date: string, home: string, away: string, startR
     headers: {
       accept: "application/json, text/plain, */*",
       referer: "https://m.sports.naver.com/wbaseball/schedule/index",
-      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.23",
+      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.24",
     },
   });
   const payload = await response.json().catch(() => null);
@@ -248,7 +251,7 @@ async function resolveMlbGameId(date: string, home: string, away: string, startR
           headers: {
             accept: "application/json, text/plain, */*",
             referer: `https://m.sports.naver.com/game/${probeGameId}`,
-            "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.23",
+            "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.24",
           },
         });
         if (!probeResponse.ok) continue;
@@ -597,7 +600,7 @@ export async function GET(request: Request) {
       headers: {
         accept: "application/json, text/plain, */*",
         referer: `https://m.sports.naver.com/game/${gameId}`,
-        "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.23",
+        "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.24",
       },
     });
 
@@ -627,7 +630,7 @@ export async function GET(request: Request) {
         headers: {
           accept: "application/json, text/plain, */*",
           referer: `https://m.sports.naver.com/game/${gameId}`,
-          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.23",
+          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.24",
         },
       });
       previewStatus = previewResponse.status;
