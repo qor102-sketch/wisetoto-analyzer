@@ -20584,7 +20584,7 @@ export default function Home() {
 
                   {currentSport === "축구" && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V13.8.28 축구 LIVE DATA · Naver 실제 선발</h3>
+                      <h3>V13.8.29 축구 LIVE DATA · Naver 실제 선발</h3>
                       <div className="notice" style={{ margin: "8px 0" }}>
                         네이버 Sports의 경기별 players 응답에서 <b>substitute:false</b> 선수를 실제 선발로 수집합니다.
                         현재 단계에서는 선발 11+11을 READY 진단과 경기전 스냅샷에만 연결하며 V13.0 축구 λ/Poisson 계산식은 변경하지 않습니다.
@@ -20704,8 +20704,8 @@ export default function Home() {
                         </div>
                         <div className="card">
                           선발 최근 투구
-                          <b>{matched?.naverTodayLineup?.league === "MLB" && (matched?.naverTodayLineup?.homeStarter?.latestStart || matched?.naverTodayLineup?.awayStarter?.latestStart) ? "✓ MLB 직전등판" : Number(matched?.wisetotoLive?.coverage?.recentDetailStarterRows ?? 0) > 0 ? "✓ 최근경기" : Number(matched?.wisetotoLive?.coverage?.latestPitcherRows ?? 0) > 0 ? "✓ 직전경기" : "미연결"}</b>
-                          <div className="small">{matched?.naverTodayLineup?.league === "MLB" ? `홈 ${matched?.naverTodayLineup?.homeStarter?.latestStart?.innings ?? "-"}IP · 원정 ${matched?.naverTodayLineup?.awayStarter?.latestStart?.innings ?? "-"}IP · Naver preview` : `최근 상세 선발 ${Number(matched?.wisetotoLive?.coverage?.recentDetailStarterRows ?? 0)}행 · IP/투구수/K/실점 수집 · 모델식은 아직 변경 없음`}</div>
+                          <b>{matched?.naverTodayLineup?.league === "MLB" && (matched?.naverTodayLineup?.homeStarter?.latestStart || matched?.naverTodayLineup?.awayStarter?.latestStart) ? "✓ MLB 직전등판" : Number(matched?.wisetotoLive?.coverage?.currentStarterRecentStarts ?? 0) > 0 ? "✓ 현재 선발 최근등판" : Number(matched?.wisetotoLive?.coverage?.recentDetailStarterRows ?? 0) > 0 ? "△ 팀 최근 선발만" : "미연결"}</b>
+                          <div className="small">{matched?.naverTodayLineup?.league === "MLB" ? `홈 ${matched?.naverTodayLineup?.homeStarter?.latestStart?.innings ?? "-"}IP · 원정 ${matched?.naverTodayLineup?.awayStarter?.latestStart?.innings ?? "-"}IP · Naver preview` : `현재 선발 일치 등판 홈 ${Number(matched?.wisetotoLive?.starterRecent?.home?.startsFound ?? 0)}회 / 원정 ${Number(matched?.wisetotoLive?.starterRecent?.away?.startsFound ?? 0)}회 · 팀 최근 5경기 범위 · 모델 반영 OFF`}</div>
                         </div>
                         <div className="card">
                           타자 최근 타격감
