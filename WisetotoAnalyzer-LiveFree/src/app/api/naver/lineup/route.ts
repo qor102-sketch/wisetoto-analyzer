@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_28_FOOTBALL_NAVER_LINEUP_V1_20260830
+// DEPLOY_MARKER_V13_8_30_NAVER_STARTER_BULLPEN_WORKLOAD_V1_20260903
 
 const NAVER_API = "https://api-gw.sports.naver.com/schedule/games";
 
@@ -701,6 +701,270 @@ function summarizeMlbPreviousGames(rows: any, teamName: string) {
   };
 }
 
+
+
+type CacheEntry = { at: number; value: any };
+const HIST_TTL_MS = 6 * 60 * 60 * 1000;
+const histJsonCache = new Map<string, CacheEntry>();
+const histJsonInflight = new Map<string, Promise<any>>();
+
+async function fetchNaverJsonCached(endpoint: string, referer: string, historical = false) {
+  if (historical) {
+    const cached = histJsonCache.get(endpoint);
+    if (cached && Date.now() - cached.at < HIST_TTL_MS) return { ok: true, status: 200, payload: cached.value, cacheHit: true };
+  }
+  if (historical) {
+    const inflight = histJsonInflight.get(endpoint);
+    if (inflight) return inflight;
+  }
+  const task = (async () => {
+    try {
+      const response = await fetch(endpoint, {
+        cache: "no-store",
+        headers: {
+          accept: "application/json, text/plain, */*",
+          referer,
+          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.30",
+        },
+      });
+      const payload = await response.json().catch(() => null);
+      if (historical && response.ok && payload) histJsonCache.set(endpoint, { at: Date.now(), value: payload });
+      return { ok: response.ok && Boolean(payload), status: response.status, payload, cacheHit: false };
+    } catch {
+      return { ok: false, status: 0, payload: null, cacheHit: false };
+    } finally {
+      if (historical) histJsonInflight.delete(endpoint);
+    }
+  })();
+  if (historical) histJsonInflight.set(endpoint, task);
+  return task;
+}
+
+function isoDayOffset(dateKeyRaw: string, days: number) {
+  const y = Number(dateKeyRaw.slice(0, 4));
+  const m = Number(dateKeyRaw.slice(4, 6));
+  const d = Number(dateKeyRaw.slice(6, 8));
+  const value = new Date(Date.UTC(y, m - 1, d + days));
+  return value.toISOString().slice(0, 10);
+}
+
+function normalizePerson(value: any) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^0-9a-z가-힣ぁ-んァ-ヶ一-龥]/g, "");
+}
+
+function personMatches(a: any, b: any) {
+  const x = normalizePerson(a);
+  const y = normalizePerson(b);
+  if (!x || !y) return false;
+  return x === y || (x.length >= 3 && y.length >= 3 && (x.includes(y) || y.includes(x)));
+}
+
+function exactCategoryForLeague(league: string) {
+  if (league === "KBO") return "kbo";
+  if (league === "MLB") return "mlb";
+  if (league === "NPB") return "npb";
+  return null;
+}
+
+function upperCategoryForLeague(league: string) {
+  return league === "KBO" ? "kbaseball" : "wbaseball";
+}
+
+function pitcherRowSummary(row: AnyObj, game: AnyObj, side: "home" | "away") {
+  const id = String(row?.playerId ?? row?.pcode ?? row?.pCode ?? "").trim() || null;
+  const pitchRaw = row?.pitchCount ?? row?.pitches ?? row?.np ?? row?.pc ?? row?.pitchCnt;
+  return {
+    gameId: String(game?.gameId ?? "") || null,
+    date: game?.gameDate ?? null,
+    gameDateTime: game?.gameDateTime ?? null,
+    opponent: side === "home" ? game?.awayTeamName ?? null : game?.homeTeamName ?? null,
+    name: String(row?.name ?? row?.playerName ?? "").trim() || null,
+    playerId: id,
+    innings: row?.inn ?? null,
+    pitches: Number.isFinite(Number(pitchRaw)) ? Number(pitchRaw) : null,
+    hits: Number.isFinite(Number(row?.hit)) ? Number(row.hit) : null,
+    homeRuns: Number.isFinite(Number(row?.hr)) ? Number(row.hr) : null,
+    walks: Number.isFinite(Number(row?.bb)) ? Number(row.bb) : null,
+    strikeouts: Number.isFinite(Number(row?.so ?? row?.kk)) ? Number(row?.so ?? row?.kk) : null,
+    runs: Number.isFinite(Number(row?.r)) ? Number(row.r) : null,
+    earnedRuns: Number.isFinite(Number(row?.er)) ? Number(row.er) : null,
+  };
+}
+
+function inningsToOuts(value: any) {
+  const raw = String(value ?? "").trim();
+  const m = raw.match(/^(\d+)(?:\.(\d))?$/);
+  if (!m) return 0;
+  const whole = Number(m[1]);
+  const frac = Number(m[2] ?? 0);
+  return whole * 3 + Math.min(2, Math.max(0, frac));
+}
+
+function outsToInnings(outs: number) {
+  const safe = Math.max(0, Math.round(outs));
+  return `${Math.floor(safe / 3)}.${safe % 3}`;
+}
+
+async function fetchHistoricalRecord(gameId: string) {
+  const endpoint = `${NAVER_API}/${encodeURIComponent(gameId)}/record`;
+  const result = await fetchNaverJsonCached(endpoint, `https://m.sports.naver.com/game/${gameId}`, true);
+  const recordData = result?.payload?.success && result?.payload?.code === 200 ? result.payload?.result?.recordData ?? null : null;
+  return { endpoint, status: result.status, cacheHit: result.cacheHit, recordData };
+}
+
+async function collectNaverPitcherWorkload(args: {
+  league: "NPB" | "KBO" | "MLB";
+  date: string;
+  home: string;
+  away: string;
+  homeStarter: AnyObj | null;
+  awayStarter: AnyObj | null;
+  startRaw: string;
+}) {
+  const categoryId = exactCategoryForLeague(args.league);
+  const upperCategoryId = upperCategoryForLeague(args.league);
+  if (!categoryId) return null;
+
+  const fromDate = isoDayOffset(args.date, -40);
+  const toDate = isoDayOffset(args.date, -1);
+  const scheduleEndpoint = `${NAVER_API}?fields=basic%2Cschedule%2Cbaseball%2CmanualRelayUrl&upperCategoryId=${upperCategoryId}&fromDate=${fromDate}&toDate=${toDate}&size=500`;
+  const scheduleResult = await fetchNaverJsonCached(
+    scheduleEndpoint,
+    args.league === "KBO" ? "https://m.sports.naver.com/kbaseball/schedule/index" : "https://m.sports.naver.com/wbaseball/schedule/index",
+    true,
+  );
+  const rows = Array.isArray(scheduleResult?.payload?.result?.games) ? scheduleResult.payload.result.games : [];
+  const games = rows
+    .filter((g: AnyObj) => String(g?.categoryId ?? "").toLowerCase() === categoryId)
+    .filter((g: AnyObj) => String(g?.gameDate ?? "").replace(/-/g, "") < args.date)
+    .sort((a: AnyObj, b: AnyObj) => String(b?.gameDateTime ?? b?.gameDate ?? "").localeCompare(String(a?.gameDateTime ?? a?.gameDate ?? "")));
+
+  function teamGames(team: string) {
+    return games.filter((g: AnyObj) => teamMatches(String(g?.homeTeamName ?? ""), team) || teamMatches(String(g?.awayTeamName ?? ""), team));
+  }
+
+  async function starterRecent(team: string, starter: AnyObj | null) {
+    const starterName = String(starter?.name ?? "").trim();
+    const starterId = String(starter?.playerId ?? starter?.pcode ?? "").trim();
+    if (!starterName && !starterId) return { startsFound: 0, games: [], summary: null, candidateGames: 0 };
+    const candidates = teamGames(team)
+      .filter((g: AnyObj) => {
+        const isHome = teamMatches(String(g?.homeTeamName ?? ""), team);
+        const scheduledStarter = isHome ? g?.homeStarterName : g?.awayStarterName;
+        return starterName ? personMatches(scheduledStarter, starterName) : true;
+      })
+      .slice(0, 5);
+
+    const found: AnyObj[] = [];
+    for (const g of candidates) {
+      const rec = await fetchHistoricalRecord(String(g?.gameId ?? ""));
+      const isHome = teamMatches(String(g?.homeTeamName ?? ""), team);
+      const pitchers = Array.isArray(isHome ? rec.recordData?.homePitcher : rec.recordData?.awayPitcher)
+        ? (isHome ? rec.recordData.homePitcher : rec.recordData.awayPitcher)
+        : [];
+      const row = pitchers.find((p: AnyObj) => starterId
+        ? String(p?.playerId ?? p?.pcode ?? p?.pCode ?? "").trim() === starterId
+        : personMatches(p?.name ?? p?.playerName, starterName));
+      if (row) found.push(pitcherRowSummary(row, g, isHome ? "home" : "away"));
+    }
+    const totals = found.reduce((acc, r) => {
+      acc.outs += inningsToOuts(r.innings);
+      acc.pitches += Number(r.pitches ?? 0);
+      acc.earnedRuns += Number(r.earnedRuns ?? 0);
+      acc.strikeouts += Number(r.strikeouts ?? 0);
+      acc.walks += Number(r.walks ?? 0);
+      return acc;
+    }, { outs: 0, pitches: 0, earnedRuns: 0, strikeouts: 0, walks: 0 });
+    return {
+      startsFound: found.length,
+      candidateGames: candidates.length,
+      games: found,
+      summary: found.length ? {
+        innings: outsToInnings(totals.outs),
+        pitches: totals.pitches || null,
+        earnedRuns: totals.earnedRuns,
+        strikeouts: totals.strikeouts,
+        walks: totals.walks,
+        era: totals.outs > 0 ? Number(((totals.earnedRuns * 27) / totals.outs).toFixed(2)) : null,
+      } : null,
+    };
+  }
+
+  async function bullpen(team: string) {
+    const currentMs = requestedStartMs(args.startRaw);
+    const allTeamGames = teamGames(team);
+    const recentGames = allTeamGames.filter((g: AnyObj) => {
+      if (currentMs === null) return true;
+      const ms = naverLocalGameMs(g?.gameDateTime);
+      if (ms === null) return false;
+      const diffHours = (currentMs - ms) / 3600000;
+      return diffHours > 0 && diffHours <= 72;
+    }).slice(0, 4);
+    const appearances: AnyObj[] = [];
+    for (const g of recentGames) {
+      const rec = await fetchHistoricalRecord(String(g?.gameId ?? ""));
+      const isHome = teamMatches(String(g?.homeTeamName ?? ""), team);
+      const pitchers = Array.isArray(isHome ? rec.recordData?.homePitcher : rec.recordData?.awayPitcher)
+        ? (isHome ? rec.recordData.homePitcher : rec.recordData.awayPitcher)
+        : [];
+      const gameMs = naverLocalGameMs(g?.gameDateTime);
+      const hoursAgo = currentMs !== null && gameMs !== null ? (currentMs - gameMs) / 3600000 : null;
+      pitchers.slice(1).forEach((p: AnyObj) => appearances.push({ ...pitcherRowSummary(p, g, isHome ? "home" : "away"), hoursAgo }));
+    }
+
+    function windowSummary(hours: number) {
+      const filtered = appearances.filter((a) => a.hoursAgo === null || (Number(a.hoursAgo) > 0 && Number(a.hoursAgo) <= hours));
+      const uniquePitchers = new Set(filtered.map((a) => a.playerId || normalizePerson(a.name)).filter(Boolean));
+      const outs = filtered.reduce((sum, a) => sum + inningsToOuts(a.innings), 0);
+      const pitches = filtered.reduce((sum, a) => sum + Number(a.pitches ?? 0), 0);
+      return {
+        appearances: filtered.length,
+        pitchersUsed: uniquePitchers.size,
+        innings: outsToInnings(outs),
+        pitches: pitches || null,
+      };
+    }
+
+    const byPitcher = new Map<string, number>();
+    appearances.forEach((a) => {
+      const key = String(a.playerId || normalizePerson(a.name) || "");
+      if (key) byPitcher.set(key, (byPitcher.get(key) ?? 0) + 1);
+    });
+    const multiGamePitchers = Array.from(byPitcher.values()).filter((count) => count >= 2).length;
+    return {
+      gamesChecked: recentGames.length,
+      windows: { h24: windowSummary(24), h48: windowSummary(48), h72: windowSummary(72) },
+      multiGamePitchers,
+      games: recentGames.map((g: AnyObj) => ({ gameId: g?.gameId ?? null, date: g?.gameDate ?? null, gameDateTime: g?.gameDateTime ?? null, home: g?.homeTeamName ?? null, away: g?.awayTeamName ?? null })),
+    };
+  }
+
+  const [homeStarterRecent, awayStarterRecent, homeBullpen, awayBullpen] = await Promise.all([
+    starterRecent(args.home, args.homeStarter),
+    starterRecent(args.away, args.awayStarter),
+    bullpen(args.home),
+    bullpen(args.away),
+  ]);
+
+  return {
+    source: "NAVER_SCHEDULE_RECORD",
+    modelApplied: false,
+    scheduleEndpoint,
+    scheduleStatus: scheduleResult.status,
+    scheduleCacheHit: scheduleResult.cacheHit,
+    lookbackDays: 40,
+    starterRecent: { home: homeStarterRecent, away: awayStarterRecent },
+    bullpen: { home: homeBullpen, away: awayBullpen },
+    coverage: {
+      scheduleGames: games.length,
+      starterRecentStarts: Number(homeStarterRecent.startsFound) + Number(awayStarterRecent.startsFound),
+      bullpenGames: Number(homeBullpen.gamesChecked) + Number(awayBullpen.gamesChecked),
+    },
+  };
+}
+
 function normalizeKboStarter(value: any, fallbackName: any) {
   const p = Array.isArray(value) ? value[0] : null;
   const name = String(p?.name ?? fallbackName ?? "").trim();
@@ -928,6 +1192,16 @@ export async function GET(request: Request) {
       }
     }
 
+    const naverPitcherWorkload = league === "FOOTBALL" ? null : await collectNaverPitcherWorkload({
+      league,
+      date,
+      home,
+      away,
+      homeStarter,
+      awayStarter,
+      startRaw,
+    });
+
     return Response.json({
       ok: true,
       source: "sports.naver.com",
@@ -966,6 +1240,7 @@ export async function GET(request: Request) {
         startingAway: awayLineup.length,
         startingTotal: homeLineup.length + awayLineup.length,
       } : null,
+      pitcherWorkload: naverPitcherWorkload,
       recentSummary: league === "MLB" && previewData ? {
         home: summarizeMlbPreviousGames(previewData?.homeTeamPreviousGames, String(previewData?.gameInfo?.hName ?? game?.homeTeamName ?? home)),
         away: summarizeMlbPreviousGames(previewData?.awayTeamPreviousGames, String(previewData?.gameInfo?.aName ?? game?.awayTeamName ?? away)),
@@ -998,6 +1273,8 @@ export async function GET(request: Request) {
         homeStats: homeLineup.filter((p: AnyObj) => p?.currentSeasonStats?.avg !== null && p?.currentSeasonStats?.avg !== undefined).length,
         awayStats: awayLineup.filter((p: AnyObj) => p?.currentSeasonStats?.avg !== null && p?.currentSeasonStats?.avg !== undefined).length,
         starters: Number(Boolean(homeStarter)) + Number(Boolean(awayStarter)),
+        starterRecentStarts: Number(naverPitcherWorkload?.coverage?.starterRecentStarts ?? 0),
+        bullpenGames: Number(naverPitcherWorkload?.coverage?.bullpenGames ?? 0),
         startingPlayers: league === "FOOTBALL" ? homeLineup.length + awayLineup.length : null,
       },
       debug: resolverDebug ? { resolver: resolverDebug } : undefined,
