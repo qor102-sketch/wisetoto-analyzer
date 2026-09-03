@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_15_WISETOTO_RECENT_5GAME_DETAIL_20260829
+// DEPLOY_MARKER_V13_8_29_STARTER_RECENT_DATA_V1_20260903
 
 const WISETOTO_ORIGIN = "https://www.wisetoto.com";
 const WISETOTO_DETAIL = `${WISETOTO_ORIGIN}/util/gameinfo/get_detail_lineup.htm`;
@@ -476,6 +476,61 @@ function aggregateRecentTeamDetails(details: AnyObj[]) {
   };
 }
 
+
+function normalizePersonName(value: any) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, "")
+    .replace(/[^0-9a-z가-힣ぁ-んァ-ン一-龯]/g, "");
+}
+
+function collectCurrentStarterRecent(details: AnyObj[], starterName: string | null | undefined) {
+  const wanted = normalizePersonName(starterName);
+  const starts: AnyObj[] = [];
+  if (!wanted) {
+    return { starterName: starterName ?? null, requestedGames: details.length, successfulGames: details.filter((x) => x?.ok).length, startsFound: 0, starts: [], summary: null, source: "WISETOTO_RECENT_TEAM_GAMES", modelApplied: false };
+  }
+  for (const item of details) {
+    if (!item?.ok) continue;
+    const pitching = summarizeLatestPitchers(Array.isArray(item?.pitchers) ? item.pitchers : []);
+    const row = pitching.starter;
+    if (!row?.name) continue;
+    const got = normalizePersonName(row.name);
+    if (!got || (got !== wanted && !got.includes(wanted) && !wanted.includes(got))) continue;
+    starts.push({
+      scheduleInfoSeq: item?.ref?.scheduleInfoSeq ?? null,
+      date: item?.ref?.date ?? null,
+      name: row.name,
+      innings: row.innings,
+      pitches: row.pitches,
+      strikeouts: row.strikeouts,
+      runs: row.runs,
+      earnedRuns: row.earnedRuns,
+    });
+  }
+  const sum = (key: string) => starts.reduce((acc, row) => acc + (Number.isFinite(Number(row?.[key])) ? Number(row[key]) : 0), 0);
+  const innings = sum("innings");
+  const earnedRuns = sum("earnedRuns");
+  return {
+    starterName: starterName ?? null,
+    requestedGames: details.length,
+    successfulGames: details.filter((x) => x?.ok).length,
+    startsFound: starts.length,
+    starts: starts.slice(0, 5),
+    summary: starts.length ? {
+      innings: Number(innings.toFixed(1)),
+      pitches: sum("pitches"),
+      strikeouts: sum("strikeouts"),
+      runs: sum("runs"),
+      earnedRuns,
+      era: innings > 0 ? Number(((earnedRuns * 9) / innings).toFixed(2)) : null,
+    } : null,
+    source: "WISETOTO_RECENT_TEAM_GAMES",
+    modelApplied: false,
+    limitation: "현재 확보된 팀 최근 5경기 상세에서 현재 선발과 이름이 일치하는 실제 선발 등판만 집계. 3~5 개인 선발등판이 모두 포함된다는 보장은 없음.",
+  };
+}
+
 function normalizeName(value: string) {
   return String(value ?? "")
     .toLowerCase()
@@ -657,6 +712,10 @@ export async function GET(request: Request) {
       home: aggregateRecentTeamDetails(homeRecentDetails),
       away: aggregateRecentTeamDetails(awayRecentDetails),
     };
+    const starterRecent = {
+      home: collectCurrentStarterRecent(homeRecentDetails, expectedStarters.find((x: any) => x?.side === "left")?.name),
+      away: collectCurrentStarterRecent(awayRecentDetails, expectedStarters.find((x: any) => x?.side === "right")?.name),
+    };
 
     const latestDetailSummary = {
       home: {
@@ -703,6 +762,7 @@ export async function GET(request: Request) {
       latestDetailSummary,
       recentDetails: { home: homeRecentDetails, away: awayRecentDetails },
       recentDetailSummary,
+      starterRecent,
       currentLineup,
       absentee: {
         available: Boolean(absenteeText),
@@ -721,6 +781,7 @@ export async function GET(request: Request) {
         recentDetailGamesTotal: recentDetailSummary.home.successfulGames + recentDetailSummary.away.successfulGames,
         recentDetailBatterRows: recentDetailSummary.home.batterRows + recentDetailSummary.away.batterRows,
         recentDetailStarterRows: recentDetailSummary.home.starters.length + recentDetailSummary.away.starters.length,
+        currentStarterRecentStarts: Number(starterRecent.home.startsFound ?? 0) + Number(starterRecent.away.startsFound ?? 0),
         currentLineupBatters: currentLineup.home.length + currentLineup.away.length,
         absenteeDetected: Boolean(absenteeText),
       },
@@ -730,7 +791,8 @@ export async function GET(request: Request) {
           "DevTools에서 확인된 get_detail_lineup_bs.htm XHR로 홈/원정 최근 최대 5경기 상세를 수집. 응답 실패 경기는 임의 보간하지 않음.",
         currentLineup:
           "현재 경기 영역에서 당일 라인업 heading/table이 실제 존재할 때만 감지하며, 이전 경기 라인업은 현재 라인업으로 사용하지 않음.",
-        modelApplied: "Wisetoto recent Form/H2H is exposed as the baseball LIVE primary feed; V13.0 formulas are unchanged.",
+        starterRecent: "현재 팀 최근 5경기 상세 안에서 현재 선발과 동일한 투수의 실제 선발등판만 별도 집계. 개인 최근 3~5선발 전체 이력으로 과장하지 않음.",
+        modelApplied: "Starter recent data is diagnostic/snapshot only. V13.0 formulas, Poisson λ, calibration and Gate V2 are unchanged.",
       },
     });
   } catch (error: any) {
