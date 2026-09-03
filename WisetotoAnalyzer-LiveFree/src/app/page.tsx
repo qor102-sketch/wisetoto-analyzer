@@ -4,6 +4,7 @@
 // DEPLOY_MARKER_V13_8_8_LIVE_DATA_DIAGNOSTICS_20260829
 // DEPLOY_MARKER_V13_8_6_FIXED_ODDS_3COL_GRID_20260829
 "use client";
+// DEPLOY_MARKER_V13_8_34_NAVER_RECENT_BATTING_V1_20260903
 
 import { useEffect, useMemo, useState, useRef } from "react";
 
@@ -20713,8 +20714,8 @@ export default function Home() {
                         </div>
                         <div className="card">
                           타자 최근 타격감
-                          <b>{Number(matched?.wisetotoLive?.coverage?.recentDetailBatterRows ?? 0) > 0 ? "✓ 최근 5경기" : Number(matched?.wisetotoLive?.coverage?.latestBatterRows ?? 0) > 0 ? "✓ 직전경기" : "미연결"}</b>
-                          <div className="small">최근 상세 타자 {Number(matched?.wisetotoLive?.coverage?.recentDetailBatterRows ?? 0)}행 · AB/H/RBI/R/HR 누적 집계</div>
+                          <b>{Number(matched?.naverTodayLineup?.pitcherWorkload?.coverage?.recentBattingPlayers ?? 0) > 0 ? "✓ Naver 라인업 최근5경기" : Number(matched?.wisetotoLive?.coverage?.recentDetailBatterRows ?? 0) > 0 ? "✓ 와이즈 최근 5경기" : Number(matched?.wisetotoLive?.coverage?.latestBatterRows ?? 0) > 0 ? "✓ 직전경기" : "미연결"}</b>
+                          <div className="small">Naver 매칭 홈 {Number(matched?.naverTodayLineup?.pitcherWorkload?.recentBatting?.home?.playersMatched ?? 0)}/9 · 원정 {Number(matched?.naverTodayLineup?.pitcherWorkload?.recentBatting?.away?.playersMatched ?? 0)}/9 · 최근5경기 AB/H/R/RBI/HR/BB/K 집계 · 모델 반영 OFF</div>
                         </div>
                         <div className="card">
                           불펜 소모도
