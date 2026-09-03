@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_8_31_KBO_PREVIEW_LINEUP_20260903
+// DEPLOY_MARKER_V13_8_33_KBO_RECORD_PITCHER_BOXSCORE_20260903
 // DEPLOY_MARKER_V13_8_30_NAVER_STARTER_BULLPEN_WORKLOAD_V1_20260903
 
 const NAVER_API = "https://api-gw.sports.naver.com/schedule/games";
@@ -847,11 +847,36 @@ function pitcherRowSummary(row: AnyObj, game: AnyObj, side: "home" | "away") {
 
 function inningsToOuts(value: any) {
   const raw = String(value ?? "").trim();
-  const m = raw.match(/^(\d+)(?:\.(\d))?$/);
-  if (!m) return 0;
-  const whole = Number(m[1]);
-  const frac = Number(m[2] ?? 0);
+  if (!raw) return 0;
+
+  // Naver KBO completed-game /record uses baseball fractions such as
+  // "2 ⅓", "1 ⅔" (and some feeds use "2 1/3" / "1.2").
+  const normalized = raw
+    .replace(/⅓/g, " 1/3")
+    .replace(/⅔/g, " 2/3")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const mixed = normalized.match(/^(\d+)\s+([12])\/3$/);
+  if (mixed) return Number(mixed[1]) * 3 + Number(mixed[2]);
+
+  const fractionOnly = normalized.match(/^([12])\/3$/);
+  if (fractionOnly) return Number(fractionOnly[1]);
+
+  const decimal = normalized.match(/^(\d+)(?:\.(\d))?$/);
+  if (!decimal) return 0;
+  const whole = Number(decimal[1]);
+  const frac = Number(decimal[2] ?? 0);
   return whole * 3 + Math.min(2, Math.max(0, frac));
+}
+
+function recordPitchers(recordData: AnyObj | null, side: "home" | "away") {
+  const boxscore = recordData?.pitchersBoxscore?.[side];
+  if (Array.isArray(boxscore)) return boxscore;
+
+  // Compatibility fallback for NPB/MLB or older Naver record shapes.
+  const legacy = side === "home" ? recordData?.homePitcher : recordData?.awayPitcher;
+  return Array.isArray(legacy) ? legacy : [];
 }
 
 function outsToInnings(outs: number) {
@@ -913,9 +938,7 @@ async function collectNaverPitcherWorkload(args: {
     for (const g of candidates) {
       const rec = await fetchHistoricalRecord(String(g?.gameId ?? ""));
       const isHome = teamMatches(String(g?.homeTeamName ?? ""), team);
-      const pitchers = Array.isArray(isHome ? rec.recordData?.homePitcher : rec.recordData?.awayPitcher)
-        ? (isHome ? rec.recordData.homePitcher : rec.recordData.awayPitcher)
-        : [];
+      const pitchers = recordPitchers(rec.recordData, isHome ? "home" : "away");
       const row = pitchers.find((p: AnyObj) => starterId
         ? String(p?.playerId ?? p?.pcode ?? p?.pCode ?? "").trim() === starterId
         : personMatches(p?.name ?? p?.playerName, starterName));
@@ -958,9 +981,7 @@ async function collectNaverPitcherWorkload(args: {
     for (const g of recentGames) {
       const rec = await fetchHistoricalRecord(String(g?.gameId ?? ""));
       const isHome = teamMatches(String(g?.homeTeamName ?? ""), team);
-      const pitchers = Array.isArray(isHome ? rec.recordData?.homePitcher : rec.recordData?.awayPitcher)
-        ? (isHome ? rec.recordData.homePitcher : rec.recordData.awayPitcher)
-        : [];
+      const pitchers = recordPitchers(rec.recordData, isHome ? "home" : "away");
       const gameMs = naverLocalGameMs(g?.gameDateTime);
       const hoursAgo = currentMs !== null && gameMs !== null ? (currentMs - gameMs) / 3600000 : null;
       pitchers.slice(1).forEach((p: AnyObj) => appearances.push({ ...pitcherRowSummary(p, g, isHome ? "home" : "away"), hoursAgo }));
