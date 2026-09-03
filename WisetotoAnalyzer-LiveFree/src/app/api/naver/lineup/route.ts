@@ -1,6 +1,7 @@
 // DEPLOY_MARKER_V13_8_33_KBO_RECORD_PITCHER_BOXSCORE_20260903
 // DEPLOY_MARKER_V13_8_30_NAVER_STARTER_BULLPEN_WORKLOAD_V1_20260903
 
+// DEPLOY_MARKER_V13_8_34_NAVER_RECENT_BATTING_V1_20260903
 const NAVER_API = "https://api-gw.sports.naver.com/schedule/games";
 
 type AnyObj = Record<string, any>;
@@ -879,6 +880,30 @@ function recordPitchers(recordData: AnyObj | null, side: "home" | "away") {
   return Array.isArray(legacy) ? legacy : [];
 }
 
+function recordBatters(recordData: AnyObj | null, side: "home" | "away") {
+  const boxscore = recordData?.battersBoxscore?.[side];
+  return Array.isArray(boxscore) ? boxscore : [];
+}
+
+function batterRowSummary(row: AnyObj, game: AnyObj, side: "home" | "away") {
+  const id = String(row?.playerCode ?? row?.playerId ?? row?.pcode ?? row?.pCode ?? "").trim() || null;
+  return {
+    gameId: String(game?.gameId ?? "") || null,
+    date: game?.gameDate ?? null,
+    gameDateTime: game?.gameDateTime ?? null,
+    opponent: side === "home" ? game?.awayTeamName ?? null : game?.homeTeamName ?? null,
+    name: String(row?.name ?? row?.playerName ?? "").trim() || null,
+    playerId: id,
+    atBats: Number.isFinite(Number(row?.ab)) ? Number(row.ab) : 0,
+    hits: Number.isFinite(Number(row?.hit)) ? Number(row.hit) : 0,
+    runs: Number.isFinite(Number(row?.run ?? row?.r)) ? Number(row?.run ?? row?.r) : 0,
+    rbi: Number.isFinite(Number(row?.rbi)) ? Number(row.rbi) : 0,
+    homeRuns: Number.isFinite(Number(row?.hr)) ? Number(row.hr) : 0,
+    walks: Number.isFinite(Number(row?.bb)) ? Number(row.bb) : 0,
+    strikeouts: Number.isFinite(Number(row?.kk ?? row?.so)) ? Number(row?.kk ?? row?.so) : 0,
+  };
+}
+
 function outsToInnings(outs: number) {
   const safe = Math.max(0, Math.round(outs));
   return `${Math.floor(safe / 3)}.${safe % 3}`;
@@ -899,6 +924,8 @@ async function collectNaverPitcherWorkload(args: {
   homeStarter: AnyObj | null;
   awayStarter: AnyObj | null;
   startRaw: string;
+  homeLineup?: AnyObj[];
+  awayLineup?: AnyObj[];
 }) {
   const categoryId = exactCategoryForLeague(args.league);
   const upperCategoryId = upperCategoryForLeague(args.league);
@@ -1014,11 +1041,72 @@ async function collectNaverPitcherWorkload(args: {
     };
   }
 
-  const [homeStarterRecent, awayStarterRecent, homeBullpen, awayBullpen] = await Promise.all([
+  async function recentBatting(team: string, lineup: AnyObj[]) {
+    const ids = new Set(lineup.map((p: AnyObj) => String(p?.playerId ?? p?.pcode ?? "").trim()).filter(Boolean));
+    const names = new Set(lineup.map((p: AnyObj) => normalizePerson(p?.name)).filter(Boolean));
+    const recentGames = teamGames(team).slice(0, 5);
+    const byPlayer = new Map<string, AnyObj>();
+    let gamesWithData = 0;
+
+    for (const g of recentGames) {
+      const rec = await fetchHistoricalRecord(String(g?.gameId ?? ""));
+      const isHome = teamMatches(String(g?.homeTeamName ?? ""), team);
+      const batters = recordBatters(rec.recordData, isHome ? "home" : "away");
+      if (batters.length) gamesWithData += 1;
+      for (const row of batters) {
+        const summary = batterRowSummary(row, g, isHome ? "home" : "away");
+        const normalizedName = normalizePerson(summary.name);
+        if (!ids.has(String(summary.playerId ?? "")) && !names.has(normalizedName)) continue;
+        const key = String(summary.playerId || normalizedName || "");
+        if (!key) continue;
+        const current = byPlayer.get(key) ?? {
+          playerId: summary.playerId,
+          name: summary.name,
+          games: 0, atBats: 0, hits: 0, runs: 0, rbi: 0, homeRuns: 0, walks: 0, strikeouts: 0,
+          gameLogs: [],
+        };
+        current.games += 1;
+        current.atBats += summary.atBats;
+        current.hits += summary.hits;
+        current.runs += summary.runs;
+        current.rbi += summary.rbi;
+        current.homeRuns += summary.homeRuns;
+        current.walks += summary.walks;
+        current.strikeouts += summary.strikeouts;
+        current.gameLogs.push(summary);
+        byPlayer.set(key, current);
+      }
+    }
+
+    const players = Array.from(byPlayer.values()).map((p: AnyObj) => ({
+      ...p,
+      avg: p.atBats > 0 ? Number((p.hits / p.atBats).toFixed(3)) : null,
+    }));
+    const totals = players.reduce((acc: AnyObj, p: AnyObj) => {
+      acc.games += Number(p.games ?? 0); acc.atBats += Number(p.atBats ?? 0); acc.hits += Number(p.hits ?? 0);
+      acc.runs += Number(p.runs ?? 0); acc.rbi += Number(p.rbi ?? 0); acc.homeRuns += Number(p.homeRuns ?? 0);
+      acc.walks += Number(p.walks ?? 0); acc.strikeouts += Number(p.strikeouts ?? 0); return acc;
+    }, { games: 0, atBats: 0, hits: 0, runs: 0, rbi: 0, homeRuns: 0, walks: 0, strikeouts: 0 });
+    return {
+      gamesChecked: recentGames.length,
+      gamesWithData,
+      lineupPlayers: lineup.length,
+      playersMatched: players.length,
+      players,
+      summary: {
+        ...totals,
+        avg: totals.atBats > 0 ? Number((totals.hits / totals.atBats).toFixed(3)) : null,
+      },
+    };
+  }
+
+  const [homeStarterRecent, awayStarterRecent, homeBullpen, awayBullpen, homeRecentBatting, awayRecentBatting] = await Promise.all([
     starterRecent(args.home, args.homeStarter),
     starterRecent(args.away, args.awayStarter),
     bullpen(args.home),
     bullpen(args.away),
+    recentBatting(args.home, args.homeLineup ?? []),
+    recentBatting(args.away, args.awayLineup ?? []),
   ]);
 
   return {
@@ -1030,10 +1118,13 @@ async function collectNaverPitcherWorkload(args: {
     lookbackDays: 40,
     starterRecent: { home: homeStarterRecent, away: awayStarterRecent },
     bullpen: { home: homeBullpen, away: awayBullpen },
+    recentBatting: { home: homeRecentBatting, away: awayRecentBatting },
     coverage: {
       scheduleGames: games.length,
       starterRecentStarts: Number(homeStarterRecent.startsFound) + Number(awayStarterRecent.startsFound),
       bullpenGames: Number(homeBullpen.gamesChecked) + Number(awayBullpen.gamesChecked),
+      recentBattingPlayers: Number(homeRecentBatting.playersMatched) + Number(awayRecentBatting.playersMatched),
+      recentBattingGames: Number(homeRecentBatting.gamesWithData) + Number(awayRecentBatting.gamesWithData),
     },
   };
 }
@@ -1281,6 +1372,8 @@ export async function GET(request: Request) {
       homeStarter,
       awayStarter,
       startRaw,
+      homeLineup,
+      awayLineup,
     });
 
     return Response.json({
@@ -1365,6 +1458,8 @@ export async function GET(request: Request) {
         starters: Number(Boolean(homeStarter)) + Number(Boolean(awayStarter)),
         starterRecentStarts: Number(naverPitcherWorkload?.coverage?.starterRecentStarts ?? 0),
         bullpenGames: Number(naverPitcherWorkload?.coverage?.bullpenGames ?? 0),
+        recentBattingPlayers: Number(naverPitcherWorkload?.coverage?.recentBattingPlayers ?? 0),
+        recentBattingGames: Number(naverPitcherWorkload?.coverage?.recentBattingGames ?? 0),
         startingPlayers: league === "FOOTBALL" ? homeLineup.length + awayLineup.length : null,
       },
       debug: resolverDebug ? { resolver: resolverDebug } : undefined,
