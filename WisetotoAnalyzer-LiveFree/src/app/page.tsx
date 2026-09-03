@@ -1,3 +1,4 @@
+// DEPLOY_MARKER_V13_8_32_POST_START_30MIN_VISIBILITY_20260903
 // DEPLOY_MARKER_V13_8_28_FOOTBALL_NAVER_LINEUP_V1_20260830
 // DEPLOY_MARKER_V13_8_19_MLB_SPORTSAPI_ALIAS_FIX_20260829
 // DEPLOY_MARKER_V13_8_8_LIVE_DATA_DIAGNOSTICS_20260829
@@ -12521,6 +12522,7 @@ export default function Home() {
       if (!response.ok || !payload?.ok) throw new Error(readableError(payload?.error, "Betman 경기목록 수집 실패"));
       setBetmanDiagnostics(payload?.diagnostics ?? null);
       const now = Date.now();
+      const liveGraceMs = 30 * 60 * 1000;
 
       const games = getBetmanGames(payload)
         .filter((game) => {
@@ -12549,7 +12551,7 @@ export default function Home() {
 
           return (
             Number.isFinite(start) &&
-            start > now &&
+            start > now - liveGraceMs &&
             hasOdds
           );
         })
@@ -12566,8 +12568,8 @@ export default function Home() {
         setStatus(`실전 발매경기 ${games.length}개 · 경기 선택 후 분석`);
       } else {
         setSelectedBetmanKey(null);
-        setBetman({ loading:false, matched:null, score:null, error:"현재 Betman에서 배당이 있는 미시작 발매경기가 없습니다." });
-        setStatus("현재 Betman에서 배당이 있는 미시작 발매경기가 없습니다.");
+        setBetman({ loading:false, matched:null, score:null, error:"현재 Betman에서 배당이 있는 경기(시작 후 30분 이내 포함)가 없습니다." });
+        setStatus("현재 Betman에서 배당이 있는 경기(시작 후 30분 이내 포함)가 없습니다.");
       }
     } catch (e:any) {
       const message = readableError(e,"Betman 경기목록 수집 실패");
@@ -17159,10 +17161,11 @@ export default function Home() {
     if (liveBatchAnalysis.running) return;
 
     const now = Date.now();
+    const liveGraceMs = 30 * 60 * 1000;
     const keys = filteredGames
       .filter((game) => {
         const startMs = gameTimeMs(game);
-        return Number.isFinite(startMs) && startMs > now;
+        return Number.isFinite(startMs) && startMs > now - liveGraceMs;
       })
       .map((game) => visibleGameKey(game));
 
@@ -17180,17 +17183,18 @@ export default function Home() {
     if (loading || liveBatchAnalysis.running) return;
 
     const now = Date.now();
+    const liveGraceMs = 30 * 60 * 1000;
     const keys = liveBatchSelectedKeys.filter((key) => {
       const game = visibleBetmanGames.find(
         (candidate) => visibleGameKey(candidate) === key
       );
       if (!game) return false;
       const startMs = gameTimeMs(game);
-      return Number.isFinite(startMs) && startMs > now;
+      return Number.isFinite(startMs) && startMs > now - liveGraceMs;
     });
 
     if (!keys.length) {
-      setStatus("일괄 분석할 경기 시작 전 경기를 먼저 체크하세요.");
+      setStatus("일괄 분석할 경기(시작 후 30분 이내 포함)를 먼저 체크하세요.");
       return;
     }
 
@@ -18016,7 +18020,7 @@ export default function Home() {
       <div className="top">
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
-          <div className="sub">Betman 미시작 발매경기 전체 종목 → 실제 경기 단위 그룹화 → SportsAPI 분석 → 종목별 실제 시장 최적 픽</div>
+          <div className="sub">Betman 발매경기 전체 종목(시작 후 30분까지 표시) → 실제 경기 단위 그룹화 → SportsAPI 분석 → 종목별 실제 시장 최적 픽</div>
         </div>
         <div className="bar">
           <button
@@ -22005,7 +22009,7 @@ export default function Home() {
             </details>
 
             {betman.error && <div className="notice">{betman.error}</div>}
-            <div className="notice">실전 화면은 Betman에서 현재 배당이 제공되는 모든 미시작 발매경기를 표시합니다. 야구 LIVE 경기정보는 와이즈토토를 우선 수집하며, 와이즈토토 누락 시에만 SportsAPI 데이터를 fallback으로 사용합니다.</div>
+            <div className="notice">실전 화면은 Betman에서 현재 배당이 제공되는 경기와 경기 시작 후 30분 이내 경기를 표시합니다. 야구 LIVE 경기정보는 와이즈토토를 우선 수집하며, 와이즈토토 누락 시에만 SportsAPI 데이터를 fallback으로 사용합니다.</div>
           </>}
         </section>
       </div>
