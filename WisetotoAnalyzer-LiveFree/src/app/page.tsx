@@ -20584,7 +20584,7 @@ export default function Home() {
 
                   {currentSport === "축구" && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V13.8.29 축구 LIVE DATA · Naver 실제 선발</h3>
+                      <h3>V13.8.30 축구 LIVE DATA · Naver 실제 선발</h3>
                       <div className="notice" style={{ margin: "8px 0" }}>
                         네이버 Sports의 경기별 players 응답에서 <b>substitute:false</b> 선수를 실제 선발로 수집합니다.
                         현재 단계에서는 선발 11+11을 READY 진단과 경기전 스냅샷에만 연결하며 V13.0 축구 λ/Poisson 계산식은 변경하지 않습니다.
@@ -20704,8 +20704,8 @@ export default function Home() {
                         </div>
                         <div className="card">
                           선발 최근 투구
-                          <b>{matched?.naverTodayLineup?.league === "MLB" && (matched?.naverTodayLineup?.homeStarter?.latestStart || matched?.naverTodayLineup?.awayStarter?.latestStart) ? "✓ MLB 직전등판" : Number(matched?.wisetotoLive?.coverage?.currentStarterRecentStarts ?? 0) > 0 ? "✓ 현재 선발 최근등판" : Number(matched?.wisetotoLive?.coverage?.recentDetailStarterRows ?? 0) > 0 ? "△ 팀 최근 선발만" : "미연결"}</b>
-                          <div className="small">{matched?.naverTodayLineup?.league === "MLB" ? `홈 ${matched?.naverTodayLineup?.homeStarter?.latestStart?.innings ?? "-"}IP · 원정 ${matched?.naverTodayLineup?.awayStarter?.latestStart?.innings ?? "-"}IP · Naver preview` : `현재 선발 일치 등판 홈 ${Number(matched?.wisetotoLive?.starterRecent?.home?.startsFound ?? 0)}회 / 원정 ${Number(matched?.wisetotoLive?.starterRecent?.away?.startsFound ?? 0)}회 · 팀 최근 5경기 범위 · 모델 반영 OFF`}</div>
+                          <b>{Number(matched?.naverTodayLineup?.pitcherWorkload?.coverage?.starterRecentStarts ?? 0) > 0 ? "✓ Naver 개인 최근등판" : matched?.naverTodayLineup?.league === "MLB" && (matched?.naverTodayLineup?.homeStarter?.latestStart || matched?.naverTodayLineup?.awayStarter?.latestStart) ? "✓ MLB 직전등판" : Number(matched?.wisetotoLive?.coverage?.currentStarterRecentStarts ?? 0) > 0 ? "✓ 와이즈 최근등판" : "미연결"}</b>
+                          <div className="small">Naver 홈 {Number(matched?.naverTodayLineup?.pitcherWorkload?.starterRecent?.home?.startsFound ?? 0)}회 / 원정 {Number(matched?.naverTodayLineup?.pitcherWorkload?.starterRecent?.away?.startsFound ?? 0)}회 · 최근 40일 schedule→record 검증 · 모델 반영 OFF</div>
                         </div>
                         <div className="card">
                           타자 최근 타격감
@@ -20714,8 +20714,8 @@ export default function Home() {
                         </div>
                         <div className="card">
                           불펜 소모도
-                          <b>{Number(matched?.wisetotoLive?.coverage?.recentDetailGamesTotal ?? 0) > 0 ? "✓ 최근경기 누적" : Number(matched?.wisetotoLive?.coverage?.latestPitcherRows ?? 0) > 2 ? "✓ 1경기 집계" : "미연결"}</b>
-                          <div className="small">최근3경기 홈 {Number(matched?.wisetotoLive?.recentDetailSummary?.home?.bullpen?.last3?.pitches ?? 0)}구 · 원정 {Number(matched?.wisetotoLive?.recentDetailSummary?.away?.bullpen?.last3?.pitches ?? 0)}구 · 2경기+ 연속등판 홈 {Number(matched?.wisetotoLive?.recentDetailSummary?.home?.bullpen?.backToBack?.length ?? 0)}명 / 원정 {Number(matched?.wisetotoLive?.recentDetailSummary?.away?.bullpen?.backToBack?.length ?? 0)}명</div>
+                          <b>{Number(matched?.naverTodayLineup?.pitcherWorkload?.coverage?.bullpenGames ?? 0) > 0 ? "✓ Naver 최근3경기" : "미연결"}</b>
+                          <div className="small">24h 홈 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h24?.innings ?? "0.0"}IP / 원정 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h24?.innings ?? "0.0"}IP · 48h 홈 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h48?.innings ?? "0.0"}IP / 원정 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h48?.innings ?? "0.0"}IP · 72h 홈 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h72?.innings ?? "0.0"}IP / 원정 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h72?.innings ?? "0.0"}IP · 2경기+ 사용 홈 {Number(matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.multiGamePitchers ?? 0)}명 / 원정 {Number(matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.multiGamePitchers ?? 0)}명 · 모델 반영 OFF</div>
                         </div>
                         <div className="card">
                           부상/결장
