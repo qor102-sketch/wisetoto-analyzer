@@ -1,3 +1,4 @@
+// DEPLOY_MARKER_V13_8_31_KBO_PREVIEW_LINEUP_20260903
 // DEPLOY_MARKER_V13_8_30_NAVER_STARTER_BULLPEN_WORKLOAD_V1_20260903
 
 const NAVER_API = "https://api-gw.sports.naver.com/schedule/games";
@@ -499,6 +500,57 @@ function normalizeKboPlayers(players: any) {
         }))
         .filter((p: AnyObj) => Boolean(p.name))
     : [];
+}
+
+function normalizeKboPreviewPlayers(fullLineUp: any) {
+  if (!Array.isArray(fullLineUp)) return [];
+  return fullLineUp
+    .filter((p: AnyObj) => Number(p?.batorder ?? 0) >= 1 && Number(p?.batorder ?? 0) <= 9)
+    .sort((a: AnyObj, b: AnyObj) => Number(a?.batorder ?? 99) - Number(b?.batorder ?? 99))
+    .slice(0, 9)
+    .map((p: AnyObj) => {
+      const id = String(p?.playerCode ?? p?.pCode ?? p?.pcode ?? "").trim() || null;
+      return {
+        battingOrder: Number(p?.batorder ?? 0) || null,
+        position: String(p?.positionName ?? p?.position ?? "").trim() || null,
+        pcode: id,
+        playerId: id,
+        name: String(p?.playerName ?? p?.name ?? "").trim() || null,
+        hitType: String(p?.hitType ?? "").trim() || null,
+        backnum: String(p?.backnum ?? "").trim() || null,
+        currentSeasonStats: { avg: null },
+        source: "NAVER_KBO_PREVIEW",
+      };
+    })
+    .filter((p: AnyObj) => Boolean(p.name));
+}
+
+function normalizeKboPreviewStarter(previewStarter: any, fullLineUp: any, fallbackName: any) {
+  const lineupStarter = Array.isArray(fullLineUp)
+    ? fullLineUp.find((p: AnyObj) => String(p?.positionName ?? "").includes("선발투수"))
+    : null;
+  const info = previewStarter?.playerInfo ?? {};
+  const season = previewStarter?.currentSeasonStats ?? {};
+  const name = String(info?.name ?? lineupStarter?.playerName ?? fallbackName ?? "").trim();
+  if (!name) return null;
+  const id = String(info?.pCode ?? lineupStarter?.playerCode ?? "").trim() || null;
+  return {
+    name,
+    playerId: id,
+    pcode: id,
+    era: Number.isFinite(Number(season?.era)) ? Number(season.era) : null,
+    whip: Number.isFinite(Number(season?.whip)) ? Number(season.whip) : null,
+    innings: String(season?.inn2 ?? season?.inn ?? "").trim() || null,
+    games: Number.isFinite(Number(season?.gameCount)) ? Number(season.gameCount) : null,
+    wins: Number.isFinite(Number(season?.w)) ? Number(season.w) : null,
+    losses: Number.isFinite(Number(season?.l)) ? Number(season.l) : null,
+    strikeouts: Number.isFinite(Number(season?.kk)) ? Number(season.kk) : null,
+    walks: Number.isFinite(Number(season?.bb)) ? Number(season.bb) : null,
+    opponentEra: Number.isFinite(Number(previewStarter?.currentSeasonStatsOnOpponents?.era))
+      ? Number(previewStarter.currentSeasonStatsOnOpponents.era) : null,
+    status: "CONFIRMED",
+    source: "NAVER_KBO_PREVIEW",
+  };
 }
 
 function mlbSeasonStatsMap(rows: any) {
@@ -1106,7 +1158,7 @@ export async function GET(request: Request) {
         npbRecordData = recordPayload?.result?.recordData ?? null;
       }
     }
-    if (league === "MLB") {
+    if (league === "MLB" || league === "KBO") {
       previewEndpoint = `${NAVER_API}/${gameId}/preview`;
       const previewResponse = await fetch(previewEndpoint, {
         cache: "no-store",
@@ -1157,10 +1209,18 @@ export async function GET(request: Request) {
         confirmed,
       );
     } else if (league === "KBO") {
-      homeLineup = normalizeKboPlayers(result?.textRelayData?.homeLineup?.batter);
-      awayLineup = normalizeKboPlayers(result?.textRelayData?.awayLineup?.batter);
-      homeStarter = normalizeKboStarter(result?.textRelayData?.homeLineup?.pitcher, game?.homeStarterName);
-      awayStarter = normalizeKboStarter(result?.textRelayData?.awayLineup?.pitcher, game?.awayStarterName);
+      // KBO pregame confirmed lineup is published in /preview before /record is populated.
+      // Prefer preview fullLineUp (starter + batting order 1~9); keep game-polling as fallback.
+      const previewHome = normalizeKboPreviewPlayers(previewData?.homeTeamLineUp?.fullLineUp);
+      const previewAway = normalizeKboPreviewPlayers(previewData?.awayTeamLineUp?.fullLineUp);
+      const pollingHome = normalizeKboPlayers(result?.textRelayData?.homeLineup?.batter);
+      const pollingAway = normalizeKboPlayers(result?.textRelayData?.awayLineup?.batter);
+      homeLineup = previewHome.length >= 7 ? previewHome : pollingHome;
+      awayLineup = previewAway.length >= 7 ? previewAway : pollingAway;
+      homeStarter = normalizeKboPreviewStarter(previewData?.homeStarter, previewData?.homeTeamLineUp?.fullLineUp, game?.homeStarterName)
+        ?? normalizeKboStarter(result?.textRelayData?.homeLineup?.pitcher, game?.homeStarterName);
+      awayStarter = normalizeKboPreviewStarter(previewData?.awayStarter, previewData?.awayTeamLineUp?.fullLineUp, game?.awayStarterName)
+        ?? normalizeKboStarter(result?.textRelayData?.awayLineup?.pitcher, game?.awayStarterName);
     } else {
       // NPB pregame confirmed lineup lives in /record even while game-polling.textRelayData is null.
       // Prefer /record; retain the old game-polling shape only as a compatibility fallback.
@@ -1252,6 +1312,15 @@ export async function GET(request: Request) {
         awayBatters: Array.isArray(npbRecordData?.awayBatter) ? npbRecordData.awayBatter.length : 0,
         starters: Number(Array.isArray(npbRecordData?.homePitcher) && npbRecordData.homePitcher.length > 0)
           + Number(Array.isArray(npbRecordData?.awayPitcher) && npbRecordData.awayPitcher.length > 0),
+      } : null,
+      kboPreview: league === "KBO" ? {
+        ok: Boolean(previewData),
+        status: previewStatus,
+        generatedDate: previewData?.generateDate ?? null,
+        homeLineup: normalizeKboPreviewPlayers(previewData?.homeTeamLineUp?.fullLineUp).length,
+        awayLineup: normalizeKboPreviewPlayers(previewData?.awayTeamLineUp?.fullLineUp).length,
+        homePreviousGames: Array.isArray(previewData?.homeTeamPreviousGames) ? previewData.homeTeamPreviousGames.length : 0,
+        awayPreviousGames: Array.isArray(previewData?.awayTeamPreviousGames) ? previewData.awayTeamPreviousGames.length : 0,
       } : null,
       mlbPreview: league === "MLB" ? {
         ok: Boolean(previewData),
