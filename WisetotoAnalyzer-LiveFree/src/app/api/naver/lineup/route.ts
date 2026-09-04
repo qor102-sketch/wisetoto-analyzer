@@ -832,15 +832,23 @@ function naverScheduleFinalScore(game: AnyObj) {
 }
 
 function summarizeNaverScheduleTeam(rows: AnyObj[], teamName: string) {
+  /*
+   * V13.8.44:
+   * - Form 집계는 기존과 동일하게 최신 완료 5경기만 사용.
+   * - 장소표본은 그 5경기에 원하는 venue가 없을 수 있으므로 fixture pool은
+   *   최근 40일 범위에서 최대 20경기까지 전달한다. page.tsx가 이 중 최근
+   *   home/away 최대 5개를 별도로 가중 집계한다.
+   */
   const fixtures: AnyObj[] = [];
   let wins = 0;
   let draws = 0;
   let losses = 0;
   let scored = 0;
   let conceded = 0;
+  let formPlayed = 0;
 
   for (const g of rows) {
-    if (fixtures.length >= 5) break;
+    if (fixtures.length >= 20) break;
     const score = naverScheduleFinalScore(g);
     if (!score) continue;
 
@@ -850,11 +858,16 @@ function summarizeNaverScheduleTeam(rows: AnyObj[], teamName: string) {
 
     const teamScored = isHome ? score.home : score.away;
     const teamConceded = isHome ? score.away : score.home;
-    scored += teamScored;
-    conceded += teamConceded;
-    if (teamScored > teamConceded) wins += 1;
-    else if (teamScored < teamConceded) losses += 1;
-    else draws += 1;
+
+    // Form은 최신 완료 5경기까지만 집계한다.
+    if (formPlayed < 5) {
+      scored += teamScored;
+      conceded += teamConceded;
+      if (teamScored > teamConceded) wins += 1;
+      else if (teamScored < teamConceded) losses += 1;
+      else draws += 1;
+      formPlayed += 1;
+    }
 
     const date = g?.gameDateTime ?? g?.gameDate ?? null;
     fixtures.push({
@@ -873,18 +886,17 @@ function summarizeNaverScheduleTeam(rows: AnyObj[], teamName: string) {
     });
   }
 
-  const played = fixtures.length;
   return {
     teamName,
     form: {
-      played,
+      played: formPlayed,
       wins,
       draws,
       losses,
       scored,
       conceded,
       goalDifference: scored - conceded,
-      formPercent: played > 0 ? Number(((wins / played) * 100).toFixed(1)) : null,
+      formPercent: formPlayed > 0 ? Number(((wins / formPlayed) * 100).toFixed(1)) : null,
     },
     fixtures,
     games: fixtures,
