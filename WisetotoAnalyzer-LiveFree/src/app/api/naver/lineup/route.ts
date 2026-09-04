@@ -706,7 +706,7 @@ function normalizeMlbStarter(starter: any, fallbackName: any, lineupPitchers: an
 }
 
 
-function naverScheduleScoreNumber(...values: any[]) {
+function naverScheduleScoreNumber(...values: any[]): number | null {
   for (const value of values) {
     if (value === null || value === undefined || value === "") continue;
     if (typeof value === "number" || typeof value === "string") {
