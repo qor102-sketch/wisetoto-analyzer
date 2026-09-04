@@ -705,6 +705,110 @@ function normalizeMlbStarter(starter: any, fallbackName: any, lineupPitchers: an
   };
 }
 
+
+function naverScheduleScoreNumber(...values: any[]) {
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
+    if (typeof value === "number" || typeof value === "string") {
+      const n = Number(value);
+      if (Number.isFinite(n) && n >= 0) return n;
+      continue;
+    }
+    if (typeof value === "object") {
+      const nested = naverScheduleScoreNumber(
+        value?.current,
+        value?.final,
+        value?.display,
+        value?.value,
+        value?.score,
+        value?.runs,
+        value?.total,
+      );
+      if (nested !== null) return nested;
+    }
+  }
+  return null;
+}
+
+function naverScheduleFinalScore(game: AnyObj) {
+  const home = naverScheduleScoreNumber(
+    game?.homeTeamScore,
+    game?.homeScore,
+    game?.hScore,
+    game?.score?.home,
+    game?.scores?.home,
+    game?.result?.home,
+    game?.home?.score,
+  );
+  const away = naverScheduleScoreNumber(
+    game?.awayTeamScore,
+    game?.awayScore,
+    game?.aScore,
+    game?.score?.away,
+    game?.scores?.away,
+    game?.result?.away,
+    game?.away?.score,
+  );
+  return home !== null && away !== null ? { home, away } : null;
+}
+
+function summarizeNaverScheduleTeam(rows: AnyObj[], teamName: string) {
+  const fixtures: AnyObj[] = [];
+  let wins = 0;
+  let draws = 0;
+  let losses = 0;
+  let scored = 0;
+  let conceded = 0;
+
+  for (const g of rows) {
+    if (fixtures.length >= 5) break;
+    const score = naverScheduleFinalScore(g);
+    if (!score) continue;
+
+    const isHome = teamMatches(String(g?.homeTeamName ?? g?.home ?? ""), teamName);
+    const isAway = teamMatches(String(g?.awayTeamName ?? g?.away ?? ""), teamName);
+    if (!isHome && !isAway) continue;
+
+    const teamScored = isHome ? score.home : score.away;
+    const teamConceded = isHome ? score.away : score.home;
+    scored += teamScored;
+    conceded += teamConceded;
+    if (teamScored > teamConceded) wins += 1;
+    else if (teamScored < teamConceded) losses += 1;
+    else draws += 1;
+
+    const date = g?.gameDateTime ?? g?.gameDate ?? null;
+    fixtures.push({
+      gameId: g?.gameId ?? null,
+      date,
+      startTime: date,
+      home: g?.homeTeamName ?? g?.home ?? null,
+      away: g?.awayTeamName ?? g?.away ?? null,
+      homeScore: score.home,
+      awayScore: score.away,
+      score: { home: score.home, away: score.away },
+      source: "NAVER_SCHEDULE",
+    });
+  }
+
+  const played = fixtures.length;
+  return {
+    teamName,
+    form: {
+      played,
+      wins,
+      draws,
+      losses,
+      scored,
+      conceded,
+      goalDifference: scored - conceded,
+      formPercent: played > 0 ? Number(((wins / played) * 100).toFixed(1)) : null,
+    },
+    fixtures,
+    games: fixtures,
+  };
+}
+
 function summarizeMlbPreviousGames(rows: any, teamName: string) {
   const games = Array.isArray(rows) ? rows.slice(0, 5) : [];
   const wins = games.filter((g: AnyObj) => String(g?.result ?? "").trim() === "승").length;
@@ -949,6 +1053,11 @@ async function collectNaverPitcherWorkload(args: {
     return games.filter((g: AnyObj) => teamMatches(String(g?.homeTeamName ?? ""), team) || teamMatches(String(g?.awayTeamName ?? ""), team));
   }
 
+  const recentSummary = {
+    home: summarizeNaverScheduleTeam(teamGames(args.home), args.home),
+    away: summarizeNaverScheduleTeam(teamGames(args.away), args.away),
+  };
+
   async function starterRecent(team: string, starter: AnyObj | null) {
     const starterName = String(starter?.name ?? "").trim();
     const starterId = String(starter?.playerId ?? starter?.pcode ?? "").trim();
@@ -1119,6 +1228,7 @@ async function collectNaverPitcherWorkload(args: {
     starterRecent: { home: homeStarterRecent, away: awayStarterRecent },
     bullpen: { home: homeBullpen, away: awayBullpen },
     recentBatting: { home: homeRecentBatting, away: awayRecentBatting },
+    recentSummary,
     coverage: {
       scheduleGames: games.length,
       starterRecentStarts: Number(homeStarterRecent.startsFound) + Number(awayStarterRecent.startsFound),
@@ -1418,7 +1528,7 @@ export async function GET(request: Request) {
       recentSummary: league === "MLB" && previewData ? {
         home: summarizeMlbPreviousGames(previewData?.homeTeamPreviousGames, String(previewData?.gameInfo?.hName ?? game?.homeTeamName ?? home)),
         away: summarizeMlbPreviousGames(previewData?.awayTeamPreviousGames, String(previewData?.gameInfo?.aName ?? game?.awayTeamName ?? away)),
-      } : null,
+      } : naverPitcherWorkload?.recentSummary ?? null,
       npbRecord: league === "NPB" ? {
         ok: Boolean(npbRecordData),
         status: npbRecordStatus,
