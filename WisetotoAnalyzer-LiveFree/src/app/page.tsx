@@ -12644,7 +12644,11 @@ export default function Home() {
       setMatched(null);
 
       if (games.length) {
-        setSelectedBetmanKey(gameKey(games[0], 0));
+        // V13.8.39: 최근 검증 목록은 아래 visibleBetmanGames에서 mergeActualGames()를 거친다.
+        // 원본 Betman game.key를 저장하면 merge 후 key(actualGameIdentity)와 달라져
+        // selectedBetman을 찾지 못하고 "선택 경기 분석" 버튼이 disabled 되는 경우가 있다.
+        // 최초 선택부터 mergeActualGames와 동일한 안정 식별자를 사용한다.
+        setSelectedBetmanKey(actualGameIdentity(games[0]));
         setBetman({ loading: false, matched: games[0], score: 1, error: null });
         setStatus(
           `🔎 최근 경기 검증 · 최근 6시간 ${games.length}경기 · PRE 저장 없이 LIVE DATA 재검증`
@@ -17238,11 +17242,41 @@ export default function Home() {
 
   function toggleLiveBatchSelection(key: string) {
     if (liveBatchAnalysis.running) return;
+
+    const isCurrentlySelected = liveBatchSelectedKeys.includes(key);
+
     setLiveBatchSelectedKeys((previous) =>
       previous.includes(key)
         ? previous.filter((value) => value !== key)
         : [...previous, key]
     );
+
+    // V13.8.40: 경기번호 옆 체크박스 선택만으로도 해당 경기를
+    // 단일 "선택 경기 분석" 대상으로 지정한다. 보기 버튼은 상세보기 전용이다.
+    if (!isCurrentlySelected) {
+      setSelectedBetmanKey(key);
+      setMatched(null);
+
+      const game = visibleBetmanGames.find(
+        (candidate, index) => gameKey(candidate, index) === key
+      ) ?? null;
+
+      if (game) {
+        setBetman({ loading:false, matched:game, score:1, error:null });
+        setStatus(
+          recentVerifyMode
+            ? `🔎 ${game?.home ?? "-"} vs ${game?.away ?? "-"} 선택 · 선택 경기 분석을 누르세요 · PRE 저장 안 함`
+            : `${game?.home ?? "-"} vs ${game?.away ?? "-"} 선택 · 선택 경기 분석을 누르세요`
+        );
+      }
+    } else if (selectedBetmanKey === key) {
+      // 같은 경기를 체크 해제해도 상세보기 선택은 유지해 버튼이 갑자기 비활성화되지 않게 한다.
+      setStatus(
+        recentVerifyMode
+          ? "체크 해제 · 현재 상세 경기는 선택 경기 분석 대상으로 유지됩니다."
+          : "체크 해제 · 현재 상세 경기는 선택 경기 분석 대상으로 유지됩니다."
+      );
+    }
   }
 
   function selectAllVisibleUpcomingGames() {
