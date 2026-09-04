@@ -3307,11 +3307,16 @@ function buildWeightedRecentProfile(
     const score = fixtureFinalScore(fixture);
     if (!score) return;
 
-    const venue =
-      fixtureTeamSideForBacktest(
-        fixture,
-        team
-      );
+    const explicitVenue = String(
+      fixture?.teamSide ?? fixture?.venue ?? ""
+    ).toLowerCase();
+    const venue: "home" | "away" | null =
+      explicitVenue === "home" || explicitVenue === "away"
+        ? explicitVenue
+        : fixtureTeamSideForBacktest(
+            fixture,
+            team
+          );
 
     if (!venue) {
       return;
