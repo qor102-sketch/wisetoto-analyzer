@@ -137,6 +137,8 @@ type AnalysisFactors = {
   awayVenueShadowOutliers: number;
   venueShadowRawHomeScore: number | null;
   venueShadowRawAwayScore: number | null;
+  venueShadowFinalHomeScore: number | null;
+  venueShadowFinalAwayScore: number | null;
   marketHomeFair: number | null;
   marketAwayFair: number | null;
   scoreGuardApplied: boolean;
@@ -630,9 +632,34 @@ type LiveTrackerPick = {
   resultNote: string | null;
 };
 
+type VenueShadowValidationSnapshot = {
+  stage: "READY";
+  rawHome: number;
+  rawAway: number;
+  shadowHome: number;
+  shadowAway: number;
+  homeVenueSample: number;
+  awayVenueSample: number;
+  homeShadowWeight: number;
+  awayShadowWeight: number;
+  homeStability: number;
+  awayStability: number;
+};
+
+type VenueShadowValidationResult = {
+  rawHomeAbsError: number;
+  rawAwayAbsError: number;
+  rawTotalAbsError: number;
+  rawMarginAbsError: number;
+  shadowHomeAbsError: number;
+  shadowAwayAbsError: number;
+  shadowTotalAbsError: number;
+  shadowMarginAbsError: number;
+};
+
 type LiveTrackerRecord = {
   id: string;
-  fixtureId: number;
+  fixtureId: number | null;
   fixtureKey: string;
   betmanIdentity?: string;
   home: string;
@@ -648,6 +675,8 @@ type LiveTrackerRecord = {
   verificationStatus: "PENDING" | "VERIFIED";
   verifiedAt: number | null;
   result: BacktestValidationResult | null;
+  venueShadow?: VenueShadowValidationSnapshot | null;
+  venueShadowResult?: VenueShadowValidationResult | null;
 };
 
 
@@ -1506,7 +1535,7 @@ function readLiveTrackerRecords(): LiveTrackerRecord[] {
     return rows
       .filter((row: any) =>
         row &&
-        Number.isFinite(Number(row.fixtureId)) &&
+        (row.fixtureId === null || row.fixtureId === undefined || Number.isFinite(Number(row.fixtureId))) &&
         Number.isFinite(Number(row.startMs))
       )
       .slice(0, 300);
@@ -5757,6 +5786,9 @@ function buildAnalysis(
     | number
     | null = null;
 
+  let venueShadowFinalHomeScore: number | null = null;
+  let venueShadowFinalAwayScore: number | null = null;
+
   if (scoringUsed) {
     const rawHome =
       (
@@ -5939,6 +5971,32 @@ function buildAnalysis(
 
       postLineupHomeScore = expectedHomeScore;
       postLineupAwayScore = expectedAwayScore;
+
+      /*
+       * V13.8.47 VENUE SHADOW VALIDATOR
+       * READY 검증용 SHADOW λ를 현재 모델과 동일한 neutral shrink → 선발 → 타선
+       * 순서로 재생한다. 저장/검증만 하며 실제 추천 λ에는 절대 대입하지 않는다.
+       */
+      if (
+        baseballAvailability.stage === "READY" &&
+        venueShadowRawHomeScore !== null &&
+        venueShadowRawAwayScore !== null
+      ) {
+        let shadowHome = shrinkExpectedScore(
+          venueShadowRawHomeScore, prior, sampleStrength, sport
+        ) + 0.10;
+        let shadowAway = shrinkExpectedScore(
+          venueShadowRawAwayScore, prior, sampleStrength, sport
+        );
+
+        shadowHome = applyPitcherAdjustment(shadowHome, awayStarter, 1).runs;
+        shadowAway = applyPitcherAdjustment(shadowAway, homeStarter, 1).runs;
+        shadowHome = applyLineupAdjustment(shadowHome, homeLineupOffense, 1).runs;
+        shadowAway = applyLineupAdjustment(shadowAway, awayLineupOffense, 1).runs;
+
+        venueShadowFinalHomeScore = Math.max(0.1, shadowHome);
+        venueShadowFinalAwayScore = Math.max(0.1, shadowAway);
+      }
 
       // V13.0: 모든 야구 단계에서 시장 prior 직전 λ를 보존.
       preMarketHomeScore = expectedHomeScore;
@@ -6761,6 +6819,10 @@ function buildAnalysis(
         venueShadowRawHomeScore === null ? null : Number(venueShadowRawHomeScore.toFixed(3)),
       venueShadowRawAwayScore:
         venueShadowRawAwayScore === null ? null : Number(venueShadowRawAwayScore.toFixed(3)),
+      venueShadowFinalHomeScore:
+        venueShadowFinalHomeScore === null ? null : Number(venueShadowFinalHomeScore.toFixed(3)),
+      venueShadowFinalAwayScore:
+        venueShadowFinalAwayScore === null ? null : Number(venueShadowFinalAwayScore.toFixed(3)),
 
       marketHomeFair:
         moneylineFair.home === null ? null : Number(moneylineFair.home.toFixed(1)),
@@ -14064,6 +14126,41 @@ export default function Home() {
     };
   }, [liveTrackerRecords]);
 
+  const venueShadowValidationSummary = useMemo(() => {
+    const rows = liveTrackerRecords.filter(
+      (record) => record.venueShadow?.stage === "READY" && record.venueShadowResult
+    );
+    const avg = (key: keyof VenueShadowValidationResult) =>
+      rows.length
+        ? rows.reduce((sum, record) => sum + Number(record.venueShadowResult?.[key] ?? 0), 0) / rows.length
+        : null;
+    const rawScoreMae = rows.length
+      ? rows.reduce((sum, record) => sum + (
+          Number(record.venueShadowResult?.rawHomeAbsError ?? 0) +
+          Number(record.venueShadowResult?.rawAwayAbsError ?? 0)
+        ) / 2, 0) / rows.length
+      : null;
+    const shadowScoreMae = rows.length
+      ? rows.reduce((sum, record) => sum + (
+          Number(record.venueShadowResult?.shadowHomeAbsError ?? 0) +
+          Number(record.venueShadowResult?.shadowAwayAbsError ?? 0)
+        ) / 2, 0) / rows.length
+      : null;
+    const improvement = rawScoreMae !== null && shadowScoreMae !== null && rawScoreMae > 0
+      ? ((rawScoreMae - shadowScoreMae) / rawScoreMae) * 100
+      : null;
+    return {
+      games: rows.length,
+      rawScoreMae,
+      shadowScoreMae,
+      rawTotalMae: avg("rawTotalAbsError"),
+      shadowTotalMae: avg("shadowTotalAbsError"),
+      rawMarginMae: avg("rawMarginAbsError"),
+      shadowMarginMae: avg("shadowMarginAbsError"),
+      improvement,
+    };
+  }, [liveTrackerRecords]);
+
   /*
    * V13.8.1 LIVE TRACKER
    * 실전 분석이 완전히 끝난 경기의 시작 전 PRE 판단만 최초 1회 잠근다.
@@ -14087,14 +14184,17 @@ export default function Home() {
     const startMs = gameTimeMs(selectedBetman);
 
     if (
-      !Number.isFinite(fixtureId) ||
       !Number.isFinite(startMs) ||
       startMs <= Date.now()
     ) {
       return;
     }
 
-    const recordId = `live:${fixtureId}:${startMs}`;
+    const trackerFixtureId = Number.isFinite(fixtureId) && fixtureId > 0 ? fixtureId : null;
+    const trackerBetmanIdentity = actualGameIdentity(selectedBetman);
+    const recordId = trackerFixtureId !== null
+      ? `live:${trackerFixtureId}:${startMs}`
+      : `live:betman:${trackerBetmanIdentity}:${startMs}`;
 
     setLiveTrackerRecords((previous) => {
       if (previous.some((record) => record.id === recordId)) {
@@ -14194,7 +14294,7 @@ export default function Home() {
 
       const nextRecord: LiveTrackerRecord = {
         id: recordId,
-        fixtureId,
+        fixtureId: trackerFixtureId,
         fixtureKey: String(
           (selectedBetman as any)?.gameKey ??
           (selectedBetman as any)?.key ??
@@ -14224,6 +14324,28 @@ export default function Home() {
         decision: trackerPicks.length ? "PICK" : "PASS",
         picks: trackerPicks,
         marketResults: trackerMarketResults,
+        venueShadow:
+          currentSport === "야구" &&
+          analysisFactors.baseballAnalysisStage === "READY" &&
+          analysisFactors.expectedHomeScore !== null &&
+          analysisFactors.expectedAwayScore !== null &&
+          analysisFactors.venueShadowFinalHomeScore !== null &&
+          analysisFactors.venueShadowFinalAwayScore !== null
+            ? {
+                stage: "READY",
+                rawHome: analysisFactors.expectedHomeScore,
+                rawAway: analysisFactors.expectedAwayScore,
+                shadowHome: analysisFactors.venueShadowFinalHomeScore,
+                shadowAway: analysisFactors.venueShadowFinalAwayScore,
+                homeVenueSample: analysisFactors.homeVenueSample,
+                awayVenueSample: analysisFactors.awayVenueSample,
+                homeShadowWeight: analysisFactors.homeVenueShadowWeight,
+                awayShadowWeight: analysisFactors.awayVenueShadowWeight,
+                homeStability: analysisFactors.homeVenueShadowStability,
+                awayStability: analysisFactors.awayVenueShadowStability,
+              }
+            : null,
+        venueShadowResult: null,
         verificationStatus: "PENDING",
         verifiedAt: null,
         result: null,
@@ -14267,40 +14389,74 @@ export default function Home() {
     let unavailable = 0;
 
     try {
+      /* V13.8.47: SportsAPI fixtureId가 없는 Naver 독립 PRE도 Betman 종료점수로 검증한다. */
+      let betmanFinishedGames: BetmanMatch[] = [];
+      try {
+        const betmanResponse = await fetch("/api/betman?scope=all", { cache: "no-store" });
+        const betmanPayload = await readApiResponse(betmanResponse, "Betman 종료 결과 검증 API");
+        if (betmanResponse.ok && betmanPayload?.ok) {
+          betmanFinishedGames = getBetmanGames(betmanPayload);
+        }
+      } catch {}
+
       for (const record of due) {
         try {
-          const response = await fetch(
-            `/api/fixture/result?id=${encodeURIComponent(String(record.fixtureId))}`,
-            { cache: "no-store" }
-          );
-          const payload = await readApiResponse(
-            response,
-            `실전 추적 Fixture #${record.fixtureId}`
-          );
+          let truth: BacktestValidationResult | null = null;
 
-          if (!response.ok || !payload?.ok || !payload?.result) {
-            unavailable += 1;
-            if (response.status === 429) break;
-            continue;
+          const betmanMatch = betmanFinishedGames.find((game) =>
+            actualGameIdentity(game) === record.betmanIdentity ||
+            actualGameIdentity(game) === record.fixtureKey
+          );
+          const betmanScore = betmanMatch ? fixtureFinalScore(betmanMatch) : null;
+
+          if (betmanScore) {
+            truth = {
+              homeScore: betmanScore.home,
+              awayScore: betmanScore.away,
+              firstHalfHomeScore: null,
+              firstHalfAwayScore: null,
+              sourceLabel: "Betman 종료점수 · 실전 PRE 잠금 후 검증",
+            };
           }
 
-          const truth: BacktestValidationResult = {
-            homeScore: Number(payload.result.homeScore),
-            awayScore: Number(payload.result.awayScore),
-            firstHalfHomeScore: Number.isFinite(Number(payload.result.firstHalfHomeScore))
-              ? Number(payload.result.firstHalfHomeScore)
-              : null,
-            firstHalfAwayScore: Number.isFinite(Number(payload.result.firstHalfAwayScore))
-              ? Number(payload.result.firstHalfAwayScore)
-              : null,
-            sourceLabel: `SportsAPI Fixture #${record.fixtureId} · 실전 PRE 잠금 후 검증`,
-          };
+          if (!truth && record.fixtureId !== null && Number.isFinite(Number(record.fixtureId))) {
+            const response = await fetch(
+              `/api/fixture/result?id=${encodeURIComponent(String(record.fixtureId))}`,
+              { cache: "no-store" }
+            );
+            const payload = await readApiResponse(
+              response,
+              `실전 추적 Fixture #${record.fixtureId}`
+            );
+
+            if (response.ok && payload?.ok && payload?.result) {
+              truth = {
+                homeScore: Number(payload.result.homeScore),
+                awayScore: Number(payload.result.awayScore),
+                firstHalfHomeScore: Number.isFinite(Number(payload.result.firstHalfHomeScore))
+                  ? Number(payload.result.firstHalfHomeScore)
+                  : null,
+                firstHalfAwayScore: Number.isFinite(Number(payload.result.firstHalfAwayScore))
+                  ? Number(payload.result.firstHalfAwayScore)
+                  : null,
+                sourceLabel: `SportsAPI Fixture #${record.fixtureId} · 실전 PRE 잠금 후 검증`,
+              };
+            } else if (response.status === 429) {
+              unavailable += 1;
+              break;
+            }
+          }
+
+          if (!truth || !Number.isFinite(truth.homeScore) || !Number.isFinite(truth.awayScore)) {
+            unavailable += 1;
+            continue;
+          }
 
           const settledPicks = (record.picks ?? []).map((pick) => {
             const validation = validateBacktestMarket(
               pick.marketSnapshot,
               pick.modelSnapshot as MarketPick,
-              truth
+              truth!
             );
             return {
               ...pick,
@@ -14310,6 +14466,20 @@ export default function Home() {
             };
           });
 
+          const shadow = record.venueShadow;
+          const shadowResult: VenueShadowValidationResult | null = shadow
+            ? {
+                rawHomeAbsError: Math.abs(shadow.rawHome - truth.homeScore),
+                rawAwayAbsError: Math.abs(shadow.rawAway - truth.awayScore),
+                rawTotalAbsError: Math.abs((shadow.rawHome + shadow.rawAway) - (truth.homeScore + truth.awayScore)),
+                rawMarginAbsError: Math.abs((shadow.rawHome - shadow.rawAway) - (truth.homeScore - truth.awayScore)),
+                shadowHomeAbsError: Math.abs(shadow.shadowHome - truth.homeScore),
+                shadowAwayAbsError: Math.abs(shadow.shadowAway - truth.awayScore),
+                shadowTotalAbsError: Math.abs((shadow.shadowHome + shadow.shadowAway) - (truth.homeScore + truth.awayScore)),
+                shadowMarginAbsError: Math.abs((shadow.shadowHome - shadow.shadowAway) - (truth.homeScore - truth.awayScore)),
+              }
+            : null;
+
           next = next.map((candidate) =>
             candidate.id === record.id
               ? {
@@ -14318,6 +14488,7 @@ export default function Home() {
                   verificationStatus: "VERIFIED",
                   verifiedAt: Date.now(),
                   result: truth,
+                  venueShadowResult: shadowResult,
                 }
               : candidate
           );
@@ -19940,6 +20111,18 @@ export default function Home() {
             {" · "}Gate V2 고정
           </span>
         </div>
+
+        <div style={{ padding: "9px 12px", borderTop: "1px solid #e2e8f0" }}>
+          <div className="small" style={{ fontWeight: 900, marginBottom: 6 }}>
+            V13.8.47 VENUE SHADOW VALIDATOR · MODEL OFF · READY 검증 {venueShadowValidationSummary.games}/30경기
+          </div>
+          <div className="cards">
+            <div className="card">득점 MAE<b>{venueShadowValidationSummary.rawScoreMae?.toFixed(2) ?? "-"} → {venueShadowValidationSummary.shadowScoreMae?.toFixed(2) ?? "-"}</b><div className="small">RAW → SHADOW</div></div>
+            <div className="card">총점 MAE<b>{venueShadowValidationSummary.rawTotalMae?.toFixed(2) ?? "-"} → {venueShadowValidationSummary.shadowTotalMae?.toFixed(2) ?? "-"}</b><div className="small">RAW → SHADOW</div></div>
+            <div className="card">점수차 MAE<b>{venueShadowValidationSummary.rawMarginMae?.toFixed(2) ?? "-"} → {venueShadowValidationSummary.shadowMarginMae?.toFixed(2) ?? "-"}</b><div className="small">RAW → SHADOW</div></div>
+            <div className="card">득점 MAE 개선<b>{venueShadowValidationSummary.improvement === null ? "-" : `${venueShadowValidationSummary.improvement >= 0 ? "+" : ""}${venueShadowValidationSummary.improvement.toFixed(1)}%`}</b><div className="small">20~30 READY 전 MODEL ON 금지</div></div>
+          </div>
+        </div>
       </details>
 
       <div className="tabs">
@@ -22508,6 +22691,11 @@ export default function Home() {
                             SHADOW 수축 전 예상
                             <b>{analysisFactors.venueShadowRawHomeScore?.toFixed(2) ?? "-"} : {analysisFactors.venueShadowRawAwayScore?.toFixed(2) ?? "-"}</b>
                             <div className="small">현재 수축 전 {analysisFactors.rawExpectedHomeScore?.toFixed(2) ?? "-"} : {analysisFactors.rawExpectedAwayScore?.toFixed(2) ?? "-"} · MODEL OFF</div>
+                          </div>
+                          <div className="card">
+                            SHADOW READY 검증 λ
+                            <b>{analysisFactors.venueShadowFinalHomeScore?.toFixed(2) ?? "-"} : {analysisFactors.venueShadowFinalAwayScore?.toFixed(2) ?? "-"}</b>
+                            <div className="small">동일 neutral 수축·선발·타선 적용 · 저장/검증 전용 · MODEL OFF</div>
                           </div>
                         </div>
                       </div>
