@@ -19909,6 +19909,12 @@ export default function Home() {
                     const marketResult =
                       trackerMarketResult ?? batchMarketResult;
 
+                    const marketResultGrade = marketResult
+                      ? "grade" in marketResult
+                        ? marketResult.grade
+                        : marketResult.valueGrade
+                      : "";
+
                     const recommended = trackerRecord
                       ? Boolean(
                           trackerRecord?.picks?.some(
@@ -20086,7 +20092,7 @@ export default function Home() {
                                   marketResult.expectedValue === null
                                     ? "-"
                                     : `${marketResult.expectedValue >= 0 ? "+" : ""}${marketResult.expectedValue.toFixed(1)}%`
-                                } · ${marketResult.grade}`}
+                                } · ${marketResultGrade}`}
                               >
                                 {compactBetmanPickLabel(
                                   marketResult.market,
