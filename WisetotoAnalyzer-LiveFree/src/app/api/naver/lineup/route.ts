@@ -526,12 +526,88 @@ function normalizeKboPreviewPlayers(fullLineUp: any) {
     .filter((p: AnyObj) => Boolean(p.name));
 }
 
+function parseKboSeasonInnings(value: any): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const raw = String(value).trim().replace(/,/g, "");
+  if (!raw) return null;
+
+  const fractionMatch = raw.match(/^(-?\d+)(?:\s+)?([⅓⅔])$/);
+  if (fractionMatch) {
+    const whole = Number(fractionMatch[1]);
+    if (!Number.isFinite(whole)) return null;
+    return whole + (fractionMatch[2] === "⅓" ? 1 / 3 : 2 / 3);
+  }
+
+  const slashMatch = raw.match(/^(-?\d+)(?:\s+)?([12])\/3$/);
+  if (slashMatch) {
+    const whole = Number(slashMatch[1]);
+    const frac = Number(slashMatch[2]);
+    if (!Number.isFinite(whole) || !Number.isFinite(frac)) return null;
+    return whole + frac / 3;
+  }
+
+  const numeric = Number(raw);
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
+}
+
+function validatedKboStarterSeasonSample(season: any) {
+  const gamesRaw = Number(season?.gameCount ?? season?.games ?? season?.g);
+  const startsRaw = Number(season?.gamesStarted ?? season?.gameStarted ?? season?.starts ?? season?.gs);
+  const games = Number.isFinite(gamesRaw) && gamesRaw >= 0 && gamesRaw <= 100 ? gamesRaw : null;
+  const starts = Number.isFinite(startsRaw) && startsRaw >= 0 && startsRaw <= 40 ? startsRaw : null;
+
+  // inn/innings/ip 계열을 우선하고 inn2는 마지막 후보로만 사용한다.
+  const candidates = [
+    season?.inningsPitched,
+    season?.inningPitched,
+    season?.innings,
+    season?.ip,
+    season?.inn,
+    season?.inn2,
+  ]
+    .map(parseKboSeasonInnings)
+    .filter((v): v is number => v !== null);
+
+  let innings = candidates.find((v) => {
+    if (v > 350) return false;
+    if (games !== null && games >= 3 && v < games * 0.5) return false;
+    return true;
+  }) ?? null;
+
+  // 표본 필드끼리 명백히 모순되면 잘못된 시즌 표본을 모델에 넣지 않는다.
+  const inconsistentStarts =
+    (Number.isFinite(startsRaw) && (startsRaw < 0 || startsRaw > 40)) ||
+    (starts !== null && games !== null && starts > games);
+  const inconsistentInnings =
+    (candidates.length > 0 && innings === null && games !== null && games >= 3) ||
+    (innings !== null && games !== null && games >= 3 && innings < games * 0.5);
+  const sampleValid = !inconsistentStarts && !inconsistentInnings;
+
+  if (!sampleValid) innings = null;
+
+  return {
+    innings,
+    games: sampleValid ? games : null,
+    gamesStarted: sampleValid ? starts : null,
+    sampleValid,
+    raw: {
+      inn: season?.inn ?? null,
+      inn2: season?.inn2 ?? null,
+      innings: season?.innings ?? null,
+      ip: season?.ip ?? null,
+      gameCount: season?.gameCount ?? null,
+      gs: season?.gs ?? null,
+    },
+  };
+}
+
 function normalizeKboPreviewStarter(previewStarter: any, fullLineUp: any, fallbackName: any) {
   const lineupStarter = Array.isArray(fullLineUp)
     ? fullLineUp.find((p: AnyObj) => String(p?.positionName ?? "").includes("선발투수"))
     : null;
   const info = previewStarter?.playerInfo ?? {};
   const season = previewStarter?.currentSeasonStats ?? {};
+  const seasonSample = validatedKboStarterSeasonSample(season);
   const name = String(info?.name ?? lineupStarter?.playerName ?? fallbackName ?? "").trim();
   if (!name) return null;
   const id = String(info?.pCode ?? lineupStarter?.playerCode ?? "").trim() || null;
@@ -541,8 +617,11 @@ function normalizeKboPreviewStarter(previewStarter: any, fullLineUp: any, fallba
     pcode: id,
     era: Number.isFinite(Number(season?.era)) ? Number(season.era) : null,
     whip: Number.isFinite(Number(season?.whip)) ? Number(season.whip) : null,
-    innings: String(season?.inn2 ?? season?.inn ?? "").trim() || null,
-    games: Number.isFinite(Number(season?.gameCount)) ? Number(season.gameCount) : null,
+    innings: seasonSample.innings,
+    games: seasonSample.games,
+    gamesStarted: seasonSample.gamesStarted,
+    seasonSampleValid: seasonSample.sampleValid,
+    seasonSampleRaw: seasonSample.raw,
     wins: Number.isFinite(Number(season?.w)) ? Number(season.w) : null,
     losses: Number.isFinite(Number(season?.l)) ? Number(season.l) : null,
     strikeouts: Number.isFinite(Number(season?.kk)) ? Number(season.kk) : null,
@@ -787,6 +866,9 @@ function summarizeNaverScheduleTeam(rows: AnyObj[], teamName: string) {
       homeScore: score.home,
       awayScore: score.away,
       score: { home: score.home, away: score.away },
+      teamSide: isHome ? "home" : "away",
+      venue: isHome ? "home" : "away",
+      teamName,
       source: "NAVER_SCHEDULE",
     });
   }
