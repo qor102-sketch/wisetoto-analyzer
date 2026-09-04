@@ -163,6 +163,8 @@ type AnalysisFactors = {
   awayStarterGames: number | null;
   homeStarterGamesStarted: number | null;
   awayStarterGamesStarted: number | null;
+  homeStarterSeasonSampleRaw: Record<string, any> | null;
+  awayStarterSeasonSampleRaw: Record<string, any> | null;
   homeStarterSampleReliability: number;
   awayStarterSampleReliability: number;
   homeStarterPosteriorEra: number | null;
@@ -3403,6 +3405,68 @@ function buildWeightedRecentProfile(
   };
 }
 
+type VenueAuditRow = {
+  date: string;
+  opponent: string;
+  venue: "home" | "away";
+  scoreText: string;
+  scored: number;
+  conceded: number;
+};
+
+function venueAuditRows(
+  team: RecentTeam | null | undefined,
+  wantedVenue: "home" | "away",
+  maxGames = 5
+): VenueAuditRow[] {
+  const fixtures = Array.isArray(team?.fixtures) ? team!.fixtures! : [];
+  const rows: Array<VenueAuditRow & { time: number }> = [];
+
+  fixtures.forEach((fixture: any, index: number) => {
+    const score = fixtureFinalScore(fixture);
+    if (!score) return;
+
+    const explicitVenue = String(fixture?.teamSide ?? fixture?.venue ?? "").toLowerCase();
+    const venue: "home" | "away" | null =
+      explicitVenue === "home" || explicitVenue === "away"
+        ? explicitVenue
+        : fixtureTeamSideForBacktest(fixture, team);
+    if (venue !== wantedVenue) return;
+
+    const homeName = String(
+      fixture?.home ?? fixture?.homeTeamName ?? fixture?.teams?.home?.name ?? ""
+    ).trim();
+    const awayName = String(
+      fixture?.away ?? fixture?.awayTeamName ?? fixture?.teams?.away?.name ?? ""
+    ).trim();
+    const opponent = venue === "home" ? awayName : homeName;
+    const scored = venue === "home" ? score.home : score.away;
+    const conceded = venue === "home" ? score.away : score.home;
+    const rawDate = fixture?.date ?? fixture?.startTime ?? fixture?.gameDate ?? fixture?.gameDateTime ?? null;
+    const time = Number.isFinite(fixtureTimeMs(fixture))
+      ? fixtureTimeMs(fixture)
+      : Date.now() - index * 86_400_000;
+    const date = rawDate
+      ? String(rawDate).replace("T", " ").slice(0, 16)
+      : "-";
+
+    rows.push({
+      date,
+      opponent: opponent || "-",
+      venue,
+      scoreText: `${score.home}:${score.away}`,
+      scored,
+      conceded,
+      time,
+    });
+  });
+
+  return rows
+    .sort((a, b) => b.time - a.time)
+    .slice(0, maxGames)
+    .map(({ time: _time, ...row }) => row);
+}
+
 function neutralScorePrior(
   sport: Exclude<Sport, "전체">
 ) {
@@ -3701,6 +3765,8 @@ type StarterInfo = {
   inningsPitched: number | null;
   games: number | null;
   gamesStarted: number | null;
+  seasonSampleValid?: boolean | null;
+  seasonSampleRaw?: Record<string, any> | null;
 };
 
 function normalizeStatKey(value: unknown) {
@@ -3903,6 +3969,11 @@ function starterInfoFromObject(value: any): StarterInfo {
     inningsPitched: inningsPitched !== null ? clamp(inningsPitched, 0, 300) : null,
     games: games !== null ? clamp(games, 0, 100) : null,
     gamesStarted: gamesStarted !== null ? clamp(gamesStarted, 0, 100) : null,
+    seasonSampleValid: hasExplicitSeasonSample ? value?.seasonSampleValid === true : null,
+    seasonSampleRaw:
+      hasExplicitSeasonSample && value?.seasonSampleRaw && typeof value.seasonSampleRaw === "object"
+        ? value.seasonSampleRaw
+        : null,
   };
 }
 
@@ -5560,6 +5631,21 @@ function buildAnalysis(
         awayWeighted.venuePlayed
       );
 
+    /*
+     * V13.8.45 audit: 장소커버 진단은 종목 공통으로 실제 venue 표본을 반영한다.
+     * 기존에는 축구 분기에서만 값이 채워져 야구가 5/5여도 0%로 표시됐다.
+     * 계산식 변경이 아니라 diagnostics 값 동기화다.
+     */
+    venueCoverage =
+      clamp(
+        (
+          Math.min(homeWeighted.venuePlayed, 3) +
+          Math.min(awayWeighted.venuePlayed, 3)
+        ) / 6,
+        0,
+        1
+      );
+
     // 기본 종목용 표본 강도.
     let sampleStrength =
       clamp(
@@ -6581,6 +6667,8 @@ function buildAnalysis(
       awayStarterGames: awayStarter.games,
       homeStarterGamesStarted: homeStarter.gamesStarted,
       awayStarterGamesStarted: awayStarter.gamesStarted,
+      homeStarterSeasonSampleRaw: homeStarter.seasonSampleRaw ?? null,
+      awayStarterSeasonSampleRaw: awayStarter.seasonSampleRaw ?? null,
       homeStarterSampleReliability:
         starterSampleReliability(homeStarter),
       awayStarterSampleReliability:
@@ -21290,6 +21378,16 @@ export default function Home() {
                             {" · "}IP {analysisFactors.homeStarterInningsPitched?.toFixed(1) ?? "-"}
                             {" · "}GS {analysisFactors.homeStarterGamesStarted?.toFixed(0) ?? "-"}
                             {" · "}G {analysisFactors.homeStarterGames?.toFixed(0) ?? "-"}
+                            {analysisFactors.homeStarterSeasonSampleRaw && (
+                              <>
+                                <br />
+                                원본 inn {String(analysisFactors.homeStarterSeasonSampleRaw.inn ?? "-")}
+                                {" · "}inn2 {String(analysisFactors.homeStarterSeasonSampleRaw.inn2 ?? "-")}
+                                {" · "}gameCount/games/g {String(analysisFactors.homeStarterSeasonSampleRaw.gameCount ?? "-")}/{String(analysisFactors.homeStarterSeasonSampleRaw.games ?? "-")}/{String(analysisFactors.homeStarterSeasonSampleRaw.g ?? "-")}
+                                <br />
+                                원본 GS gamesStarted/gameStarted/starts/gs {String(analysisFactors.homeStarterSeasonSampleRaw.gamesStarted ?? "-")}/{String(analysisFactors.homeStarterSeasonSampleRaw.gameStarted ?? "-")}/{String(analysisFactors.homeStarterSeasonSampleRaw.starts ?? "-")}/{String(analysisFactors.homeStarterSeasonSampleRaw.gs ?? "-")}
+                              </>
+                            )}
                           </div>
                         </div>
 
@@ -21302,6 +21400,16 @@ export default function Home() {
                             {" · "}IP {analysisFactors.awayStarterInningsPitched?.toFixed(1) ?? "-"}
                             {" · "}GS {analysisFactors.awayStarterGamesStarted?.toFixed(0) ?? "-"}
                             {" · "}G {analysisFactors.awayStarterGames?.toFixed(0) ?? "-"}
+                            {analysisFactors.awayStarterSeasonSampleRaw && (
+                              <>
+                                <br />
+                                원본 inn {String(analysisFactors.awayStarterSeasonSampleRaw.inn ?? "-")}
+                                {" · "}inn2 {String(analysisFactors.awayStarterSeasonSampleRaw.inn2 ?? "-")}
+                                {" · "}gameCount/games/g {String(analysisFactors.awayStarterSeasonSampleRaw.gameCount ?? "-")}/{String(analysisFactors.awayStarterSeasonSampleRaw.games ?? "-")}/{String(analysisFactors.awayStarterSeasonSampleRaw.g ?? "-")}
+                                <br />
+                                원본 GS gamesStarted/gameStarted/starts/gs {String(analysisFactors.awayStarterSeasonSampleRaw.gamesStarted ?? "-")}/{String(analysisFactors.awayStarterSeasonSampleRaw.gameStarted ?? "-")}/{String(analysisFactors.awayStarterSeasonSampleRaw.starts ?? "-")}/{String(analysisFactors.awayStarterSeasonSampleRaw.gs ?? "-")}
+                              </>
+                            )}
                           </div>
                         </div>
 
@@ -22164,6 +22272,40 @@ export default function Home() {
                         <div className="small">장소가중 {Math.round(analysisFactors.awayVenueWeight * 100)}%</div>
                       </div>
                     </div>
+
+                    {currentSport === "야구" && (() => {
+                      const homeVenueAudit = venueAuditRows(matched?.recentSummary?.home, "home", 5);
+                      const awayVenueAudit = venueAuditRows(matched?.recentSummary?.away, "away", 5);
+                      if (homeVenueAudit.length === 0 && awayVenueAudit.length === 0) return null;
+                      const rows = [
+                        ...homeVenueAudit.map((row) => ({ sideLabel: "홈팀 HOME", ...row })),
+                        ...awayVenueAudit.map((row) => ({ sideLabel: "원정팀 AWAY", ...row })),
+                      ];
+                      return (
+                        <div style={{ marginTop: 8 }}>
+                          <div className="notice" style={{ margin: "0 0 6px" }}>
+                            <b>V13.8.45 장소표본 Audit</b> · 아래 경기만 홈/원정 전용 득실 가중치에 사용합니다.
+                            최종점수는 실제 홈:원정 점수이며, 팀득/실은 분석 대상 팀 기준입니다.
+                          </div>
+                          <div style={{ overflowX: "auto", border: "1px solid #e3e9f2", borderRadius: 9 }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "95px 135px minmax(110px,1fr) 60px 75px 65px 65px", gap: 6, padding: "6px 8px", minWidth: 700, background: "#f5f8fc", fontSize: 9, fontWeight: 900 }}>
+                              <div>표본</div><div>날짜</div><div>상대팀</div><div>H/A</div><div>최종점수</div><div>팀득점</div><div>팀실점</div>
+                            </div>
+                            {rows.map((row, index) => (
+                              <div key={`venue-audit-${row.sideLabel}-${row.date}-${index}`} style={{ display: "grid", gridTemplateColumns: "95px 135px minmax(110px,1fr) 60px 75px 65px 65px", gap: 6, padding: "6px 8px", minWidth: 700, borderTop: "1px solid #edf1f6", fontSize: 9 }}>
+                                <div><b>{row.sideLabel}</b></div>
+                                <div>{row.date}</div>
+                                <div>{row.opponent}</div>
+                                <div>{row.venue === "home" ? "HOME" : "AWAY"}</div>
+                                <div>{row.scoreText}</div>
+                                <div>{row.scored}</div>
+                                <div>{row.conceded}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     <div className="cards" style={{ marginTop: 7 }}>
                       <div className="card">
