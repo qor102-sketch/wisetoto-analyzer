@@ -17471,6 +17471,199 @@ export default function Home() {
         !response.ok ||
         !data?.ok
       ) {
+        /*
+         * V13.8.35 · SportsAPI 장애 격리 / Naver 독립 실행
+         *
+         * SportsAPI fixture search가 502/매칭 실패여도 실전 PRE 전체를 중단하지 않는다.
+         * Betman의 현재 경기정보를 기준으로 Naver LIVE DATA를 독립 수집하고,
+         * SportsAPI Form/H2H만 미수신 상태로 남긴다.
+         * 백테스트는 기존 재현성을 위해 이 fallback을 사용하지 않는다.
+         */
+        if (!backtestMode) {
+          let wisetotoLiveFallback: any = null;
+          let naverTodayLineupFallback: any = null;
+
+          if (koreanSport(String((selectedBetman as any)?.sport ?? "")) === "야구") {
+            try {
+              const firstMarket = marketRows(selectedBetman)?.[0] as any;
+              const wisetotoMatchSeq = String(
+                firstMarket?.matchSeq ??
+                firstMarket?.gameNo ??
+                (selectedBetman as any)?.matchSeq ??
+                (selectedBetman as any)?.gameNo ??
+                ""
+              ).trim();
+
+              if (wisetotoMatchSeq) {
+                const wisetotoParams = new URLSearchParams({
+                  matchSeq: wisetotoMatchSeq,
+                  home: String(selectedBetman?.home ?? ""),
+                  away: String(selectedBetman?.away ?? ""),
+                });
+                const wisetotoResponse = await fetch(
+                  `/api/wisetoto/live?${wisetotoParams.toString()}`,
+                  { cache: "no-store" }
+                );
+                const wisetotoPayload = await readApiResponse(
+                  wisetotoResponse,
+                  "와이즈토토 LIVE DATA V2 · SportsAPI 격리"
+                );
+                wisetotoLiveFallback = wisetotoResponse.ok && wisetotoPayload?.ok
+                  ? wisetotoPayload
+                  : {
+                      ok: false,
+                      error: readableError(
+                        wisetotoPayload?.error,
+                        "와이즈토토 LIVE DATA 자동매칭/수집 실패"
+                      ),
+                      debug: wisetotoPayload?.debug ?? null,
+                      matchSeq: wisetotoMatchSeq,
+                    };
+              }
+            } catch (wisetotoError: any) {
+              wisetotoLiveFallback = {
+                ok: false,
+                error: readableError(
+                  wisetotoError,
+                  "와이즈토토 LIVE DATA 수집 실패"
+                ),
+              };
+            }
+          }
+
+          if (["야구", "축구"].includes(koreanSport(String((selectedBetman as any)?.sport ?? "")))) {
+            try {
+              const naverParams = new URLSearchParams({
+                date: Number.isFinite(selectedStartMs)
+                  ? new Date(selectedStartMs).toISOString()
+                  : "",
+                home: String(selectedBetman?.home ?? ""),
+                away: String(selectedBetman?.away ?? ""),
+                sport: koreanSport(String((selectedBetman as any)?.sport ?? "")),
+              });
+              const naverResponse = await fetch(
+                `/api/naver/lineup?${naverParams.toString()}`,
+                { cache: "no-store" }
+              );
+              const naverPayload = await readApiResponse(
+                naverResponse,
+                "네이버 당일 선발 라인업 · SportsAPI 격리"
+              );
+              naverTodayLineupFallback = naverResponse.ok && naverPayload?.ok
+                ? naverPayload
+                : {
+                    ok: false,
+                    error: readableError(
+                      naverPayload?.error,
+                      "네이버 당일 라인업 미수신"
+                    ),
+                    debug: naverPayload?.debug ?? null,
+                  };
+            } catch (naverError: any) {
+              naverTodayLineupFallback = {
+                ok: false,
+                error: readableError(
+                  naverError,
+                  "네이버 당일 라인업 수집 실패"
+                ),
+              };
+            }
+          }
+
+          const naverHomeRows = Array.isArray(naverTodayLineupFallback?.home)
+            ? naverTodayLineupFallback.home
+            : [];
+          const naverAwayRows = Array.isArray(naverTodayLineupFallback?.away)
+            ? naverTodayLineupFallback.away
+            : [];
+          const naverLineupTotal = naverHomeRows.length + naverAwayRows.length;
+          const naverSource = naverTodayLineupFallback?.league === "MLB"
+            ? "NAVER_GAME_POLLING_MLB"
+            : naverTodayLineupFallback?.league === "FOOTBALL"
+              ? "NAVER_FOOTBALL_PLAYERS"
+              : "NAVER_GAME_POLLING";
+
+          const naverLiveLineups = naverTodayLineupFallback?.ok
+            ? {
+                source: naverSource,
+                homeStarter: naverTodayLineupFallback?.homeStarter ?? null,
+                awayStarter: naverTodayLineupFallback?.awayStarter ?? null,
+                homeTeamLineUp: { fullLineUp: naverHomeRows },
+                awayTeamLineUp: { fullLineUp: naverAwayRows },
+                confirmedBattingLineup:
+                  naverTodayLineupFallback?.league !== "FOOTBALL" &&
+                  naverLineupTotal >= 18,
+                confirmedStartingLineup:
+                  naverTodayLineupFallback?.league === "FOOTBALL" &&
+                  naverHomeRows.length >= 11 &&
+                  naverAwayRows.length >= 11,
+              }
+            : null;
+
+          const matchDebug = data?.debug
+            ? ` · debug=${JSON.stringify(data.debug)}`
+            : "";
+          const sportsApiError = `${readableError(
+            data?.error,
+            "SportsAPI 동일경기 자동매칭 실패"
+          )}${matchDebug}`;
+
+          const isolatedCombined = {
+            ok: true,
+            partial: true,
+            fixtureId: null,
+            sportsApiAvailable: false,
+            sportsApiError,
+            sportsApiFallback: "ISOLATED",
+            fixture: null,
+            detail: null,
+            selectedFixture: {
+              home: String(selectedBetman?.home ?? ""),
+              away: String(selectedBetman?.away ?? ""),
+              startTime: Number.isFinite(selectedStartMs)
+                ? new Date(selectedStartMs).toISOString()
+                : null,
+              sport: String((selectedBetman as any)?.sport ?? ""),
+              league: String((selectedBetman as any)?.league ?? ""),
+              source: "BETMAN",
+            },
+            wisetotoLive: wisetotoLiveFallback,
+            naverTodayLineup: naverTodayLineupFallback,
+            liveDataPrimarySource: naverTodayLineupFallback?.ok
+              ? "NAVER"
+              : wisetotoLiveFallback?.ok
+                ? "WISETOTO"
+                : "BETMAN",
+            h2h: wisetotoLiveFallback?.h2h?.sample > 0
+              ? wisetotoLiveFallback.h2h
+              : null,
+            recentSummary:
+              wisetotoLiveFallback?.recentSummary?.home?.form?.played > 0 &&
+              wisetotoLiveFallback?.recentSummary?.away?.form?.played > 0
+                ? wisetotoLiveFallback.recentSummary
+                : naverTodayLineupFallback?.recentSummary?.home?.form?.played > 0 &&
+                    naverTodayLineupFallback?.recentSummary?.away?.form?.played > 0
+                  ? naverTodayLineupFallback.recentSummary
+                  : null,
+            statistics: null,
+            lineups: naverLiveLineups,
+            lineupsSource: naverLiveLineups ? naverSource : null,
+            detailDebug: {
+              sportsApi: data?.debug ?? null,
+              sportsApiError,
+              isolated: true,
+            },
+          };
+
+          setMatched(isolatedCombined);
+          setStatus(
+            naverTodayLineupFallback?.ok
+              ? `SportsAPI 미수신 · Naver LIVE DATA 독립 분석 완료 · ${selectedBetman?.home ?? "-"} vs ${selectedBetman?.away ?? "-"}`
+              : `SportsAPI 미수신 · Naver 독립 분석도 미수신 · ${selectedBetman?.home ?? "-"} vs ${selectedBetman?.away ?? "-"}`
+          );
+          return true;
+        }
+
         const matchDebug =
           data?.debug
             ? ` · debug=${JSON.stringify(data.debug)}`
