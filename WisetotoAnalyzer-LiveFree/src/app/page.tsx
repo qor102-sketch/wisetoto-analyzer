@@ -123,6 +123,20 @@ type AnalysisFactors = {
   awayVenueConceded: number | null;
   homeVenueWeight: number;
   awayVenueWeight: number;
+
+  // V13.8.46 VENUE ROBUST SHADOW V1 · 진단 전용, 실제 λ에는 미적용
+  homeVenueShadowScored: number | null;
+  homeVenueShadowConceded: number | null;
+  awayVenueShadowScored: number | null;
+  awayVenueShadowConceded: number | null;
+  homeVenueShadowWeight: number;
+  awayVenueShadowWeight: number;
+  homeVenueShadowStability: number;
+  awayVenueShadowStability: number;
+  homeVenueShadowOutliers: number;
+  awayVenueShadowOutliers: number;
+  venueShadowRawHomeScore: number | null;
+  venueShadowRawAwayScore: number | null;
   marketHomeFair: number | null;
   marketAwayFair: number | null;
   scoreGuardApplied: boolean;
@@ -3467,6 +3481,107 @@ function venueAuditRows(
     .map(({ time: _time, ...row }) => row);
 }
 
+
+type VenueRobustShadow = {
+  scored: number | null;
+  conceded: number | null;
+  rawWeight: number;
+  suggestedWeight: number;
+  stability: number;
+  outliers: number;
+};
+
+function winsorizedVenueMetric(
+  values: number[]
+): { values: number[]; outliers: number } {
+  const clean = values.filter((value) => Number.isFinite(value));
+  if (clean.length < 4) return { values: clean, outliers: 0 };
+
+  const sorted = [...clean].sort((a, b) => a - b);
+  // 5경기 표본에서는 양끝 1개씩을 두 번째 최소/최대값으로 제한한다.
+  // SHADOW 진단용이며 현재 λ 계산에는 적용하지 않는다.
+  const lower = sorted[1];
+  const upper = sorted[sorted.length - 2];
+  let outliers = 0;
+  const winsorized = clean.map((value) => {
+    const clipped = clamp(value, lower, upper);
+    if (Math.abs(clipped - value) > 1e-9) outliers += 1;
+    return clipped;
+  });
+
+  return { values: winsorized, outliers };
+}
+
+function weightedOrderedMetric(values: number[]) {
+  if (!values.length) return null;
+  let total = 0;
+  let weightSum = 0;
+  values.forEach((value, index) => {
+    const weight = Math.pow(0.78, index);
+    total += value * weight;
+    weightSum += weight;
+  });
+  return weightSum > 0 ? total / weightSum : null;
+}
+
+function metricCoefficientOfVariation(values: number[]) {
+  if (values.length < 2) return 0;
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance = values.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / values.length;
+  const sd = Math.sqrt(Math.max(0, variance));
+  return sd / Math.max(1, Math.abs(mean));
+}
+
+function venueRobustShadow(
+  team: RecentTeam | null | undefined,
+  wantedVenue: "home" | "away",
+  profile: WeightedProfile
+): VenueRobustShadow {
+  const rows = venueAuditRows(team, wantedVenue, 5);
+  if (!rows.length || profile.venueWeight <= 0) {
+    return {
+      scored: profile.scored,
+      conceded: profile.conceded,
+      rawWeight: profile.venueWeight,
+      suggestedWeight: 0,
+      stability: 0,
+      outliers: 0,
+    };
+  }
+
+  const rawScored = rows.map((row) => row.scored);
+  const rawConceded = rows.map((row) => row.conceded);
+  const scoredWinsor = winsorizedVenueMetric(rawScored);
+  const concededWinsor = winsorizedVenueMetric(rawConceded);
+  const venueScored = weightedOrderedMetric(scoredWinsor.values);
+  const venueConceded = weightedOrderedMetric(concededWinsor.values);
+
+  const maxCv = Math.max(
+    metricCoefficientOfVariation(rawScored),
+    metricCoefficientOfVariation(rawConceded)
+  );
+  // 분산이 클수록 장소 가중치 권고치를 자동 감점한다. 최소 35%의 안정성은 남긴다.
+  const stability = clamp(1 - maxCv * 0.35, 0.35, 1);
+  const suggestedWeight = clamp(profile.venueWeight * stability, 0, profile.venueWeight);
+  const baseScored = profile.overallScored;
+  const baseConceded = profile.overallConceded;
+
+  return {
+    scored:
+      venueScored !== null && baseScored !== null
+        ? venueScored * suggestedWeight + baseScored * (1 - suggestedWeight)
+        : profile.scored,
+    conceded:
+      venueConceded !== null && baseConceded !== null
+        ? venueConceded * suggestedWeight + baseConceded * (1 - suggestedWeight)
+        : profile.conceded,
+    rawWeight: profile.venueWeight,
+    suggestedWeight,
+    stability,
+    outliers: Math.max(scoredWinsor.outliers, concededWinsor.outliers),
+  };
+}
+
 function neutralScorePrior(
   sport: Exclude<Sport, "전체">
 ) {
@@ -3938,7 +4053,7 @@ function starterInfoFromObject(value: any): StarterInfo {
     Object.prototype.hasOwnProperty.call(value, "seasonSampleValid");
 
   const inningsPitched = hasExplicitSeasonSample
-    ? (value?.seasonSampleValid === true && Number.isFinite(Number(value?.innings))
+    ? (value?.seasonSampleValid === true && value?.innings !== null && value?.innings !== undefined && value?.innings !== "" && Number.isFinite(Number(value?.innings))
         ? Number(value.innings)
         : null)
     : findNumericStatDeep(
@@ -3946,7 +4061,7 @@ function starterInfoFromObject(value: any): StarterInfo {
         ["inningspitched", "inningpitched", "innings", "ip", "투구이닝", "이닝"]
       );
   const gamesStarted = hasExplicitSeasonSample
-    ? (value?.seasonSampleValid === true && Number.isFinite(Number(value?.gamesStarted))
+    ? (value?.seasonSampleValid === true && value?.gamesStarted !== null && value?.gamesStarted !== undefined && value?.gamesStarted !== "" && Number.isFinite(Number(value?.gamesStarted))
         ? Number(value.gamesStarted)
         : null)
     : findNumericStatDeep(
@@ -3954,7 +4069,7 @@ function starterInfoFromObject(value: any): StarterInfo {
         ["gamesstarted", "gamestarted", "starts", "startgames", "gs", "선발경기", "선발"]
       );
   const games = hasExplicitSeasonSample
-    ? (value?.seasonSampleValid === true && Number.isFinite(Number(value?.games))
+    ? (value?.seasonSampleValid === true && value?.games !== null && value?.games !== undefined && value?.games !== "" && Number.isFinite(Number(value?.games))
         ? Number(value.games)
         : null)
     : findNumericStatDeep(
@@ -5309,6 +5424,52 @@ function buildAnalysis(
       awayFormData
     );
 
+  /* V13.8.46: 장소 극단표본 robust SHADOW. 현재 모델 입력은 homeWeighted/awayWeighted 그대로 유지한다. */
+  const homeVenueShadow = venueRobustShadow(
+    recentSummary?.home ?? null,
+    "home",
+    homeWeighted
+  );
+  const awayVenueShadow = venueRobustShadow(
+    recentSummary?.away ?? null,
+    "away",
+    awayWeighted
+  );
+
+  const homeVenueShadowRobustScored = robustRecentMetric({
+    value: homeVenueShadow.scored,
+    played: homeWeighted.played,
+    venuePlayed: homeWeighted.venuePlayed,
+    sport,
+  }).value;
+  const homeVenueShadowRobustConceded = robustRecentMetric({
+    value: homeVenueShadow.conceded,
+    played: homeWeighted.played,
+    venuePlayed: homeWeighted.venuePlayed,
+    sport,
+  }).value;
+  const awayVenueShadowRobustScored = robustRecentMetric({
+    value: awayVenueShadow.scored,
+    played: awayWeighted.played,
+    venuePlayed: awayWeighted.venuePlayed,
+    sport,
+  }).value;
+  const awayVenueShadowRobustConceded = robustRecentMetric({
+    value: awayVenueShadow.conceded,
+    played: awayWeighted.played,
+    venuePlayed: awayWeighted.venuePlayed,
+    sport,
+  }).value;
+
+  const venueShadowRawHomeScore =
+    homeVenueShadowRobustScored !== null && awayVenueShadowRobustConceded !== null
+      ? (homeVenueShadowRobustScored + awayVenueShadowRobustConceded) / 2
+      : null;
+  const venueShadowRawAwayScore =
+    awayVenueShadowRobustScored !== null && homeVenueShadowRobustConceded !== null
+      ? (awayVenueShadowRobustScored + homeVenueShadowRobustConceded) / 2
+      : null;
+
   const homeRobustScored =
     robustRecentMetric({
       value:
@@ -6581,6 +6742,25 @@ function buildAnalysis(
 
       homeVenueWeight: Number(homeWeighted.venueWeight.toFixed(2)),
       awayVenueWeight: Number(awayWeighted.venueWeight.toFixed(2)),
+
+      homeVenueShadowScored:
+        homeVenueShadow.scored === null ? null : Number(homeVenueShadow.scored.toFixed(3)),
+      homeVenueShadowConceded:
+        homeVenueShadow.conceded === null ? null : Number(homeVenueShadow.conceded.toFixed(3)),
+      awayVenueShadowScored:
+        awayVenueShadow.scored === null ? null : Number(awayVenueShadow.scored.toFixed(3)),
+      awayVenueShadowConceded:
+        awayVenueShadow.conceded === null ? null : Number(awayVenueShadow.conceded.toFixed(3)),
+      homeVenueShadowWeight: Number(homeVenueShadow.suggestedWeight.toFixed(2)),
+      awayVenueShadowWeight: Number(awayVenueShadow.suggestedWeight.toFixed(2)),
+      homeVenueShadowStability: Number(homeVenueShadow.stability.toFixed(2)),
+      awayVenueShadowStability: Number(awayVenueShadow.stability.toFixed(2)),
+      homeVenueShadowOutliers: homeVenueShadow.outliers,
+      awayVenueShadowOutliers: awayVenueShadow.outliers,
+      venueShadowRawHomeScore:
+        venueShadowRawHomeScore === null ? null : Number(venueShadowRawHomeScore.toFixed(3)),
+      venueShadowRawAwayScore:
+        venueShadowRawAwayScore === null ? null : Number(venueShadowRawAwayScore.toFixed(3)),
 
       marketHomeFair:
         moneylineFair.home === null ? null : Number(moneylineFair.home.toFixed(1)),
@@ -21373,7 +21553,7 @@ export default function Home() {
                           홈 선발
                           <b>{analysisFactors.homeStarterName ?? "데이터 미수신"}</b>
                           <div className="small">
-                            ERA {analysisFactors.homeStarterEra?.toFixed(2) ?? "-"}
+                            Naver 제공 표본 · ERA {analysisFactors.homeStarterEra?.toFixed(2) ?? "-"}
                             {" · "}WHIP {analysisFactors.homeStarterWhip?.toFixed(2) ?? "-"}
                             {" · "}IP {analysisFactors.homeStarterInningsPitched?.toFixed(1) ?? "-"}
                             {" · "}GS {analysisFactors.homeStarterGamesStarted?.toFixed(0) ?? "-"}
@@ -21395,7 +21575,7 @@ export default function Home() {
                           원정 선발
                           <b>{analysisFactors.awayStarterName ?? "데이터 미수신"}</b>
                           <div className="small">
-                            ERA {analysisFactors.awayStarterEra?.toFixed(2) ?? "-"}
+                            Naver 제공 표본 · ERA {analysisFactors.awayStarterEra?.toFixed(2) ?? "-"}
                             {" · "}WHIP {analysisFactors.awayStarterWhip?.toFixed(2) ?? "-"}
                             {" · "}IP {analysisFactors.awayStarterInningsPitched?.toFixed(1) ?? "-"}
                             {" · "}GS {analysisFactors.awayStarterGamesStarted?.toFixed(0) ?? "-"}
@@ -22306,6 +22486,32 @@ export default function Home() {
                         </div>
                       );
                     })()}
+
+                    {currentSport === "야구" && (
+                      <div style={{ marginTop: 8 }}>
+                        <div className="notice" style={{ margin: "0 0 6px" }}>
+                          <b>V13.8.46 VENUE ROBUST SHADOW V1 · MODEL OFF</b> · 장소 5경기의 양끝 극단값을 winsor 처리하고,
+                          득실 변동성이 클수록 장소 가중치 권고값을 낮춰 비교합니다. 아래 값은 진단 전용이며 현재 λ·확률·추천에는 반영하지 않습니다.
+                        </div>
+                        <div className="cards">
+                          <div className="card">
+                            홈 장소 SHADOW 혼합
+                            <b>{analysisFactors.homeVenueShadowScored?.toFixed(2) ?? "-"} / {analysisFactors.homeVenueShadowConceded?.toFixed(2) ?? "-"}</b>
+                            <div className="small">가중 {Math.round(analysisFactors.homeVenueWeight * 100)}% → 권고 {Math.round(analysisFactors.homeVenueShadowWeight * 100)}% · 안정성 {Math.round(analysisFactors.homeVenueShadowStability * 100)}% · 극단 {analysisFactors.homeVenueShadowOutliers}</div>
+                          </div>
+                          <div className="card">
+                            원정 장소 SHADOW 혼합
+                            <b>{analysisFactors.awayVenueShadowScored?.toFixed(2) ?? "-"} / {analysisFactors.awayVenueShadowConceded?.toFixed(2) ?? "-"}</b>
+                            <div className="small">가중 {Math.round(analysisFactors.awayVenueWeight * 100)}% → 권고 {Math.round(analysisFactors.awayVenueShadowWeight * 100)}% · 안정성 {Math.round(analysisFactors.awayVenueShadowStability * 100)}% · 극단 {analysisFactors.awayVenueShadowOutliers}</div>
+                          </div>
+                          <div className="card">
+                            SHADOW 수축 전 예상
+                            <b>{analysisFactors.venueShadowRawHomeScore?.toFixed(2) ?? "-"} : {analysisFactors.venueShadowRawAwayScore?.toFixed(2) ?? "-"}</b>
+                            <div className="small">현재 수축 전 {analysisFactors.rawExpectedHomeScore?.toFixed(2) ?? "-"} : {analysisFactors.rawExpectedAwayScore?.toFixed(2) ?? "-"} · MODEL OFF</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="cards" style={{ marginTop: 7 }}>
                       <div className="card">
