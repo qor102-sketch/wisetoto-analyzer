@@ -596,6 +596,11 @@ function validatedKboStarterSeasonSample(season: any) {
       innings: season?.innings ?? null,
       ip: season?.ip ?? null,
       gameCount: season?.gameCount ?? null,
+      games: season?.games ?? null,
+      g: season?.g ?? null,
+      gamesStarted: season?.gamesStarted ?? null,
+      gameStarted: season?.gameStarted ?? null,
+      starts: season?.starts ?? null,
       gs: season?.gs ?? null,
     },
   };
