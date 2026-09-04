@@ -3863,18 +3863,38 @@ function starterInfoFromObject(value: any): StarterInfo {
     value,
     ["whip", "walkshitsperinningpitched"]
   );
-  const inningsPitched = findNumericStatDeep(
-    value,
-    ["inningspitched", "inningpitched", "innings", "ip", "투구이닝", "이닝"]
-  );
-  const gamesStarted = findNumericStatDeep(
-    value,
-    ["gamesstarted", "gamestarted", "starts", "startgames", "gs", "선발경기", "선발"]
-  );
-  const games = findNumericStatDeep(
-    value,
-    ["gamesplayed", "games", "gamecount", "appearances", "g", "경기수", "경기"]
-  );
+  /*
+   * V13.8.44: NAVER KBO preview에서 seasonSampleValid=false로 무효화한
+   * raw inn/inn2를 deep search가 다시 주워오는 것을 차단한다.
+   * normalizeKboPreviewStarter가 명시적으로 정규화한 표본 필드를 우선 사용한다.
+   */
+  const hasExplicitSeasonSample =
+    Object.prototype.hasOwnProperty.call(value, "seasonSampleValid");
+
+  const inningsPitched = hasExplicitSeasonSample
+    ? (value?.seasonSampleValid === true && Number.isFinite(Number(value?.innings))
+        ? Number(value.innings)
+        : null)
+    : findNumericStatDeep(
+        value,
+        ["inningspitched", "inningpitched", "innings", "ip", "투구이닝", "이닝"]
+      );
+  const gamesStarted = hasExplicitSeasonSample
+    ? (value?.seasonSampleValid === true && Number.isFinite(Number(value?.gamesStarted))
+        ? Number(value.gamesStarted)
+        : null)
+    : findNumericStatDeep(
+        value,
+        ["gamesstarted", "gamestarted", "starts", "startgames", "gs", "선발경기", "선발"]
+      );
+  const games = hasExplicitSeasonSample
+    ? (value?.seasonSampleValid === true && Number.isFinite(Number(value?.games))
+        ? Number(value.games)
+        : null)
+    : findNumericStatDeep(
+        value,
+        ["gamesplayed", "games", "gamecount", "appearances", "g", "경기수", "경기"]
+      );
 
   return {
     name: objectName(value),
