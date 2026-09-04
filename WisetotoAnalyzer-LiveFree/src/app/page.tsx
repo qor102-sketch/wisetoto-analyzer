@@ -4,6 +4,7 @@
 // DEPLOY_MARKER_V13_8_8_LIVE_DATA_DIAGNOSTICS_20260829
 // DEPLOY_MARKER_V13_8_6_FIXED_ODDS_3COL_GRID_20260829
 "use client";
+// DEPLOY_MARKER_V13_8_41_NAVER_KBO_NPB_RECENT_FORM_FALLBACK_20260904
 // DEPLOY_MARKER_V13_8_34_NAVER_RECENT_BATTING_V1_20260903
 
 import { useEffect, useMemo, useState, useRef } from "react";
@@ -18032,7 +18033,7 @@ export default function Home() {
           recentSummary:
             (wisetotoBaseballPrimary && wisetotoLive?.recentSummary?.home?.form?.played > 0 && wisetotoLive?.recentSummary?.away?.form?.played > 0
               ? wisetotoLive.recentSummary
-              : naverTodayLineup?.league === "MLB" && naverTodayLineup?.recentSummary?.home?.form?.played > 0 && naverTodayLineup?.recentSummary?.away?.form?.played > 0
+              : naverTodayLineup?.recentSummary?.home?.form?.played > 0 && naverTodayLineup?.recentSummary?.away?.form?.played > 0
                 ? naverTodayLineup.recentSummary
                 : detailData?.recentSummary ?? data?.recentSummary ?? null),
           statistics:
