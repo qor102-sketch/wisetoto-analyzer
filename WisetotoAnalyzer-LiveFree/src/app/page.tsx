@@ -10918,6 +10918,8 @@ type LiveBatchAnalysisState = {
 type LiveBatchOutcome = {
   status: "SUCCESS" | "FAIL";
   message: string;
+  marketResults?: MarketPick[];
+  recommendedKeys?: string[];
 };
 
 type BacktestBaselineSnapshot = {
@@ -11108,6 +11110,11 @@ export default function Home() {
   const [matched, setMatched] = useState<any>(null);
 
   const [backtestMode, setBacktestMode] =
+    useState(false);
+
+  // V13.8.37: 실전 30분 목록과 분리된 최근 경기 검증 모드.
+  // PRE TRACKER에는 저장하지 않고, 이미 시작한 경기의 LIVE DATA 재검증에만 사용한다.
+  const [recentVerifyMode, setRecentVerifyMode] =
     useState(false);
 
   const [backtestResultRevealed, setBacktestResultRevealed] =
@@ -12516,6 +12523,7 @@ export default function Home() {
   }
 
   async function loadBetmanList() {
+    setRecentVerifyMode(false);
     setStatus("Betman 발매경기 불러오는 중…");
     try {
       const response = await fetch("/api/betman", { cache: "no-store" });
@@ -12578,6 +12586,85 @@ export default function Home() {
       setBetmanDiagnostics(null);
       setSelectedBetmanKey(null);
       setBetman({ loading:false, matched:null, score:null, error:message });
+      setStatus(message);
+    }
+  }
+
+  // V13.8.37: 경기 시작 후 30분이 지나 실전 목록에서 사라진 경기도
+  // 최근 6시간 범위에서 다시 선택해 LIVE DATA를 검증할 수 있게 한다.
+  // 이 목록은 검증용이며 PRE 최초 스냅샷 저장 규칙을 변경하지 않는다.
+  async function loadRecentVerificationGames() {
+    if (loading || liveBatchAnalysis.running || batchBacktest.running) return;
+
+    setStatus("최근 경기 검증 목록 불러오는 중…");
+
+    try {
+      const response = await fetch("/api/betman?scope=all", { cache: "no-store" });
+      const payload = await readApiResponse(response, "Betman 최근 경기 검증 API");
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(
+          readableError(payload?.error, "최근 경기 검증 목록 수집 실패")
+        );
+      }
+
+      const now = Date.now();
+      const recentWindowMs = 6 * 60 * 60 * 1000;
+
+      const games = getBetmanGames(payload)
+        .filter((game) => {
+          const start = gameTimeMs(game);
+          const markets = Array.isArray((game as any)?.markets)
+            ? (game as any).markets
+            : [];
+          const hasOdds = markets.some(
+            (market: any) =>
+              Array.isArray(market?.selections) &&
+              market.selections.some(
+                (selection: any) => Number(selection?.odds) > 1
+              )
+          );
+
+          return (
+            Number.isFinite(start) &&
+            start <= now &&
+            start > now - recentWindowMs &&
+            hasOdds
+          );
+        })
+        .sort((a, b) => gameTimeMs(b) - gameTimeMs(a));
+
+      setBetmanDiagnostics(payload?.diagnostics ?? null);
+      setBacktestMode(false);
+      setRecentVerifyMode(true);
+      setBacktestResultRevealed(false);
+      setLiveBatchSelectedKeys([]);
+      setLiveBatchOutcomes({});
+      setBetmanGames(games);
+      setMatched(null);
+
+      if (games.length) {
+        setSelectedBetmanKey(gameKey(games[0], 0));
+        setBetman({ loading: false, matched: games[0], score: 1, error: null });
+        setStatus(
+          `🔎 최근 경기 검증 · 최근 6시간 ${games.length}경기 · PRE 저장 없이 LIVE DATA 재검증`
+        );
+      } else {
+        setSelectedBetmanKey(null);
+        setBetman({
+          loading: false,
+          matched: null,
+          score: null,
+          error: "최근 6시간 내 검증 가능한 Betman 경기가 없습니다.",
+        });
+        setStatus("최근 6시간 내 검증 가능한 Betman 경기가 없습니다.");
+      }
+    } catch (e: any) {
+      const message = readableError(e, "최근 경기 검증 목록 수집 실패");
+      setBetmanGames([]);
+      setBetmanDiagnostics(null);
+      setSelectedBetmanKey(null);
+      setBetman({ loading: false, matched: null, score: null, error: message });
       setStatus(message);
     }
   }
@@ -17217,6 +17304,7 @@ export default function Home() {
       gameTimeMs(game);
 
     const historical =
+      !recentVerifyMode &&
       Number.isFinite(selectedTime) &&
       selectedTime <
         Date.now() -
@@ -17230,7 +17318,9 @@ export default function Home() {
     setStatus(
       historical
         ? `${game?.home ?? "-"} vs ${game?.away ?? "-"} 선택 · 백테스트 모드 자동 활성화`
-        : `${game?.home ?? "-"} vs ${game?.away ?? "-"} 선택 · 분석 버튼을 누르세요`
+        : recentVerifyMode
+          ? `🔎 ${game?.home ?? "-"} vs ${game?.away ?? "-"} 선택 · 검증용 LIVE 재분석 · PRE 저장 안 함`
+          : `${game?.home ?? "-"} vs ${game?.away ?? "-"} 선택 · 분석 버튼을 누르세요`
     );
   }
 
@@ -17969,6 +18059,71 @@ export default function Home() {
   }
 
 
+  // V13.8.36: 경기 시작 후 30분 이내의 LIVE 분석은 PRE TRACKER에 억지로 저장하지 않는다.
+  // 대신 일괄분석 세션의 화면 표시용 결과만 별도로 보관해 왼쪽 시장 행에 픽을 표시한다.
+  useEffect(() => {
+    if (
+      backtestMode ||
+      !selectedBetmanKey ||
+      !analysisFactors.hasRealData
+    ) {
+      return;
+    }
+
+    const currentOutcome = liveBatchOutcomes[selectedBetmanKey];
+    if (!currentOutcome || currentOutcome.status !== "SUCCESS") {
+      return;
+    }
+
+    const marketResults = actualMarketPicks.map((pick) => ({ ...pick }));
+    if (!marketResults.length) {
+      return;
+    }
+
+    const recommendedKeys = eligibleMarketPicks.map((pick) => pick.key);
+    const nextFingerprint = JSON.stringify({
+      marketResults: marketResults.map((pick) => [
+        pick.key,
+        pick.pick,
+        pick.probability,
+        pick.expectedValue,
+        pick.valueGrade,
+      ]),
+      recommendedKeys,
+    });
+    const previousFingerprint = JSON.stringify({
+      marketResults: (currentOutcome.marketResults ?? []).map((pick) => [
+        pick.key,
+        pick.pick,
+        pick.probability,
+        pick.expectedValue,
+        pick.valueGrade,
+      ]),
+      recommendedKeys: currentOutcome.recommendedKeys ?? [],
+    });
+
+    if (nextFingerprint === previousFingerprint) {
+      return;
+    }
+
+    setLiveBatchOutcomes((previous) => ({
+      ...previous,
+      [selectedBetmanKey]: {
+        ...previous[selectedBetmanKey],
+        marketResults,
+        recommendedKeys,
+      },
+    }));
+  }, [
+    backtestMode,
+    selectedBetmanKey,
+    liveBatchOutcomes,
+    analysisFactors.hasRealData,
+    actualMarketPicks,
+    eligibleMarketPicks,
+  ]);
+
+
   useEffect(() => {
     if (!liveBatchAnalysis.running) {
       liveBatchWorkerRef.current = false;
@@ -18214,13 +18369,14 @@ export default function Home() {
       <div className="top">
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
-          <div className="sub">Betman 발매경기 전체 종목(시작 후 30분까지 표시) → 실제 경기 단위 그룹화 → SportsAPI 분석 → 종목별 실제 시장 최적 픽</div>
+          <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 6시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
         </div>
         <div className="bar">
           <button
             className="btn light"
             onClick={() => {
               setBacktestMode(false);
+              setRecentVerifyMode(false);
               setBacktestResultRevealed(false);
               setSelectedBetmanKey(null);
               setMatched(null);
@@ -18234,6 +18390,15 @@ export default function Home() {
 
 
 
+          <button
+            className="btn light"
+            onClick={() => void loadRecentVerificationGames()}
+            disabled={loading || batchBacktest.running || liveBatchAnalysis.running}
+            title="경기 시작 후 30분이 지나 실전 목록에서 사라진 최근 6시간 경기를 PRE 저장 없이 다시 불러옵니다."
+          >
+            🔎 최근 경기 검증
+          </button>
+
           <button className="btn primary" onClick={analyzeSelected} disabled={loading || batchBacktest.running || !selectedBetman}>
             {loading ? "⏳ 분석 중" : "📊 선택 경기 분석"}
           </button>
@@ -18243,12 +18408,16 @@ export default function Home() {
               padding: "6px 8px",
               border: "1px solid #dbe4ef",
               borderRadius: 8,
-              background: backtestMode ? "#eef6ff" : "#f8fafc",
+              background: backtestMode || recentVerifyMode ? "#eef6ff" : "#f8fafc",
               whiteSpace: "nowrap",
             }}
             title="작업에 따라 실전/과거 분석 모드가 자동 전환됩니다."
           >
-            {backtestMode ? "🧪 과거 분석" : "📡 실전 분석"}
+            {backtestMode
+              ? "🧪 과거 분석"
+              : recentVerifyMode
+                ? "🔎 최근 검증"
+                : "📡 실전 분석"}
           </span>
           <span className={betman.error ? "small err" : "small"}>{status}</span>
         </div>
@@ -19573,7 +19742,9 @@ export default function Home() {
             >
               {backtestMode
                 ? "현재 저장된 백테스트 과거경기 중 이 종목의 경기가 없습니다."
-                : "현재 Betman API가 반환한 데이터 중 이 종목의 미시작 배당 경기가 없습니다."}
+                : recentVerifyMode
+                  ? "최근 6시간 내 검증 가능한 이 종목의 경기가 없습니다."
+                  : "현재 Betman API가 반환한 데이터 중 이 종목의 미시작 배당 경기가 없습니다."}
             </div>
           )}
 
@@ -19588,7 +19759,16 @@ export default function Home() {
             </div>
           )}
 
-          {!!filteredGames.length && !backtestMode && (
+          {!!filteredGames.length && recentVerifyMode && (
+            <div className="notice" style={{ margin: "0 14px 10px" }}>
+              <b>🔎 V13.8.37 최근 경기 검증 모드</b>
+              {" · "}경기 시작 후 최근 6시간 경기만 표시합니다.
+              <br />
+              <span>검증용 재분석은 LIVE DATA 확인용이며 PRE TRACKER 최초 스냅샷을 생성하거나 덮어쓰지 않습니다. 결과 VERIFY와도 분리됩니다.</span>
+            </div>
+          )}
+
+          {!!filteredGames.length && !backtestMode && !recentVerifyMode && (
             <div className="batchTools">
               <button
                 className="btn light"
@@ -19711,7 +19891,7 @@ export default function Home() {
                     const batchChecked =
                       liveBatchSelectedKeys.includes(key);
 
-                    const marketResult =
+                    const trackerMarketResult =
                       (
                         trackerRecord?.marketResults ??
                         trackerRecord?.picks ??
@@ -19721,13 +19901,23 @@ export default function Home() {
                           pick.key === marketKey
                       ) ?? null;
 
-                    const recommended =
-                      Boolean(
-                        trackerRecord?.picks?.some(
-                          (pick) =>
-                            pick.key === marketKey
+                    const batchMarketResult =
+                      batchOutcome?.marketResults?.find(
+                        (pick) => pick.key === marketKey
+                      ) ?? null;
+
+                    const marketResult =
+                      trackerMarketResult ?? batchMarketResult;
+
+                    const recommended = trackerRecord
+                      ? Boolean(
+                          trackerRecord?.picks?.some(
+                            (pick) => pick.key === marketKey
+                          )
                         )
-                      );
+                      : Boolean(
+                          batchOutcome?.recommendedKeys?.includes(marketKey)
+                        );
 
                     const marketNo =
                       market?.matchSeq ??
@@ -22203,7 +22393,7 @@ export default function Home() {
             </details>
 
             {betman.error && <div className="notice">{betman.error}</div>}
-            <div className="notice">실전 화면은 Betman에서 현재 배당이 제공되는 경기와 경기 시작 후 30분 이내 경기를 표시합니다. 야구 LIVE 경기정보는 와이즈토토를 우선 수집하며, 와이즈토토 누락 시에만 SportsAPI 데이터를 fallback으로 사용합니다.</div>
+            <div className="notice">실전 화면은 Betman에서 현재 배당이 제공되는 경기와 경기 시작 후 30분 이내 경기를 표시합니다. 시작 후 30분이 지난 경기는 상단의 최근 경기 검증에서 최근 6시간까지 PRE 저장 없이 다시 확인할 수 있습니다. 야구 LIVE 경기정보는 와이즈토토를 우선 수집하며, 와이즈토토 누락 시에만 SportsAPI 데이터를 fallback으로 사용합니다.</div>
           </>}
         </section>
       </div>
