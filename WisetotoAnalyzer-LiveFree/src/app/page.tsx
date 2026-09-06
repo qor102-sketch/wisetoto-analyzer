@@ -725,6 +725,8 @@ type LiveTrackerRecord = {
   footballLineup?: FootballLineupSnapshot | null;
   footballPre?: FootballPreValidationSnapshot | null;
   footballPreResult?: FootballPreValidationResult | null;
+  verifyWaitReason?: "BETMAN_MATCH_WAIT" | "BETMAN_FINAL_WAIT" | "FALLBACK_TIME_WAIT" | "FIXTURE_ID_MISSING" | "RESULT_NOT_FOUND" | null;
+  verifyLastCheckedAt?: number | null;
 };
 
 
@@ -14701,21 +14703,23 @@ export default function Home() {
   async function verifyLiveTrackerResults() {
     if (validationLoading) return;
 
-    const due = liveTrackerRecords
+    // V13.8.62: 시작한 PENDING 레코드는 Betman FINAL을 먼저 확인한다.
+    // +2시간은 SportsAPI fallback 자격에만 사용하고 VERIFY 후보 자체를 막지 않는다.
+    const candidates = liveTrackerRecords
       .filter(
         (record) =>
           record.verificationStatus === "PENDING" &&
-          record.startMs < Date.now() - 2 * 60 * 60 * 1000
+          record.startMs < Date.now()
       )
       .slice(0, 10);
 
-    if (!due.length) {
-      setStatus("실전 추적 · 지금 확인할 종료 경기 결과가 없습니다.");
+    if (!candidates.length) {
+      setStatus("실전 추적 · 지금 확인할 시작 경기 PENDING 기록이 없습니다.");
       return;
     }
 
     setValidationLoading(true);
-    setStatus(`실전 추적 · 종료 경기 ${due.length}건 결과 확인 중…`);
+    setStatus(`실전 추적 · PENDING ${candidates.length}건 Betman FINAL 우선 확인 중…`);
 
     let next = [...liveTrackerRecords];
     let verified = 0;
@@ -14732,7 +14736,7 @@ export default function Home() {
         }
       } catch {}
 
-      for (const record of due) {
+      for (const record of candidates) {
         try {
           let truth: BacktestValidationResult | null = null;
 
@@ -14741,6 +14745,8 @@ export default function Home() {
             actualGameIdentity(game) === record.fixtureKey
           );
           const betmanScore = betmanMatch ? fixtureFinalScore(betmanMatch) : null;
+          const fallbackEligible = record.startMs < Date.now() - 2 * 60 * 60 * 1000;
+          let waitReason: LiveTrackerRecord["verifyWaitReason"] = null;
 
           if (betmanScore) {
             truth = {
@@ -14750,9 +14756,14 @@ export default function Home() {
               firstHalfAwayScore: null,
               sourceLabel: "Betman 종료점수 · 실전 PRE 잠금 후 검증",
             };
+          } else if (betmanMatch) {
+            waitReason = "BETMAN_FINAL_WAIT";
+          } else {
+            waitReason = "BETMAN_MATCH_WAIT";
           }
 
-          if (!truth && record.fixtureId !== null && Number.isFinite(Number(record.fixtureId))) {
+          // SportsAPI result는 VERIFY 전용 fallback이며 경기 시작 +2시간 이후에만 호출한다.
+          if (!truth && fallbackEligible && record.fixtureId !== null && Number.isFinite(Number(record.fixtureId))) {
             const response = await fetch(
               `/api/fixture/result?id=${encodeURIComponent(String(record.fixtureId))}`,
               { cache: "no-store" }
@@ -14777,10 +14788,22 @@ export default function Home() {
             } else if (response.status === 429) {
               unavailable += 1;
               break;
+            } else {
+              waitReason = "RESULT_NOT_FOUND";
             }
+          } else if (!truth && !fallbackEligible) {
+            waitReason = waitReason ?? "FALLBACK_TIME_WAIT";
+          } else if (!truth && fallbackEligible && (record.fixtureId === null || !Number.isFinite(Number(record.fixtureId)))) {
+            waitReason = "FIXTURE_ID_MISSING";
           }
 
           if (!truth || !Number.isFinite(truth.homeScore) || !Number.isFinite(truth.awayScore)) {
+            const checkedAt = Date.now();
+            next = next.map((candidate) =>
+              candidate.id === record.id
+                ? { ...candidate, verifyWaitReason: waitReason, verifyLastCheckedAt: checkedAt }
+                : candidate
+            );
             unavailable += 1;
             continue;
           }
@@ -14844,6 +14867,8 @@ export default function Home() {
                   result: truth,
                   venueShadowResult: shadowResult,
                   footballPreResult,
+                  verifyWaitReason: null,
+                  verifyLastCheckedAt: Date.now(),
                 }
               : candidate
           );
@@ -14855,8 +14880,15 @@ export default function Home() {
 
       saveLiveTrackerRecords(next);
       setLiveTrackerRecords(next);
+      const waiting = next.filter((record) => record.verificationStatus === "PENDING" && record.verifyLastCheckedAt);
+      const waitCounts = waiting.reduce<Record<string, number>>((acc, record) => {
+        const key = String(record.verifyWaitReason ?? "UNKNOWN");
+        acc[key] = (acc[key] ?? 0) + 1;
+        return acc;
+      }, {});
+      const waitLabel = Object.entries(waitCounts).map(([key, count]) => `${key} ${count}`).join(" · ");
       setStatus(
-        `실전 추적 결과 확인 완료 · 검증 ${verified}경기 · 아직 결과 없음 ${unavailable}경기`
+        `실전 추적 결과 확인 완료 · 검증 ${verified}경기 · 아직 결과 없음 ${unavailable}경기${waitLabel ? ` · ${waitLabel}` : ""}`
       );
     } finally {
       setValidationLoading(false);
@@ -18484,6 +18516,7 @@ export default function Home() {
                 home: String(selectedBetman?.home ?? ""),
                 away: String(selectedBetman?.away ?? ""),
                 sport: koreanSport(String((selectedBetman as any)?.sport ?? "")),
+                league: String((selectedBetman as any)?.league ?? (selectedBetman as any)?.leagueName ?? ""),
               });
               const naverResponse = await fetch(
                 `/api/naver/lineup?${naverParams.toString()}`,
@@ -18732,6 +18765,7 @@ export default function Home() {
               home: String(selectedBetman?.home ?? detailData?.selectedFixture?.home ?? data?.selectedFixture?.home ?? ""),
               away: String(selectedBetman?.away ?? detailData?.selectedFixture?.away ?? data?.selectedFixture?.away ?? ""),
               sport: koreanSport(String((selectedBetman as any)?.sport ?? "")),
+              league: String((selectedBetman as any)?.league ?? (selectedBetman as any)?.leagueName ?? ""),
             });
             const naverResponse = await fetch(`/api/naver/lineup?${naverParams.toString()}`, { cache: "no-store" });
             const naverPayload = await readApiResponse(naverResponse, "네이버 당일 선발 라인업");
@@ -20427,7 +20461,7 @@ export default function Home() {
             className="btn light"
             onClick={() => void verifyLiveTrackerResults()}
             disabled={validationLoading}
-            title="경기 시작 후 충분한 시간이 지난 실전 PRE 기록만 결과 API로 검증합니다. PRE 저장 단계에서는 결과 API를 호출하지 않습니다."
+            title="시작한 PENDING 기록은 Betman FINAL을 먼저 확인하고, +2시간 이후에만 SportsAPI 결과를 fallback으로 확인합니다. PRE 저장 단계에서는 결과 API를 호출하지 않습니다."
           >
             {validationLoading ? "⏳ 결과 확인 중" : "✅ 종료 경기 결과 확인"}
           </button>
@@ -20470,7 +20504,7 @@ export default function Home() {
 
         <div style={{ padding: "9px 12px", borderTop: "1px solid #e2e8f0" }}>
           <div className="small" style={{ fontWeight: 900, marginBottom: 6 }}>
-            V13.8.49 VENUE SHADOW VALIDATOR · MODEL OFF · READY PRE 잠금 {venueShadowReadySummary.locked}경기 · VERIFY {venueShadowValidationSummary.games}/30경기 · 결과대기 {venueShadowReadySummary.pending}경기{venueShadowReadySummary.due > 0 ? ` · 확인가능 ${venueShadowReadySummary.due}` : ""}
+            V13.8.62 VENUE SHADOW VALIDATOR · MODEL OFF · READY PRE 잠금 {venueShadowReadySummary.locked}경기 · VERIFY {venueShadowValidationSummary.games}/30경기 · 결과대기 {venueShadowReadySummary.pending}경기{venueShadowReadySummary.due > 0 ? ` · 확인가능 ${venueShadowReadySummary.due}` : ""}
           </div>
           <div className="cards">
             <div className="card">득점 MAE<b>{venueShadowValidationSummary.rawScoreMae?.toFixed(2) ?? "-"} → {venueShadowValidationSummary.shadowScoreMae?.toFixed(2) ?? "-"}</b><div className="small">RAW → SHADOW</div></div>
@@ -20482,7 +20516,7 @@ export default function Home() {
 
         <div style={{ padding: "9px 12px", borderTop: "1px solid #e2e8f0" }}>
           <div className="small" style={{ fontWeight: 900, marginBottom: 6 }}>
-            V13.8.61 FOOTBALL PRE → LINEUP → VERIFY · MODEL OFF · PRE {footballLineupValidationSummary.pre}경기 · PRE ONLY {footballLineupValidationSummary.preOnly}경기 · LINEUP READY {footballLineupValidationSummary.lineupReady}경기 · VERIFY {footballLineupValidationSummary.lineupVerified}/30경기 · 결과대기 {footballLineupValidationSummary.pending}경기{footballLineupValidationSummary.due > 0 ? ` · 확인가능 ${footballLineupValidationSummary.due}` : ""}
+            V13.8.62 FOOTBALL PRE → LINEUP → VERIFY · MODEL OFF · PRE {footballLineupValidationSummary.pre}경기 · PRE ONLY {footballLineupValidationSummary.preOnly}경기 · LINEUP READY {footballLineupValidationSummary.lineupReady}경기 · VERIFY {footballLineupValidationSummary.lineupVerified}/30경기 · 결과대기 {footballLineupValidationSummary.pending}경기{footballLineupValidationSummary.due > 0 ? ` · 확인가능 ${footballLineupValidationSummary.due}` : ""}
           </div>
           <div className="cards">
             <div className="card">득점 MAE<b>{footballLineupValidationSummary.lineupScoreMae?.toFixed(2) ?? "-"}</b><div className="small">LINEUP READY PRE λ 기준</div></div>
