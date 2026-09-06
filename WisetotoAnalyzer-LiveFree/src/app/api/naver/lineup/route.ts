@@ -1,3 +1,4 @@
+// DEPLOY_MARKER_V13_8_64_J1_ACTUAL_SCHEDULE_API_20260906
 // DEPLOY_MARKER_V13_8_63_J1_CATEGORY_RESOLVER_20260906
 // DEPLOY_MARKER_V13_8_62_LEAGUE_ADAPTER_VERIFY_READY_20260906
 // DEPLOY_MARKER_V13_8_58_FOOTBALL_LINEUP_SNAPSHOT_AUDIT_20260906
@@ -274,10 +275,19 @@ function footballTeamMatches(candidate: string, requested: string, adapterId: Fo
 async function resolveFootballGameId(date: string, home: string, away: string, startRaw: string, adapterId: FootballAdapterId) {
   const d = isoDate(date);
   const exactCategoryId = footballCategoryIdForAdapter(adapterId);
+  const j1MonthFrom = `${d.slice(0, 8)}01`;
+  const j1MonthTo = (() => {
+    const [year, month] = d.split("-").map(Number);
+    const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    return `${d.slice(0, 8)}${String(last).padStart(2, "0")}`;
+  })();
+  const j1ActualFields = "basic%2Cschedule%2CmatchRound%2CroundTournamentInfo%2CphaseCode%2CgroupName%2Cleg%2ChasPtSore%2ChomePtScore%2CawayPtScore%2Cleague%2CleagueName%2CaggregateWinner%2CneutralGround%2Cpostponed%2CmanualRelayUrl";
   const endpoints = [
-    exactCategoryId
-      ? `${NAVER_API}?fields=basic%2Cschedule%2Cfootball&upperCategoryId=wfootball&categoryId=${encodeURIComponent(exactCategoryId)}&fromDate=${encodeURIComponent(d)}&toDate=${encodeURIComponent(d)}&size=500`
-      : null,
+    adapterId === "J1_JP"
+      ? `${NAVER_API}?fields=${j1ActualFields}&upperCategoryId=kfootball&categoryId=jleague&fromDate=${encodeURIComponent(j1MonthFrom)}&toDate=${encodeURIComponent(j1MonthTo)}&roundCodes=&size=500`
+      : exactCategoryId
+        ? `${NAVER_API}?fields=basic%2Cschedule%2Cfootball&upperCategoryId=wfootball&categoryId=${encodeURIComponent(exactCategoryId)}&fromDate=${encodeURIComponent(d)}&toDate=${encodeURIComponent(d)}&size=500`
+        : null,
     `${NAVER_API}?fields=basic%2Cschedule%2Cfootball&upperCategoryId=wfootball&fromDate=${encodeURIComponent(d)}&toDate=${encodeURIComponent(d)}&size=500`,
   ].filter((v, i, a): v is string => Boolean(v) && a.indexOf(v as string) === i);
 
@@ -291,10 +301,12 @@ async function resolveFootballGameId(date: string, home: string, away: string, s
         cache: "no-store",
         headers: {
           accept: "application/json, text/plain, */*",
-          referer: exactCategoryId
-            ? `https://m.sports.naver.com/wfootball/schedule/index?category=${encodeURIComponent(exactCategoryId)}`
-            : "https://m.sports.naver.com/wfootball/schedule/index",
-          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.63",
+          referer: adapterId === "J1_JP"
+            ? `https://m.sports.naver.com/kfootball/schedule/index?category=jleague&date=${encodeURIComponent(d)}`
+            : exactCategoryId
+              ? `https://m.sports.naver.com/wfootball/schedule/index?category=${encodeURIComponent(exactCategoryId)}`
+              : "https://m.sports.naver.com/wfootball/schedule/index",
+          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.64",
         },
       });
       lastStatus = response.status;
@@ -385,7 +397,7 @@ async function resolveFootballGameId(date: string, home: string, away: string, s
       gameDateTime: obj?.gameDateTime ?? obj?.startTime ?? null,
     })),
     adapterId,
-    build: "V13.8.63_J1_EXACT_CATEGORY_RESOLVER",
+    build: "V13.8.64_J1_ACTUAL_SCHEDULE_API",
   };
 }
 
@@ -1166,10 +1178,15 @@ function summarizeFootballScheduleTeam(rows: AnyObj[], teamName: string, adapter
 async function collectFootballRecentSummary(date: string, home: string, away: string, adapterId: FootballAdapterId) {
   const fromDate = isoDayOffset(date, -40);
   const toDate = isoDayOffset(date, -1);
-  const endpoint = `${NAVER_API}?fields=basic%2Cschedule%2Cfootball&upperCategoryId=wfootball&fromDate=${fromDate}&toDate=${toDate}&size=500`;
+  const j1ActualFields = "basic%2Cschedule%2CmatchRound%2CroundTournamentInfo%2CphaseCode%2CgroupName%2Cleg%2ChasPtSore%2ChomePtScore%2CawayPtScore%2Cleague%2CleagueName%2CaggregateWinner%2CneutralGround%2Cpostponed%2CmanualRelayUrl";
+  const endpoint = adapterId === "J1_JP"
+    ? `${NAVER_API}?fields=${j1ActualFields}&upperCategoryId=kfootball&categoryId=jleague&fromDate=${fromDate}&toDate=${toDate}&roundCodes=&size=500`
+    : `${NAVER_API}?fields=basic%2Cschedule%2Cfootball&upperCategoryId=wfootball&fromDate=${fromDate}&toDate=${toDate}&size=500`;
   const scheduleResult = await fetchNaverJsonCached(
     endpoint,
-    "https://m.sports.naver.com/wfootball/schedule/index",
+    adapterId === "J1_JP"
+      ? `https://m.sports.naver.com/kfootball/schedule/index?category=jleague&date=${encodeURIComponent(date)}`
+      : "https://m.sports.naver.com/wfootball/schedule/index",
     true,
   );
   const directRows = Array.isArray(scheduleResult?.payload?.result?.games) ? scheduleResult.payload.result.games : [];
