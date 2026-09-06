@@ -420,23 +420,88 @@ async function resolveMlbGameId(date: string, home: string, away: string, startR
   };
 }
 
-function normalizeFootballPlayers(players: any, teamCode: any, substitute: boolean) {
+function footballPlayerSubstituteValue(player: AnyObj) {
+  const raw = player?.substitute ?? player?.isSubstitute ?? player?.bench ?? player?.isBench;
+  if (typeof raw === "boolean") return raw;
+  const text = String(raw ?? "").trim().toLowerCase();
+  if (["true", "1", "y", "yes", "sub", "bench"].includes(text)) return true;
+  if (["false", "0", "n", "no", "starter", "start"].includes(text)) return false;
+  const playType = String(player?.playerPlayType ?? player?.playType ?? "").trim().toLowerCase();
+  if (/sub|bench|교체|후보/.test(playType)) return true;
+  if (/start|starter|선발/.test(playType)) return false;
+  return null;
+}
+
+function footballPlayerTeamCode(player: AnyObj) {
+  return String(
+    player?.teamId ?? player?.teamCode ?? player?.team?.id ?? player?.team?.teamId ?? player?.team?.code ?? ""
+  ).trim();
+}
+
+function footballPlayerTeamName(player: AnyObj) {
+  return String(
+    player?.teamName ?? player?.team?.name ?? player?.team?.teamName ?? player?.clubName ?? ""
+  ).trim();
+}
+
+function extractFootballPlayers(payload: any) {
+  const directCandidates = [
+    payload?.result?.players,
+    payload?.result?.playerList,
+    payload?.result?.lineups,
+    payload?.result?.data?.players,
+    payload?.players,
+  ];
+  for (const candidate of directCandidates) {
+    if (Array.isArray(candidate) && candidate.some((p: AnyObj) => p && typeof p === "object")) {
+      return candidate;
+    }
+  }
+  const arrays: AnyObj[][] = [];
+  const visit = (value: any) => {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      if (value.some((p: AnyObj) => p && typeof p === "object" && (p?.playerId != null || p?.playerName != null || p?.name != null))) {
+        arrays.push(value as AnyObj[]);
+      }
+      value.forEach(visit);
+      return;
+    }
+    Object.values(value).forEach(visit);
+  };
+  visit(payload);
+  return arrays.sort((a, b) => b.length - a.length)[0] ?? [];
+}
+
+function normalizeFootballPlayers(
+  players: any,
+  teamCode: any,
+  substitute: boolean,
+  teamName = ""
+) {
   const code = String(teamCode ?? "").trim();
-  if (!Array.isArray(players) || !code) return [];
+  if (!Array.isArray(players)) return [];
   return players
-    .filter((p: AnyObj) => String(p?.teamId ?? "").trim() === code && Boolean(p?.substitute) === substitute)
-    .sort((a: AnyObj, b: AnyObj) => Number(a?.formationPlace ?? 99) - Number(b?.formationPlace ?? 99))
+    .filter((p: AnyObj) => {
+      const pCode = footballPlayerTeamCode(p);
+      const pName = footballPlayerTeamName(p);
+      const teamOk = code ? pCode === code : (teamName ? footballTeamMatches(pName, teamName) : false);
+      if (!teamOk) return false;
+      const subValue = footballPlayerSubstituteValue(p);
+      return subValue === substitute;
+    })
+    .sort((a: AnyObj, b: AnyObj) => Number(a?.formationPlace ?? a?.formationOrder ?? 99) - Number(b?.formationPlace ?? b?.formationOrder ?? 99))
     .map((p: AnyObj) => ({
-      playerId: String(p?.playerId ?? "").trim() || null,
-      pcode: String(p?.playerId ?? "").trim() || null,
-      name: String(p?.playerName ?? "").trim() || null,
-      position: String(p?.position ?? "").trim() || null,
-      formationPlace: Number.isFinite(Number(p?.formationPlace)) ? Number(p.formationPlace) : null,
-      shirtNumber: Number.isFinite(Number(p?.shirtNumber)) ? Number(p.shirtNumber) : null,
+      playerId: String(p?.playerId ?? p?.id ?? "").trim() || null,
+      pcode: String(p?.playerId ?? p?.id ?? "").trim() || null,
+      name: String(p?.playerName ?? p?.name ?? "").trim() || null,
+      position: String(p?.position ?? p?.positionName ?? "").trim() || null,
+      formationPlace: Number.isFinite(Number(p?.formationPlace ?? p?.formationOrder)) ? Number(p?.formationPlace ?? p?.formationOrder) : null,
+      shirtNumber: Number.isFinite(Number(p?.shirtNumber ?? p?.backNumber)) ? Number(p?.shirtNumber ?? p?.backNumber) : null,
       substitute,
       matchPlayed: Boolean(p?.matchPlayed),
-      playerPlayType: String(p?.playerPlayType ?? "").trim() || null,
-      countryName: String(p?.countryName ?? "").trim() || null,
+      playerPlayType: String(p?.playerPlayType ?? p?.playType ?? "").trim() || null,
+      countryName: String(p?.countryName ?? p?.country?.name ?? "").trim() || null,
       source: "NAVER_FOOTBALL_PLAYERS",
     }))
     .filter((p: AnyObj) => Boolean(p.name));
@@ -1579,8 +1644,8 @@ export async function GET(request: Request) {
       });
       footballPlayersStatus = playersResponse.status;
       const playersPayload = await playersResponse.json().catch(() => null);
-      if (playersResponse.ok && playersPayload?.success && playersPayload?.code === 200 && Array.isArray(playersPayload?.result?.players)) {
-        footballPlayers = playersPayload.result.players;
+      if (playersResponse.ok && playersPayload) {
+        footballPlayers = extractFootballPlayers(playersPayload);
       }
     }
     if (league === "NPB") {
@@ -1622,8 +1687,10 @@ export async function GET(request: Request) {
     let awayStarter: AnyObj | null = null;
 
     if (league === "FOOTBALL") {
-      homeLineup = normalizeFootballPlayers(footballPlayers, game?.homeTeamCode, false).slice(0, 11);
-      awayLineup = normalizeFootballPlayers(footballPlayers, game?.awayTeamCode, false).slice(0, 11);
+      const homeTeamCode = game?.homeTeamCode ?? game?.homeTeamId ?? game?.homeTeam?.id ?? game?.homeTeam?.teamId ?? null;
+      const awayTeamCode = game?.awayTeamCode ?? game?.awayTeamId ?? game?.awayTeam?.id ?? game?.awayTeam?.teamId ?? null;
+      homeLineup = normalizeFootballPlayers(footballPlayers, homeTeamCode, false, String(game?.homeTeamName ?? home)).slice(0, 11);
+      awayLineup = normalizeFootballPlayers(footballPlayers, awayTeamCode, false, String(game?.awayTeamName ?? away)).slice(0, 11);
     } else if (league === "MLB") {
       const baseInfo = result?.textRelayData?.baseInfo ?? {};
       const pollingLineup = baseInfo?.batterLineup ?? {};
@@ -1743,13 +1810,26 @@ export async function GET(request: Request) {
       home: homeLineup,
       away: awayLineup,
       bench: league === "FOOTBALL" ? {
-        home: normalizeFootballPlayers(footballPlayers, game?.homeTeamCode, true),
-        away: normalizeFootballPlayers(footballPlayers, game?.awayTeamCode, true),
+        home: normalizeFootballPlayers(
+          footballPlayers,
+          game?.homeTeamCode ?? game?.homeTeamId ?? game?.homeTeam?.id ?? game?.homeTeam?.teamId ?? null,
+          true,
+          String(game?.homeTeamName ?? home),
+        ),
+        away: normalizeFootballPlayers(
+          footballPlayers,
+          game?.awayTeamCode ?? game?.awayTeamId ?? game?.awayTeam?.id ?? game?.awayTeam?.teamId ?? null,
+          true,
+          String(game?.awayTeamName ?? away),
+        ),
       } : null,
       footballPlayers: league === "FOOTBALL" ? {
         ok: footballPlayers.length > 0,
         status: footballPlayersStatus,
         total: footballPlayers.length,
+        rawTeamCodes: Array.from(new Set(footballPlayers.map((p: AnyObj) => footballPlayerTeamCode(p)).filter(Boolean))),
+        rawTeamNames: Array.from(new Set(footballPlayers.map((p: AnyObj) => footballPlayerTeamName(p)).filter(Boolean))),
+        substituteKnown: footballPlayers.filter((p: AnyObj) => footballPlayerSubstituteValue(p) !== null).length,
         startingHome: homeLineup.length,
         startingAway: awayLineup.length,
         startingTotal: homeLineup.length + awayLineup.length,
