@@ -5,6 +5,7 @@
 
 // DEPLOY_MARKER_V13_8_34_NAVER_RECENT_BATTING_V1_20260903
 const NAVER_API = "https://api-gw.sports.naver.com/schedule/games";
+const NAVER_STATISTICS_API = "https://api-gw.sports.naver.com/statistics/categories";
 
 type AnyObj = Record<string, any>;
 type TeamCodeEntry = { code: string; aliases: string[] };
@@ -498,11 +499,16 @@ function cookieHeaderFromSetCookie(raw: string | null) {
     .join("; ");
 }
 
-async function fetchFootballPlayersFromNaverSession(gameId: string) {
+async function fetchFootballPlayersFromNaverSession(gameId: string, categoryId: string | null) {
   const lineupPage = `https://m.sports.naver.com/game/${encodeURIComponent(gameId)}/lineup`;
-  const playersEndpoint = `${NAVER_API}/${encodeURIComponent(gameId)}/players`;
+  // V13.8.57: Chrome Network에서 확인된 실제 라인업 XHR 경로.
+  // schedule/games/{gameId}/players 가 아니라 statistics/categories/{categoryId}/games/{gameId}/players 이다.
+  const normalizedCategoryId = String(categoryId ?? "").trim().toLowerCase();
+  const playersEndpoint = normalizedCategoryId
+    ? `${NAVER_STATISTICS_API}/${encodeURIComponent(normalizedCategoryId)}/games/${encodeURIComponent(gameId)}/players`
+    : `${NAVER_API}/${encodeURIComponent(gameId)}/players`;
   const desktopUa =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36";
 
   const pageResponse = await fetch(lineupPage, {
     cache: "no-store",
@@ -527,11 +533,13 @@ async function fetchFootballPlayersFromNaverSession(gameId: string) {
 
   const xhrHeaders: Record<string, string> = {
     accept: "application/json, text/plain, */*",
-    "accept-language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-    "cache-control": "no-cache",
-    pragma: "no-cache",
+    "accept-language": "es-ES,es;q=0.9,ko;q=0.8",
     origin: "https://m.sports.naver.com",
+    priority: "u=1, i",
     referer: lineupPage,
+    "sec-ch-ua": '"Chromium";v="152", "Not?A_Brand";v="24", "Google Chrome";v="152"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
     "sec-fetch-dest": "empty",
     "sec-fetch-mode": "cors",
     "sec-fetch-site": "same-site",
@@ -1721,11 +1729,14 @@ export async function GET(request: Request) {
     let footballPlayersSource: string | null = null;
     let footballPlayersAttempts: Array<{ endpoint: string; status: number | null; source: string }> = [];
     if (league === "FOOTBALL") {
-      // V13.8.56: 실제 Naver 라인업 탭이 호출하는 /players를 다시 PRIMARY로 사용한다.
+      // V13.8.57: Chrome Network에서 확인한 statistics/categories/{categoryId}/games/{gameId}/players를 PRIMARY로 사용한다.
       // 서버에서 바로 /players를 때리면 403이 발생했으므로, 먼저 동일 gameId의 /lineup 페이지를
       // 브라우저 navigation 형태로 warm-up하고 응답 쿠키를 이어받은 뒤 XHR 형태로 /players를 호출한다.
       // 이 PRIMARY가 실패한 경우에만 200 응답 후보를 진단/보조 fallback으로 확인한다.
-      const sessionPlayers = await fetchFootballPlayersFromNaverSession(gameId);
+      const footballCategoryId = String(
+        resolverDebug?.selectedCategoryId ?? resolverDebug?.selectedGame?.categoryId ?? ""
+      ).trim() || null;
+      const sessionPlayers = await fetchFootballPlayersFromNaverSession(gameId, footballCategoryId);
       footballPlayersAttempts.push({
         endpoint: `https://m.sports.naver.com/game/${encodeURIComponent(gameId)}/lineup`,
         status: sessionPlayers.pageStatus,
@@ -1734,7 +1745,7 @@ export async function GET(request: Request) {
       footballPlayersAttempts.push({
         endpoint: sessionPlayers.endpoint,
         status: sessionPlayers.status,
-        source: "PLAYERS_PRIMARY_SESSION",
+        source: "PLAYERS_STATISTICS_PRIMARY",
       });
       footballPlayersEndpoint = sessionPlayers.endpoint;
       footballPlayersStatus = sessionPlayers.status;
@@ -1744,7 +1755,7 @@ export async function GET(request: Request) {
         const known = extracted.filter((p: AnyObj) => footballPlayerSubstituteValue(p) !== null).length;
         if (extracted.length >= 11 && known >= 11) {
           footballPlayers = extracted;
-          footballPlayersSource = "PLAYERS_PRIMARY_SESSION";
+          footballPlayersSource = "PLAYERS_STATISTICS_PRIMARY";
         }
       }
 
