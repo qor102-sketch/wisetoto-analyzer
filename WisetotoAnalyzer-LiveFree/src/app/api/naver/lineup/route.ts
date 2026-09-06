@@ -444,26 +444,39 @@ function footballPlayerTeamName(player: AnyObj) {
   ).trim();
 }
 
+function isFootballPlayerLike(p: AnyObj) {
+  if (!p || typeof p !== "object") return false;
+  const name = String(p?.playerName ?? p?.name ?? p?.player?.name ?? "").trim();
+  const id = String(p?.playerId ?? p?.id ?? p?.player?.id ?? "").trim();
+  const position = String(p?.position ?? p?.positionName ?? p?.player?.position ?? "").trim();
+  const team = footballPlayerTeamCode(p) || footballPlayerTeamName(p);
+  const sub = footballPlayerSubstituteValue(p);
+  // 팀/선발/포지션 중 하나 이상이 동반된 실제 선수형 객체만 허용한다.
+  return Boolean((name || id) && (team || sub !== null || position));
+}
+
 function extractFootballPlayers(payload: any) {
   const directCandidates = [
     payload?.result?.players,
     payload?.result?.playerList,
     payload?.result?.lineups,
+    payload?.result?.lineup?.players,
     payload?.result?.data?.players,
+    payload?.result?.football?.players,
     payload?.players,
   ];
   for (const candidate of directCandidates) {
-    if (Array.isArray(candidate) && candidate.some((p: AnyObj) => p && typeof p === "object")) {
-      return candidate;
+    if (Array.isArray(candidate)) {
+      const rows = candidate.filter((p: AnyObj) => isFootballPlayerLike(p));
+      if (rows.length >= 11) return rows;
     }
   }
   const arrays: AnyObj[][] = [];
   const visit = (value: any) => {
     if (!value || typeof value !== "object") return;
     if (Array.isArray(value)) {
-      if (value.some((p: AnyObj) => p && typeof p === "object" && (p?.playerId != null || p?.playerName != null || p?.name != null))) {
-        arrays.push(value as AnyObj[]);
-      }
+      const rows = value.filter((p: AnyObj) => isFootballPlayerLike(p));
+      if (rows.length >= 11) arrays.push(rows);
       value.forEach(visit);
       return;
     }
@@ -1635,34 +1648,32 @@ export async function GET(request: Request) {
     let footballPlayersSource: string | null = null;
     let footballPlayersAttempts: Array<{ endpoint: string; status: number | null; source: string }> = [];
     if (league === "FOOTBALL") {
-      footballPlayersEndpoint = `${NAVER_API}/${gameId}/players`;
+      // V13.8.54: 축구 선발은 /players 단일 경로를 전제로 하지 않는다.
+      // Naver gamecenter가 사용하는 공개 경기 payload 후보를 다시 조회하고,
+      // 실제 선수형 객체 + 명시적 선발 여부가 확인된 데이터만 채택한다.
       const browserHeaders = {
         accept: "application/json, text/plain, */*",
         "accept-language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
         origin: "https://m.sports.naver.com",
-        referer: `https://m.sports.naver.com/game/${gameId}`,
+        referer: `https://m.sports.naver.com/game/${gameId}/relay`,
         "sec-fetch-dest": "empty",
         "sec-fetch-mode": "cors",
         "sec-fetch-site": "same-site",
         "user-agent": "Mozilla/5.0 (Linux; Android 14; SM-S928N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36",
       };
       const playerAttempts = [
-        {
-          endpoint: footballPlayersEndpoint,
-          source: "PLAYERS_API_BROWSER",
-          headers: browserHeaders,
-        },
-        {
-          endpoint: footballPlayersEndpoint,
-          source: "PLAYERS_API_RELAY_REFERER",
-          headers: { ...browserHeaders, referer: `https://m.sports.naver.com/game/${gameId}/relay` },
-        },
+        { endpoint: `${NAVER_API}/${gameId}/preview`, source: "GAME_PREVIEW" },
+        { endpoint: `${NAVER_API}/${gameId}/relay`, source: "GAME_RELAY" },
+        { endpoint: `${NAVER_API}/${gameId}/record`, source: "GAME_RECORD" },
+        { endpoint: `${NAVER_API}/${gameId}/game-polling?inning=1&isHighlight=false`, source: "GAME_POLLING" },
+        { endpoint: `${NAVER_API}/${gameId}/players`, source: "PLAYERS_API_LEGACY" },
       ];
+      footballPlayersEndpoint = playerAttempts[0].endpoint;
 
       for (const attempt of playerAttempts) {
         const playersResponse = await fetch(attempt.endpoint, {
           cache: "no-store",
-          headers: attempt.headers,
+          headers: browserHeaders,
         }).catch(() => null);
         const status = playersResponse?.status ?? null;
         footballPlayersAttempts.push({ endpoint: attempt.endpoint, status, source: attempt.source });
@@ -1670,28 +1681,30 @@ export async function GET(request: Request) {
         if (!playersResponse?.ok) continue;
         const playersPayload = await playersResponse.json().catch(() => null);
         const extracted = extractFootballPlayers(playersPayload);
-        if (extracted.length > 0) {
-          footballPlayers = extracted;
-          footballPlayersStatus = playersResponse.status;
-          footballPlayersSource = attempt.source;
-          break;
-        }
+        if (extracted.length < 11) continue;
+        const known = extracted.filter((p: AnyObj) => footballPlayerSubstituteValue(p) !== null).length;
+        // 선발/벤치 판정이 전혀 없는 roster 배열은 공식 선발로 오인하지 않는다.
+        if (known < 11) continue;
+        footballPlayers = extracted;
+        footballPlayersStatus = playersResponse.status;
+        footballPlayersSource = attempt.source;
+        footballPlayersEndpoint = attempt.endpoint;
+        break;
       }
 
-      // players API가 403 등으로 차단돼도 이미 정상 수신된 game-polling / schedule 응답 안에
-      // 실제 선수 배열이 포함된 경우에만 사용한다. 이름/선발 여부를 임의 생성하지 않는다.
+      // schedule/polling embedded fallback 역시 엄격한 player-like + 선발판정 조건을 만족할 때만 사용한다.
       if (footballPlayers.length === 0) {
-        const pollingPlayers = extractFootballPlayers(payload);
-        if (pollingPlayers.length > 0) {
-          footballPlayers = pollingPlayers;
-          footballPlayersSource = "GAME_POLLING_EMBEDDED";
-        }
-      }
-      if (footballPlayers.length === 0) {
-        const schedulePlayers = extractFootballPlayers(resolverDebug?.selectedGame);
-        if (schedulePlayers.length > 0) {
-          footballPlayers = schedulePlayers;
-          footballPlayersSource = "SCHEDULE_EMBEDDED";
+        for (const embedded of [
+          { payload, source: "GAME_POLLING_EMBEDDED" },
+          { payload: resolverDebug?.selectedGame, source: "SCHEDULE_EMBEDDED" },
+        ]) {
+          const rows = extractFootballPlayers(embedded.payload);
+          const known = rows.filter((p: AnyObj) => footballPlayerSubstituteValue(p) !== null).length;
+          if (rows.length >= 11 && known >= 11) {
+            footballPlayers = rows;
+            footballPlayersSource = embedded.source;
+            break;
+          }
         }
       }
     }
