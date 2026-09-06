@@ -1,3 +1,4 @@
+// DEPLOY_MARKER_V13_8_63_J1_CATEGORY_RESOLVER_20260906
 // DEPLOY_MARKER_V13_8_62_LEAGUE_ADAPTER_VERIFY_READY_20260906
 // DEPLOY_MARKER_V13_8_58_FOOTBALL_LINEUP_SNAPSHOT_AUDIT_20260906
 // DEPLOY_MARKER_V13_8_56_FOOTBALL_NAVER_PLAYERS_SESSION_PRIMARY_20260906
@@ -75,6 +76,12 @@ function footballAdapterId(leagueRaw: string): FootballAdapterId {
   if (/mls|미국.*축구|메이저리그사커/.test(league)) return "MLS_US";
   if (/에레디비시|네덜란드|epl|프리미어|라리가|분데스|세리에|리그1|유럽/.test(league)) return "EUROPE_GENERIC";
   return "FOOTBALL_GENERIC";
+}
+
+function footballCategoryIdForAdapter(adapterId: FootballAdapterId): string | null {
+  if (adapterId === "J1_JP") return "jleague";
+  if (adapterId === "MLS_US") return "mls";
+  return null;
 }
 
 function footballAliasesFor(adapterId: FootballAdapterId) {
@@ -266,33 +273,68 @@ function footballTeamMatches(candidate: string, requested: string, adapterId: Fo
 
 async function resolveFootballGameId(date: string, home: string, away: string, startRaw: string, adapterId: FootballAdapterId) {
   const d = isoDate(date);
-  const endpoint = `${NAVER_API}?fields=basic%2Cschedule%2Cfootball&upperCategoryId=wfootball&fromDate=${encodeURIComponent(d)}&toDate=${encodeURIComponent(d)}&size=500`;
-  const response = await fetch(endpoint, {
-    cache: "no-store",
-    headers: {
-      accept: "application/json, text/plain, */*",
-      referer: "https://m.sports.naver.com/wfootball/schedule/index",
-      "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.50",
-    },
-  });
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || !payload) return { gameId: null, endpoint, status: response.status, candidateCount: 0, scheduleCount: 0 };
+  const exactCategoryId = footballCategoryIdForAdapter(adapterId);
+  const endpoints = [
+    exactCategoryId
+      ? `${NAVER_API}?fields=basic%2Cschedule%2Cfootball&upperCategoryId=wfootball&categoryId=${encodeURIComponent(exactCategoryId)}&fromDate=${encodeURIComponent(d)}&toDate=${encodeURIComponent(d)}&size=500`
+      : null,
+    `${NAVER_API}?fields=basic%2Cschedule%2Cfootball&upperCategoryId=wfootball&fromDate=${encodeURIComponent(d)}&toDate=${encodeURIComponent(d)}&size=500`,
+  ].filter((v, i, a): v is string => Boolean(v) && a.indexOf(v as string) === i);
 
-  // V13.8.50: Naver football schedule 응답은 리그마다 gameDate/category 필드가 다를 수 있다.
-  // wfootball endpoint 자체가 축구 범위이므로 gameId + 실제 날짜를 우선하고, category 필드 부재만으로 버리지 않는다.
-  const directRows = Array.isArray(payload?.result?.games) ? payload.result.games : [];
-  const discoveredRows = allObjects(payload);
+  const attempts: Array<{ endpoint: string; status: number | null; scheduleCount: number }> = [];
+  let mergedRows: AnyObj[] = [];
+  let lastStatus = 0;
+
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint, {
+        cache: "no-store",
+        headers: {
+          accept: "application/json, text/plain, */*",
+          referer: exactCategoryId
+            ? `https://m.sports.naver.com/wfootball/schedule/index?category=${encodeURIComponent(exactCategoryId)}`
+            : "https://m.sports.naver.com/wfootball/schedule/index",
+          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.63",
+        },
+      });
+      lastStatus = response.status;
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload) {
+        attempts.push({ endpoint, status: response.status, scheduleCount: 0 });
+        continue;
+      }
+
+      const directRows = Array.isArray(payload?.result?.games) ? payload.result.games : [];
+      const discoveredRows = allObjects(payload);
+      const localById = new Map<string, AnyObj>();
+      for (const obj of [...directRows, ...discoveredRows]) {
+        const gameId = String(obj?.gameId ?? obj?.game_id ?? "").trim();
+        if (!gameId) continue;
+        const gameDate = dateKey(String(obj?.gameDateTime ?? obj?.gameDate ?? obj?.startTime ?? ""));
+        // 축구 gameId는 MLS/J1 모두 opaque ID일 수 있으므로 gameId 앞 8자리로 날짜를 추정하지 않는다.
+        if (gameDate && gameDate !== date) continue;
+        if (!localById.has(gameId)) localById.set(gameId, obj);
+      }
+      const localRows = Array.from(localById.values());
+      attempts.push({ endpoint, status: response.status, scheduleCount: localRows.length });
+      mergedRows.push(...localRows);
+      // 리그 전용 schedule 응답에서 실제 행을 확보했으면 generic 결과와 섞지 않는다.
+      if (exactCategoryId && localRows.length > 0 && endpoint.includes(`categoryId=${encodeURIComponent(exactCategoryId)}`)) break;
+    } catch {
+      attempts.push({ endpoint, status: null, scheduleCount: 0 });
+    }
+  }
+
   const byId = new Map<string, AnyObj>();
-  for (const obj of [...directRows, ...discoveredRows]) {
+  for (const obj of mergedRows) {
     const gameId = String(obj?.gameId ?? obj?.game_id ?? "").trim();
-    if (!gameId) continue;
-    const gameDate = dateKey(String(obj?.gameDateTime ?? obj?.gameDate ?? gameId.slice(0, 8) ?? ""));
-    if (gameDate !== date) continue;
-    if (!byId.has(gameId)) byId.set(gameId, obj);
+    if (gameId && !byId.has(gameId)) byId.set(gameId, obj);
   }
   const all = Array.from(byId.values());
 
   let candidates = all.filter((obj) => {
+    const category = String(obj?.categoryId ?? obj?.category ?? obj?.upperCategoryId ?? "").trim().toLowerCase();
+    if (exactCategoryId && category && category !== exactCategoryId && category !== "wfootball") return false;
     const h = String(obj?.homeTeamName ?? obj?.homeTeamShortName ?? obj?.homeTeamFullName ?? obj?.homeName ?? "");
     const a = String(obj?.awayTeamName ?? obj?.awayTeamShortName ?? obj?.awayTeamFullName ?? obj?.awayName ?? "");
     return footballTeamMatches(h, home, adapterId) && footballTeamMatches(a, away, adapterId);
@@ -301,10 +343,12 @@ async function resolveFootballGameId(date: string, home: string, away: string, s
   const requestedMs = requestedStartMs(startRaw);
   if (candidates.length === 0 && requestedMs !== null) {
     const sameTime = all.filter((obj) => {
+      const category = String(obj?.categoryId ?? obj?.category ?? obj?.upperCategoryId ?? "").trim().toLowerCase();
+      if (exactCategoryId && category && category !== exactCategoryId && category !== "wfootball") return false;
       const ms = naverLocalGameMs(obj?.gameDateTime ?? obj?.startTime ?? obj?.gameTime);
       return ms !== null && Math.abs(ms - requestedMs) <= 5 * 60 * 1000;
     });
-    // 팀명 매칭이 실패해도 같은 시각 후보가 정확히 1경기일 때만 안전하게 사용한다.
+    // 팀명 매칭이 실패해도 같은 리그/같은 시각 후보가 정확히 1경기일 때만 안전하게 사용한다.
     if (sameTime.length === 1) candidates = sameTime;
   }
 
@@ -321,23 +365,27 @@ async function resolveFootballGameId(date: string, home: string, away: string, s
     }
   }
 
+  const selectedCategoryId = String(selected?.categoryId ?? selected?.category ?? exactCategoryId ?? "").trim() || null;
   return {
     gameId: selected ? String(selected?.gameId ?? selected?.game_id) : null,
-    endpoint,
-    status: response.status,
+    endpoint: attempts[0]?.endpoint ?? endpoints[0] ?? null,
+    status: attempts[0]?.status ?? lastStatus,
     scheduleCount: all.length,
     candidateCount: candidates.length,
     closestDiffMinutes,
-    selectedCategoryId: selected?.categoryId ?? null,
+    selectedCategoryId,
+    exactCategoryId,
     selectedGame: selected ?? null,
-    candidateTeams: all.slice(0, 20).map((obj) => ({
+    attempts,
+    candidateTeams: all.slice(0, 40).map((obj) => ({
       gameId: String(obj?.gameId ?? obj?.game_id ?? ""),
+      categoryId: obj?.categoryId ?? obj?.category ?? null,
       home: String(obj?.homeTeamName ?? obj?.homeTeamShortName ?? obj?.homeName ?? ""),
       away: String(obj?.awayTeamName ?? obj?.awayTeamShortName ?? obj?.awayName ?? ""),
       gameDateTime: obj?.gameDateTime ?? obj?.startTime ?? null,
     })),
     adapterId,
-    build: "V13.8.62_FOOTBALL_COUNTRY_ADAPTER_V1",
+    build: "V13.8.63_J1_EXACT_CATEGORY_RESOLVER",
   };
 }
 
@@ -1777,7 +1825,10 @@ export async function GET(request: Request) {
       // 브라우저 navigation 형태로 warm-up하고 응답 쿠키를 이어받은 뒤 XHR 형태로 /players를 호출한다.
       // 이 PRIMARY가 실패한 경우에만 200 응답 후보를 진단/보조 fallback으로 확인한다.
       const footballCategoryId = String(
-        resolverDebug?.selectedCategoryId ?? resolverDebug?.selectedGame?.categoryId ?? ""
+        resolverDebug?.selectedCategoryId ??
+        resolverDebug?.selectedGame?.categoryId ??
+        footballCategoryIdForAdapter(footballAdapter) ??
+        ""
       ).trim() || null;
       const sessionPlayers = await fetchFootballPlayersFromNaverSession(gameId, footballCategoryId);
       footballPlayersAttempts.push({
