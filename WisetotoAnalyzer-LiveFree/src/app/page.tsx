@@ -682,6 +682,25 @@ type FootballLineupSnapshot = {
   }>;
 };
 
+type FootballPreValidationSnapshot = {
+  stage: "PRE";
+  capturedAt: number;
+  expectedHome: number;
+  expectedAway: number;
+  homeRecentSample: number;
+  awayRecentSample: number;
+  homeVenueSample: number;
+  awayVenueSample: number;
+};
+
+type FootballPreValidationResult = {
+  homeAbsError: number;
+  awayAbsError: number;
+  scoreMae: number;
+  totalAbsError: number;
+  marginAbsError: number;
+};
+
 type LiveTrackerRecord = {
   id: string;
   fixtureId: number | null;
@@ -704,6 +723,8 @@ type LiveTrackerRecord = {
   venueShadow?: VenueShadowValidationSnapshot | null;
   venueShadowResult?: VenueShadowValidationResult | null;
   footballLineup?: FootballLineupSnapshot | null;
+  footballPre?: FootballPreValidationSnapshot | null;
+  footballPreResult?: FootballPreValidationResult | null;
 };
 
 
@@ -14260,6 +14281,47 @@ export default function Home() {
     };
   }, [liveTrackerRecords]);
 
+  const footballLineupValidationSummary = useMemo(() => {
+    const footballPre = liveTrackerRecords.filter(
+      (record) => record.sport === "축구" && record.footballPre?.stage === "PRE"
+    );
+    const lineupReady = footballPre.filter((record) => record.footballLineup?.stage === "LINEUP_READY");
+    const verified = footballPre.filter(
+      (record) => record.verificationStatus === "VERIFIED" && record.footballPreResult
+    );
+    const lineupVerified = verified.filter((record) => record.footballLineup?.stage === "LINEUP_READY");
+    const noLineupVerified = verified.filter((record) => !record.footballLineup);
+    const pending = lineupReady.filter((record) => record.verificationStatus === "PENDING");
+    const due = pending.filter((record) => record.startMs < Date.now() - 2 * 60 * 60 * 1000);
+    const avgResult = (rows: LiveTrackerRecord[], key: keyof FootballPreValidationResult) =>
+      rows.length
+        ? rows.reduce((sum, record) => sum + Number(record.footballPreResult?.[key] ?? 0), 0) / rows.length
+        : null;
+    const leadRows = lineupReady
+      .map((record) => {
+        const capturedAt = Number(record.footballLineup?.capturedAt);
+        return Number.isFinite(capturedAt) ? (record.startMs - capturedAt) / 60000 : null;
+      })
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+    const averageLeadMinutes = leadRows.length
+      ? leadRows.reduce((sum, value) => sum + value, 0) / leadRows.length
+      : null;
+    return {
+      pre: footballPre.length,
+      lineupReady: lineupReady.length,
+      verified: verified.length,
+      lineupVerified: lineupVerified.length,
+      noLineupVerified: noLineupVerified.length,
+      pending: pending.length,
+      due: due.length,
+      lineupScoreMae: avgResult(lineupVerified, "scoreMae"),
+      lineupTotalMae: avgResult(lineupVerified, "totalAbsError"),
+      lineupMarginMae: avgResult(lineupVerified, "marginAbsError"),
+      noLineupScoreMae: avgResult(noLineupVerified, "scoreMae"),
+      averageLeadMinutes,
+    };
+  }, [liveTrackerRecords]);
+
   /*
    * V13.8.1 LIVE TRACKER
    * 실전 분석이 완전히 끝난 경기의 시작 전 PRE 판단만 최초 1회 잠근다.
@@ -14358,6 +14420,22 @@ export default function Home() {
             })),
           }
         : null;
+
+      const footballPreSnapshot: FootballPreValidationSnapshot | null =
+        currentSport === "축구" &&
+        analysisFactors.expectedHomeScore !== null &&
+        analysisFactors.expectedAwayScore !== null
+          ? {
+              stage: "PRE",
+              capturedAt: Date.now(),
+              expectedHome: analysisFactors.expectedHomeScore,
+              expectedAway: analysisFactors.expectedAwayScore,
+              homeRecentSample: analysisFactors.homeRecentSample,
+              awayRecentSample: analysisFactors.awayRecentSample,
+              homeVenueSample: analysisFactors.homeVenueSample,
+              awayVenueSample: analysisFactors.awayVenueSample,
+            }
+          : null;
 
       const canPromoteBaseballReady = Boolean(
         existingRecord &&
@@ -14531,6 +14609,8 @@ export default function Home() {
             : null,
         venueShadowResult: null,
         footballLineup: footballLineupSnapshot,
+        footballPre: footballPreSnapshot,
+        footballPreResult: null,
         verificationStatus: "PENDING" as const,
         verifiedAt: null,
         result: null,
@@ -14547,6 +14627,9 @@ export default function Home() {
                   readyCapturedAt: Date.now(),
                   venueShadow: nextRecord.venueShadow ?? existingRecord.venueShadow ?? null,
                   footballLineup: nextRecord.footballLineup ?? existingRecord.footballLineup ?? null,
+                  /* V13.8.60: 최초 PRE λ는 라인업 승격 시에도 보존한다. */
+                  footballPre: existingRecord.footballPre ?? nextRecord.footballPre ?? null,
+                  footballPreResult: null,
                   verificationStatus: "PENDING" as const,
                   verifiedAt: null,
                   result: null,
@@ -14566,6 +14649,10 @@ export default function Home() {
     analysisFactors.baseballAnalysisStage,
     analysisFactors.expectedHomeScore,
     analysisFactors.expectedAwayScore,
+    analysisFactors.homeRecentSample,
+    analysisFactors.awayRecentSample,
+    analysisFactors.homeVenueSample,
+    analysisFactors.awayVenueSample,
     analysisFactors.venueShadowFinalHomeScore,
     analysisFactors.venueShadowFinalAwayScore,
     currentSport,
@@ -14688,6 +14775,27 @@ export default function Home() {
               }
             : null;
 
+          const footballPre = record.footballPre;
+          const footballPreResult: FootballPreValidationResult | null = footballPre
+            ? {
+                homeAbsError: Math.abs(footballPre.expectedHome - truth.homeScore),
+                awayAbsError: Math.abs(footballPre.expectedAway - truth.awayScore),
+                scoreMae:
+                  (Math.abs(footballPre.expectedHome - truth.homeScore) +
+                    Math.abs(footballPre.expectedAway - truth.awayScore)) / 2,
+                totalAbsError: Math.abs(
+                  footballPre.expectedHome +
+                    footballPre.expectedAway -
+                    (truth.homeScore + truth.awayScore)
+                ),
+                marginAbsError: Math.abs(
+                  footballPre.expectedHome -
+                    footballPre.expectedAway -
+                    (truth.homeScore - truth.awayScore)
+                ),
+              }
+            : null;
+
           next = next.map((candidate) =>
             candidate.id === record.id
               ? {
@@ -14697,6 +14805,7 @@ export default function Home() {
                   verifiedAt: Date.now(),
                   result: truth,
                   venueShadowResult: shadowResult,
+                  footballPreResult,
                 }
               : candidate
           );
@@ -20332,6 +20441,18 @@ export default function Home() {
             <div className="card">득점 MAE 개선<b>{venueShadowValidationSummary.improvement === null ? "-" : `${venueShadowValidationSummary.improvement >= 0 ? "+" : ""}${venueShadowValidationSummary.improvement.toFixed(1)}%`}</b><div className="small">20~30 READY 전 MODEL ON 금지</div></div>
           </div>
         </div>
+
+        <div style={{ padding: "9px 12px", borderTop: "1px solid #e2e8f0" }}>
+          <div className="small" style={{ fontWeight: 900, marginBottom: 6 }}>
+            V13.8.60 FOOTBALL LINEUP VALIDATOR · MODEL OFF · PRE {footballLineupValidationSummary.pre}경기 · LINEUP READY {footballLineupValidationSummary.lineupReady}경기 · VERIFY {footballLineupValidationSummary.lineupVerified}/30경기 · 결과대기 {footballLineupValidationSummary.pending}경기{footballLineupValidationSummary.due > 0 ? ` · 확인가능 ${footballLineupValidationSummary.due}` : ""}
+          </div>
+          <div className="cards">
+            <div className="card">득점 MAE<b>{footballLineupValidationSummary.lineupScoreMae?.toFixed(2) ?? "-"}</b><div className="small">LINEUP READY PRE λ 기준</div></div>
+            <div className="card">총점 MAE<b>{footballLineupValidationSummary.lineupTotalMae?.toFixed(2) ?? "-"}</b><div className="small">실제 결과 VERIFY</div></div>
+            <div className="card">점수차 MAE<b>{footballLineupValidationSummary.lineupMarginMae?.toFixed(2) ?? "-"}</b><div className="small">MODEL OFF · 효과 추정 아님</div></div>
+            <div className="card">평균 선발 확보<b>{footballLineupValidationSummary.averageLeadMinutes === null ? "-" : `${footballLineupValidationSummary.averageLeadMinutes.toFixed(0)}분 전`}</b><div className="small">NO-LINEUP VERIFY {footballLineupValidationSummary.noLineupVerified} · MAE {footballLineupValidationSummary.noLineupScoreMae?.toFixed(2) ?? "-"}</div></div>
+          </div>
+        </div>
       </details>
 
       <div className="tabs">
@@ -21698,7 +21819,7 @@ export default function Home() {
 
                   {currentSport === "축구" && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V13.8.58 축구 LIVE DATA · Naver 실제 선발</h3>
+                      <h3>V13.8.60 축구 LIVE DATA · Naver 실제 선발</h3>
                       <div className="notice" style={{ margin: "8px 0" }}>
                         네이버 Sports의 경기별 players 응답에서 <b>substitute:false</b> 선수를 실제 선발로 수집합니다.
                         현재 단계에서는 선발 11+11을 READY 진단과 경기전 스냅샷에만 연결하며 V13.0 축구 λ/Poisson 계산식은 변경하지 않습니다.
@@ -21726,7 +21847,7 @@ export default function Home() {
                         </div>
                       </div>
                       <div className="notice" style={{ margin: "8px 0" }}>
-                        <b>V13.8.58 축구 LINEUP SNAPSHOT / AUDIT · MODEL OFF</b> · 실제 Naver statistics players 응답의 <b>substitute:false</b> 11+11만 LINEUP READY로 인정합니다.
+                        <b>V13.8.60 축구 LINEUP SNAPSHOT / AUDIT · MODEL OFF</b> · 실제 Naver statistics players 응답의 <b>substitute:false</b> 11+11만 LINEUP READY로 인정합니다.
                         22명 명단은 실전 추적 PRE 레코드에 스냅샷으로 저장하되 축구 λ/Poisson에는 아직 반영하지 않습니다.
                       </div>
                       <div className="cards">
