@@ -1,3 +1,4 @@
+// DEPLOY_MARKER_V13_8_62_LEAGUE_ADAPTER_VERIFY_READY_20260906
 // DEPLOY_MARKER_V13_8_58_FOOTBALL_LINEUP_SNAPSHOT_AUDIT_20260906
 // DEPLOY_MARKER_V13_8_56_FOOTBALL_NAVER_PLAYERS_SESSION_PRIMARY_20260906
 // DEPLOY_MARKER_V13_8_50_FOOTBALL_NAVER_RESOLVER_RECENT_FORM_V2_20260906
@@ -40,12 +41,50 @@ const KBO_TEAM_ALIASES: Record<string, string[]> = {
 };
 
 
-const FOOTBALL_TEAM_ALIASES: Record<string, string[]> = {
-  FEYENOORD: ["페예노르트", "페예노르", "feyenoord", "feyenoordrotterdam"],
-  ADO_DEN_HAAG: ["ado덴하그", "ado덴하흐", "덴하그", "덴하흐", "adodenhaag", "denhaag"],
-  REAL_SALT_LAKE: ["레알솔트레이크", "리얼솔트레이크", "레알솔트레이크fc", "realsaltlake", "realsaltlakefc", "rsl"],
-  LAFC: ["lafc", "la fc", "로스앤젤레스fc", "로스앤젤레스fc", "losangelesfc", "losangelesfootballclub"],
+type FootballAdapterId = "J1_JP" | "MLS_US" | "EUROPE_GENERIC" | "FOOTBALL_GENERIC";
+
+const FOOTBALL_ADAPTER_ALIASES: Record<FootballAdapterId, Record<string, string[]>> = {
+  J1_JP: {
+    VISSEL_KOBE: ["비셀고베", "비셀 고베", "visselkobe", "vissel kobe", "고베"],
+    V_VAREN_NAGASAKI: ["v바렌나가사키", "v-바렌나가사키", "v바렌 나가사키", "vvaren nagasaki", "v-varennagasaki", "나가사키"],
+    KASHIWA_REYSOL: ["가시와레이솔", "가시와 레이솔", "kashiwareysol", "kashiwa reysol", "가시와"],
+    YOKOHAMA_F_MARINOS: ["요코하마f마리노스", "요코하마 f마리노스", "요코하마fm", "yokohamafmarinos", "yokohama f marinos", "fmarinos"],
+    KASHIMA_ANTLERS: ["가시마앤틀러스", "가시마 앤틀러스", "kashimaantlers", "kashima antlers", "가시마"],
+    URAWA_REDS: ["우라와레즈", "우라와 레즈", "urawareddiamonds", "urawa reds", "우라와"],
+    JEF_CHIBA: ["제프유나이티드지바", "제프 지바", "jefunitedchiba", "jef chiba", "지바"],
+    GAMBA_OSAKA: ["감바오사카", "감바 오사카", "gambaosaka", "gamba osaka"],
+    NAGOYA_GRAMPUS: ["나고야그램퍼스", "나고야 그램퍼스", "nagoyagrampus", "nagoya grampus", "나고야"],
+    MACHIDA_ZELVIA: ["마치다젤비아", "마치다 젤비아", "machidazelvia", "machida zelvia", "마치다"],
+    FAGIANO_OKAYAMA: ["파지아노오카야마", "파지아노 오카야마", "fagianookayama", "fagiano okayama", "오카야마"],
+    SANFRECCE_HIROSHIMA: ["산프레체히로시마", "산프레체 히로시마", "sanfreccehiroshima", "sanfrecce hiroshima", "히로시마"],
+  },
+  MLS_US: {
+    REAL_SALT_LAKE: ["레알솔트레이크", "리얼솔트레이크", "레알솔트레이크fc", "realsaltlake", "realsaltlakefc", "rsl"],
+    LAFC: ["lafc", "la fc", "로스앤젤레스fc", "losangelesfc", "losangelesfootballclub"],
+  },
+  EUROPE_GENERIC: {
+    FEYENOORD: ["페예노르트", "페예노르", "feyenoord", "feyenoordrotterdam"],
+    ADO_DEN_HAAG: ["ado덴하그", "ado덴하흐", "덴하그", "덴하흐", "adodenhaag", "denhaag"],
+  },
+  FOOTBALL_GENERIC: {},
 };
+
+function footballAdapterId(leagueRaw: string): FootballAdapterId {
+  const league = String(leagueRaw ?? "").toLowerCase().replace(/\s/g, "");
+  if (/j1|j리그|일본.*축구|일본j/.test(league)) return "J1_JP";
+  if (/mls|미국.*축구|메이저리그사커/.test(league)) return "MLS_US";
+  if (/에레디비시|네덜란드|epl|프리미어|라리가|분데스|세리에|리그1|유럽/.test(league)) return "EUROPE_GENERIC";
+  return "FOOTBALL_GENERIC";
+}
+
+function footballAliasesFor(adapterId: FootballAdapterId) {
+  return {
+    ...FOOTBALL_ADAPTER_ALIASES.EUROPE_GENERIC,
+    ...FOOTBALL_ADAPTER_ALIASES.MLS_US,
+    ...FOOTBALL_ADAPTER_ALIASES.J1_JP,
+    ...FOOTBALL_ADAPTER_ALIASES[adapterId],
+  };
+}
 
 const MLB_TEAM_ALIASES: Record<string, string[]> = {
   AZ: ["애리조나", "애리조나다이아몬드백스", "arizona", "arizonadiamondbacks", "diamondbacks"],
@@ -206,10 +245,10 @@ function teamMatches(candidate: string, requested: string) {
   return Boolean(mc && mr && mc === mr);
 }
 
-function normalizedFootballName(name: string) {
+function normalizedFootballName(name: string, adapterId: FootballAdapterId = "FOOTBALL_GENERIC") {
   const target = normMlb(name);
   if (!target) return null;
-  for (const [code, aliases] of Object.entries(FOOTBALL_TEAM_ALIASES)) {
+  for (const [code, aliases] of Object.entries(footballAliasesFor(adapterId))) {
     if (aliases.some((alias) => {
       const a = normMlb(alias);
       return a === target || (a.length >= 4 && target.length >= 4 && (a.includes(target) || target.includes(a)));
@@ -218,14 +257,14 @@ function normalizedFootballName(name: string) {
   return target;
 }
 
-function footballTeamMatches(candidate: string, requested: string) {
-  const c = normalizedFootballName(candidate);
-  const r = normalizedFootballName(requested);
+function footballTeamMatches(candidate: string, requested: string, adapterId: FootballAdapterId = "FOOTBALL_GENERIC") {
+  const c = normalizedFootballName(candidate, adapterId);
+  const r = normalizedFootballName(requested, adapterId);
   if (!c || !r) return false;
   return c === r || (c.length >= 4 && r.length >= 4 && (c.includes(r) || r.includes(c)));
 }
 
-async function resolveFootballGameId(date: string, home: string, away: string, startRaw: string) {
+async function resolveFootballGameId(date: string, home: string, away: string, startRaw: string, adapterId: FootballAdapterId) {
   const d = isoDate(date);
   const endpoint = `${NAVER_API}?fields=basic%2Cschedule%2Cfootball&upperCategoryId=wfootball&fromDate=${encodeURIComponent(d)}&toDate=${encodeURIComponent(d)}&size=500`;
   const response = await fetch(endpoint, {
@@ -256,7 +295,7 @@ async function resolveFootballGameId(date: string, home: string, away: string, s
   let candidates = all.filter((obj) => {
     const h = String(obj?.homeTeamName ?? obj?.homeTeamShortName ?? obj?.homeTeamFullName ?? obj?.homeName ?? "");
     const a = String(obj?.awayTeamName ?? obj?.awayTeamShortName ?? obj?.awayTeamFullName ?? obj?.awayName ?? "");
-    return footballTeamMatches(h, home) && footballTeamMatches(a, away);
+    return footballTeamMatches(h, home, adapterId) && footballTeamMatches(a, away, adapterId);
   });
 
   const requestedMs = requestedStartMs(startRaw);
@@ -297,7 +336,8 @@ async function resolveFootballGameId(date: string, home: string, away: string, s
       away: String(obj?.awayTeamName ?? obj?.awayTeamShortName ?? obj?.awayName ?? ""),
       gameDateTime: obj?.gameDateTime ?? obj?.startTime ?? null,
     })),
-    build: "V13.8.50_FOOTBALL_NAVER_RESOLVER_V2",
+    adapterId,
+    build: "V13.8.62_FOOTBALL_COUNTRY_ADAPTER_V1",
   };
 }
 
@@ -1025,7 +1065,7 @@ function naverFootballGameCompleted(game: AnyObj) {
   return ms !== null && ms < Date.now() - 3 * 60 * 60 * 1000;
 }
 
-function summarizeFootballScheduleTeam(rows: AnyObj[], teamName: string) {
+function summarizeFootballScheduleTeam(rows: AnyObj[], teamName: string, adapterId: FootballAdapterId) {
   const fixtures: AnyObj[] = [];
   let wins = 0;
   let draws = 0;
@@ -1039,8 +1079,8 @@ function summarizeFootballScheduleTeam(rows: AnyObj[], teamName: string) {
     if (!naverFootballGameCompleted(g)) continue;
     const score = naverScheduleFinalScore(g);
     if (!score) continue;
-    const isHome = footballTeamMatches(String(g?.homeTeamName ?? g?.home ?? ""), teamName);
-    const isAway = footballTeamMatches(String(g?.awayTeamName ?? g?.away ?? ""), teamName);
+    const isHome = footballTeamMatches(String(g?.homeTeamName ?? g?.home ?? ""), teamName, adapterId);
+    const isAway = footballTeamMatches(String(g?.awayTeamName ?? g?.away ?? ""), teamName, adapterId);
     if (!isHome && !isAway) continue;
     const teamScored = isHome ? score.home : score.away;
     const teamConceded = isHome ? score.away : score.home;
@@ -1075,7 +1115,7 @@ function summarizeFootballScheduleTeam(rows: AnyObj[], teamName: string) {
   };
 }
 
-async function collectFootballRecentSummary(date: string, home: string, away: string) {
+async function collectFootballRecentSummary(date: string, home: string, away: string, adapterId: FootballAdapterId) {
   const fromDate = isoDayOffset(date, -40);
   const toDate = isoDayOffset(date, -1);
   const endpoint = `${NAVER_API}?fields=basic%2Cschedule%2Cfootball&upperCategoryId=wfootball&fromDate=${fromDate}&toDate=${toDate}&size=500`;
@@ -1098,12 +1138,12 @@ async function collectFootballRecentSummary(date: string, home: string, away: st
     String(b?.gameDateTime ?? b?.gameDate ?? "").localeCompare(String(a?.gameDateTime ?? a?.gameDate ?? ""))
   );
   const teamGames = (team: string) => rows.filter((g) =>
-    footballTeamMatches(String(g?.homeTeamName ?? g?.home ?? ""), team) ||
-    footballTeamMatches(String(g?.awayTeamName ?? g?.away ?? ""), team)
+    footballTeamMatches(String(g?.homeTeamName ?? g?.home ?? ""), team, adapterId) ||
+    footballTeamMatches(String(g?.awayTeamName ?? g?.away ?? ""), team, adapterId)
   );
   const recentSummary = {
-    home: summarizeFootballScheduleTeam(teamGames(home), home),
-    away: summarizeFootballScheduleTeam(teamGames(away), away),
+    home: summarizeFootballScheduleTeam(teamGames(home), home, adapterId),
+    away: summarizeFootballScheduleTeam(teamGames(away), away, adapterId),
   };
   return {
     recentSummary,
@@ -1639,6 +1679,7 @@ export async function GET(request: Request) {
     const away = url.searchParams.get("away") ?? "";
     const startRaw = url.searchParams.get("date") ?? "";
     const sport = url.searchParams.get("sport") ?? "";
+    const requestedLeague = url.searchParams.get("league") ?? "";
     const date = dateKey(startRaw);
     if (!date || !home || !away) {
       return Response.json({ ok: false, error: "네이버 gameId 생성에 필요한 날짜/팀 정보 없음", debug: { date, home, away } }, { status: 400 });
@@ -1649,19 +1690,20 @@ export async function GET(request: Request) {
     const homeMlb = normalizedMlbName(home);
     const awayMlb = normalizedMlbName(away);
     const isFootball = /축구|football|soccer/i.test(String(sport));
+    const footballAdapter = footballAdapterId(requestedLeague);
     let league: "NPB" | "KBO" | "MLB" | "FOOTBALL" = isFootball ? "FOOTBALL" : homeNpb && awayNpb ? "NPB" : homeMlb && awayMlb ? "MLB" : "KBO";
     let gameId: string | null = null;
     let resolverDebug: any = null;
 
     if (league === "FOOTBALL") {
-      const resolved = await resolveFootballGameId(date, home, away, startRaw);
+      const resolved = await resolveFootballGameId(date, home, away, startRaw, footballAdapter);
       gameId = resolved.gameId;
       resolverDebug = resolved;
       if (!gameId) {
         return Response.json({
           ok: false,
           error: "네이버 해외축구 당일 일정에서 경기 gameId 자동매칭 실패",
-          debug: { date, home, away, resolver: resolved },
+          debug: { date, home, away, requestedLeague, footballAdapter, resolver: resolved },
         }, { status: 404 });
       }
     } else if (league === "NPB") {
@@ -1928,7 +1970,7 @@ export async function GET(request: Request) {
     }
 
     const footballRecent = league === "FOOTBALL"
-      ? await collectFootballRecentSummary(date, home, away).catch((error: any) => ({
+      ? await collectFootballRecentSummary(date, home, away, footballAdapter).catch((error: any) => ({
           recentSummary: null,
           endpoint: null,
           status: null,
