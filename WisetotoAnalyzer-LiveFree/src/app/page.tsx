@@ -14472,7 +14472,7 @@ export default function Home() {
                   id: existingRecord.id,
                   capturedAt: existingRecord.capturedAt,
                   readyCapturedAt: Date.now(),
-                  verificationStatus: "PENDING" as const,
+                  verificationStatus: "PENDING",
                   verifiedAt: null,
                   result: null,
                   venueShadowResult: null,
@@ -21651,14 +21651,15 @@ export default function Home() {
                         </div>
                       </div>
                       <div className="notice" style={{ margin: "8px 0" }}>
-                        <b>V13.8.51 축구 DATA AUDIT · MODEL OFF</b> · 최근 Form 5경기의 실제 홈/원정 점수와 분석 대상 팀 득실을 그대로 표시합니다.
+                        <b>V13.8.54 축구 NAVER LINEUP REFETCH · MODEL OFF</b> · 최근 Form 5경기의 실제 홈/원정 점수와 분석 대상 팀 득실을 그대로 표시합니다.
                         players 응답은 필드 구조가 달라도 player 배열을 탐색하지만, 선발 여부가 명확하지 않은 선수는 22명 READY에 포함하지 않습니다.
                       </div>
                       <div className="cards">
                         <div className="card">
-                          players 원본 진단
+                          players 재수집 진단
                           <b>{Number(matched?.naverTodayLineup?.footballPlayers?.total ?? 0)}명</b>
-                          <div className="small">선발판정 가능 {Number(matched?.naverTodayLineup?.footballPlayers?.substituteKnown ?? 0)}명 · HTTP {matched?.naverTodayLineup?.footballPlayers?.status ?? "-"}</div>
+                          <div className="small">선발판정 가능 {Number(matched?.naverTodayLineup?.footballPlayers?.substituteKnown ?? 0)}명 · HTTP {matched?.naverTodayLineup?.footballPlayers?.status ?? "-"} · source {matched?.naverTodayLineup?.footballPlayers?.source ?? "-"}</div>
+                          <div className="small">시도 {Array.isArray(matched?.naverTodayLineup?.footballPlayers?.attempts) ? matched.naverTodayLineup.footballPlayers.attempts.map((a: any) => `${a.source}:${a.status ?? "-"}`).join(" · ") : "-"}</div>
                         </div>
                         <div className="card">
                           team 식별
