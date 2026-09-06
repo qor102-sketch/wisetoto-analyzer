@@ -1,3 +1,4 @@
+// DEPLOY_MARKER_V13_8_56_FOOTBALL_NAVER_PLAYERS_SESSION_PRIMARY_20260906
 // DEPLOY_MARKER_V13_8_50_FOOTBALL_NAVER_RESOLVER_RECENT_FORM_V2_20260906
 // DEPLOY_MARKER_V13_8_33_KBO_RECORD_PITCHER_BOXSCORE_20260903
 // DEPLOY_MARKER_V13_8_30_NAVER_STARTER_BULLPEN_WORKLOAD_V1_20260903
@@ -484,6 +485,78 @@ function extractFootballPlayers(payload: any) {
   };
   visit(payload);
   return arrays.sort((a, b) => b.length - a.length)[0] ?? [];
+}
+
+function cookieHeaderFromSetCookie(raw: string | null) {
+  if (!raw) return "";
+  // Multiple Set-Cookie headers may be collapsed into one string by fetch.
+  // Split only where a new cookie name begins, then keep name=value.
+  return raw
+    .split(/,(?=[^;,\s]+=)/g)
+    .map((chunk) => chunk.trim().split(";", 1)[0]?.trim())
+    .filter(Boolean)
+    .join("; ");
+}
+
+async function fetchFootballPlayersFromNaverSession(gameId: string) {
+  const lineupPage = `https://m.sports.naver.com/game/${encodeURIComponent(gameId)}/lineup`;
+  const playersEndpoint = `${NAVER_API}/${encodeURIComponent(gameId)}/players`;
+  const desktopUa =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+
+  const pageResponse = await fetch(lineupPage, {
+    cache: "no-store",
+    redirect: "follow",
+    headers: {
+      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      "accept-language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+      "cache-control": "no-cache",
+      pragma: "no-cache",
+      "sec-fetch-dest": "document",
+      "sec-fetch-mode": "navigate",
+      "sec-fetch-site": "none",
+      "upgrade-insecure-requests": "1",
+      "user-agent": desktopUa,
+    },
+  }).catch(() => null);
+
+  const setCookie = pageResponse?.headers?.get("set-cookie") ?? null;
+  const cookie = cookieHeaderFromSetCookie(setCookie);
+  // Consume the body so the warm-up navigation is completed before the XHR-style request.
+  if (pageResponse) await pageResponse.text().catch(() => "");
+
+  const xhrHeaders: Record<string, string> = {
+    accept: "application/json, text/plain, */*",
+    "accept-language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    "cache-control": "no-cache",
+    pragma: "no-cache",
+    origin: "https://m.sports.naver.com",
+    referer: lineupPage,
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-site",
+    "user-agent": desktopUa,
+  };
+  if (cookie) xhrHeaders.cookie = cookie;
+
+  const playersResponse = await fetch(playersEndpoint, {
+    cache: "no-store",
+    redirect: "follow",
+    headers: xhrHeaders,
+  }).catch(() => null);
+  const playersPayload = playersResponse?.ok
+    ? await playersResponse.json().catch(() => null)
+    : null;
+
+  return {
+    pageStatus: pageResponse?.status ?? null,
+    pageOk: Boolean(pageResponse?.ok),
+    cookieCount: cookie ? cookie.split(";").filter(Boolean).length : 0,
+    endpoint: playersEndpoint,
+    status: playersResponse?.status ?? null,
+    ok: Boolean(playersResponse?.ok),
+    payload: playersPayload,
+  };
 }
 
 function normalizeFootballPlayers(
@@ -1648,51 +1721,73 @@ export async function GET(request: Request) {
     let footballPlayersSource: string | null = null;
     let footballPlayersAttempts: Array<{ endpoint: string; status: number | null; source: string }> = [];
     if (league === "FOOTBALL") {
-      // V13.8.54: 축구 선발은 /players 단일 경로를 전제로 하지 않는다.
-      // Naver gamecenter가 사용하는 공개 경기 payload 후보를 다시 조회하고,
-      // 실제 선수형 객체 + 명시적 선발 여부가 확인된 데이터만 채택한다.
-      const browserHeaders = {
-        accept: "application/json, text/plain, */*",
-        "accept-language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-        origin: "https://m.sports.naver.com",
-        referer: `https://m.sports.naver.com/game/${gameId}/relay`,
-        "sec-fetch-dest": "empty",
-        "sec-fetch-mode": "cors",
-        "sec-fetch-site": "same-site",
-        "user-agent": "Mozilla/5.0 (Linux; Android 14; SM-S928N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36",
-      };
-      const playerAttempts = [
-        { endpoint: `${NAVER_API}/${gameId}/preview`, source: "GAME_PREVIEW" },
-        { endpoint: `${NAVER_API}/${gameId}/relay`, source: "GAME_RELAY" },
-        { endpoint: `${NAVER_API}/${gameId}/record`, source: "GAME_RECORD" },
-        { endpoint: `${NAVER_API}/${gameId}/game-polling?inning=1&isHighlight=false`, source: "GAME_POLLING" },
-        { endpoint: `${NAVER_API}/${gameId}/players`, source: "PLAYERS_API_LEGACY" },
-      ];
-      footballPlayersEndpoint = playerAttempts[0].endpoint;
+      // V13.8.56: 실제 Naver 라인업 탭이 호출하는 /players를 다시 PRIMARY로 사용한다.
+      // 서버에서 바로 /players를 때리면 403이 발생했으므로, 먼저 동일 gameId의 /lineup 페이지를
+      // 브라우저 navigation 형태로 warm-up하고 응답 쿠키를 이어받은 뒤 XHR 형태로 /players를 호출한다.
+      // 이 PRIMARY가 실패한 경우에만 200 응답 후보를 진단/보조 fallback으로 확인한다.
+      const sessionPlayers = await fetchFootballPlayersFromNaverSession(gameId);
+      footballPlayersAttempts.push({
+        endpoint: `https://m.sports.naver.com/game/${encodeURIComponent(gameId)}/lineup`,
+        status: sessionPlayers.pageStatus,
+        source: `LINEUP_PAGE_WARMUP(cookie:${sessionPlayers.cookieCount})`,
+      });
+      footballPlayersAttempts.push({
+        endpoint: sessionPlayers.endpoint,
+        status: sessionPlayers.status,
+        source: "PLAYERS_PRIMARY_SESSION",
+      });
+      footballPlayersEndpoint = sessionPlayers.endpoint;
+      footballPlayersStatus = sessionPlayers.status;
 
-      for (const attempt of playerAttempts) {
-        const playersResponse = await fetch(attempt.endpoint, {
-          cache: "no-store",
-          headers: browserHeaders,
-        }).catch(() => null);
-        const status = playersResponse?.status ?? null;
-        footballPlayersAttempts.push({ endpoint: attempt.endpoint, status, source: attempt.source });
-        if (footballPlayersStatus == null && status != null) footballPlayersStatus = status;
-        if (!playersResponse?.ok) continue;
-        const playersPayload = await playersResponse.json().catch(() => null);
-        const extracted = extractFootballPlayers(playersPayload);
-        if (extracted.length < 11) continue;
+      if (sessionPlayers.ok) {
+        const extracted = extractFootballPlayers(sessionPlayers.payload);
         const known = extracted.filter((p: AnyObj) => footballPlayerSubstituteValue(p) !== null).length;
-        // 선발/벤치 판정이 전혀 없는 roster 배열은 공식 선발로 오인하지 않는다.
-        if (known < 11) continue;
-        footballPlayers = extracted;
-        footballPlayersStatus = playersResponse.status;
-        footballPlayersSource = attempt.source;
-        footballPlayersEndpoint = attempt.endpoint;
-        break;
+        if (extracted.length >= 11 && known >= 11) {
+          footballPlayers = extracted;
+          footballPlayersSource = "PLAYERS_PRIMARY_SESSION";
+        }
       }
 
-      // schedule/polling embedded fallback 역시 엄격한 player-like + 선발판정 조건을 만족할 때만 사용한다.
+      if (footballPlayers.length === 0) {
+        const browserHeaders = {
+          accept: "application/json, text/plain, */*",
+          "accept-language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+          origin: "https://m.sports.naver.com",
+          referer: `https://m.sports.naver.com/game/${gameId}/lineup`,
+          "sec-fetch-dest": "empty",
+          "sec-fetch-mode": "cors",
+          "sec-fetch-site": "same-site",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+        };
+        const fallbackAttempts = [
+          { endpoint: `${NAVER_API}/${gameId}/preview`, source: "GAME_PREVIEW_FALLBACK" },
+          { endpoint: `${NAVER_API}/${gameId}/relay`, source: "GAME_RELAY_FALLBACK" },
+          { endpoint: `${NAVER_API}/${gameId}/record`, source: "GAME_RECORD_FALLBACK" },
+          { endpoint: `${NAVER_API}/${gameId}/game-polling?inning=1&isHighlight=false`, source: "GAME_POLLING_FALLBACK" },
+        ];
+
+        for (const attempt of fallbackAttempts) {
+          const playersResponse = await fetch(attempt.endpoint, {
+            cache: "no-store",
+            headers: browserHeaders,
+          }).catch(() => null);
+          const status = playersResponse?.status ?? null;
+          footballPlayersAttempts.push({ endpoint: attempt.endpoint, status, source: attempt.source });
+          if (!playersResponse?.ok) continue;
+          const playersPayload = await playersResponse.json().catch(() => null);
+          const extracted = extractFootballPlayers(playersPayload);
+          if (extracted.length < 11) continue;
+          const known = extracted.filter((p: AnyObj) => footballPlayerSubstituteValue(p) !== null).length;
+          if (known < 11) continue;
+          footballPlayers = extracted;
+          footballPlayersStatus = playersResponse.status;
+          footballPlayersSource = attempt.source;
+          footballPlayersEndpoint = attempt.endpoint;
+          break;
+        }
+      }
+
+      // schedule/polling embedded fallback 역시 실제 선수형 + 선발판정 조건을 모두 만족할 때만 사용한다.
       if (footballPlayers.length === 0) {
         for (const embedded of [
           { payload, source: "GAME_POLLING_EMBEDDED" },
