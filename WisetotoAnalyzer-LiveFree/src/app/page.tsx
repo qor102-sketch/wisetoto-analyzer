@@ -12946,8 +12946,9 @@ export default function Home() {
     }
   }
 
-  // V13.8.37: 경기 시작 후 30분이 지나 실전 목록에서 사라진 경기도
-  // 최근 6시간 범위에서 다시 선택해 LIVE DATA를 검증할 수 있게 한다.
+  // V13.8.48: 경기 시작 후 30분이 지나 실전 목록에서 사라진 경기까지
+  // rolling 24시간 범위에서 다시 선택해 LIVE DATA를 검증할 수 있게 한다.
+  // 전날 17시 경기처럼 다음날 오전에 확인해도 목록에 남도록 검증 보존 시간을 확장한다.
   // 이 목록은 검증용이며 PRE 최초 스냅샷 저장 규칙을 변경하지 않는다.
   async function loadRecentVerificationGames() {
     if (loading || liveBatchAnalysis.running || batchBacktest.running) return;
@@ -12965,7 +12966,7 @@ export default function Home() {
       }
 
       const now = Date.now();
-      const recentWindowMs = 6 * 60 * 60 * 1000;
+      const recentWindowMs = 24 * 60 * 60 * 1000;
 
       const games = getBetmanGames(payload)
         .filter((game) => {
@@ -13007,7 +13008,7 @@ export default function Home() {
         setSelectedBetmanKey(actualGameIdentity(games[0]));
         setBetman({ loading: false, matched: games[0], score: 1, error: null });
         setStatus(
-          `🔎 최근 경기 검증 · 최근 6시간 ${games.length}경기 · PRE 저장 없이 LIVE DATA 재검증`
+          `🔎 최근 경기 검증 · 최근 24시간 ${games.length}경기 · PRE 저장 없이 LIVE DATA 재검증`
         );
       } else {
         setSelectedBetmanKey(null);
@@ -13015,9 +13016,9 @@ export default function Home() {
           loading: false,
           matched: null,
           score: null,
-          error: "최근 6시간 내 검증 가능한 Betman 경기가 없습니다.",
+          error: "최근 24시간 내 검증 가능한 Betman 경기가 없습니다.",
         });
-        setStatus("최근 6시간 내 검증 가능한 Betman 경기가 없습니다.");
+        setStatus("최근 24시간 내 검증 가능한 Betman 경기가 없습니다.");
       }
     } catch (e: any) {
       const message = readableError(e, "최근 경기 검증 목록 수집 실패");
@@ -18868,7 +18869,7 @@ export default function Home() {
       <div className="top">
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
-          <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 6시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
+          <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
         </div>
         <div className="bar">
           <button
@@ -18893,7 +18894,7 @@ export default function Home() {
             className="btn light"
             onClick={() => void loadRecentVerificationGames()}
             disabled={loading || batchBacktest.running || liveBatchAnalysis.running}
-            title="경기 시작 후 30분이 지나 실전 목록에서 사라진 최근 6시간 경기를 PRE 저장 없이 다시 불러옵니다."
+            title="경기 시작 후 30분이 지나 실전 목록에서 사라진 최근 24시간 경기를 PRE 저장 없이 다시 불러옵니다."
           >
             🔎 최근 경기 검증
           </button>
@@ -20254,7 +20255,7 @@ export default function Home() {
               {backtestMode
                 ? "현재 저장된 백테스트 과거경기 중 이 종목의 경기가 없습니다."
                 : recentVerifyMode
-                  ? "최근 6시간 내 검증 가능한 이 종목의 경기가 없습니다."
+                  ? "최근 24시간 내 검증 가능한 이 종목의 경기가 없습니다."
                   : "현재 Betman API가 반환한 데이터 중 이 종목의 미시작 배당 경기가 없습니다."}
             </div>
           )}
@@ -20273,7 +20274,7 @@ export default function Home() {
           {!!filteredGames.length && recentVerifyMode && (
             <div className="notice" style={{ margin: "0 14px 10px" }}>
               <b>🔎 V13.8.37 최근 경기 검증 모드</b>
-              {" · "}경기 시작 후 최근 6시간 경기만 표시합니다.
+              {" · "}경기 시작 후 최근 24시간 경기만 표시합니다.
               <br />
               <span>검증용 재분석은 LIVE DATA 확인용이며 PRE TRACKER 최초 스냅샷을 생성하거나 덮어쓰지 않습니다. 결과 VERIFY와도 분리됩니다.</span>
             </div>
@@ -22995,7 +22996,7 @@ export default function Home() {
             </details>
 
             {betman.error && <div className="notice">{betman.error}</div>}
-            <div className="notice">실전 화면은 Betman에서 현재 배당이 제공되는 경기와 경기 시작 후 30분 이내 경기를 표시합니다. 시작 후 30분이 지난 경기는 상단의 최근 경기 검증에서 최근 6시간까지 PRE 저장 없이 다시 확인할 수 있습니다. 야구 LIVE 경기정보는 와이즈토토를 우선 수집하며, 와이즈토토 누락 시에만 SportsAPI 데이터를 fallback으로 사용합니다.</div>
+            <div className="notice">실전 화면은 Betman에서 현재 배당이 제공되는 경기와 경기 시작 후 30분 이내 경기를 표시합니다. 시작 후 30분이 지난 경기는 상단의 최근 경기 검증에서 최근 24시간까지 PRE 저장 없이 다시 확인할 수 있습니다. 야구 LIVE 경기정보는 와이즈토토를 우선 수집하며, 와이즈토토 누락 시에만 SportsAPI 데이터를 fallback으로 사용합니다.</div>
           </>}
         </section>
       </div>
