@@ -1,3 +1,4 @@
+// DEPLOY_MARKER_V13_8_58_FOOTBALL_LINEUP_SNAPSHOT_AUDIT_20260906
 // DEPLOY_MARKER_V13_8_56_FOOTBALL_NAVER_PLAYERS_SESSION_PRIMARY_20260906
 // DEPLOY_MARKER_V13_8_50_FOOTBALL_NAVER_RESOLVER_RECENT_FORM_V2_20260906
 // DEPLOY_MARKER_V13_8_33_KBO_RECORD_PITCHER_BOXSCORE_20260903
@@ -1996,7 +1997,14 @@ export async function GET(request: Request) {
         attempts: footballPlayersAttempts,
         total: footballPlayers.length,
         rawTeamCodes: Array.from(new Set(footballPlayers.map((p: AnyObj) => footballPlayerTeamCode(p)).filter(Boolean))),
-        rawTeamNames: Array.from(new Set(footballPlayers.map((p: AnyObj) => footballPlayerTeamName(p)).filter(Boolean))),
+        rawTeamNames: Array.from(new Set([
+          ...footballPlayers.map((p: AnyObj) => footballPlayerTeamName(p)).filter(Boolean),
+          ...footballPlayers.flatMap((p: AnyObj) => [String(p?.homeTeamName ?? "").trim(), String(p?.awayTeamName ?? "").trim()]).filter(Boolean),
+        ])),
+        homeTeamCode: String(footballPlayers?.[0]?.homeTeamCode ?? homeTeamCode ?? "").trim() || null,
+        awayTeamCode: String(footballPlayers?.[0]?.awayTeamCode ?? awayTeamCode ?? "").trim() || null,
+        homeTeamName: String(footballPlayers?.[0]?.homeTeamName ?? game?.homeTeamName ?? home ?? "").trim() || null,
+        awayTeamName: String(footballPlayers?.[0]?.awayTeamName ?? game?.awayTeamName ?? away ?? "").trim() || null,
         substituteKnown: footballPlayers.filter((p: AnyObj) => footballPlayerSubstituteValue(p) !== null).length,
         startingHome: homeLineup.length,
         startingAway: awayLineup.length,
