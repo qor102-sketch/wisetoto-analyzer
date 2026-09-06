@@ -668,6 +668,7 @@ type LiveTrackerRecord = {
   sport: string;
   startMs: number;
   capturedAt: number;
+  readyCapturedAt?: number | null;
   gateVersion: "FALLBACK_GATE_V2";
   decision: "PICK" | "PASS";
   picks: LiveTrackerPick[];
@@ -1520,6 +1521,7 @@ const BACKTEST_PRE_SNAPSHOT_STORAGE_KEY = "wisetoto_v13_3_9_pre_prediction_snaps
 
 const LIVE_TRACKER_STORAGE_KEY =
   "wisetoto_v13_8_1_live_tracker";
+// V13.8.49: tracker PENDING/READY records are date-independent; recent-verify 24h UI list does not control retention.
 
 function readLiveTrackerRecords(): LiveTrackerRecord[] {
   if (typeof window === "undefined") return [];
@@ -3510,6 +3512,55 @@ function venueAuditRows(
     .map(({ time: _time, ...row }) => row);
 }
 
+
+type RecentFormAuditRow = VenueAuditRow & {
+  result: "W" | "D" | "L";
+};
+
+function recentFormAuditRows(
+  team: RecentTeam | null | undefined,
+  maxGames = 5
+): RecentFormAuditRow[] {
+  const fixtures = Array.isArray(team?.fixtures) ? team!.fixtures! : [];
+  const rows: Array<RecentFormAuditRow & { time: number }> = [];
+
+  fixtures.forEach((fixture: any, index: number) => {
+    const score = fixtureFinalScore(fixture);
+    if (!score) return;
+    const explicitVenue = String(fixture?.teamSide ?? fixture?.venue ?? "").toLowerCase();
+    const venue: "home" | "away" | null =
+      explicitVenue === "home" || explicitVenue === "away"
+        ? explicitVenue
+        : fixtureTeamSideForBacktest(fixture, team);
+    if (!venue) return;
+
+    const homeName = String(fixture?.home ?? fixture?.homeTeamName ?? fixture?.teams?.home?.name ?? "").trim();
+    const awayName = String(fixture?.away ?? fixture?.awayTeamName ?? fixture?.teams?.away?.name ?? "").trim();
+    const opponent = venue === "home" ? awayName : homeName;
+    const scored = venue === "home" ? score.home : score.away;
+    const conceded = venue === "home" ? score.away : score.home;
+    const rawDate = fixture?.date ?? fixture?.startTime ?? fixture?.gameDate ?? fixture?.gameDateTime ?? null;
+    const time = Number.isFinite(fixtureTimeMs(fixture))
+      ? fixtureTimeMs(fixture)
+      : Date.now() - index * 86_400_000;
+    const date = rawDate ? String(rawDate).replace("T", " ").slice(0, 16) : "-";
+    rows.push({
+      date,
+      opponent: opponent || "-",
+      venue,
+      scoreText: `${score.home}:${score.away}`,
+      scored,
+      conceded,
+      result: scored > conceded ? "W" : scored < conceded ? "L" : "D",
+      time,
+    });
+  });
+
+  return rows
+    .sort((a, b) => b.time - a.time)
+    .slice(0, maxGames)
+    .map(({ time: _time, ...row }) => row);
+}
 
 type VenueRobustShadow = {
   scored: number | null;
@@ -14127,6 +14178,27 @@ export default function Home() {
     };
   }, [liveTrackerRecords]);
 
+  const venueShadowReadySummary = useMemo(() => {
+    const ready = liveTrackerRecords.filter(
+      (record) => record.venueShadow?.stage === "READY"
+    );
+    const verified = ready.filter(
+      (record) => record.verificationStatus === "VERIFIED" && record.venueShadowResult
+    );
+    const pending = ready.filter(
+      (record) => record.verificationStatus === "PENDING"
+    );
+    const due = pending.filter(
+      (record) => record.startMs < Date.now() - 2 * 60 * 60 * 1000
+    );
+    return {
+      locked: ready.length,
+      verified: verified.length,
+      pending: pending.length,
+      due: due.length,
+    };
+  }, [liveTrackerRecords]);
+
   const venueShadowValidationSummary = useMemo(() => {
     const rows = liveTrackerRecords.filter(
       (record) => record.venueShadow?.stage === "READY" && record.venueShadowResult
@@ -14198,7 +14270,42 @@ export default function Home() {
       : `live:betman:${trackerBetmanIdentity}:${startMs}`;
 
     setLiveTrackerRecords((previous) => {
-      if (previous.some((record) => record.id === recordId)) {
+      const existingIndex = previous.findIndex((record) => {
+        if (record.id === recordId) return true;
+        if (record.startMs !== startMs) return false;
+
+        const sameBetmanIdentity = Boolean(
+          trackerBetmanIdentity &&
+          record.betmanIdentity &&
+          record.betmanIdentity === trackerBetmanIdentity
+        );
+        const sameFixture = Boolean(
+          trackerFixtureId !== null &&
+          record.fixtureId !== null &&
+          Number(record.fixtureId) === trackerFixtureId
+        );
+        return sameBetmanIdentity || sameFixture;
+      });
+      const existingRecord = existingIndex >= 0 ? previous[existingIndex] : null;
+
+      /*
+       * V13.8.49: 최초 PRE/STARTER 잠금이 있더라도 경기 시작 전 READY가
+       * 나중에 들어오면 같은 경기 레코드를 READY snapshot으로 1회 승격한다.
+       * 이미 READY가 잠겼거나 VERIFY가 끝난 레코드는 절대 덮어쓰지 않는다.
+       */
+      const canPromoteToReady = Boolean(
+        existingRecord &&
+        existingRecord.verificationStatus === "PENDING" &&
+        !existingRecord.venueShadow &&
+        currentSport === "야구" &&
+        analysisFactors.baseballAnalysisStage === "READY" &&
+        analysisFactors.expectedHomeScore !== null &&
+        analysisFactors.expectedAwayScore !== null &&
+        analysisFactors.venueShadowFinalHomeScore !== null &&
+        analysisFactors.venueShadowFinalAwayScore !== null
+      );
+
+      if (existingRecord && !canPromoteToReady) {
         return previous;
       }
 
@@ -14321,6 +14428,10 @@ export default function Home() {
         sport: currentSport,
         startMs,
         capturedAt: Date.now(),
+        readyCapturedAt:
+          currentSport === "야구" && analysisFactors.baseballAnalysisStage === "READY"
+            ? Date.now()
+            : null,
         gateVersion: "FALLBACK_GATE_V2",
         decision: trackerPicks.length ? "PICK" : "PASS",
         picks: trackerPicks,
@@ -14352,7 +14463,23 @@ export default function Home() {
         result: null,
       };
 
-      const next = [nextRecord, ...previous].slice(0, 300);
+      const next = existingRecord
+        ? previous.map((record, index) =>
+            index === existingIndex
+              ? {
+                  ...nextRecord,
+                  /* 첫 PRE 잠금 시각/ID는 보존하고, READY 내용만 승격한다. */
+                  id: existingRecord.id,
+                  capturedAt: existingRecord.capturedAt,
+                  readyCapturedAt: Date.now(),
+                  verificationStatus: "PENDING",
+                  verifiedAt: null,
+                  result: null,
+                  venueShadowResult: null,
+                }
+              : record
+          )
+        : [nextRecord, ...previous].slice(0, 300);
       saveLiveTrackerRecords(next);
       return next;
     });
@@ -14361,6 +14488,11 @@ export default function Home() {
     selectedBetman,
     matched,
     analysisFactors.hasRealData,
+    analysisFactors.baseballAnalysisStage,
+    analysisFactors.expectedHomeScore,
+    analysisFactors.expectedAwayScore,
+    analysisFactors.venueShadowFinalHomeScore,
+    analysisFactors.venueShadowFinalAwayScore,
     currentSport,
     eligibleMarketPicks,
     actualMarketPicks,
@@ -20109,13 +20241,14 @@ export default function Home() {
             {" · "}추천경기 {liveTrackerSummary.pickGames}
             {" · "}PASS {liveTrackerSummary.passGames}
             {" · "}미결 추천 {liveTrackerSummary.pending}픽
+            {" · "}PENDING은 최근 경기 목록과 무관하게 localStorage에 유지
             {" · "}Gate V2 고정
           </span>
         </div>
 
         <div style={{ padding: "9px 12px", borderTop: "1px solid #e2e8f0" }}>
           <div className="small" style={{ fontWeight: 900, marginBottom: 6 }}>
-            V13.8.47 VENUE SHADOW VALIDATOR · MODEL OFF · READY 검증 {venueShadowValidationSummary.games}/30경기
+            V13.8.49 VENUE SHADOW VALIDATOR · MODEL OFF · READY PRE 잠금 {venueShadowReadySummary.locked}경기 · VERIFY {venueShadowValidationSummary.games}/30경기 · 결과대기 {venueShadowReadySummary.pending}경기{venueShadowReadySummary.due > 0 ? ` · 확인가능 ${venueShadowReadySummary.due}` : ""}
           </div>
           <div className="cards">
             <div className="card">득점 MAE<b>{venueShadowValidationSummary.rawScoreMae?.toFixed(2) ?? "-"} → {venueShadowValidationSummary.shadowScoreMae?.toFixed(2) ?? "-"}</b><div className="small">RAW → SHADOW</div></div>
@@ -21517,6 +21650,45 @@ export default function Home() {
                           <div className="small">실전 READY 표본을 먼저 축적한 뒤 포지션별 영향 검증</div>
                         </div>
                       </div>
+                      <div className="notice" style={{ margin: "8px 0" }}>
+                        <b>V13.8.51 축구 DATA AUDIT · MODEL OFF</b> · 최근 Form 5경기의 실제 홈/원정 점수와 분석 대상 팀 득실을 그대로 표시합니다.
+                        players 응답은 필드 구조가 달라도 player 배열을 탐색하지만, 선발 여부가 명확하지 않은 선수는 22명 READY에 포함하지 않습니다.
+                      </div>
+                      <div className="cards">
+                        <div className="card">
+                          players 원본 진단
+                          <b>{Number(matched?.naverTodayLineup?.footballPlayers?.total ?? 0)}명</b>
+                          <div className="small">선발판정 가능 {Number(matched?.naverTodayLineup?.footballPlayers?.substituteKnown ?? 0)}명 · HTTP {matched?.naverTodayLineup?.footballPlayers?.status ?? "-"}</div>
+                        </div>
+                        <div className="card">
+                          team 식별
+                          <b>{Array.isArray(matched?.naverTodayLineup?.footballPlayers?.rawTeamCodes) ? matched.naverTodayLineup.footballPlayers.rawTeamCodes.length : 0} code</b>
+                          <div className="small">{Array.isArray(matched?.naverTodayLineup?.footballPlayers?.rawTeamNames) && matched.naverTodayLineup.footballPlayers.rawTeamNames.length ? matched.naverTodayLineup.footballPlayers.rawTeamNames.join(" / ") : "teamName 미수신"}</div>
+                        </div>
+                      </div>
+                      {(() => {
+                        const homeRows = recentFormAuditRows(matched?.recentSummary?.home, 5);
+                        const awayRows = recentFormAuditRows(matched?.recentSummary?.away, 5);
+                        const rows = [
+                          ...homeRows.map((row) => ({ ...row, sideLabel: "홈팀 최근" })),
+                          ...awayRows.map((row) => ({ ...row, sideLabel: "원정팀 최근" })),
+                        ];
+                        if (!rows.length) return null;
+                        return (
+                          <div style={{ marginTop: 8 }}>
+                            <div style={{ overflowX: "auto", border: "1px solid #e3e9f2", borderRadius: 9 }}>
+                              <div style={{ display: "grid", gridTemplateColumns: "90px 130px minmax(120px,1fr) 55px 70px 55px 55px 45px", gap: 6, padding: "6px 8px", minWidth: 720, background: "#f5f8fc", fontSize: 9, fontWeight: 900 }}>
+                                <div>표본</div><div>날짜</div><div>상대팀</div><div>H/A</div><div>최종점수</div><div>득점</div><div>실점</div><div>결과</div>
+                              </div>
+                              {rows.map((row, index) => (
+                                <div key={`football-form-audit-${row.sideLabel}-${row.date}-${index}`} style={{ display: "grid", gridTemplateColumns: "90px 130px minmax(120px,1fr) 55px 70px 55px 55px 45px", gap: 6, padding: "6px 8px", minWidth: 720, borderTop: "1px solid #edf1f6", fontSize: 9 }}>
+                                  <div><b>{row.sideLabel}</b></div><div>{row.date}</div><div>{row.opponent}</div><div>{row.venue === "home" ? "HOME" : "AWAY"}</div><div>{row.scoreText}</div><div>{row.scored}</div><div>{row.conceded}</div><div>{row.result}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
 
