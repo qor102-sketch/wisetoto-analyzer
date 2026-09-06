@@ -21651,8 +21651,8 @@ export default function Home() {
                         </div>
                       </div>
                       <div className="notice" style={{ margin: "8px 0" }}>
-                        <b>V13.8.54 축구 NAVER LINEUP REFETCH · MODEL OFF</b> · 최근 Form 5경기의 실제 홈/원정 점수와 분석 대상 팀 득실을 그대로 표시합니다.
-                        players 응답은 필드 구조가 달라도 player 배열을 탐색하지만, 선발 여부가 명확하지 않은 선수는 22명 READY에 포함하지 않습니다.
+                        <b>V13.8.56 축구 NAVER PLAYERS SESSION PRIMARY · MODEL OFF</b> · Naver 라인업 탭과 동일하게 /players를 PRIMARY로 다시 사용합니다. 서버 403을 피하기 위해 먼저 같은 경기의 /lineup 페이지를 브라우저 세션처럼 warm-up한 뒤 쿠키를 이어받아 players XHR을 호출합니다.
+                        선발 여부가 명확하지 않은 선수는 22명 READY에 포함하지 않습니다.
                       </div>
                       <div className="cards">
                         <div className="card">
