@@ -14472,7 +14472,7 @@ export default function Home() {
                   id: existingRecord.id,
                   capturedAt: existingRecord.capturedAt,
                   readyCapturedAt: Date.now(),
-                  verificationStatus: "PENDING",
+                  verificationStatus: "PENDING" as const,
                   verifiedAt: null,
                   result: null,
                   venueShadowResult: null,
