@@ -1632,20 +1632,67 @@ export async function GET(request: Request) {
     let npbRecordData: AnyObj | null = null;
     let npbRecordEndpoint: string | null = null;
     let npbRecordStatus: number | null = null;
+    let footballPlayersSource: string | null = null;
+    let footballPlayersAttempts: Array<{ endpoint: string; status: number | null; source: string }> = [];
     if (league === "FOOTBALL") {
       footballPlayersEndpoint = `${NAVER_API}/${gameId}/players`;
-      const playersResponse = await fetch(footballPlayersEndpoint, {
-        cache: "no-store",
-        headers: {
-          accept: "application/json, text/plain, */*",
-          referer: `https://m.sports.naver.com/game/${gameId}`,
-          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.8.28",
+      const browserHeaders = {
+        accept: "application/json, text/plain, */*",
+        "accept-language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        origin: "https://m.sports.naver.com",
+        referer: `https://m.sports.naver.com/game/${gameId}`,
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-site",
+        "user-agent": "Mozilla/5.0 (Linux; Android 14; SM-S928N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36",
+      };
+      const playerAttempts = [
+        {
+          endpoint: footballPlayersEndpoint,
+          source: "PLAYERS_API_BROWSER",
+          headers: browserHeaders,
         },
-      });
-      footballPlayersStatus = playersResponse.status;
-      const playersPayload = await playersResponse.json().catch(() => null);
-      if (playersResponse.ok && playersPayload) {
-        footballPlayers = extractFootballPlayers(playersPayload);
+        {
+          endpoint: footballPlayersEndpoint,
+          source: "PLAYERS_API_RELAY_REFERER",
+          headers: { ...browserHeaders, referer: `https://m.sports.naver.com/game/${gameId}/relay` },
+        },
+      ];
+
+      for (const attempt of playerAttempts) {
+        const playersResponse = await fetch(attempt.endpoint, {
+          cache: "no-store",
+          headers: attempt.headers,
+        }).catch(() => null);
+        const status = playersResponse?.status ?? null;
+        footballPlayersAttempts.push({ endpoint: attempt.endpoint, status, source: attempt.source });
+        if (footballPlayersStatus == null && status != null) footballPlayersStatus = status;
+        if (!playersResponse?.ok) continue;
+        const playersPayload = await playersResponse.json().catch(() => null);
+        const extracted = extractFootballPlayers(playersPayload);
+        if (extracted.length > 0) {
+          footballPlayers = extracted;
+          footballPlayersStatus = playersResponse.status;
+          footballPlayersSource = attempt.source;
+          break;
+        }
+      }
+
+      // players API가 403 등으로 차단돼도 이미 정상 수신된 game-polling / schedule 응답 안에
+      // 실제 선수 배열이 포함된 경우에만 사용한다. 이름/선발 여부를 임의 생성하지 않는다.
+      if (footballPlayers.length === 0) {
+        const pollingPlayers = extractFootballPlayers(payload);
+        if (pollingPlayers.length > 0) {
+          footballPlayers = pollingPlayers;
+          footballPlayersSource = "GAME_POLLING_EMBEDDED";
+        }
+      }
+      if (footballPlayers.length === 0) {
+        const schedulePlayers = extractFootballPlayers(resolverDebug?.selectedGame);
+        if (schedulePlayers.length > 0) {
+          footballPlayers = schedulePlayers;
+          footballPlayersSource = "SCHEDULE_EMBEDDED";
+        }
       }
     }
     if (league === "NPB") {
@@ -1826,6 +1873,8 @@ export async function GET(request: Request) {
       footballPlayers: league === "FOOTBALL" ? {
         ok: footballPlayers.length > 0,
         status: footballPlayersStatus,
+        source: footballPlayersSource,
+        attempts: footballPlayersAttempts,
         total: footballPlayers.length,
         rawTeamCodes: Array.from(new Set(footballPlayers.map((p: AnyObj) => footballPlayerTeamCode(p)).filter(Boolean))),
         rawTeamNames: Array.from(new Set(footballPlayers.map((p: AnyObj) => footballPlayerTeamName(p)).filter(Boolean))),
