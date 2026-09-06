@@ -657,6 +657,31 @@ type VenueShadowValidationResult = {
   shadowMarginAbsError: number;
 };
 
+type FootballLineupSnapshot = {
+  stage: "LINEUP_READY";
+  capturedAt: number;
+  source: "NAVER_FOOTBALL_PLAYERS";
+  gameId: string | null;
+  homeTeamCode: string | null;
+  awayTeamCode: string | null;
+  homeTeamName: string | null;
+  awayTeamName: string | null;
+  home: Array<{
+    playerId: string | null;
+    name: string | null;
+    position: string | null;
+    formationPlace: number | null;
+    shirtNumber: number | null;
+  }>;
+  away: Array<{
+    playerId: string | null;
+    name: string | null;
+    position: string | null;
+    formationPlace: number | null;
+    shirtNumber: number | null;
+  }>;
+};
+
 type LiveTrackerRecord = {
   id: string;
   fixtureId: number | null;
@@ -678,6 +703,7 @@ type LiveTrackerRecord = {
   result: BacktestValidationResult | null;
   venueShadow?: VenueShadowValidationSnapshot | null;
   venueShadowResult?: VenueShadowValidationResult | null;
+  footballLineup?: FootballLineupSnapshot | null;
 };
 
 
@@ -14293,7 +14319,47 @@ export default function Home() {
        * 나중에 들어오면 같은 경기 레코드를 READY snapshot으로 1회 승격한다.
        * 이미 READY가 잠겼거나 VERIFY가 끝난 레코드는 절대 덮어쓰지 않는다.
        */
-      const canPromoteToReady = Boolean(
+      const footballHomeRows =
+        currentSport === "축구" && Array.isArray(matched?.naverTodayLineup?.home)
+          ? matched.naverTodayLineup.home.slice(0, 11)
+          : [];
+      const footballAwayRows =
+        currentSport === "축구" && Array.isArray(matched?.naverTodayLineup?.away)
+          ? matched.naverTodayLineup.away.slice(0, 11)
+          : [];
+      const hasConfirmedFootballLineup =
+        currentSport === "축구" &&
+        matched?.naverTodayLineup?.league === "FOOTBALL" &&
+        footballHomeRows.length === 11 &&
+        footballAwayRows.length === 11;
+      const footballLineupSnapshot: FootballLineupSnapshot | null = hasConfirmedFootballLineup
+        ? {
+            stage: "LINEUP_READY",
+            capturedAt: Date.now(),
+            source: "NAVER_FOOTBALL_PLAYERS",
+            gameId: String(matched?.naverTodayLineup?.gameId ?? "").trim() || null,
+            homeTeamCode: String(matched?.naverTodayLineup?.footballPlayers?.homeTeamCode ?? "").trim() || null,
+            awayTeamCode: String(matched?.naverTodayLineup?.footballPlayers?.awayTeamCode ?? "").trim() || null,
+            homeTeamName: String(matched?.naverTodayLineup?.footballPlayers?.homeTeamName ?? "").trim() || null,
+            awayTeamName: String(matched?.naverTodayLineup?.footballPlayers?.awayTeamName ?? "").trim() || null,
+            home: footballHomeRows.map((p: any) => ({
+              playerId: String(p?.playerId ?? p?.pcode ?? "").trim() || null,
+              name: String(p?.name ?? "").trim() || null,
+              position: String(p?.position ?? "").trim() || null,
+              formationPlace: Number.isFinite(Number(p?.formationPlace)) ? Number(p.formationPlace) : null,
+              shirtNumber: Number.isFinite(Number(p?.shirtNumber)) ? Number(p.shirtNumber) : null,
+            })),
+            away: footballAwayRows.map((p: any) => ({
+              playerId: String(p?.playerId ?? p?.pcode ?? "").trim() || null,
+              name: String(p?.name ?? "").trim() || null,
+              position: String(p?.position ?? "").trim() || null,
+              formationPlace: Number.isFinite(Number(p?.formationPlace)) ? Number(p.formationPlace) : null,
+              shirtNumber: Number.isFinite(Number(p?.shirtNumber)) ? Number(p.shirtNumber) : null,
+            })),
+          }
+        : null;
+
+      const canPromoteBaseballReady = Boolean(
         existingRecord &&
         existingRecord.verificationStatus === "PENDING" &&
         !existingRecord.venueShadow &&
@@ -14304,8 +14370,14 @@ export default function Home() {
         analysisFactors.venueShadowFinalHomeScore !== null &&
         analysisFactors.venueShadowFinalAwayScore !== null
       );
+      const canPromoteFootballLineup = Boolean(
+        existingRecord &&
+        existingRecord.verificationStatus === "PENDING" &&
+        !existingRecord.footballLineup &&
+        footballLineupSnapshot
+      );
 
-      if (existingRecord && !canPromoteToReady) {
+      if (existingRecord && !canPromoteBaseballReady && !canPromoteFootballLineup) {
         return previous;
       }
 
@@ -14429,7 +14501,7 @@ export default function Home() {
         startMs,
         capturedAt: Date.now(),
         readyCapturedAt:
-          currentSport === "야구" && analysisFactors.baseballAnalysisStage === "READY"
+          (currentSport === "야구" && analysisFactors.baseballAnalysisStage === "READY") || footballLineupSnapshot
             ? Date.now()
             : null,
         gateVersion: "FALLBACK_GATE_V2",
@@ -14458,6 +14530,7 @@ export default function Home() {
               }
             : null,
         venueShadowResult: null,
+        footballLineup: footballLineupSnapshot,
         verificationStatus: "PENDING" as const,
         verifiedAt: null,
         result: null,
@@ -14472,6 +14545,8 @@ export default function Home() {
                   id: existingRecord.id,
                   capturedAt: existingRecord.capturedAt,
                   readyCapturedAt: Date.now(),
+                  venueShadow: nextRecord.venueShadow ?? existingRecord.venueShadow ?? null,
+                  footballLineup: nextRecord.footballLineup ?? existingRecord.footballLineup ?? null,
                   verificationStatus: "PENDING" as const,
                   verifiedAt: null,
                   result: null,
@@ -21623,7 +21698,7 @@ export default function Home() {
 
                   {currentSport === "축구" && (
                     <div className="section" style={{ marginTop: 0 }}>
-                      <h3>V13.8.30 축구 LIVE DATA · Naver 실제 선발</h3>
+                      <h3>V13.8.58 축구 LIVE DATA · Naver 실제 선발</h3>
                       <div className="notice" style={{ margin: "8px 0" }}>
                         네이버 Sports의 경기별 players 응답에서 <b>substitute:false</b> 선수를 실제 선발로 수집합니다.
                         현재 단계에서는 선발 11+11을 READY 진단과 경기전 스냅샷에만 연결하며 V13.0 축구 λ/Poisson 계산식은 변경하지 않습니다.
@@ -21651,8 +21726,8 @@ export default function Home() {
                         </div>
                       </div>
                       <div className="notice" style={{ margin: "8px 0" }}>
-                        <b>V13.8.56 축구 NAVER PLAYERS SESSION PRIMARY · MODEL OFF</b> · Naver 라인업 탭과 동일하게 /players를 PRIMARY로 다시 사용합니다. 서버 403을 피하기 위해 먼저 같은 경기의 /lineup 페이지를 브라우저 세션처럼 warm-up한 뒤 쿠키를 이어받아 players XHR을 호출합니다.
-                        선발 여부가 명확하지 않은 선수는 22명 READY에 포함하지 않습니다.
+                        <b>V13.8.58 축구 LINEUP SNAPSHOT / AUDIT · MODEL OFF</b> · 실제 Naver statistics players 응답의 <b>substitute:false</b> 11+11만 LINEUP READY로 인정합니다.
+                        22명 명단은 실전 추적 PRE 레코드에 스냅샷으로 저장하되 축구 λ/Poisson에는 아직 반영하지 않습니다.
                       </div>
                       <div className="cards">
                         <div className="card">
@@ -21667,6 +21742,38 @@ export default function Home() {
                           <div className="small">{Array.isArray(matched?.naverTodayLineup?.footballPlayers?.rawTeamNames) && matched.naverTodayLineup.footballPlayers.rawTeamNames.length ? matched.naverTodayLineup.footballPlayers.rawTeamNames.join(" / ") : "teamName 미수신"}</div>
                         </div>
                       </div>
+                      {(() => {
+                        const homeLineup = Array.isArray(matched?.naverTodayLineup?.home) ? matched.naverTodayLineup.home.slice(0, 11) : [];
+                        const awayLineup = Array.isArray(matched?.naverTodayLineup?.away) ? matched.naverTodayLineup.away.slice(0, 11) : [];
+                        const lineupReady = homeLineup.length === 11 && awayLineup.length === 11;
+                        if (!homeLineup.length && !awayLineup.length) return null;
+                        const rows = [
+                          ...homeLineup.map((player: any) => ({ ...player, sideLabel: "HOME" })),
+                          ...awayLineup.map((player: any) => ({ ...player, sideLabel: "AWAY" })),
+                        ];
+                        return (
+                          <div style={{ marginTop: 8 }}>
+                            <div className="notice" style={{ margin: "8px 0" }}>
+                              <b>LINEUP {lineupReady ? "READY ✓" : "PARTIAL"}</b> · 실제 선발 {homeLineup.length + awayLineup.length}/22 · playerId / 포지션 / 등번호 / formationPlace를 검증용으로 고정 저장합니다. 모델 반영 OFF.
+                            </div>
+                            <div style={{ overflowX: "auto", border: "1px solid #e3e9f2", borderRadius: 9 }}>
+                              <div style={{ display: "grid", gridTemplateColumns: "60px 55px minmax(120px,1fr) 55px 60px 90px", gap: 6, padding: "6px 8px", minWidth: 560, background: "#f5f8fc", fontSize: 9, fontWeight: 900 }}>
+                                <div>팀</div><div>#</div><div>선수</div><div>POS</div><div>배치</div><div>playerId</div>
+                              </div>
+                              {rows.map((player: any, index: number) => (
+                                <div key={`football-lineup-audit-${player.sideLabel}-${player.playerId ?? player.name ?? index}`} style={{ display: "grid", gridTemplateColumns: "60px 55px minmax(120px,1fr) 55px 60px 90px", gap: 6, padding: "6px 8px", minWidth: 560, borderTop: "1px solid #edf1f6", fontSize: 9 }}>
+                                  <div><b>{player.sideLabel}</b></div>
+                                  <div>{player.shirtNumber ?? "-"}</div>
+                                  <div>{player.name ?? "-"}</div>
+                                  <div>{player.position ?? "-"}</div>
+                                  <div>{player.formationPlace ?? "-"}</div>
+                                  <div>{player.playerId ?? player.pcode ?? "-"}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
                       {(() => {
                         const homeRows = recentFormAuditRows(matched?.recentSummary?.home, 5);
                         const awayRows = recentFormAuditRows(matched?.recentSummary?.away, 5);
