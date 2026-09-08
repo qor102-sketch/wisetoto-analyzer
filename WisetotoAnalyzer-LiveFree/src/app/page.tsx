@@ -1,3 +1,4 @@
+
 // DEPLOY_MARKER_V13_8_32_POST_START_30MIN_VISIBILITY_20260903
 // DEPLOY_MARKER_V13_8_28_FOOTBALL_NAVER_LINEUP_V1_20260830
 // DEPLOY_MARKER_V13_8_19_MLB_SPORTSAPI_ALIAS_FIX_20260829
@@ -727,6 +728,8 @@ type LiveTrackerRecord = {
   footballPreResult?: FootballPreValidationResult | null;
   verifyWaitReason?: "BETMAN_MATCH_WAIT" | "BETMAN_FINAL_WAIT" | "FALLBACK_TIME_WAIT" | "FIXTURE_ID_MISSING" | "RESULT_NOT_FOUND" | null;
   verifyLastCheckedAt?: number | null;
+  verifyMatchMethod?: "IDENTITY_EXACT" | "MARKET_ID" | "TEAM_TIME_EXACT" | "TEAM_TIME_FUZZY" | null;
+  verifyMatchAudit?: string | null;
 };
 
 
@@ -3194,6 +3197,103 @@ function actualGameIdentity(game: BetmanMatch) {
   const start = game?.gameDateMs ?? game?.gameDate ?? game?.startTime ?? "";
   const sport = koreanSport(String((game as any)?.sport ?? ""));
   return [normalizeTeamName(betmanTeam(game, "home")), normalizeTeamName(betmanTeam(game, "away")), String(start), sport].join("|");
+}
+
+function betmanStartMs(game: BetmanMatch) {
+  const raw = game?.gameDateMs ?? game?.gameDate ?? game?.startTime ?? null;
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric < 10_000_000_000 ? numeric * 1000 : numeric;
+  }
+  const parsed = Date.parse(String(raw ?? ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function betmanMarketIdentifiers(game: BetmanMatch) {
+  const values = new Set<string>();
+  const push = (value: unknown) => {
+    const text = String(value ?? "").trim();
+    if (text) values.add(text);
+  };
+  push((game as any)?.gameNo);
+  push((game as any)?.matchSeq);
+  push((game as any)?.gameId);
+  push((game as any)?.id);
+  for (const market of Array.isArray((game as any)?.markets) ? (game as any).markets : []) {
+    push(market?.gameNo);
+    push(market?.matchSeq);
+  }
+  return values;
+}
+
+function trackerMarketIdentifiers(record: LiveTrackerRecord) {
+  const values = new Set<string>();
+  const push = (value: unknown) => {
+    const text = String(value ?? "").trim();
+    if (text) values.add(text);
+  };
+  for (const pick of [...(record.marketResults ?? []), ...(record.picks ?? [])]) {
+    push((pick as any)?.marketSnapshot?.gameNo);
+    push((pick as any)?.marketSnapshot?.matchSeq);
+  }
+  return values;
+}
+
+function matchBetmanFinishedGame(record: LiveTrackerRecord, games: BetmanMatch[]) {
+  const finalGames = games.filter((game) => fixtureFinalScore(game) !== null);
+  const exact = finalGames.find((game) =>
+    actualGameIdentity(game) === record.betmanIdentity ||
+    actualGameIdentity(game) === record.fixtureKey
+  );
+  if (exact) {
+    return { game: exact, method: "IDENTITY_EXACT" as const, audit: `identity exact · finals ${finalGames.length}` };
+  }
+
+  const trackerIds = trackerMarketIdentifiers(record);
+  if (trackerIds.size) {
+    const byId = finalGames.filter((game) => {
+      const ids = betmanMarketIdentifiers(game);
+      return Array.from(trackerIds).some((id) => ids.has(id));
+    });
+    if (byId.length === 1) {
+      return { game: byId[0], method: "MARKET_ID" as const, audit: `market id unique · ids ${Array.from(trackerIds).join(",")}` };
+    }
+  }
+
+  const recordHome = normalizeTeamName(record.home);
+  const recordAway = normalizeTeamName(record.away);
+  const recordSport = koreanSport(record.sport);
+  const scored = finalGames.map((game) => {
+    const home = normalizeTeamName(betmanTeam(game, "home"));
+    const away = normalizeTeamName(betmanTeam(game, "away"));
+    const sport = koreanSport(String((game as any)?.sport ?? ""));
+    const start = betmanStartMs(game);
+    const deltaMin = start === null ? Number.POSITIVE_INFINITY : Math.abs(start - record.startMs) / 60000;
+    const homeScore = teamSimilarity(recordHome, home);
+    const awayScore = teamSimilarity(recordAway, away);
+    const sportOk = !recordSport || !sport || recordSport === sport;
+    return { game, deltaMin, homeScore, awayScore, sportOk };
+  }).filter((row) => row.sportOk);
+
+  const exactTeamTime = scored.filter((row) => row.homeScore === 1 && row.awayScore === 1 && row.deltaMin <= 15);
+  if (exactTeamTime.length === 1) {
+    return { game: exactTeamTime[0].game, method: "TEAM_TIME_EXACT" as const, audit: `team exact + time ${exactTeamTime[0].deltaMin.toFixed(1)}m` };
+  }
+
+  const fuzzy = scored
+    .filter((row) => row.homeScore >= 0.92 && row.awayScore >= 0.92 && row.deltaMin <= 15)
+    .sort((a, b) => (b.homeScore + b.awayScore) - (a.homeScore + a.awayScore) || a.deltaMin - b.deltaMin);
+  if (fuzzy.length === 1 || (fuzzy.length > 1 && ((fuzzy[0].homeScore + fuzzy[0].awayScore) > (fuzzy[1].homeScore + fuzzy[1].awayScore) + 0.05 || fuzzy[0].deltaMin + 5 < fuzzy[1].deltaMin))) {
+    return { game: fuzzy[0].game, method: "TEAM_TIME_FUZZY" as const, audit: `team fuzzy ${fuzzy[0].homeScore.toFixed(2)}/${fuzzy[0].awayScore.toFixed(2)} · time ${fuzzy[0].deltaMin.toFixed(1)}m` };
+  }
+
+  const nearest = scored
+    .filter((row) => row.homeScore >= 0.75 && row.awayScore >= 0.75)
+    .sort((a, b) => a.deltaMin - b.deltaMin)[0];
+  const audit = nearest
+    ? `no unique match · nearest team ${nearest.homeScore.toFixed(2)}/${nearest.awayScore.toFixed(2)} · time ${Number.isFinite(nearest.deltaMin) ? nearest.deltaMin.toFixed(1) : "?"}m · finals ${finalGames.length}`
+    : `no team candidate · finals ${finalGames.length}`;
+  return { game: null, method: null, audit };
 }
 
 function mergeActualGames(games: BetmanMatch[]) {
@@ -14951,10 +15051,8 @@ export default function Home() {
         try {
           let truth: BacktestValidationResult | null = null;
 
-          const betmanMatch = betmanFinishedGames.find((game) =>
-            actualGameIdentity(game) === record.betmanIdentity ||
-            actualGameIdentity(game) === record.fixtureKey
-          );
+          const betmanResolved = matchBetmanFinishedGame(record, betmanFinishedGames);
+          const betmanMatch = betmanResolved.game;
           const betmanScore = betmanMatch ? fixtureFinalScore(betmanMatch) : null;
           const fallbackEligible = record.startMs < Date.now() - 2 * 60 * 60 * 1000;
           let waitReason: LiveTrackerRecord["verifyWaitReason"] = null;
@@ -15012,7 +15110,13 @@ export default function Home() {
             const checkedAt = Date.now();
             next = next.map((candidate) =>
               candidate.id === record.id
-                ? { ...candidate, verifyWaitReason: waitReason, verifyLastCheckedAt: checkedAt }
+                ? {
+                    ...candidate,
+                    verifyWaitReason: waitReason,
+                    verifyLastCheckedAt: checkedAt,
+                    verifyMatchMethod: betmanResolved.method,
+                    verifyMatchAudit: betmanResolved.audit,
+                  }
                 : candidate
             );
             unavailable += 1;
@@ -15080,6 +15184,8 @@ export default function Home() {
                   footballPreResult,
                   verifyWaitReason: null,
                   verifyLastCheckedAt: Date.now(),
+                  verifyMatchMethod: betmanResolved.method,
+                  verifyMatchAudit: betmanResolved.audit,
                 }
               : candidate
           );
@@ -20751,6 +20857,21 @@ export default function Home() {
           </div>
           <div className="small" style={{ marginTop: 5, whiteSpace: "normal" }}>
             보호 규칙 · state 변경 시 main tracker 즉시 동기화 · PRE/READY/LINEUP/VERIFIED 단계별 append-only 1회 보존 · 유효 tracker 빈 배열 덮어쓰기 금지 · 변경 전 shadow 최대 5개 자동 보존 · fixtureId=null Naver 독립 PRE도 복원 허용
+          </div>
+        </div>
+
+        <div style={{ padding: "8px 12px", borderTop: "1px solid #e2e8f0", background: "#f8fbff" }}>
+          <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
+            V13.8.67 BETMAN VERIFY MATCH AUDIT · STORAGE 8.66 보호 유지
+          </div>
+          <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.7 }}>
+            {liveTrackerRecords.filter((record) => record.verificationStatus === "PENDING" && record.startMs < Date.now()).length === 0
+              ? "확인 대상 PENDING 없음"
+              : liveTrackerRecords
+                  .filter((record) => record.verificationStatus === "PENDING" && record.startMs < Date.now())
+                  .slice(0, 3)
+                  .map((record) => `${record.home} vs ${record.away} · ${record.verifyMatchMethod ?? "MATCH 미확정"} · ${record.verifyMatchAudit ?? record.verifyWaitReason ?? "아직 결과 확인 전"}`)
+                  .join(" | ")}
           </div>
         </div>
 
