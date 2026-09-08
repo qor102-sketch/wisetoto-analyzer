@@ -1,4 +1,3 @@
-
 // DEPLOY_MARKER_V13_8_32_POST_START_30MIN_VISIBILITY_20260903
 // DEPLOY_MARKER_V13_8_28_FOOTBALL_NAVER_LINEUP_V1_20260830
 // DEPLOY_MARKER_V13_8_19_MLB_SPORTSAPI_ALIAS_FIX_20260829
@@ -1577,6 +1576,7 @@ const LIVE_TRACKER_SHADOW_PREFIX =
   "wisetoto_v13_8_65_live_tracker_shadow_";
 const LIVE_TRACKER_APPEND_ONLY_KEY =
   "wisetoto_v13_8_66_live_tracker_append_only";
+const LIVE_TRACKER_PORTABLE_SCHEMA = "V13.8.68-LIVE-TRACKER-PORTABLE";
 // V13.8.49: tracker PENDING/READY records are date-independent; recent-verify 24h UI list does not control retention.
 // V13.8.65: tracker 저장은 비파괴 방식. 기존 유효 데이터가 있으면 빈 배열로 덮어쓰지 않고 shadow를 남긴다.
 
@@ -1636,6 +1636,78 @@ type LiveTrackerAppendOnlySnapshot = {
   stage: "PRE" | "BASEBALL_READY" | "FOOTBALL_LINEUP_READY" | "VERIFIED";
   record: LiveTrackerRecord;
 };
+
+type LiveTrackerPortableBundle = {
+  schemaVersion: string;
+  exportedAt: number;
+  sourceOrigin?: string;
+  storageKey?: string;
+  gateVersion?: string;
+  records: LiveTrackerRecord[];
+  appendOnlySnapshots?: LiveTrackerAppendOnlySnapshot[];
+};
+
+function liveTrackerRecordStageRank(record: LiveTrackerRecord) {
+  if (record.verificationStatus === "VERIFIED") return 4;
+  if (record.footballLineup?.stage === "LINEUP_READY") return 3;
+  if (record.venueShadow?.stage === "READY") return 3;
+  return 1;
+}
+
+function mergePortableLiveTrackerRecords(
+  current: LiveTrackerRecord[],
+  incoming: LiveTrackerRecord[]
+): LiveTrackerRecord[] {
+  const merged = new Map<string, LiveTrackerRecord>();
+  const identityOf = (row: LiveTrackerRecord) =>
+    String(row.id || row.betmanIdentity || row.fixtureKey || `${row.startMs}:${row.home}:${row.away}`);
+
+  for (const row of [...current, ...incoming]) {
+    const identity = identityOf(row);
+    const existing = merged.get(identity);
+    if (!existing) {
+      merged.set(identity, row);
+      continue;
+    }
+    const existingRank = liveTrackerRecordStageRank(existing);
+    const rowRank = liveTrackerRecordStageRank(row);
+    const existingSize = JSON.stringify(existing).length;
+    const rowSize = JSON.stringify(row).length;
+    const selected = rowRank > existingRank || (rowRank === existingRank && rowSize > existingSize)
+      ? row
+      : existing;
+    const earliestCaptured = Math.min(
+      Number(existing.capturedAt ?? Number.MAX_SAFE_INTEGER),
+      Number(row.capturedAt ?? Number.MAX_SAFE_INTEGER)
+    );
+    merged.set(identity, {
+      ...selected,
+      capturedAt: Number.isFinite(earliestCaptured) && earliestCaptured !== Number.MAX_SAFE_INTEGER
+        ? earliestCaptured
+        : selected.capturedAt,
+    });
+  }
+  return Array.from(merged.values())
+    .sort((a, b) => Number(b.capturedAt ?? 0) - Number(a.capturedAt ?? 0))
+    .slice(0, 300);
+}
+
+function mergePortableAppendOnlySnapshots(
+  current: LiveTrackerAppendOnlySnapshot[],
+  incoming: LiveTrackerAppendOnlySnapshot[]
+): LiveTrackerAppendOnlySnapshot[] {
+  const merged = new Map<string, LiveTrackerAppendOnlySnapshot>();
+  for (const snapshot of [...current, ...incoming]) {
+    if (!snapshot || typeof snapshot.snapshotKey !== "string" || !snapshot.record) continue;
+    const existing = merged.get(snapshot.snapshotKey);
+    if (!existing || Number(snapshot.savedAt ?? 0) < Number(existing.savedAt ?? 0)) {
+      merged.set(snapshot.snapshotKey, snapshot);
+    }
+  }
+  return Array.from(merged.values())
+    .sort((a, b) => Number(a.savedAt ?? 0) - Number(b.savedAt ?? 0))
+    .slice(-1000);
+}
 
 function liveTrackerSnapshotStage(record: LiveTrackerRecord): LiveTrackerAppendOnlySnapshot["stage"] {
   if (record.verificationStatus === "VERIFIED") return "VERIFIED";
@@ -12050,6 +12122,7 @@ export default function Home() {
     useState<LiveTrackerRecord[]>([]);
   const [liveTrackerStorageAudit, setLiveTrackerStorageAudit] =
     useState<LiveTrackerStorageAudit | null>(null);
+  const [liveTrackerOrigin, setLiveTrackerOrigin] = useState("");
   const liveTrackerImportInputRef =
     useRef<HTMLInputElement | null>(null);
   const liveTrackerHydratedRef = useRef(false);
@@ -12059,6 +12132,7 @@ export default function Home() {
     const stored = readLiveTrackerRecords();
     setLiveTrackerRecords(stored);
     setLiveTrackerStorageAudit(auditLiveTrackerStorage());
+    setLiveTrackerOrigin(window.location.origin);
     liveTrackerHydratedRef.current = true;
   }, []);
 
@@ -15214,11 +15288,14 @@ export default function Home() {
   }
 
   function downloadLiveTrackerBackup() {
-    const payload = {
-      schemaVersion: "V13.8.1-LIVE-TRACKER",
+    const payload: LiveTrackerPortableBundle = {
+      schemaVersion: LIVE_TRACKER_PORTABLE_SCHEMA,
       exportedAt: Date.now(),
+      sourceOrigin: typeof window !== "undefined" ? window.location.origin : undefined,
+      storageKey: LIVE_TRACKER_STORAGE_KEY,
       gateVersion: "FALLBACK_GATE_V2",
       records: liveTrackerRecords,
+      appendOnlySnapshots: readLiveTrackerAppendOnlySnapshots(),
     };
 
     const blob = new Blob(
@@ -15229,38 +15306,58 @@ export default function Home() {
     const anchor = document.createElement("a");
     anchor.href = url;
     anchor.download =
-      `wisetoto-live-tracker-${new Date().toISOString().slice(0, 10)}.json`;
+      `wisetoto-live-tracker-portable-${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
 
-    setStatus(`실전 추적 백업 완료 · ${liveTrackerRecords.length}경기`);
+    setStatus(
+      `실전 추적 이동 백업 완료 · ${liveTrackerRecords.length}경기 · append ${readLiveTrackerAppendOnlySnapshots().length}개 · 현재 origin 포함`
+    );
   }
 
   async function restoreLiveTrackerBackup(file: File | null) {
     if (!file) return;
     try {
       const parsed = JSON.parse(await file.text());
-      const rows = Array.isArray(parsed) ? parsed : parsed?.records;
+      const rows = normalizeLiveTrackerRows(parsed);
 
-      if (!Array.isArray(rows)) {
+      if (!Array.isArray(parsed) && !Array.isArray(parsed?.records)) {
         throw new Error("실전 추적 records 배열이 없습니다.");
       }
+      if (!rows.length) {
+        throw new Error("가져올 유효한 실전 PRE 레코드가 없습니다.");
+      }
 
-      const restored = rows
-        .filter(
-          (row: any) =>
-            row &&
-            (row.fixtureId === null || row.fixtureId === undefined || Number.isFinite(Number(row.fixtureId))) &&
-            Number.isFinite(Number(row.startMs))
-        )
-        .slice(0, 300) as LiveTrackerRecord[];
+      const current = readLiveTrackerRecords();
+      const merged = mergePortableLiveTrackerRecords(current, rows);
 
-      saveLiveTrackerRecords(restored);
-      setLiveTrackerRecords(readLiveTrackerRecords());
+      const importedAppend = Array.isArray(parsed?.appendOnlySnapshots)
+        ? (parsed.appendOnlySnapshots as LiveTrackerAppendOnlySnapshot[]).filter((snapshot) =>
+            snapshot &&
+            typeof snapshot.snapshotKey === "string" &&
+            Number.isFinite(Number(snapshot.savedAt)) &&
+            snapshot.record &&
+            Number.isFinite(Number(snapshot.record.startMs))
+          )
+        : [];
+      if (typeof window !== "undefined" && importedAppend.length) {
+        const mergedAppend = mergePortableAppendOnlySnapshots(
+          readLiveTrackerAppendOnlySnapshots(),
+          importedAppend
+        );
+        window.localStorage.setItem(LIVE_TRACKER_APPEND_ONLY_KEY, JSON.stringify(mergedAppend));
+      }
+
+      saveLiveTrackerRecords(merged);
+      const restored = readLiveTrackerRecords();
+      setLiveTrackerRecords(restored);
       setLiveTrackerStorageAudit(auditLiveTrackerStorage());
-      setStatus(`실전 추적 복원 완료 · ${restored.length}경기`);
+      const sourceOrigin = typeof parsed?.sourceOrigin === "string" ? parsed.sourceOrigin : "구버전 백업/미기록";
+      setStatus(
+        `실전 추적 이동 복원 완료 · 가져온 ${rows.length}경기 · 현재 합계 ${restored.length}경기 · source ${sourceOrigin}`
+      );
     } catch (error) {
       setStatus(
         `실전 추적 복원 실패 · ${
@@ -20789,14 +20886,14 @@ export default function Home() {
             className="btn light"
             onClick={downloadLiveTrackerBackup}
           >
-            💾 실전 추적 백업
+            💾 전체 이동 백업
           </button>
 
           <button
             className="btn light"
             onClick={() => liveTrackerImportInputRef.current?.click()}
           >
-            ↑ 실전 추적 복원
+            ↑ 이동 백업 가져오기
           </button>
 
           <input
@@ -20823,7 +20920,11 @@ export default function Home() {
 
         <div style={{ padding: "9px 12px", borderTop: "1px solid #e2e8f0", background: "#fffdf5" }}>
           <div className="small" style={{ fontWeight: 900, marginBottom: 6 }}>
-            V13.8.66 TRACKER STORAGE AUDIT · WRITE-PATH + APPEND-ONLY
+            V13.8.68 TRACKER STORAGE AUDIT · PORTABLE MIGRATION + APPEND-ONLY
+          </div>
+          <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.7, marginBottom: 3 }}>
+            현재 origin <b>{liveTrackerOrigin || "확인 중"}</b>
+            {" · "}Vercel Preview URL이 바뀌면 localStorage가 분리됩니다. 실전 표본은 고정 Production URL 사용 권장.
           </div>
           <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.7 }}>
             storage key <b>{LIVE_TRACKER_STORAGE_KEY}</b>
@@ -20856,7 +20957,7 @@ export default function Home() {
             </button>
           </div>
           <div className="small" style={{ marginTop: 5, whiteSpace: "normal" }}>
-            보호 규칙 · state 변경 시 main tracker 즉시 동기화 · PRE/READY/LINEUP/VERIFIED 단계별 append-only 1회 보존 · 유효 tracker 빈 배열 덮어쓰기 금지 · 변경 전 shadow 최대 5개 자동 보존 · fixtureId=null Naver 독립 PRE도 복원 허용
+            보호 규칙 · state 변경 시 main tracker 즉시 동기화 · PRE/READY/LINEUP/VERIFIED 단계별 append-only 1회 보존 · 전체 이동 백업은 records+append-only+source origin 포함 · 구버전 JSON도 가져오기 호환 · 가져오기는 기존 기록과 병합 · 유효 tracker 빈 배열 덮어쓰기 금지 · fixtureId=null Naver 독립 PRE도 복원 허용
           </div>
         </div>
 
