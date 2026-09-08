@@ -729,6 +729,8 @@ type LiveTrackerRecord = {
   verifyLastCheckedAt?: number | null;
   verifyMatchMethod?: "IDENTITY_EXACT" | "MARKET_ID" | "TEAM_TIME_EXACT" | "TEAM_TIME_FUZZY" | null;
   verifyMatchAudit?: string | null;
+  verifyResultSource?: "BETMAN" | "NAVER" | "SPORTSAPI" | null;
+  verifyNaverAudit?: string | null;
 };
 
 
@@ -15214,6 +15216,63 @@ export default function Home() {
     actualMarketPicks,
   ]);
 
+  function naverVerifyFinalFromPayload(payload: any): { home: number; away: number; audit: string } | null {
+    if (!payload?.ok) return null;
+    const game = payload?.game ?? {};
+    const score = payload?.finalScore ?? game?.finalScore ?? null;
+    const homeRaw = score?.home ?? game?.homeScore ?? game?.homeTeamScore ?? game?.hScore ?? null;
+    const awayRaw = score?.away ?? game?.awayScore ?? game?.awayTeamScore ?? game?.aScore ?? null;
+    const home = Number(homeRaw);
+    const away = Number(awayRaw);
+    const statusText = [game?.statusCode, game?.statusInfo, game?.gameStatus, game?.status]
+      .map((v) => String(v ?? "").toLowerCase())
+      .join(" ");
+    const completed = payload?.completed === true || /final|finish|finished|ended|end|result|종료|경기종료/.test(statusText);
+    if (!completed || !Number.isFinite(home) || !Number.isFinite(away) || home < 0 || away < 0) return null;
+    return {
+      home,
+      away,
+      audit: `gameId ${String(payload?.gameId ?? "-")} · category ${String(payload?.categoryId ?? "-")} · status ${statusText || "-"} · score ${home}:${away}`,
+    };
+  }
+
+  async function verifyNaverFinal(record: LiveTrackerRecord): Promise<{ truth: BacktestValidationResult | null; audit: string }> {
+    try {
+      const params = new URLSearchParams({
+        date: new Date(record.startMs).toISOString(),
+        home: record.home,
+        away: record.away,
+        sport: koreanSport(record.sport),
+        league: record.league,
+      });
+      const response = await fetch(`/api/naver/lineup?${params.toString()}`, { cache: "no-store" });
+      const payload = await readApiResponse(response, `Naver VERIFY · ${record.home} vs ${record.away}`);
+      if (!response.ok || !payload?.ok) {
+        return { truth: null, audit: `HTTP ${response.status} · ${String(payload?.error ?? "Naver resolve 실패")}` };
+      }
+      const parsed = naverVerifyFinalFromPayload(payload);
+      if (!parsed) {
+        const game = payload?.game ?? {};
+        return {
+          truth: null,
+          audit: `gameId ${String(payload?.gameId ?? "-")} · status ${String(game?.statusCode ?? game?.statusInfo ?? "-")} · final score 미확정`,
+        };
+      }
+      return {
+        truth: {
+          homeScore: parsed.home,
+          awayScore: parsed.away,
+          firstHalfHomeScore: null,
+          firstHalfAwayScore: null,
+          sourceLabel: `Naver 종료점수 · gameId ${String(payload?.gameId ?? "-")} · 실전 PRE 잠금 후 검증`,
+        },
+        audit: parsed.audit,
+      };
+    } catch (error) {
+      return { truth: null, audit: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   async function verifyLiveTrackerResults() {
     if (validationLoading) return;
 
@@ -15298,7 +15357,19 @@ export default function Home() {
             waitReason = "BETMAN_MATCH_WAIT";
           }
 
-          // SportsAPI result는 VERIFY 전용 fallback이며 경기 시작 +2시간 이후에만 호출한다.
+          // V13.8.70: Betman 발매 목록에 최종점수가 없으면 Naver를 VERIFY 결과 공급원으로 독립 사용한다.
+          // PRE 단계에서는 호출하지 않으며, 저장된 PRE의 시작시각/홈/원정/리그로 gameId를 다시 안전하게 resolve한다.
+          let naverVerifyAudit: string | null = null;
+          if (!truth) {
+            const naverResolved = await verifyNaverFinal(record);
+            naverVerifyAudit = naverResolved.audit;
+            if (naverResolved.truth) {
+              truth = naverResolved.truth;
+              waitReason = null;
+            }
+          }
+
+          // SportsAPI result는 VERIFY 전용 최종 fallback이며 경기 시작 +2시간 이후에만 호출한다.
           if (!truth && fallbackEligible && record.fixtureId !== null && Number.isFinite(Number(record.fixtureId))) {
             const response = await fetch(
               `/api/fixture/result?id=${encodeURIComponent(String(record.fixtureId))}`,
@@ -15343,6 +15414,7 @@ export default function Home() {
                     verifyLastCheckedAt: checkedAt,
                     verifyMatchMethod: betmanResolved.method,
                     verifyMatchAudit: betmanResolved.audit,
+                    verifyNaverAudit: naverVerifyAudit,
                   }
                 : candidate
             );
@@ -15413,6 +15485,12 @@ export default function Home() {
                   verifyLastCheckedAt: Date.now(),
                   verifyMatchMethod: betmanResolved.method,
                   verifyMatchAudit: betmanResolved.audit,
+                  verifyNaverAudit: naverVerifyAudit,
+                  verifyResultSource: truth.sourceLabel.startsWith("Naver")
+                    ? "NAVER"
+                    : truth.sourceLabel.startsWith("Betman")
+                      ? "BETMAN"
+                      : "SPORTSAPI",
                 }
               : candidate
           );
@@ -21126,6 +21204,18 @@ export default function Home() {
                   .slice(0, 3)
                   .map((record) => `${record.home} vs ${record.away} · ${record.verifyMatchMethod ?? "MATCH 미확정"} · ${record.verifyMatchAudit ?? record.verifyWaitReason ?? "아직 결과 확인 전"}`)
                   .join(" | ")}
+          </div>
+        </div>
+
+        <div style={{ padding: "8px 12px", borderTop: "1px solid #e2e8f0", background: "#f6fff8" }}>
+          <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
+            V13.8.70 NAVER FINAL SCORE VERIFY FALLBACK · VERIFY ONLY · MODEL/PRE 변경 없음
+          </div>
+          <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.7 }}>
+            Naver VERIFY 성공 {liveTrackerRecords.filter((r) => r.verificationStatus === "VERIFIED" && r.verifyResultSource === "NAVER").length}경기
+            {liveTrackerRecords.filter((r) => r.verifyNaverAudit).slice(-3).map((r) => (
+              <span key={`naver-verify-${r.id}`}> · {r.home} vs {r.away}: {r.verifyNaverAudit}</span>
+            ))}
           </div>
         </div>
 
