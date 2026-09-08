@@ -1175,6 +1175,15 @@ function summarizeFootballScheduleTeam(rows: AnyObj[], teamName: string, adapter
   };
 }
 
+function naverVerifyGameCompleted(game: AnyObj) {
+  const statusText = [game?.statusCode, game?.statusInfo, game?.gameStatus, game?.status]
+    .map((v) => String(v ?? "").toLowerCase())
+    .join(" ");
+  if (/cancel|postpon|suspend|scheduled|before|live|진행|예정|취소|연기|중단/.test(statusText)) return false;
+  if (/final|finish|finished|ended|end|result|종료|경기종료/.test(statusText)) return true;
+  return false;
+}
+
 async function collectFootballRecentSummary(date: string, home: string, away: string, adapterId: FootballAdapterId) {
   const fromDate = isoDayOffset(date, -40);
   const toDate = isoDayOffset(date, -1);
@@ -2060,6 +2069,9 @@ export async function GET(request: Request) {
       awayLineup,
     });
 
+    const verifyFinalScore = naverScheduleFinalScore(game);
+    const verifyCompleted = naverVerifyGameCompleted(game);
+
     return Response.json({
       ok: true,
       source: "sports.naver.com",
@@ -2071,11 +2083,16 @@ export async function GET(request: Request) {
       npbRecordEndpoint,
       footballPlayersEndpoint,
       gameId,
+      finalScore: verifyFinalScore,
+      completed: verifyCompleted,
       game: {
         gameDateTime: game?.gameDateTime ?? null,
         stadium: game?.stadium ?? null,
         statusCode: game?.statusCode ?? null,
         statusInfo: game?.statusInfo ?? null,
+        homeScore: verifyFinalScore?.home ?? null,
+        awayScore: verifyFinalScore?.away ?? null,
+        finalScore: verifyFinalScore,
         homeTeamName: game?.homeTeamName ?? home,
         awayTeamName: game?.awayTeamName ?? away,
         homeStarterName: game?.homeStarterName ?? homeStarter?.name ?? null,
