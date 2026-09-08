@@ -732,6 +732,22 @@ type LiveTrackerRecord = {
 };
 
 
+type BetmanResultSourceAudit = {
+  checkedAt: number;
+  responseOk: boolean;
+  payloadOk: boolean;
+  extractedGames: number;
+  gameLikeRows: number;
+  startedRows: number;
+  finalStatusRows: number;
+  scoreFieldRows: number;
+  parsedFinalRows: number;
+  topLevelKeys: string[];
+  sourcePathHints: string[];
+  candidateHints: string[];
+  error?: string | null;
+};
+
 type SimpleBacktestRecord = {
   id: string;
   fixtureKey: string;
@@ -3309,6 +3325,117 @@ function trackerMarketIdentifiers(record: LiveTrackerRecord) {
     push((pick as any)?.marketSnapshot?.matchSeq);
   }
   return values;
+}
+
+function betmanStatusText(game: any) {
+  return String(
+    game?.status ??
+    game?.gameStatus ??
+    game?.matchStatus ??
+    game?.state ??
+    game?.resultStatus ??
+    game?.gameState ??
+    game?.statusCode ??
+    ""
+  ).trim();
+}
+
+function betmanFinalStatusLike(game: any) {
+  const value = betmanStatusText(game).toLowerCase().replace(/\s+/g, "");
+  if (!value) return false;
+  return /final|finished|finish|ended|end|complete|completed|종료|경기종료|확정/.test(value);
+}
+
+function betmanHasScoreField(game: any) {
+  const values = [
+    game?.homeScore,
+    game?.awayScore,
+    game?.score,
+    game?.scores,
+    game?.goals,
+    game?.result,
+    game?.home?.score,
+    game?.away?.score,
+    game?.score?.fullTime,
+    game?.score?.fulltime,
+  ];
+  return values.some((value) => value !== undefined && value !== null && value !== "");
+}
+
+function collectBetmanGameLikeRows(payload: any) {
+  const root = payload?.data ?? payload;
+  const rows: Array<{ game: BetmanMatch; path: string }> = [];
+  const seen = new Set<any>();
+  const seenRows = new Set<any>();
+  const walk = (value: any, path: string, depth: number) => {
+    if (!value || typeof value !== "object" || depth > 7 || seen.has(value)) return;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => walk(item, `${path}[${index}]`, depth + 1));
+      return;
+    }
+    const home = betmanTeam(value as BetmanMatch, "home");
+    const away = betmanTeam(value as BetmanMatch, "away");
+    if (home && away && !seenRows.has(value)) {
+      rows.push({ game: value as BetmanMatch, path });
+      seenRows.add(value);
+    }
+    Object.entries(value).forEach(([key, child]) => walk(child, path ? `${path}.${key}` : key, depth + 1));
+  };
+  walk(root, "root", 0);
+  return rows;
+}
+
+function buildBetmanResultSourceAudit(
+  payload: any,
+  extractedGames: BetmanMatch[],
+  candidates: LiveTrackerRecord[],
+  responseOk: boolean,
+  error?: string | null
+): BetmanResultSourceAudit {
+  const gameLike = collectBetmanGameLikeRows(payload);
+  const now = Date.now();
+  const startedRows = gameLike.filter(({ game }) => {
+    const start = betmanStartMs(game);
+    return start !== null && start < now;
+  }).length;
+  const finalStatusRows = gameLike.filter(({ game }) => betmanFinalStatusLike(game)).length;
+  const scoreFieldRows = gameLike.filter(({ game }) => betmanHasScoreField(game)).length;
+  const parsedFinalRows = gameLike.filter(({ game }) => fixtureFinalScore(game) !== null).length;
+  const top = payload?.data ?? payload;
+  const topLevelKeys = top && typeof top === "object" && !Array.isArray(top) ? Object.keys(top).slice(0, 20) : [];
+  const sourcePathHints = Array.from(new Set(gameLike.slice(0, 30).map((row) => row.path.split("[")[0]))).slice(0, 8);
+
+  const candidateHints = candidates.slice(0, 3).map((record) => {
+    const scored = gameLike.map(({ game }) => {
+      const start = betmanStartMs(game);
+      const delta = start === null ? Number.POSITIVE_INFINITY : Math.abs(start - record.startMs) / 60000;
+      const homeScore = teamSimilarity(record.home, betmanTeam(game, "home"));
+      const awayScore = teamSimilarity(record.away, betmanTeam(game, "away"));
+      return { game, delta, sim: (homeScore + awayScore) / 2 };
+    }).sort((a, b) => (b.sim - a.sim) || (a.delta - b.delta));
+    const nearest = scored[0];
+    if (!nearest) return `${record.home} vs ${record.away}: 후보 없음`;
+    const status = betmanStatusText(nearest.game) || "-";
+    const score = fixtureFinalScore(nearest.game);
+    return `${record.home} vs ${record.away}: nearest ${betmanTeam(nearest.game,"home")} vs ${betmanTeam(nearest.game,"away")} · sim ${nearest.sim.toFixed(2)} · time ${Number.isFinite(nearest.delta) ? nearest.delta.toFixed(1) : "?"}m · status ${status} · score ${score ? `${score.home}:${score.away}` : "미해석"}`;
+  });
+
+  return {
+    checkedAt: Date.now(),
+    responseOk,
+    payloadOk: Boolean(payload?.ok),
+    extractedGames: extractedGames.length,
+    gameLikeRows: gameLike.length,
+    startedRows,
+    finalStatusRows,
+    scoreFieldRows,
+    parsedFinalRows,
+    topLevelKeys,
+    sourcePathHints,
+    candidateHints,
+    error: error ?? null,
+  };
 }
 
 function matchBetmanFinishedGame(record: LiveTrackerRecord, games: BetmanMatch[]) {
@@ -12123,6 +12250,8 @@ export default function Home() {
   const [liveTrackerStorageAudit, setLiveTrackerStorageAudit] =
     useState<LiveTrackerStorageAudit | null>(null);
   const [liveTrackerOrigin, setLiveTrackerOrigin] = useState("");
+  const [betmanResultSourceAudit, setBetmanResultSourceAudit] =
+    useState<BetmanResultSourceAudit | null>(null);
   const liveTrackerImportInputRef =
     useRef<HTMLInputElement | null>(null);
   const liveTrackerHydratedRef = useRef(false);
@@ -15119,7 +15248,31 @@ export default function Home() {
         if (betmanResponse.ok && betmanPayload?.ok) {
           betmanFinishedGames = getBetmanGames(betmanPayload);
         }
-      } catch {}
+        setBetmanResultSourceAudit(
+          buildBetmanResultSourceAudit(
+            betmanPayload,
+            betmanFinishedGames,
+            candidates,
+            betmanResponse.ok
+          )
+        );
+      } catch (error) {
+        setBetmanResultSourceAudit({
+          checkedAt: Date.now(),
+          responseOk: false,
+          payloadOk: false,
+          extractedGames: 0,
+          gameLikeRows: 0,
+          startedRows: 0,
+          finalStatusRows: 0,
+          scoreFieldRows: 0,
+          parsedFinalRows: 0,
+          topLevelKeys: [],
+          sourcePathHints: [],
+          candidateHints: [],
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
 
       for (const record of candidates) {
         try {
@@ -20974,6 +21127,32 @@ export default function Home() {
                   .map((record) => `${record.home} vs ${record.away} · ${record.verifyMatchMethod ?? "MATCH 미확정"} · ${record.verifyMatchAudit ?? record.verifyWaitReason ?? "아직 결과 확인 전"}`)
                   .join(" | ")}
           </div>
+        </div>
+
+        <div style={{ padding: "8px 12px", borderTop: "1px solid #e2e8f0", background: "#fffdf7" }}>
+          <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
+            V13.8.69 BETMAN RESULT SOURCE AUDIT · 진단 전용 · VERIFY 로직 변경 없음
+          </div>
+          {!betmanResultSourceAudit ? (
+            <div className="small">아직 종료 경기 결과 확인을 실행하지 않았습니다.</div>
+          ) : (
+            <>
+              <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.7 }}>
+                API {betmanResultSourceAudit.responseOk ? "HTTP OK" : "HTTP FAIL"} · payload.ok {betmanResultSourceAudit.payloadOk ? "true" : "false"} · getBetmanGames {betmanResultSourceAudit.extractedGames}건 · game-like {betmanResultSourceAudit.gameLikeRows}건 · 시작경기 {betmanResultSourceAudit.startedRows}건 · 종료상태 {betmanResultSourceAudit.finalStatusRows}건 · 점수필드 {betmanResultSourceAudit.scoreFieldRows}건 · 최종점수 해석 {betmanResultSourceAudit.parsedFinalRows}건
+              </div>
+              <div className="small" style={{ marginTop: 3, whiteSpace: "normal", lineHeight: 1.7 }}>
+                top keys {betmanResultSourceAudit.topLevelKeys.length ? betmanResultSourceAudit.topLevelKeys.join(", ") : "-"} · paths {betmanResultSourceAudit.sourcePathHints.length ? betmanResultSourceAudit.sourcePathHints.join(" | ") : "-"}
+              </div>
+              {betmanResultSourceAudit.candidateHints.length ? (
+                <div className="small" style={{ marginTop: 3, whiteSpace: "normal", lineHeight: 1.7 }}>
+                  PRE 근접 후보 · {betmanResultSourceAudit.candidateHints.join(" | ")}
+                </div>
+              ) : null}
+              {betmanResultSourceAudit.error ? (
+                <div className="small" style={{ marginTop: 3, whiteSpace: "normal" }}>오류 · {betmanResultSourceAudit.error}</div>
+              ) : null}
+            </>
+          )}
         </div>
 
         <div style={{ padding: "9px 12px", borderTop: "1px solid #e2e8f0" }}>
