@@ -1572,6 +1572,8 @@ const LIVE_TRACKER_STORAGE_KEY =
   "wisetoto_v13_8_1_live_tracker";
 const LIVE_TRACKER_SHADOW_PREFIX =
   "wisetoto_v13_8_65_live_tracker_shadow_";
+const LIVE_TRACKER_APPEND_ONLY_KEY =
+  "wisetoto_v13_8_66_live_tracker_append_only";
 // V13.8.49: tracker PENDING/READY records are date-independent; recent-verify 24h UI list does not control retention.
 // V13.8.65: tracker 저장은 비파괴 방식. 기존 유효 데이터가 있으면 빈 배열로 덮어쓰지 않고 shadow를 남긴다.
 
@@ -1585,6 +1587,8 @@ type LiveTrackerStorageAudit = {
   parseError: string | null;
   candidateKeys: Array<{ key: string; validRows: number; rawBytes: number }>;
   recoverableRows: number;
+  appendOnlySnapshots: number;
+  appendOnlyUniqueRecords: number;
 };
 
 function normalizeLiveTrackerRows(input: any): LiveTrackerRecord[] {
@@ -1622,10 +1626,71 @@ function readLiveTrackerRecords(): LiveTrackerRecord[] {
   return parseLiveTrackerRaw(window.localStorage.getItem(LIVE_TRACKER_STORAGE_KEY)).rows;
 }
 
+
+type LiveTrackerAppendOnlySnapshot = {
+  snapshotKey: string;
+  savedAt: number;
+  stage: "PRE" | "BASEBALL_READY" | "FOOTBALL_LINEUP_READY" | "VERIFIED";
+  record: LiveTrackerRecord;
+};
+
+function liveTrackerSnapshotStage(record: LiveTrackerRecord): LiveTrackerAppendOnlySnapshot["stage"] {
+  if (record.verificationStatus === "VERIFIED") return "VERIFIED";
+  if (record.footballLineup?.stage === "LINEUP_READY") return "FOOTBALL_LINEUP_READY";
+  if (record.venueShadow?.stage === "READY") return "BASEBALL_READY";
+  return "PRE";
+}
+
+function readLiveTrackerAppendOnlySnapshots(): LiveTrackerAppendOnlySnapshot[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(LIVE_TRACKER_APPEND_ONLY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((row: any) =>
+      row &&
+      typeof row.snapshotKey === "string" &&
+      Number.isFinite(Number(row.savedAt)) &&
+      row.record &&
+      Number.isFinite(Number(row.record.startMs))
+    ).slice(-1000) as LiveTrackerAppendOnlySnapshot[];
+  } catch {
+    return [];
+  }
+}
+
+function appendLiveTrackerSnapshots(rows: LiveTrackerRecord[]) {
+  if (typeof window === "undefined" || !rows.length) return;
+  try {
+    const previous = readLiveTrackerAppendOnlySnapshots();
+    const existingKeys = new Set(previous.map((row) => row.snapshotKey));
+    const additions: LiveTrackerAppendOnlySnapshot[] = [];
+    for (const record of rows) {
+      const stage = liveTrackerSnapshotStage(record);
+      const snapshotKey = `${record.id}:${stage}`;
+      if (existingKeys.has(snapshotKey)) continue;
+      existingKeys.add(snapshotKey);
+      additions.push({
+        snapshotKey,
+        savedAt: Date.now(),
+        stage,
+        record: JSON.parse(JSON.stringify(record)) as LiveTrackerRecord,
+      });
+    }
+    if (!additions.length) return;
+    window.localStorage.setItem(
+      LIVE_TRACKER_APPEND_ONLY_KEY,
+      JSON.stringify([...previous, ...additions].slice(-1000))
+    );
+  } catch {}
+}
+
 function auditLiveTrackerStorage(): LiveTrackerStorageAudit {
   const empty: LiveTrackerStorageAudit = {
     storageKey: LIVE_TRACKER_STORAGE_KEY, rawPresent: false, rawBytes: 0, parsedRows: 0,
     validRows: 0, rejectedRows: 0, parseError: null, candidateKeys: [], recoverableRows: 0,
+    appendOnlySnapshots: 0, appendOnlyUniqueRecords: 0,
   };
   if (typeof window === "undefined") return empty;
   try {
@@ -1633,9 +1698,11 @@ function auditLiveTrackerStorage(): LiveTrackerStorageAudit {
     const primary = parseLiveTrackerRaw(raw);
     const candidates: Array<{ key: string; validRows: number; rawBytes: number }> = [];
     let recoverableRows = 0;
+    const appendOnly = readLiveTrackerAppendOnlySnapshots();
+    const appendOnlyUniqueRecords = new Set(appendOnly.map((row) => row.record.id)).size;
     for (let i = 0; i < window.localStorage.length; i += 1) {
       const key = window.localStorage.key(i);
-      if (!key || key === LIVE_TRACKER_STORAGE_KEY) continue;
+      if (!key || key === LIVE_TRACKER_STORAGE_KEY || key === LIVE_TRACKER_APPEND_ONLY_KEY) continue;
       const normalized = key.toLowerCase();
       if (!(normalized.includes("live_tracker") || normalized.includes("live-tracker"))) continue;
       const candidateRaw = window.localStorage.getItem(key);
@@ -1655,6 +1722,8 @@ function auditLiveTrackerStorage(): LiveTrackerStorageAudit {
       parseError: primary.error,
       candidateKeys: candidates.slice(0, 8),
       recoverableRows,
+      appendOnlySnapshots: appendOnly.length,
+      appendOnlyUniqueRecords,
     };
   } catch (error) {
     return { ...empty, parseError: error instanceof Error ? error.message : String(error) };
@@ -1683,6 +1752,7 @@ function saveLiveTrackerRecords(rows: LiveTrackerRecord[]) {
       shadowKeys.sort().reverse().slice(5).forEach((key) => window.localStorage.removeItem(key));
     }
     window.localStorage.setItem(LIVE_TRACKER_STORAGE_KEY, nextRaw);
+    appendLiveTrackerSnapshots(nextRows);
   } catch {}
 }
 
@@ -1697,9 +1767,10 @@ function recoverLiveTrackerFromStorageCandidates(): LiveTrackerRecord[] {
     }
   };
   addRows(readLiveTrackerRecords());
+  addRows(readLiveTrackerAppendOnlySnapshots().map((snapshot) => snapshot.record));
   for (let i = 0; i < window.localStorage.length; i += 1) {
     const key = window.localStorage.key(i);
-    if (!key || key === LIVE_TRACKER_STORAGE_KEY) continue;
+    if (!key || key === LIVE_TRACKER_STORAGE_KEY || key === LIVE_TRACKER_APPEND_ONLY_KEY) continue;
     const normalized = key.toLowerCase();
     if (!(normalized.includes("live_tracker") || normalized.includes("live-tracker"))) continue;
     addRows(parseLiveTrackerRaw(window.localStorage.getItem(key)).rows);
@@ -11881,11 +11952,27 @@ export default function Home() {
     useState<LiveTrackerStorageAudit | null>(null);
   const liveTrackerImportInputRef =
     useRef<HTMLInputElement | null>(null);
+  const liveTrackerHydratedRef = useRef(false);
+  const liveTrackerSkipInitialPersistRef = useRef(true);
 
   useEffect(() => {
-    setLiveTrackerRecords(readLiveTrackerRecords());
+    const stored = readLiveTrackerRecords();
+    setLiveTrackerRecords(stored);
     setLiveTrackerStorageAudit(auditLiveTrackerStorage());
+    liveTrackerHydratedRef.current = true;
   }, []);
+
+  // V13.8.66: React state가 바뀌면 main tracker + append-only archive를 반드시 동기화한다.
+  // 첫 mount의 빈 state는 저장하지 않아 기존 localStorage를 덮어쓰지 않는다.
+  useEffect(() => {
+    if (!liveTrackerHydratedRef.current) return;
+    if (liveTrackerSkipInitialPersistRef.current) {
+      liveTrackerSkipInitialPersistRef.current = false;
+      return;
+    }
+    saveLiveTrackerRecords(liveTrackerRecords);
+    setLiveTrackerStorageAudit(auditLiveTrackerStorage());
+  }, [liveTrackerRecords]);
 
   function refreshLiveTrackerStorageAudit() {
     setLiveTrackerStorageAudit(auditLiveTrackerStorage());
@@ -20630,7 +20717,7 @@ export default function Home() {
 
         <div style={{ padding: "9px 12px", borderTop: "1px solid #e2e8f0", background: "#fffdf5" }}>
           <div className="small" style={{ fontWeight: 900, marginBottom: 6 }}>
-            V13.8.65 TRACKER STORAGE AUDIT · 비파괴 복구
+            V13.8.66 TRACKER STORAGE AUDIT · WRITE-PATH + APPEND-ONLY
           </div>
           <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.7 }}>
             storage key <b>{LIVE_TRACKER_STORAGE_KEY}</b>
@@ -20640,6 +20727,8 @@ export default function Home() {
             {" · "}유효 {liveTrackerStorageAudit?.validRows ?? 0}건
             {" · "}제외 {liveTrackerStorageAudit?.rejectedRows ?? 0}건
             {" · "}보존 후보 {liveTrackerStorageAudit?.recoverableRows ?? 0}건
+            {" · "}append snapshot {liveTrackerStorageAudit?.appendOnlySnapshots ?? 0}건
+            {" · "}append unique {liveTrackerStorageAudit?.appendOnlyUniqueRecords ?? 0}경기
             {liveTrackerStorageAudit?.parseError ? ` · PARSE ERROR ${liveTrackerStorageAudit.parseError}` : ""}
           </div>
           {liveTrackerStorageAudit?.candidateKeys?.length ? (
@@ -20661,13 +20750,13 @@ export default function Home() {
             </button>
           </div>
           <div className="small" style={{ marginTop: 5, whiteSpace: "normal" }}>
-            보호 규칙 · 유효 tracker가 존재할 때 빈 배열 저장 금지 · 변경 전 shadow 최대 5개 자동 보존 · fixtureId=null Naver 독립 PRE도 복원 허용
+            보호 규칙 · state 변경 시 main tracker 즉시 동기화 · PRE/READY/LINEUP/VERIFIED 단계별 append-only 1회 보존 · 유효 tracker 빈 배열 덮어쓰기 금지 · 변경 전 shadow 최대 5개 자동 보존 · fixtureId=null Naver 독립 PRE도 복원 허용
           </div>
         </div>
 
         <div style={{ padding: "9px 12px", borderTop: "1px solid #e2e8f0" }}>
           <div className="small" style={{ fontWeight: 900, marginBottom: 6 }}>
-            V13.8.65 VENUE SHADOW VALIDATOR · MODEL OFF · READY PRE 잠금 {venueShadowReadySummary.locked}경기 · VERIFY {venueShadowValidationSummary.games}/30경기 · 결과대기 {venueShadowReadySummary.pending}경기{venueShadowReadySummary.due > 0 ? ` · 확인가능 ${venueShadowReadySummary.due}` : ""}
+            V13.8.66 VENUE SHADOW VALIDATOR · MODEL OFF · READY PRE 잠금 {venueShadowReadySummary.locked}경기 · VERIFY {venueShadowValidationSummary.games}/30경기 · 결과대기 {venueShadowReadySummary.pending}경기{venueShadowReadySummary.due > 0 ? ` · 확인가능 ${venueShadowReadySummary.due}` : ""}
           </div>
           <div className="cards">
             <div className="card">득점 MAE<b>{venueShadowValidationSummary.rawScoreMae?.toFixed(2) ?? "-"} → {venueShadowValidationSummary.shadowScoreMae?.toFixed(2) ?? "-"}</b><div className="small">RAW → SHADOW</div></div>
@@ -20679,7 +20768,7 @@ export default function Home() {
 
         <div style={{ padding: "9px 12px", borderTop: "1px solid #e2e8f0" }}>
           <div className="small" style={{ fontWeight: 900, marginBottom: 6 }}>
-            V13.8.65 FOOTBALL PRE → LINEUP → VERIFY · MODEL OFF · PRE {footballLineupValidationSummary.pre}경기 · PRE ONLY {footballLineupValidationSummary.preOnly}경기 · LINEUP READY {footballLineupValidationSummary.lineupReady}경기 · VERIFY {footballLineupValidationSummary.lineupVerified}/30경기 · 결과대기 {footballLineupValidationSummary.pending}경기{footballLineupValidationSummary.due > 0 ? ` · 확인가능 ${footballLineupValidationSummary.due}` : ""}
+            V13.8.66 FOOTBALL PRE → LINEUP → VERIFY · MODEL OFF · PRE {footballLineupValidationSummary.pre}경기 · PRE ONLY {footballLineupValidationSummary.preOnly}경기 · LINEUP READY {footballLineupValidationSummary.lineupReady}경기 · VERIFY {footballLineupValidationSummary.lineupVerified}/30경기 · 결과대기 {footballLineupValidationSummary.pending}경기{footballLineupValidationSummary.due > 0 ? ` · 확인가능 ${footballLineupValidationSummary.due}` : ""}
           </div>
           <div className="cards">
             <div className="card">득점 MAE<b>{footballLineupValidationSummary.lineupScoreMae?.toFixed(2) ?? "-"}</b><div className="small">LINEUP READY PRE λ 기준</div></div>
