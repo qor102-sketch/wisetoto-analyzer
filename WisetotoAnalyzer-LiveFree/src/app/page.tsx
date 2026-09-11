@@ -14922,6 +14922,125 @@ export default function Home() {
         .sort((a, b) => b.picks - a.picks || a.label.localeCompare(b.label, "ko"));
     };
 
+    // V13.8.72 CALIBRATION / ROI ROBUSTNESS · DIAGNOSTIC ONLY
+    const calibrationBucket = (value: number | null) => {
+      if (value === null || !Number.isFinite(value)) return "확률 없음";
+      if (value < 50) return "<50%";
+      if (value < 55) return "50~55%";
+      if (value < 60) return "55~60%";
+      if (value < 65) return "60~65%";
+      if (value < 70) return "65~70%";
+      return "≥70%";
+    };
+
+    const calibrationGroups = (() => {
+      const groups = new Map<string, typeof settledPicks>();
+      for (const row of settledPicks) {
+        const key = calibrationBucket(row.pick.probability);
+        groups.set(key, [...(groups.get(key) ?? []), row]);
+      }
+      const order = ["<50%", "50~55%", "55~60%", "60~65%", "65~70%", "≥70%", "확률 없음"];
+      return [...groups.entries()]
+        .map(([label, rows]) => {
+          const probs = rows
+            .map(({ pick }) => Number(pick.probability))
+            .filter((v) => Number.isFinite(v));
+          const avgPredicted = probs.length ? probs.reduce((a, b) => a + b, 0) / probs.length : null;
+          const hits = rows.filter(({ pick }) => pick.resultStatus === "HIT").length;
+          const observed = rows.length ? (hits / rows.length) * 100 : null;
+          const brierValues = rows
+            .map(({ pick }) => {
+              const p = Number(pick.probability) / 100;
+              if (!Number.isFinite(p)) return null;
+              const y = pick.resultStatus === "HIT" ? 1 : 0;
+              return (p - y) ** 2;
+            })
+            .filter((v): v is number => v !== null && Number.isFinite(v));
+          const brier = brierValues.length ? brierValues.reduce((a, b) => a + b, 0) / brierValues.length : null;
+          return {
+            label,
+            picks: rows.length,
+            avgPredicted,
+            observed,
+            gap: avgPredicted !== null && observed !== null ? observed - avgPredicted : null,
+            brier,
+          };
+        })
+        .sort((a, b) => order.indexOf(a.label) - order.indexOf(b.label));
+    })();
+
+    const brierSummary = (() => {
+      const values = settledPicks
+        .map(({ pick }) => {
+          const p = Number(pick.probability) / 100;
+          if (!Number.isFinite(p)) return null;
+          const y = pick.resultStatus === "HIT" ? 1 : 0;
+          return (p - y) ** 2;
+        })
+        .filter((v): v is number => v !== null && Number.isFinite(v));
+      return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+    })();
+
+    const brierByMarket = (() => {
+      const groups = new Map<string, typeof settledPicks>();
+      for (const row of settledPicks) {
+        const key = normalizeMarketGroup(row.pick.market);
+        groups.set(key, [...(groups.get(key) ?? []), row]);
+      }
+      return [...groups.entries()].map(([label, rows]) => {
+        const values = rows
+          .map(({ pick }) => {
+            const p = Number(pick.probability) / 100;
+            if (!Number.isFinite(p)) return null;
+            const y = pick.resultStatus === "HIT" ? 1 : 0;
+            return (p - y) ** 2;
+          })
+          .filter((v): v is number => v !== null && Number.isFinite(v));
+        return { label, picks: rows.length, brier: values.length ? values.reduce((a, b) => a + b, 0) / values.length : null };
+      }).sort((a, b) => b.picks - a.picks || a.label.localeCompare(b.label, "ko"));
+    })();
+
+    const marketEdgeCross = (() => {
+      const groups = new Map<string, typeof settledPicks>();
+      for (const row of settledPicks) {
+        const key = `${normalizeMarketGroup(row.pick.market)} × ${edgeBucket(row.pick.edge)}`;
+        groups.set(key, [...(groups.get(key) ?? []), row]);
+      }
+      return [...groups.entries()]
+        .map(([label, rows]) => ({ label, ...summarize(rows) }))
+        .filter((row) => row.picks >= 2)
+        .sort((a, b) => b.picks - a.picks || a.label.localeCompare(b.label, "ko"));
+    })();
+
+    const roiRobustness = (() => {
+      const rows = settledPicks.filter(({ pick }) => Number.isFinite(Number(pick.odds)) && Number(pick.odds) > 1);
+      const contribution = (row: (typeof settledPicks)[number]) => row.pick.resultStatus === "HIT" ? Number(row.pick.odds) - 1 : -1;
+      const roiOf = (input: typeof settledPicks) => input.length
+        ? (input.reduce((sum, row) => sum + contribution(row), 0) / input.length) * 100
+        : null;
+      const winners = rows
+        .filter((row) => contribution(row) > 0)
+        .sort((a, b) => contribution(b) - contribution(a));
+      const removeTop = (count: number) => {
+        const remove = new Set(winners.slice(0, count).map((row) => `${row.record.id}:${row.pick.key}`));
+        const remain = rows.filter((row) => !remove.has(`${row.record.id}:${row.pick.key}`));
+        return { removed: Math.min(count, winners.length), samples: remain.length, roi: roiOf(remain) };
+      };
+      const noHighOdds = rows.filter(({ pick }) => Number(pick.odds) < 3);
+      const highOdds = rows.filter(({ pick }) => Number(pick.odds) >= 3);
+      const highOddsProfit = highOdds.reduce((sum, row) => sum + contribution(row), 0);
+      const totalProfit = rows.reduce((sum, row) => sum + contribution(row), 0);
+      return {
+        samples: rows.length,
+        totalRoi: roiOf(rows),
+        withoutOdds3: { samples: noHighOdds.length, roi: roiOf(noHighOdds) },
+        highOdds: { samples: highOdds.length, roi: roiOf(highOdds), profitShare: totalProfit > 0 ? (highOddsProfit / totalProfit) * 100 : null },
+        removeTop1: removeTop(1),
+        removeTop3: removeTop(3),
+        removeTop5: removeTop(5),
+      };
+    })();
+
     const readyVerified = verifiedRecords
       .filter((record) => record.venueShadow?.stage === "READY" && record.venueShadowResult)
       .sort((a, b) => a.capturedAt - b.capturedAt);
@@ -14966,6 +15085,11 @@ export default function Home() {
       byOdds: groupBy(({ pick }) => oddsBucket(pick.odds)),
       baseline: { games: baselineRecords.length, ...summarize(baselinePicks) },
       postBaseline: { games: postBaselineRecords.length, ...summarize(postBaselinePicks) },
+      calibrationGroups,
+      brier: brierSummary,
+      brierByMarket,
+      marketEdgeCross,
+      roiRobustness,
       errorRows,
     };
   }, [liveTrackerRecords]);
@@ -21425,6 +21549,78 @@ export default function Home() {
               </table>
             </div>
           ))}
+
+          <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid #dbeafe" }}>
+            <div className="small" style={{ fontWeight: 900, marginBottom: 6 }}>
+              V13.8.72 CALIBRATION + ROI ROBUSTNESS · DIAGNOSTIC ONLY · MODEL/GATE 변경 없음
+            </div>
+            <div className="cards" style={{ marginBottom: 10 }}>
+              <div className="card">전체 Brier<b>{performanceBreakdown.brier === null ? "-" : performanceBreakdown.brier.toFixed(3)}</b><div className="small">낮을수록 확률 calibration 양호</div></div>
+              <div className="card">≥3.00 제거 ROI<b>{performanceBreakdown.roiRobustness.withoutOdds3.roi === null ? "-" : `${performanceBreakdown.roiRobustness.withoutOdds3.roi >= 0 ? "+" : ""}${performanceBreakdown.roiRobustness.withoutOdds3.roi.toFixed(1)}%`}</b><div className="small">N {performanceBreakdown.roiRobustness.withoutOdds3.samples}</div></div>
+              <div className="card">최고수익 1픽 제거 ROI<b>{performanceBreakdown.roiRobustness.removeTop1.roi === null ? "-" : `${performanceBreakdown.roiRobustness.removeTop1.roi >= 0 ? "+" : ""}${performanceBreakdown.roiRobustness.removeTop1.roi.toFixed(1)}%`}</b><div className="small">고배당 1픽 의존 검사</div></div>
+              <div className="card">최고수익 5픽 제거 ROI<b>{performanceBreakdown.roiRobustness.removeTop5.roi === null ? "-" : `${performanceBreakdown.roiRobustness.removeTop5.roi >= 0 ? "+" : ""}${performanceBreakdown.roiRobustness.removeTop5.roi.toFixed(1)}%`}</b><div className="small">N {performanceBreakdown.roiRobustness.removeTop5.samples}</div></div>
+            </div>
+
+            <div style={{ overflowX: "auto", marginTop: 8 }}>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>예측확률 Calibration</div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 650 }}>
+                <thead><tr style={{ background: "#f1f5f9" }}>
+                  {['확률구간','픽','평균예측','실제적중','실제-예측','Brier'].map((head) => <th key={head} style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: head === '확률구간' ? 'left' : 'right' }}>{head}</th>)}
+                </tr></thead>
+                <tbody>
+                  {performanceBreakdown.calibrationGroups.length ? performanceBreakdown.calibrationGroups.map((row) => (
+                    <tr key={`cal-${row.label}`}>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", fontWeight: 700 }}>{row.label}</td>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.picks}</td>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.avgPredicted === null ? '-' : `${row.avgPredicted.toFixed(1)}%`}</td>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.observed === null ? '-' : `${row.observed.toFixed(1)}%`}</td>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right", fontWeight: 800 }}>{row.gap === null ? '-' : `${row.gap >= 0 ? '+' : ''}${row.gap.toFixed(1)}%p`}</td>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.brier === null ? '-' : row.brier.toFixed(3)}</td>
+                    </tr>
+                  )) : <tr><td colSpan={6} style={{ border: "1px solid #e2e8f0", padding: 6 }}>정산 표본 없음</td></tr>}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ overflowX: "auto", marginTop: 10 }}>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>마켓별 Brier</div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 420 }}>
+                <thead><tr style={{ background: "#f1f5f9" }}>{['마켓','픽','Brier'].map((head) => <th key={head} style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: head === '마켓' ? 'left' : 'right' }}>{head}</th>)}</tr></thead>
+                <tbody>{performanceBreakdown.brierByMarket.map((row) => <tr key={`brier-${row.label}`}><td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", fontWeight: 700 }}>{row.label}</td><td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.picks}</td><td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.brier === null ? '-' : row.brier.toFixed(3)}</td></tr>)}</tbody>
+              </table>
+            </div>
+
+            <div style={{ overflowX: "auto", marginTop: 10 }}>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>마켓 × Edge 교차분석 · N≥2만 표시</div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 760 }}>
+                <thead><tr style={{ background: "#f1f5f9" }}>{['구간','픽','HIT','MISS','적중률','평균배당','평균EV','ROI'].map((head) => <th key={head} style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: head === '구간' ? 'left' : 'right' }}>{head}</th>)}</tr></thead>
+                <tbody>{performanceBreakdown.marketEdgeCross.length ? performanceBreakdown.marketEdgeCross.map((row) => (
+                  <tr key={`mxedge-${row.label}`}><td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", fontWeight: 700 }}>{row.label}</td><td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.picks}</td><td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.hits}</td><td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.misses}</td><td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.hitRate === null ? '-' : `${row.hitRate.toFixed(1)}%`}</td><td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.avgOdds === null ? '-' : row.avgOdds.toFixed(2)}</td><td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.avgEV === null ? '-' : `${row.avgEV >= 0 ? '+' : ''}${row.avgEV.toFixed(1)}%`}</td><td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right", fontWeight: 800 }}>{row.roi === null ? '-' : `${row.roi >= 0 ? '+' : ''}${row.roi.toFixed(1)}%`}</td></tr>
+                )) : <tr><td colSpan={8} style={{ border: "1px solid #e2e8f0", padding: 6 }}>교차 표본 없음</td></tr>}</tbody>
+              </table>
+            </div>
+
+            <div style={{ overflowX: "auto", marginTop: 10 }}>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>ROI Robustness · 고배당/소수 적중 의존 검사</div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 600 }}>
+                <thead><tr style={{ background: "#f1f5f9" }}>{['시나리오','남은 표본','ROI'].map((head) => <th key={head} style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: head === '시나리오' ? 'left' : 'right' }}>{head}</th>)}</tr></thead>
+                <tbody>
+                  {[
+                    ['전체', performanceBreakdown.roiRobustness.samples, performanceBreakdown.roiRobustness.totalRoi],
+                    ['배당 ≥3.00 제거', performanceBreakdown.roiRobustness.withoutOdds3.samples, performanceBreakdown.roiRobustness.withoutOdds3.roi],
+                    ['최고수익 1픽 제거', performanceBreakdown.roiRobustness.removeTop1.samples, performanceBreakdown.roiRobustness.removeTop1.roi],
+                    ['최고수익 3픽 제거', performanceBreakdown.roiRobustness.removeTop3.samples, performanceBreakdown.roiRobustness.removeTop3.roi],
+                    ['최고수익 5픽 제거', performanceBreakdown.roiRobustness.removeTop5.samples, performanceBreakdown.roiRobustness.removeTop5.roi],
+                  ].map(([label, samples, roi]) => (
+                    <tr key={`robust-${label}`}><td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", fontWeight: 700 }}>{label}</td><td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{samples}</td><td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right", fontWeight: 800 }}>{roi === null ? '-' : `${Number(roi) >= 0 ? '+' : ''}${Number(roi).toFixed(1)}%`}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="small" style={{ marginTop: 5, whiteSpace: "normal", lineHeight: 1.55 }}>
+                ≥3.00 표본 {performanceBreakdown.roiRobustness.highOdds.samples}픽 · ROI {performanceBreakdown.roiRobustness.highOdds.roi === null ? '-' : `${performanceBreakdown.roiRobustness.highOdds.roi >= 0 ? '+' : ''}${performanceBreakdown.roiRobustness.highOdds.roi.toFixed(1)}%`} · 전체 이익 중 고배당 기여 {performanceBreakdown.roiRobustness.highOdds.profitShare === null ? '-' : `${performanceBreakdown.roiRobustness.highOdds.profitShare.toFixed(1)}%`}
+              </div>
+            </div>
+          </div>
 
           <div style={{ marginTop: 12, overflowX: "auto" }}>
             <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>RAW 오차 큰 경기 TOP {performanceBreakdown.errorRows.length} · 원인 조사용</div>
