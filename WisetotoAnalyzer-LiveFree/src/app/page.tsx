@@ -14841,6 +14841,135 @@ export default function Home() {
     };
   }, [liveTrackerRecords]);
 
+  const performanceBreakdown = useMemo(() => {
+    const verifiedRecords = liveTrackerRecords.filter((record) => record.verificationStatus === "VERIFIED");
+    const settledPicks = verifiedRecords.flatMap((record) =>
+      (record.picks ?? [])
+        .filter((pick) => pick.resultStatus === "HIT" || pick.resultStatus === "MISS")
+        .map((pick) => ({ record, pick }))
+    );
+
+    const normalizeMarketGroup = (market: string) => {
+      const value = String(market ?? "").toUpperCase().replace(/\s+/g, " ").trim();
+      if (/전반/.test(value)) return /U\/O|오버|언더/.test(value) ? "전반 U/O" : /H|핸디/.test(value) ? "전반 핸디" : "전반 승패";
+      if (/승1패|승 1 패/.test(value)) return "승1패";
+      if (/U\/O|오버|언더/.test(value)) return "U/O";
+      if (/SUM|홀짝|홀\/짝/.test(value)) return "SUM";
+      if (/핸디|HANDICAP|(^|\s)H\s*[-+]?\d/.test(value)) return "핸디";
+      if (/승무패|승패|1X2/.test(value)) return "승무패";
+      return market || "기타";
+    };
+
+    const edgeBucket = (value: number | null) => {
+      if (value === null || !Number.isFinite(value)) return "edge 없음";
+      if (value < 0) return "< 0%p";
+      if (value < 5) return "0~5%p";
+      if (value < 8) return "5~8%p";
+      if (value < 12) return "8~12%p";
+      if (value < 20) return "12~20%p";
+      return "≥20%p";
+    };
+    const evBucket = (value: number | null) => {
+      if (value === null || !Number.isFinite(value)) return "EV 없음";
+      if (value < 0) return "< 0%";
+      if (value < 3) return "0~3%";
+      if (value < 8) return "3~8%";
+      if (value < 15) return "8~15%";
+      return "≥15%";
+    };
+    const oddsBucket = (value: number | null) => {
+      if (value === null || !Number.isFinite(value)) return "배당 없음";
+      if (value < 1.5) return "<1.50";
+      if (value < 1.8) return "1.50~1.79";
+      if (value < 2.2) return "1.80~2.19";
+      if (value < 3) return "2.20~2.99";
+      return "≥3.00";
+    };
+
+    const summarize = (rows: typeof settledPicks) => {
+      const hits = rows.filter(({ pick }) => pick.resultStatus === "HIT").length;
+      const misses = rows.filter(({ pick }) => pick.resultStatus === "MISS").length;
+      const withOdds = rows.filter(({ pick }) => Number.isFinite(Number(pick.odds)) && Number(pick.odds) > 1);
+      const profit = withOdds.reduce((sum, { pick }) => {
+        const odds = Number(pick.odds);
+        return sum + (pick.resultStatus === "HIT" ? odds - 1 : -1);
+      }, 0);
+      const avg = (getter: (pick: LiveTrackerPick) => number | null) => {
+        const values = rows.map(({ pick }) => getter(pick)).filter((v): v is number => v !== null && Number.isFinite(v));
+        return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+      };
+      return {
+        picks: rows.length,
+        hits,
+        misses,
+        hitRate: rows.length ? (hits / rows.length) * 100 : null,
+        avgOdds: avg((pick) => pick.odds),
+        avgEdge: avg((pick) => pick.edge),
+        avgEV: avg((pick) => pick.expectedValue),
+        roi: withOdds.length ? (profit / withOdds.length) * 100 : null,
+        roiSamples: withOdds.length,
+      };
+    };
+
+    const groupBy = (keyFn: (row: (typeof settledPicks)[number]) => string) => {
+      const groups = new Map<string, typeof settledPicks>();
+      for (const row of settledPicks) {
+        const key = keyFn(row);
+        groups.set(key, [...(groups.get(key) ?? []), row]);
+      }
+      return [...groups.entries()]
+        .map(([label, rows]) => ({ label, ...summarize(rows) }))
+        .sort((a, b) => b.picks - a.picks || a.label.localeCompare(b.label, "ko"));
+    };
+
+    const readyVerified = verifiedRecords
+      .filter((record) => record.venueShadow?.stage === "READY" && record.venueShadowResult)
+      .sort((a, b) => a.capturedAt - b.capturedAt);
+    const baselineRecords = readyVerified.slice(0, 30);
+    const postBaselineRecords = readyVerified.slice(30);
+    const baselineIds = new Set(baselineRecords.map((record) => record.id));
+    const postBaselineIds = new Set(postBaselineRecords.map((record) => record.id));
+    const baselinePicks = settledPicks.filter(({ record }) => baselineIds.has(record.id));
+    const postBaselinePicks = settledPicks.filter(({ record }) => postBaselineIds.has(record.id));
+
+    const errorRows = readyVerified
+      .map((record) => {
+        const shadow = record.venueShadow!;
+        const result = record.result;
+        if (!result) return null;
+        const rawScoreMae = (Math.abs(shadow.rawHome - result.homeScore) + Math.abs(shadow.rawAway - result.awayScore)) / 2;
+        const shadowScoreMae = (Math.abs(shadow.shadowHome - result.homeScore) + Math.abs(shadow.shadowAway - result.awayScore)) / 2;
+        return {
+          id: record.id,
+          game: `${record.home} vs ${record.away}`,
+          league: record.league,
+          actual: `${result.homeScore}:${result.awayScore}`,
+          raw: `${shadow.rawHome.toFixed(2)}:${shadow.rawAway.toFixed(2)}`,
+          shadow: `${shadow.shadowHome.toFixed(2)}:${shadow.shadowAway.toFixed(2)}`,
+          rawScoreMae,
+          shadowScoreMae,
+          delta: rawScoreMae - shadowScoreMae,
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null)
+      .sort((a, b) => b.rawScoreMae - a.rawScoreMae)
+      .slice(0, 8);
+
+    return {
+      verifiedGames: verifiedRecords.length,
+      settledPicks: settledPicks.length,
+      overall: summarize(settledPicks),
+      byMarket: groupBy(({ pick }) => normalizeMarketGroup(pick.market)),
+      byGrade: groupBy(({ pick }) => String(pick.grade || "미분류")),
+      byEdge: groupBy(({ pick }) => edgeBucket(pick.edge)),
+      byEV: groupBy(({ pick }) => evBucket(pick.expectedValue)),
+      byOdds: groupBy(({ pick }) => oddsBucket(pick.odds)),
+      baseline: { games: baselineRecords.length, ...summarize(baselinePicks) },
+      postBaseline: { games: postBaselineRecords.length, ...summarize(postBaselinePicks) },
+      errorRows,
+    };
+  }, [liveTrackerRecords]);
+
   const selectedFootballTrackerState = useMemo(() => {
     if (currentSport !== "축구" || !selectedBetman) return null;
     const startMs = gameTimeMs(selectedBetman);
@@ -21243,6 +21372,85 @@ export default function Home() {
               ) : null}
             </>
           )}
+        </div>
+
+        <div style={{ padding: "10px 12px", borderTop: "1px solid #e2e8f0", background: "#fbfcff" }}>
+          <div className="small" style={{ fontWeight: 900, marginBottom: 6 }}>
+            V13.8.71 PERFORMANCE BREAKDOWN VALIDATOR · DIAGNOSTIC ONLY · MODEL/GATE 변경 없음
+          </div>
+          <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.7, marginBottom: 8 }}>
+            VERIFIED {performanceBreakdown.verifiedGames}경기 · 정산 추천 {performanceBreakdown.settledPicks}픽 · BASELINE READY {performanceBreakdown.baseline.games}/30경기 · POST-BASELINE {performanceBreakdown.postBaseline.games}경기 · ROI는 배당 확인 픽 1unit 동일베팅 기준
+          </div>
+          <div className="cards" style={{ marginBottom: 10 }}>
+            <div className="card">전체 적중률<b>{performanceBreakdown.overall.hitRate === null ? "-" : `${performanceBreakdown.overall.hitRate.toFixed(1)}%`}</b><div className="small">HIT {performanceBreakdown.overall.hits} / MISS {performanceBreakdown.overall.misses}</div></div>
+            <div className="card">전체 ROI<b>{performanceBreakdown.overall.roi === null ? "-" : `${performanceBreakdown.overall.roi >= 0 ? "+" : ""}${performanceBreakdown.overall.roi.toFixed(1)}%`}</b><div className="small">배당 확인 {performanceBreakdown.overall.roiSamples}픽</div></div>
+            <div className="card">BASELINE ROI<b>{performanceBreakdown.baseline.roi === null ? "-" : `${performanceBreakdown.baseline.roi >= 0 ? "+" : ""}${performanceBreakdown.baseline.roi.toFixed(1)}%`}</b><div className="small">첫 READY VERIFY {performanceBreakdown.baseline.games}경기 · {performanceBreakdown.baseline.picks}픽</div></div>
+            <div className="card">POST-BASELINE ROI<b>{performanceBreakdown.postBaseline.roi === null ? "-" : `${performanceBreakdown.postBaseline.roi >= 0 ? "+" : ""}${performanceBreakdown.postBaseline.roi.toFixed(1)}%`}</b><div className="small">새 표본 {performanceBreakdown.postBaseline.games}경기 · {performanceBreakdown.postBaseline.picks}픽</div></div>
+          </div>
+
+          {([
+            ["마켓별", performanceBreakdown.byMarket],
+            ["등급별", performanceBreakdown.byGrade],
+            ["Edge 구간별", performanceBreakdown.byEdge],
+            ["EV 구간별", performanceBreakdown.byEV],
+            ["배당 구간별", performanceBreakdown.byOdds],
+          ] as const).map(([title, rows]) => (
+            <div key={title} style={{ marginTop: 10, overflowX: "auto" }}>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>{title}</div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 720 }}>
+                <thead>
+                  <tr style={{ background: "#f1f5f9" }}>
+                    {['구분','픽','HIT','MISS','적중률','평균배당','평균Edge','평균EV','ROI'].map((head) => (
+                      <th key={head} style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: head === '구분' ? 'left' : 'right' }}>{head}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.length ? rows.map((row) => (
+                    <tr key={`${title}-${row.label}`}>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", fontWeight: 700 }}>{row.label}</td>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.picks}</td>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.hits}</td>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.misses}</td>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.hitRate === null ? '-' : `${row.hitRate.toFixed(1)}%`}</td>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.avgOdds === null ? '-' : row.avgOdds.toFixed(2)}</td>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.avgEdge === null ? '-' : `${row.avgEdge >= 0 ? '+' : ''}${row.avgEdge.toFixed(1)}%p`}</td>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.avgEV === null ? '-' : `${row.avgEV >= 0 ? '+' : ''}${row.avgEV.toFixed(1)}%`}</td>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right", fontWeight: 800 }}>{row.roi === null ? '-' : `${row.roi >= 0 ? '+' : ''}${row.roi.toFixed(1)}%`}</td>
+                    </tr>
+                  )) : (
+                    <tr><td colSpan={9} style={{ border: "1px solid #e2e8f0", padding: 6 }}>정산 표본 없음</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          ))}
+
+          <div style={{ marginTop: 12, overflowX: "auto" }}>
+            <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>RAW 오차 큰 경기 TOP {performanceBreakdown.errorRows.length} · 원인 조사용</div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 760 }}>
+              <thead><tr style={{ background: "#f1f5f9" }}>
+                {['경기','리그','실제','RAW λ','SHADOW λ','RAW 득점MAE','SHADOW 득점MAE','개선'].map((head) => <th key={head} style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: head === '경기' ? 'left' : 'right' }}>{head}</th>)}
+              </tr></thead>
+              <tbody>
+                {performanceBreakdown.errorRows.length ? performanceBreakdown.errorRows.map((row) => (
+                  <tr key={`error-${row.id}`}>
+                    <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", fontWeight: 700 }}>{row.game}</td>
+                    <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.league}</td>
+                    <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.actual}</td>
+                    <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.raw}</td>
+                    <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.shadow}</td>
+                    <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.rawScoreMae.toFixed(2)}</td>
+                    <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.shadowScoreMae.toFixed(2)}</td>
+                    <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right", fontWeight: 800 }}>{`${row.delta >= 0 ? '+' : ''}${row.delta.toFixed(2)}`}</td>
+                  </tr>
+                )) : <tr><td colSpan={8} style={{ border: "1px solid #e2e8f0", padding: 6 }}>READY VERIFY 표본 없음</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <div className="small" style={{ marginTop: 7, whiteSpace: "normal", lineHeight: 1.6 }}>
+            해석 규칙 · 이 영역은 진단만 수행합니다. 1~30 READY VERIFY는 BASELINE으로 고정하고, 31번째 이후는 POST-BASELINE으로 분리합니다. 동일 표본으로 임계값/계수를 맞춘 뒤 성능 향상을 주장하지 않습니다.
+          </div>
         </div>
 
         <div style={{ padding: "9px 12px", borderTop: "1px solid #e2e8f0" }}>
