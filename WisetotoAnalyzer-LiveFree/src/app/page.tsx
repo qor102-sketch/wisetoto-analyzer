@@ -15041,6 +15041,99 @@ export default function Home() {
       };
     })();
 
+    // V13.8.73 FORWARD POLICY SHADOW VALIDATOR
+    // Freeze candidate policies before observing future outcomes. Diagnostic only: no MODEL/GATE/PICK mutation.
+    const forwardPolicyStartMs = Date.parse("2026-09-12T09:05:00+09:00");
+    const forwardRecords = liveTrackerRecords.filter((record) => record.sport === "야구" && Number(record.capturedAt) >= forwardPolicyStartMs);
+    const forwardVerifiedIds = new Set(
+      forwardRecords.filter((record) => record.verificationStatus === "VERIFIED").map((record) => record.id)
+    );
+    const forwardSettledPicks = settledPicks.filter(({ record }) => forwardVerifiedIds.has(record.id));
+
+    const policyRows = [
+      {
+        key: "CONTROL",
+        label: "CONTROL · 현행 Gate",
+        rule: "현행 추천 전부",
+        keep: (_row: (typeof settledPicks)[number]) => true,
+      },
+      {
+        key: "EDGE_8_12",
+        label: "Edge 8~12%p 중심",
+        rule: "8 ≤ Edge < 12",
+        keep: ({ pick }: (typeof settledPicks)[number]) => Number(pick.edge) >= 8 && Number(pick.edge) < 12,
+      },
+      {
+        key: "UO_EDGE_8_12",
+        label: "U/O × Edge 8~12%p",
+        rule: "U/O이면서 8 ≤ Edge < 12",
+        keep: ({ pick }: (typeof settledPicks)[number]) => normalizeMarketGroup(pick.market) === "U/O" && Number(pick.edge) >= 8 && Number(pick.edge) < 12,
+      },
+      {
+        key: "SUPPRESS_UO_12_20",
+        label: "U/O 12~20%p 억제",
+        rule: "U/O의 12 ≤ Edge < 20 제외",
+        keep: ({ pick }: (typeof settledPicks)[number]) => !(normalizeMarketGroup(pick.market) === "U/O" && Number(pick.edge) >= 12 && Number(pick.edge) < 20),
+      },
+      {
+        key: "SUPPRESS_P65_70",
+        label: "65~70% 과신 억제",
+        rule: "65 ≤ 예측확률 < 70 제외",
+        keep: ({ pick }: (typeof settledPicks)[number]) => !(Number(pick.probability) >= 65 && Number(pick.probability) < 70),
+      },
+      {
+        key: "ODDS_LT_3",
+        label: "고배당 제한",
+        rule: "배당 < 3.00",
+        keep: ({ pick }: (typeof settledPicks)[number]) => Number(pick.odds) < 3,
+      },
+      {
+        key: "CONSERVATIVE_COMBO",
+        label: "보수 조합",
+        rule: "배당<3 + 65~70% 제외 + U/O 12~20%p 제외",
+        keep: ({ pick }: (typeof settledPicks)[number]) =>
+          Number(pick.odds) < 3 &&
+          !(Number(pick.probability) >= 65 && Number(pick.probability) < 70) &&
+          !(normalizeMarketGroup(pick.market) === "U/O" && Number(pick.edge) >= 12 && Number(pick.edge) < 20),
+      },
+    ].map((policy) => {
+      const rows = forwardSettledPicks.filter(policy.keep);
+      const base = summarize(rows);
+      const contribution = (row: (typeof settledPicks)[number]) => row.pick.resultStatus === "HIT" ? Number(row.pick.odds) - 1 : -1;
+      const oddsRows = rows.filter(({ pick }) => Number.isFinite(Number(pick.odds)) && Number(pick.odds) > 1);
+      const winners = oddsRows.filter((row) => contribution(row) > 0).sort((a, b) => contribution(b) - contribution(a));
+      const robustRoi = (removeCount: number) => {
+        const removed = new Set(winners.slice(0, removeCount).map((row) => `${row.record.id}:${row.pick.key}`));
+        const remain = oddsRows.filter((row) => !removed.has(`${row.record.id}:${row.pick.key}`));
+        if (!remain.length) return null;
+        return (remain.reduce((sum, row) => sum + contribution(row), 0) / remain.length) * 100;
+      };
+      const brierValues = rows.map(({ pick }) => {
+        const p = Number(pick.probability) / 100;
+        if (!Number.isFinite(p)) return null;
+        const y = pick.resultStatus === "HIT" ? 1 : 0;
+        return (p - y) ** 2;
+      }).filter((v): v is number => v !== null && Number.isFinite(v));
+      return {
+        key: policy.key,
+        label: policy.label,
+        rule: policy.rule,
+        ...base,
+        brier: brierValues.length ? brierValues.reduce((a, b) => a + b, 0) / brierValues.length : null,
+        removeTop1Roi: robustRoi(1),
+        removeTop3Roi: robustRoi(3),
+      };
+    });
+
+    const forwardPolicy = {
+      startMs: forwardPolicyStartMs,
+      lockedGames: forwardRecords.length,
+      verifiedGames: forwardRecords.filter((record) => record.verificationStatus === "VERIFIED").length,
+      pendingGames: forwardRecords.filter((record) => record.verificationStatus === "PENDING").length,
+      settledPicks: forwardSettledPicks.length,
+      policies: policyRows,
+    };
+
     const readyVerified = verifiedRecords
       .filter((record) => record.venueShadow?.stage === "READY" && record.venueShadowResult)
       .sort((a, b) => a.capturedAt - b.capturedAt);
@@ -15090,6 +15183,7 @@ export default function Home() {
       brierByMarket,
       marketEdgeCross,
       roiRobustness,
+      forwardPolicy,
       errorRows,
     };
   }, [liveTrackerRecords]);
@@ -21619,6 +21713,42 @@ export default function Home() {
               <div className="small" style={{ marginTop: 5, whiteSpace: "normal", lineHeight: 1.55 }}>
                 ≥3.00 표본 {performanceBreakdown.roiRobustness.highOdds.samples}픽 · ROI {performanceBreakdown.roiRobustness.highOdds.roi === null ? '-' : `${performanceBreakdown.roiRobustness.highOdds.roi >= 0 ? '+' : ''}${performanceBreakdown.roiRobustness.highOdds.roi.toFixed(1)}%`} · 전체 이익 중 고배당 기여 {performanceBreakdown.roiRobustness.highOdds.profitShare === null ? '-' : `${performanceBreakdown.roiRobustness.highOdds.profitShare.toFixed(1)}%`}
               </div>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid #bbf7d0", background: "#f7fff9" }}>
+            <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
+              V13.8.73 FORWARD POLICY SHADOW VALIDATOR · FROZEN · MODEL/GATE/PICK 변경 없음
+            </div>
+            <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.65, marginBottom: 8 }}>
+              시작점 2026-09-12 09:05 KST · 이후 야구 PRE만 OOS 평가 · 잠금 {performanceBreakdown.forwardPolicy.lockedGames}경기 · VERIFY {performanceBreakdown.forwardPolicy.verifiedGames}경기 · 결과대기 {performanceBreakdown.forwardPolicy.pendingGames}경기 · 정산 {performanceBreakdown.forwardPolicy.settledPicks}픽
+              <br />후보 규칙은 시작점 이전 데이터로 고정했습니다. 앞으로 들어오는 결과로 규칙/임계값을 자동 변경하지 않습니다.
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 980 }}>
+                <thead><tr style={{ background: "#ecfdf5" }}>
+                  {['정책','고정 규칙','픽','HIT','MISS','적중률','ROI','Brier','최고수익1 제거 ROI','최고수익3 제거 ROI'].map((head) => <th key={head} style={{ border: "1px solid #d1fae5", padding: "5px 6px", textAlign: head === '정책' || head === '고정 규칙' ? 'left' : 'right' }}>{head}</th>)}
+                </tr></thead>
+                <tbody>
+                  {performanceBreakdown.forwardPolicy.policies.map((row) => (
+                    <tr key={`forward-policy-${row.key}`}>
+                      <td style={{ border: "1px solid #d1fae5", padding: "5px 6px", fontWeight: 800 }}>{row.label}</td>
+                      <td style={{ border: "1px solid #d1fae5", padding: "5px 6px" }}>{row.rule}</td>
+                      <td style={{ border: "1px solid #d1fae5", padding: "5px 6px", textAlign: "right" }}>{row.picks}</td>
+                      <td style={{ border: "1px solid #d1fae5", padding: "5px 6px", textAlign: "right" }}>{row.hits}</td>
+                      <td style={{ border: "1px solid #d1fae5", padding: "5px 6px", textAlign: "right" }}>{row.misses}</td>
+                      <td style={{ border: "1px solid #d1fae5", padding: "5px 6px", textAlign: "right" }}>{row.hitRate === null ? '-' : `${row.hitRate.toFixed(1)}%`}</td>
+                      <td style={{ border: "1px solid #d1fae5", padding: "5px 6px", textAlign: "right", fontWeight: 800 }}>{row.roi === null ? '-' : `${row.roi >= 0 ? '+' : ''}${row.roi.toFixed(1)}%`}</td>
+                      <td style={{ border: "1px solid #d1fae5", padding: "5px 6px", textAlign: "right" }}>{row.brier === null ? '-' : row.brier.toFixed(3)}</td>
+                      <td style={{ border: "1px solid #d1fae5", padding: "5px 6px", textAlign: "right" }}>{row.removeTop1Roi === null ? '-' : `${row.removeTop1Roi >= 0 ? '+' : ''}${row.removeTop1Roi.toFixed(1)}%`}</td>
+                      <td style={{ border: "1px solid #d1fae5", padding: "5px 6px", textAlign: "right" }}>{row.removeTop3Roi === null ? '-' : `${row.removeTop3Roi >= 0 ? '+' : ''}${row.removeTop3Roi.toFixed(1)}%`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="small" style={{ marginTop: 6, whiteSpace: "normal", lineHeight: 1.55 }}>
+              판정 보류: 최소 30 VERIFY 경기와 충분한 정책별 정산 픽이 쌓이기 전 V13.9 Gate 후보를 선택하지 않습니다. Football은 별도 검증 유지.
             </div>
           </div>
 
