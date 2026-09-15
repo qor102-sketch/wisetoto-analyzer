@@ -1,3 +1,4 @@
+// DEPLOY_MARKER_V13_8_74_BASEBALL_CHALLENGER_LAB_MODEL_OFF_20260915
 // DEPLOY_MARKER_V13_8_32_POST_START_30MIN_VISIBILITY_20260903
 // DEPLOY_MARKER_V13_8_28_FOOTBALL_NAVER_LINEUP_V1_20260830
 // DEPLOY_MARKER_V13_8_19_MLB_SPORTSAPI_ALIAS_FIX_20260829
@@ -657,6 +658,53 @@ type VenueShadowValidationResult = {
   shadowMarginAbsError: number;
 };
 
+const BASEBALL_CHALLENGER_START_MS = new Date("2026-09-15T10:00:00+09:00").getTime();
+
+type BaseballChallengerKey =
+  | "CONTROL"
+  | "VENUE"
+  | "STARTER_RECENT"
+  | "BATTING_RECENT"
+  | "BULLPEN"
+  | "COMBO";
+
+type BaseballChallengerVariant = {
+  key: BaseballChallengerKey;
+  label: string;
+  home: number;
+  away: number;
+  applied: boolean;
+  note: string;
+};
+
+type BaseballChallengerSnapshot = {
+  stage: "READY";
+  version: "V13.8.74";
+  capturedAt: number;
+  leagueGroup: "KBO" | "NPB" | "MLB" | "OTHER";
+  variants: BaseballChallengerVariant[];
+  featureAudit: {
+    starterRecentHomeStarts: number;
+    starterRecentAwayStarts: number;
+    starterRecentHomeEra: number | null;
+    starterRecentAwayEra: number | null;
+    battingHomePlayers: number;
+    battingAwayPlayers: number;
+    battingHomeAvg: number | null;
+    battingAwayAvg: number | null;
+    bullpenHomeGames: number;
+    bullpenAwayGames: number;
+    bullpenHome24Ip: number;
+    bullpenAway24Ip: number;
+    starterDeltaHome: number;
+    starterDeltaAway: number;
+    battingDeltaHome: number;
+    battingDeltaAway: number;
+    bullpenDeltaHome: number;
+    bullpenDeltaAway: number;
+  };
+};
+
 type FootballLineupSnapshot = {
   stage: "LINEUP_READY";
   capturedAt: number;
@@ -722,6 +770,7 @@ type LiveTrackerRecord = {
   result: BacktestValidationResult | null;
   venueShadow?: VenueShadowValidationSnapshot | null;
   venueShadowResult?: VenueShadowValidationResult | null;
+  baseballChallenger?: BaseballChallengerSnapshot | null;
   footballLineup?: FootballLineupSnapshot | null;
   footballPre?: FootballPreValidationSnapshot | null;
   footballPreResult?: FootballPreValidationResult | null;
@@ -7898,6 +7947,172 @@ function baseballScoreGrid(
   return rows;
 }
 
+function challengerFinite(value: any): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function baseballInningsDecimal(value: any): number {
+  if (value === null || value === undefined || value === "") return 0;
+  const text = String(value).trim();
+  const match = text.match(/^(\d+)(?:\.(\d))?$/);
+  if (!match) {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.max(0, n) : 0;
+  }
+  const whole = Number(match[1] ?? 0);
+  const outs = Math.min(2, Math.max(0, Number(match[2] ?? 0)));
+  return whole + outs / 3;
+}
+
+function baseballChallengerLeagueGroup(value: any): "KBO" | "NPB" | "MLB" | "OTHER" {
+  const text = String(value ?? "").toUpperCase();
+  if (text.includes("KBO") || /한국/.test(text)) return "KBO";
+  if (text.includes("NPB") || /일본/.test(text)) return "NPB";
+  if (text.includes("MLB") || /메이저/.test(text)) return "MLB";
+  return "OTHER";
+}
+
+function baseballHomeWinProbability(homeLambda: number, awayLambda: number): number | null {
+  if (!Number.isFinite(homeLambda) || !Number.isFinite(awayLambda) || homeLambda <= 0 || awayLambda <= 0) return null;
+  const grid = baseballScoreGrid(homeLambda, awayLambda);
+  let homeWin = 0;
+  let awayWin = 0;
+  for (const row of grid) {
+    if (row.home > row.away) homeWin += row.p;
+    else if (row.away > row.home) awayWin += row.p;
+  }
+  const denom = homeWin + awayWin;
+  return denom > 0 ? homeWin / denom : null;
+}
+
+function buildBaseballChallengerSnapshot(
+  factors: AnalysisFactors,
+  matched: any,
+  leagueRaw: any,
+  capturedAt: number,
+): BaseballChallengerSnapshot | null {
+  if (
+    factors.baseballAnalysisStage !== "READY" ||
+    factors.expectedHomeScore === null ||
+    factors.expectedAwayScore === null
+  ) return null;
+
+  const leagueGroup = baseballChallengerLeagueGroup(leagueRaw);
+  const controlHome = Math.max(0.1, Number(factors.expectedHomeScore));
+  const controlAway = Math.max(0.1, Number(factors.expectedAwayScore));
+  const venueHome = factors.venueShadowFinalHomeScore === null ? controlHome : Math.max(0.1, Number(factors.venueShadowFinalHomeScore));
+  const venueAway = factors.venueShadowFinalAwayScore === null ? controlAway : Math.max(0.1, Number(factors.venueShadowFinalAwayScore));
+
+  const workload = matched?.naverTodayLineup?.pitcherWorkload ?? null;
+  const starterHome = workload?.starterRecent?.home ?? null;
+  const starterAway = workload?.starterRecent?.away ?? null;
+  const battingHome = workload?.recentBatting?.home ?? null;
+  const battingAway = workload?.recentBatting?.away ?? null;
+  const bullpenHome = workload?.bullpen?.home ?? null;
+  const bullpenAway = workload?.bullpen?.away ?? null;
+
+  const starterNeutralEra = leagueGroup === "NPB" ? 3.5 : leagueGroup === "MLB" ? 4.3 : 4.5;
+  const starterDeltaAgainst = (row: any) => {
+    const era = challengerFinite(row?.summary?.era);
+    const starts = Math.max(0, Number(row?.startsFound ?? 0));
+    if (era === null || starts <= 0) return 0;
+    const reliability = clamp(starts / 3, 0, 1);
+    return clamp((era - starterNeutralEra) * 0.11 * reliability, -0.45, 0.45);
+  };
+  // 홈 타선은 원정 선발 최근 폼, 원정 타선은 홈 선발 최근 폼의 영향을 받는다.
+  const starterDeltaHome = starterDeltaAgainst(starterAway);
+  const starterDeltaAway = starterDeltaAgainst(starterHome);
+
+  const neutralAvg = leagueGroup === "KBO" ? 0.26 : leagueGroup === "NPB" ? 0.245 : 0.245;
+  const battingDeltaFor = (row: any) => {
+    const avg = challengerFinite(row?.summary?.avg);
+    const players = Math.max(0, Number(row?.playersMatched ?? 0));
+    const games = Math.max(0, Number(row?.gamesWithData ?? 0));
+    if (avg === null || players <= 0 || games <= 0) return 0;
+    const reliability = clamp(Math.min(players / 9, games / 5), 0, 1);
+    return clamp((avg - neutralAvg) * 6.0 * reliability, -0.45, 0.45);
+  };
+  const battingDeltaHome = battingDeltaFor(battingHome);
+  const battingDeltaAway = battingDeltaFor(battingAway);
+
+  const bullpenFatigueDelta = (row: any) => {
+    const games = Math.max(0, Number(row?.gamesChecked ?? 0));
+    if (games <= 0) return 0;
+    const h24 = baseballInningsDecimal(row?.windows?.h24?.innings);
+    const h48 = baseballInningsDecimal(row?.windows?.h48?.innings);
+    const h72 = baseballInningsDecimal(row?.windows?.h72?.innings);
+    const multi = Math.max(0, Number(row?.multiGamePitchers ?? 0));
+    // fresh bullpen에는 보너스를 주지 않고, 명확한 과사용만 상대 득점 λ에 가산한다.
+    return clamp(
+      Math.max(0, h24 - 2.0) * 0.06 +
+      Math.max(0, h48 - 4.0) * 0.025 +
+      Math.max(0, h72 - 7.0) * 0.012 +
+      multi * 0.04,
+      0,
+      0.45,
+    );
+  };
+  // 홈 불펜 피로는 원정 득점, 원정 불펜 피로는 홈 득점에 반영한다.
+  const bullpenDeltaHome = bullpenFatigueDelta(bullpenAway);
+  const bullpenDeltaAway = bullpenFatigueDelta(bullpenHome);
+
+  const safePair = (home: number, away: number) => ({
+    home: Number(Math.max(0.1, home).toFixed(3)),
+    away: Number(Math.max(0.1, away).toFixed(3)),
+  });
+  const control = safePair(controlHome, controlAway);
+  const venue = safePair(venueHome, venueAway);
+  const starter = safePair(controlHome + starterDeltaHome, controlAway + starterDeltaAway);
+  const batting = safePair(controlHome + battingDeltaHome, controlAway + battingDeltaAway);
+  const bullpen = safePair(controlHome + bullpenDeltaHome, controlAway + bullpenDeltaAway);
+  const combo = safePair(
+    venueHome + starterDeltaHome + battingDeltaHome + bullpenDeltaHome,
+    venueAway + starterDeltaAway + battingDeltaAway + bullpenDeltaAway,
+  );
+
+  const starterApplied = Math.abs(starterDeltaHome) > 0.001 || Math.abs(starterDeltaAway) > 0.001;
+  const battingApplied = Math.abs(battingDeltaHome) > 0.001 || Math.abs(battingDeltaAway) > 0.001;
+  const bullpenApplied = Math.abs(bullpenDeltaHome) > 0.001 || Math.abs(bullpenDeltaAway) > 0.001;
+  const venueApplied = Math.abs(venue.home - control.home) > 0.001 || Math.abs(venue.away - control.away) > 0.001;
+
+  return {
+    stage: "READY",
+    version: "V13.8.74",
+    capturedAt,
+    leagueGroup,
+    variants: [
+      { key: "CONTROL", label: "CONTROL 현행 λ", ...control, applied: true, note: "V13.8 현행 예상득점" },
+      { key: "VENUE", label: "A · Venue Shadow", ...venue, applied: venueApplied, note: "robust 장소가중만 병렬 적용" },
+      { key: "STARTER_RECENT", label: "B · 선발 최근등판", ...starter, applied: starterApplied, note: "최근 선발 ERA · 최대 ±0.45점" },
+      { key: "BATTING_RECENT", label: "C · 타선 최근5경기", ...batting, applied: battingApplied, note: "라인업 최근 AVG · 리그별 중립값 대비" },
+      { key: "BULLPEN", label: "D · 불펜 workload", ...bullpen, applied: bullpenApplied, note: "24/48/72h 과사용만 페널티" },
+      { key: "COMBO", label: "E · COMBO", ...combo, applied: venueApplied || starterApplied || battingApplied || bullpenApplied, note: "A+B+C+D · MODEL OFF" },
+    ],
+    featureAudit: {
+      starterRecentHomeStarts: Math.max(0, Number(starterHome?.startsFound ?? 0)),
+      starterRecentAwayStarts: Math.max(0, Number(starterAway?.startsFound ?? 0)),
+      starterRecentHomeEra: challengerFinite(starterHome?.summary?.era),
+      starterRecentAwayEra: challengerFinite(starterAway?.summary?.era),
+      battingHomePlayers: Math.max(0, Number(battingHome?.playersMatched ?? 0)),
+      battingAwayPlayers: Math.max(0, Number(battingAway?.playersMatched ?? 0)),
+      battingHomeAvg: challengerFinite(battingHome?.summary?.avg),
+      battingAwayAvg: challengerFinite(battingAway?.summary?.avg),
+      bullpenHomeGames: Math.max(0, Number(bullpenHome?.gamesChecked ?? 0)),
+      bullpenAwayGames: Math.max(0, Number(bullpenAway?.gamesChecked ?? 0)),
+      bullpenHome24Ip: baseballInningsDecimal(bullpenHome?.windows?.h24?.innings),
+      bullpenAway24Ip: baseballInningsDecimal(bullpenAway?.windows?.h24?.innings),
+      starterDeltaHome: Number(starterDeltaHome.toFixed(3)),
+      starterDeltaAway: Number(starterDeltaAway.toFixed(3)),
+      battingDeltaHome: Number(battingDeltaHome.toFixed(3)),
+      battingDeltaAway: Number(battingDeltaAway.toFixed(3)),
+      bullpenDeltaHome: Number(bullpenDeltaHome.toFixed(3)),
+      bullpenDeltaAway: Number(bullpenDeltaAway.toFixed(3)),
+    },
+  };
+}
+
 function oppositeHandicapLine(line: number) {
   const value = -line;
   return `${value >= 0 ? "+" : ""}${value}`;
@@ -14799,6 +15014,96 @@ export default function Home() {
     };
   }, [liveTrackerRecords]);
 
+  const baseballChallengerSummary = useMemo(() => {
+    const locked = liveTrackerRecords.filter(
+      (record) => record.sport === "야구" && record.baseballChallenger?.version === "V13.8.74"
+    );
+    const verified = locked.filter(
+      (record) => record.verificationStatus === "VERIFIED" && record.result
+    );
+    const pending = locked.filter((record) => record.verificationStatus === "PENDING");
+    const keys: BaseballChallengerKey[] = ["CONTROL", "VENUE", "STARTER_RECENT", "BATTING_RECENT", "BULLPEN", "COMBO"];
+
+    const variantSummary = (rows: LiveTrackerRecord[], key: BaseballChallengerKey) => {
+      const values = rows.flatMap((record) => {
+        const variant = record.baseballChallenger?.variants.find((v) => v.key === key);
+        const result = record.result;
+        if (!variant || !result) return [];
+        const actualHome = Number(result.homeScore);
+        const actualAway = Number(result.awayScore);
+        if (!Number.isFinite(actualHome) || !Number.isFinite(actualAway)) return [];
+        const scoreMae = (Math.abs(variant.home - actualHome) + Math.abs(variant.away - actualAway)) / 2;
+        const totalMae = Math.abs((variant.home + variant.away) - (actualHome + actualAway));
+        const marginMae = Math.abs((variant.home - variant.away) - (actualHome - actualAway));
+        const winP = baseballHomeWinProbability(variant.home, variant.away);
+        const actualWin = actualHome === actualAway ? null : actualHome > actualAway ? 1 : 0;
+        const brier = winP !== null && actualWin !== null ? Math.pow(winP - actualWin, 2) : null;
+        return [{ scoreMae, totalMae, marginMae, brier, applied: variant.applied }];
+      });
+      const avg = (field: "scoreMae" | "totalMae" | "marginMae") => values.length
+        ? values.reduce((sum, row) => sum + row[field], 0) / values.length
+        : null;
+      const brierRows = values.filter((row) => row.brier !== null) as Array<typeof values[number] & { brier: number }>;
+      return {
+        key,
+        label: locked[0]?.baseballChallenger?.variants.find((v) => v.key === key)?.label ?? key,
+        games: values.length,
+        appliedGames: values.filter((row) => row.applied).length,
+        scoreMae: avg("scoreMae"),
+        totalMae: avg("totalMae"),
+        marginMae: avg("marginMae"),
+        brier: brierRows.length ? brierRows.reduce((sum, row) => sum + row.brier, 0) / brierRows.length : null,
+      };
+    };
+
+    const variants = keys.map((key) => variantSummary(verified, key));
+    const control = variants.find((row) => row.key === "CONTROL") ?? null;
+    const withImprovement = variants.map((row) => ({
+      ...row,
+      scoreImprovement: control?.scoreMae !== null && control?.scoreMae !== undefined && row.scoreMae !== null && control.scoreMae > 0
+        ? ((control.scoreMae - row.scoreMae) / control.scoreMae) * 100
+        : null,
+    }));
+
+    const leagueGroups: Array<"KBO" | "NPB" | "MLB" | "OTHER"> = ["KBO", "NPB", "MLB", "OTHER"];
+    const byLeague = leagueGroups.map((league) => {
+      const rows = verified.filter((record) => record.baseballChallenger?.leagueGroup === league);
+      const controlRow = variantSummary(rows, "CONTROL");
+      const comboRow = variantSummary(rows, "COMBO");
+      return {
+        league,
+        games: rows.length,
+        controlScoreMae: controlRow.scoreMae,
+        comboScoreMae: comboRow.scoreMae,
+        scoreImprovement: controlRow.scoreMae !== null && comboRow.scoreMae !== null && controlRow.scoreMae > 0
+          ? ((controlRow.scoreMae - comboRow.scoreMae) / controlRow.scoreMae) * 100
+          : null,
+        controlBrier: controlRow.brier,
+        comboBrier: comboRow.brier,
+      };
+    }).filter((row) => row.games > 0);
+
+    const featureCoverage = (key: BaseballChallengerKey) => {
+      const rows = locked.flatMap((record) => {
+        const variant = record.baseballChallenger?.variants.find((v) => v.key === key);
+        return variant ? [variant] : [];
+      });
+      return { total: rows.length, applied: rows.filter((row) => row.applied).length };
+    };
+
+    return {
+      locked: locked.length,
+      verified: verified.length,
+      pending: pending.length,
+      variants: withImprovement,
+      byLeague,
+      starterCoverage: featureCoverage("STARTER_RECENT"),
+      battingCoverage: featureCoverage("BATTING_RECENT"),
+      bullpenCoverage: featureCoverage("BULLPEN"),
+      venueCoverage: featureCoverage("VENUE"),
+    };
+  }, [liveTrackerRecords]);
+
   const footballLineupValidationSummary = useMemo(() => {
     const footballPre = liveTrackerRecords.filter(
       (record) => record.sport === "축구" && record.footballPre?.stage === "PRE"
@@ -15337,6 +15642,16 @@ export default function Home() {
             }
           : null;
 
+      const baseballChallengerSnapshot: BaseballChallengerSnapshot | null =
+        currentSport === "야구" && Date.now() >= BASEBALL_CHALLENGER_START_MS
+          ? buildBaseballChallengerSnapshot(
+              analysisFactors,
+              matched,
+              matched?.naverTodayLineup?.league ?? matched?.selectedFixture?.league ?? matched?.fixture?.league ?? (selectedBetman as any)?.league,
+              Date.now(),
+            )
+          : null;
+
       const canPromoteBaseballReady = Boolean(
         existingRecord &&
         existingRecord.verificationStatus === "PENDING" &&
@@ -15354,8 +15669,15 @@ export default function Home() {
         !existingRecord.footballLineup &&
         footballLineupSnapshot
       );
+      const canAttachBaseballChallenger = Boolean(
+        existingRecord &&
+        existingRecord.verificationStatus === "PENDING" &&
+        existingRecord.capturedAt >= BASEBALL_CHALLENGER_START_MS &&
+        !existingRecord.baseballChallenger &&
+        baseballChallengerSnapshot
+      );
 
-      if (existingRecord && !canPromoteBaseballReady && !canPromoteFootballLineup) {
+      if (existingRecord && !canPromoteBaseballReady && !canPromoteFootballLineup && !canAttachBaseballChallenger) {
         return previous;
       }
 
@@ -15508,6 +15830,7 @@ export default function Home() {
               }
             : null,
         venueShadowResult: null,
+        baseballChallenger: baseballChallengerSnapshot,
         footballLineup: footballLineupSnapshot,
         footballPre: footballPreSnapshot,
         footballPreResult: null,
@@ -15516,28 +15839,37 @@ export default function Home() {
         result: null,
       };
 
+      const challengerOnlyPromotion = Boolean(
+        canAttachBaseballChallenger && !canPromoteBaseballReady && !canPromoteFootballLineup
+      );
       const next = existingRecord
         ? previous.map((record, index) =>
             index === existingIndex
-              ? {
-                  ...nextRecord,
-                  /* 첫 PRE 잠금 시각/ID는 보존하고, READY 내용만 승격한다. */
-                  id: existingRecord.id,
-                  capturedAt: existingRecord.capturedAt,
-                  readyCapturedAt: Date.now(),
-                  venueShadow: nextRecord.venueShadow ?? existingRecord.venueShadow ?? null,
-                  footballLineup: nextRecord.footballLineup ?? existingRecord.footballLineup ?? null,
-                  /* V13.8.61: 축구 LINEUP 승격은 최초 PRE 예측/시장 스냅샷을 절대 덮어쓰지 않는다. */
-                  decision: canPromoteFootballLineup ? existingRecord.decision : nextRecord.decision,
-                  picks: canPromoteFootballLineup ? existingRecord.picks : nextRecord.picks,
-                  marketResults: canPromoteFootballLineup ? (existingRecord.marketResults ?? []) : nextRecord.marketResults,
-                  footballPre: existingRecord.footballPre ?? nextRecord.footballPre ?? null,
-                  footballPreResult: null,
-                  verificationStatus: "PENDING" as const,
-                  verifiedAt: null,
-                  result: null,
-                  venueShadowResult: null,
-                }
+              ? challengerOnlyPromotion
+                ? {
+                    ...existingRecord,
+                    baseballChallenger: baseballChallengerSnapshot,
+                  }
+                : {
+                    ...nextRecord,
+                    /* 첫 PRE 잠금 시각/ID는 보존하고, READY 내용만 승격한다. */
+                    id: existingRecord.id,
+                    capturedAt: existingRecord.capturedAt,
+                    readyCapturedAt: Date.now(),
+                    venueShadow: nextRecord.venueShadow ?? existingRecord.venueShadow ?? null,
+                    baseballChallenger: nextRecord.baseballChallenger ?? existingRecord.baseballChallenger ?? null,
+                    footballLineup: nextRecord.footballLineup ?? existingRecord.footballLineup ?? null,
+                    /* V13.8.61: 축구 LINEUP 승격은 최초 PRE 예측/시장 스냅샷을 절대 덮어쓰지 않는다. */
+                    decision: canPromoteFootballLineup ? existingRecord.decision : nextRecord.decision,
+                    picks: canPromoteFootballLineup ? existingRecord.picks : nextRecord.picks,
+                    marketResults: canPromoteFootballLineup ? (existingRecord.marketResults ?? []) : nextRecord.marketResults,
+                    footballPre: existingRecord.footballPre ?? nextRecord.footballPre ?? null,
+                    footballPreResult: null,
+                    verificationStatus: "PENDING" as const,
+                    verifiedAt: null,
+                    result: null,
+                    venueShadowResult: null,
+                  }
               : record
           )
         : [nextRecord, ...previous].slice(0, 300);
@@ -21749,6 +22081,67 @@ export default function Home() {
             </div>
             <div className="small" style={{ marginTop: 6, whiteSpace: "normal", lineHeight: 1.55 }}>
               판정 보류: 최소 30 VERIFY 경기와 충분한 정책별 정산 픽이 쌓이기 전 V13.9 Gate 후보를 선택하지 않습니다. Football은 별도 검증 유지.
+            </div>
+          </div>
+
+          <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid #bfdbfe", background: "#f8fbff" }}>
+            <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
+              V13.8.74 BASEBALL CHALLENGER LAB · MODEL OFF · CONTROL 추천 유지
+            </div>
+            <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.65, marginBottom: 8 }}>
+              시작점 2026-09-15 10:00 KST · 이후 READY 야구 PRE만 신규 OOS 저장 · 잠금 {baseballChallengerSummary.locked}경기 · VERIFY {baseballChallengerSummary.verified}경기 · 결과대기 {baseballChallengerSummary.pending}경기
+              <br />현행 λ와 같은 경기에 A Venue / B 선발 최근등판 / C 타선 최근5경기 / D 불펜 workload / E COMBO를 병렬 계산합니다. 실제 추천·Gate·배당판정에는 반영하지 않습니다.
+            </div>
+            <div className="cards" style={{ marginBottom: 8 }}>
+              <div className="card">Venue 적용<b>{baseballChallengerSummary.venueCoverage.applied}/{baseballChallengerSummary.venueCoverage.total}</b><div className="small">robust 장소 Shadow</div></div>
+              <div className="card">선발 최근 적용<b>{baseballChallengerSummary.starterCoverage.applied}/{baseballChallengerSummary.starterCoverage.total}</b><div className="small">Naver 최근등판 ERA</div></div>
+              <div className="card">타선 최근 적용<b>{baseballChallengerSummary.battingCoverage.applied}/{baseballChallengerSummary.battingCoverage.total}</b><div className="small">라인업 최근5경기 AVG</div></div>
+              <div className="card">불펜 피로 적용<b>{baseballChallengerSummary.bullpenCoverage.applied}/{baseballChallengerSummary.bullpenCoverage.total}</b><div className="small">과사용만 페널티</div></div>
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 900 }}>
+                <thead><tr style={{ background: "#eff6ff" }}>
+                  {['모델','검증','실제적용','득점 MAE','CONTROL 대비','총점 MAE','점수차 MAE','승패 Brier'].map((head) => <th key={head} style={{ border: "1px solid #dbeafe", padding: "5px 6px", textAlign: head === '모델' ? 'left' : 'right' }}>{head}</th>)}
+                </tr></thead>
+                <tbody>
+                  {baseballChallengerSummary.variants.map((row) => (
+                    <tr key={`challenger-${row.key}`}>
+                      <td style={{ border: "1px solid #dbeafe", padding: "5px 6px", fontWeight: 800 }}>{row.label}</td>
+                      <td style={{ border: "1px solid #dbeafe", padding: "5px 6px", textAlign: "right" }}>{row.games}</td>
+                      <td style={{ border: "1px solid #dbeafe", padding: "5px 6px", textAlign: "right" }}>{row.appliedGames}</td>
+                      <td style={{ border: "1px solid #dbeafe", padding: "5px 6px", textAlign: "right", fontWeight: 800 }}>{row.scoreMae === null ? '-' : row.scoreMae.toFixed(2)}</td>
+                      <td style={{ border: "1px solid #dbeafe", padding: "5px 6px", textAlign: "right" }}>{row.scoreImprovement === null ? '-' : `${row.scoreImprovement >= 0 ? '+' : ''}${row.scoreImprovement.toFixed(1)}%`}</td>
+                      <td style={{ border: "1px solid #dbeafe", padding: "5px 6px", textAlign: "right" }}>{row.totalMae === null ? '-' : row.totalMae.toFixed(2)}</td>
+                      <td style={{ border: "1px solid #dbeafe", padding: "5px 6px", textAlign: "right" }}>{row.marginMae === null ? '-' : row.marginMae.toFixed(2)}</td>
+                      <td style={{ border: "1px solid #dbeafe", padding: "5px 6px", textAlign: "right" }}>{row.brier === null ? '-' : row.brier.toFixed(3)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ overflowX: "auto", marginTop: 9 }}>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>리그별 CONTROL vs E COMBO</div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 720 }}>
+                <thead><tr style={{ background: "#f1f5f9" }}>
+                  {['리그','VERIFY','CONTROL 득점MAE','COMBO 득점MAE','개선','CONTROL Brier','COMBO Brier'].map((head) => <th key={head} style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: head === '리그' ? 'left' : 'right' }}>{head}</th>)}
+                </tr></thead>
+                <tbody>
+                  {baseballChallengerSummary.byLeague.length ? baseballChallengerSummary.byLeague.map((row) => (
+                    <tr key={`challenger-league-${row.league}`}>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", fontWeight: 800 }}>{row.league}</td>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.games}</td>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.controlScoreMae === null ? '-' : row.controlScoreMae.toFixed(2)}</td>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.comboScoreMae === null ? '-' : row.comboScoreMae.toFixed(2)}</td>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right", fontWeight: 800 }}>{row.scoreImprovement === null ? '-' : `${row.scoreImprovement >= 0 ? '+' : ''}${row.scoreImprovement.toFixed(1)}%`}</td>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.controlBrier === null ? '-' : row.controlBrier.toFixed(3)}</td>
+                      <td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.comboBrier === null ? '-' : row.comboBrier.toFixed(3)}</td>
+                    </tr>
+                  )) : <tr><td colSpan={7} style={{ border: "1px solid #e2e8f0", padding: 6 }}>8.74 이후 VERIFY 표본 대기</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            <div className="small" style={{ marginTop: 7, whiteSpace: "normal", lineHeight: 1.6 }}>
+              승격 규칙 · 15~20 신규 VERIFY부터 1차 방향만 판단하고, 25~30경기에서 CONTROL 대비 득점/총점/점수차 MAE와 Brier가 반복 개선되는 Challenger만 V13.9 후보로 올립니다. 동일 표본에 맞춰 계수를 자동 재조정하지 않습니다.
             </div>
           </div>
 
