@@ -23926,6 +23926,44 @@ export default function Home() {
                             </div>
                           </div>
                         )}
+                        {matched?.naverTodayLineup?.league === "NPB" && (
+                          <>
+                            <div className="card">
+                              V13.8.76 NPB 공식 기록
+                              <b>{matched?.naverTodayLineup?.npbOfficial?.ok ? "✓ NPB.jp 수신" : "대기/미수신"}</b>
+                              <div className="small">
+                                schedule link {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.scheduleLinks ?? 0)} · box {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.boxScores ?? 0)}
+                                {matched?.naverTodayLineup?.npbOfficial?.schedule?.currentGameUrl ? " · 현재경기 resolve ✓" : " · 현재경기 resolve 대기"}
+                                <br />AUDIT ONLY · Challenger/추천/λ 미반영
+                              </div>
+                            </div>
+                            <div className="card">
+                              NPB 공식 예고선발 / 최근등판
+                              <b>{Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.starterRecentStarts ?? 0) > 0 ? "✓ 수신" : "부분/대기"}</b>
+                              <div className="small">
+                                예고 {matched?.naverTodayLineup?.npbOfficial?.starterAnnouncement?.home ?? "-"} / {matched?.naverTodayLineup?.npbOfficial?.starterAnnouncement?.away ?? "-"}
+                                <br />최근등판 홈 {Number(matched?.naverTodayLineup?.npbOfficial?.starterRecent?.home?.startsFound ?? 0)}회 · 원정 {Number(matched?.naverTodayLineup?.npbOfficial?.starterRecent?.away?.startsFound ?? 0)}회
+                              </div>
+                            </div>
+                            <div className="card">
+                              NPB 공식 최근 타격
+                              <b>{Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.recentBattingGames ?? 0) > 0 ? "✓ box score" : "미수신"}</b>
+                              <div className="small">
+                                현재 공식 라인업 {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.currentLineupPlayers ?? 0)}/18
+                                <br />최근 box 홈 {Number(matched?.naverTodayLineup?.npbOfficial?.recentBatting?.home?.gamesWithData ?? 0)}G · AVG {matched?.naverTodayLineup?.npbOfficial?.recentBatting?.home?.summary?.avg ?? matched?.naverTodayLineup?.npbOfficial?.recentBatting?.home?.summary?.teamAvg ?? "-"}
+                                {" / "}원정 {Number(matched?.naverTodayLineup?.npbOfficial?.recentBatting?.away?.gamesWithData ?? 0)}G · AVG {matched?.naverTodayLineup?.npbOfficial?.recentBatting?.away?.summary?.avg ?? matched?.naverTodayLineup?.npbOfficial?.recentBatting?.away?.summary?.teamAvg ?? "-"}
+                              </div>
+                            </div>
+                            <div className="card">
+                              NPB 공식 불펜 72h
+                              <b>{Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.bullpenGames ?? 0) > 0 ? "✓ 수신" : "미수신"}</b>
+                              <div className="small">
+                                홈 24/48/72h {matched?.naverTodayLineup?.npbOfficial?.bullpen?.home?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.npbOfficial?.bullpen?.home?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.npbOfficial?.bullpen?.home?.windows?.h72?.innings ?? "0.0"}IP
+                                <br />원정 {matched?.naverTodayLineup?.npbOfficial?.bullpen?.away?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.npbOfficial?.bullpen?.away?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.npbOfficial?.bullpen?.away?.windows?.h72?.innings ?? "0.0"}IP
+                              </div>
+                            </div>
+                          </>
+                        )}
                         <div className="card">
                           라인업 선수 Stats
                           <b>{analysisFactors.lineupStatsCoverage > 0 ? "✓ 수신" : "대기"}</b>
