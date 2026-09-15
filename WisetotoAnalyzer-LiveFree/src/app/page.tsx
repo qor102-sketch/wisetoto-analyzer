@@ -702,6 +702,24 @@ type BaseballChallengerSnapshot = {
     battingDeltaAway: number;
     bullpenDeltaHome: number;
     bullpenDeltaAway: number;
+    /* V13.8.75 coverage audit: optional so older V13.8.74 snapshots stay readable. */
+    workloadSource?: string | null;
+    scheduleStatus?: number | null;
+    scheduleGames?: number;
+    battingHomeLineupPlayers?: number;
+    battingAwayLineupPlayers?: number;
+    battingHomeGamesChecked?: number;
+    battingAwayGamesChecked?: number;
+    battingHomeGamesWithData?: number;
+    battingAwayGamesWithData?: number;
+    battingHomeAtBats?: number;
+    battingAwayAtBats?: number;
+    bullpenHome48Ip?: number;
+    bullpenAway48Ip?: number;
+    bullpenHome72Ip?: number;
+    bullpenAway72Ip?: number;
+    bullpenHomeMultiGamePitchers?: number;
+    bullpenAwayMultiGamePitchers?: number;
   };
 };
 
@@ -8109,6 +8127,23 @@ function buildBaseballChallengerSnapshot(
       battingDeltaAway: Number(battingDeltaAway.toFixed(3)),
       bullpenDeltaHome: Number(bullpenDeltaHome.toFixed(3)),
       bullpenDeltaAway: Number(bullpenDeltaAway.toFixed(3)),
+      workloadSource: String(workload?.source ?? "").trim() || null,
+      scheduleStatus: Number.isFinite(Number(workload?.scheduleStatus)) ? Number(workload.scheduleStatus) : null,
+      scheduleGames: Math.max(0, Number(workload?.coverage?.scheduleGames ?? 0)),
+      battingHomeLineupPlayers: Math.max(0, Number(battingHome?.lineupPlayers ?? 0)),
+      battingAwayLineupPlayers: Math.max(0, Number(battingAway?.lineupPlayers ?? 0)),
+      battingHomeGamesChecked: Math.max(0, Number(battingHome?.gamesChecked ?? 0)),
+      battingAwayGamesChecked: Math.max(0, Number(battingAway?.gamesChecked ?? 0)),
+      battingHomeGamesWithData: Math.max(0, Number(battingHome?.gamesWithData ?? 0)),
+      battingAwayGamesWithData: Math.max(0, Number(battingAway?.gamesWithData ?? 0)),
+      battingHomeAtBats: Math.max(0, Number(battingHome?.summary?.atBats ?? 0)),
+      battingAwayAtBats: Math.max(0, Number(battingAway?.summary?.atBats ?? 0)),
+      bullpenHome48Ip: baseballInningsDecimal(bullpenHome?.windows?.h48?.innings),
+      bullpenAway48Ip: baseballInningsDecimal(bullpenAway?.windows?.h48?.innings),
+      bullpenHome72Ip: baseballInningsDecimal(bullpenHome?.windows?.h72?.innings),
+      bullpenAway72Ip: baseballInningsDecimal(bullpenAway?.windows?.h72?.innings),
+      bullpenHomeMultiGamePitchers: Math.max(0, Number(bullpenHome?.multiGamePitchers ?? 0)),
+      bullpenAwayMultiGamePitchers: Math.max(0, Number(bullpenAway?.multiGamePitchers ?? 0)),
     },
   };
 }
@@ -15091,6 +15126,106 @@ export default function Home() {
       return { total: rows.length, applied: rows.filter((row) => row.applied).length };
     };
 
+    const coverageRows = locked.map((record) => {
+      const audit = record.baseballChallenger?.featureAudit;
+      const battingVariant = record.baseballChallenger?.variants.find((v) => v.key === "BATTING_RECENT");
+      const bullpenVariant = record.baseballChallenger?.variants.find((v) => v.key === "BULLPEN");
+      const starterVariant = record.baseballChallenger?.variants.find((v) => v.key === "STARTER_RECENT");
+
+      const battingHomePlayers = Math.max(0, Number(audit?.battingHomePlayers ?? 0));
+      const battingAwayPlayers = Math.max(0, Number(audit?.battingAwayPlayers ?? 0));
+      const battingHomeAvg = challengerFinite(audit?.battingHomeAvg);
+      const battingAwayAvg = challengerFinite(audit?.battingAwayAvg);
+      const battingAnyData = battingHomePlayers > 0 || battingAwayPlayers > 0 || battingHomeAvg !== null || battingAwayAvg !== null;
+      const battingFullData = battingHomePlayers > 0 && battingAwayPlayers > 0 && battingHomeAvg !== null && battingAwayAvg !== null;
+      const battingApplied = Boolean(battingVariant?.applied);
+
+      const bullpenHomeGames = Math.max(0, Number(audit?.bullpenHomeGames ?? 0));
+      const bullpenAwayGames = Math.max(0, Number(audit?.bullpenAwayGames ?? 0));
+      const bullpenAnyData = bullpenHomeGames > 0 || bullpenAwayGames > 0;
+      const bullpenFullData = bullpenHomeGames > 0 && bullpenAwayGames > 0;
+      const bullpenApplied = Boolean(bullpenVariant?.applied);
+
+      const starterHomeStarts = Math.max(0, Number(audit?.starterRecentHomeStarts ?? 0));
+      const starterAwayStarts = Math.max(0, Number(audit?.starterRecentAwayStarts ?? 0));
+      const starterFullData = starterHomeStarts > 0 && starterAwayStarts > 0;
+      const starterApplied = Boolean(starterVariant?.applied);
+
+      const battingReason = battingFullData
+        ? battingApplied
+          ? "최근 타격 데이터 확보 · λ 조정 적용"
+          : "최근 타격 데이터 확보 · 중립값 차이 미미"
+        : battingAnyData
+          ? "부분 수신 · 한쪽 라인업/AVG 누락"
+          : "최근 타격 매칭 0명 또는 record 타격행 미수신";
+
+      const bullpenReason = bullpenFullData
+        ? bullpenApplied
+          ? "72h workload 확보 · 과사용 기준 충족"
+          : "72h workload 확보 · 과사용 기준 미달(정상)"
+        : bullpenAnyData
+          ? "부분 수신 · 한쪽 최근 불펜경기 없음"
+          : "72h 내 경기 0건 또는 record 투수행 미수신";
+
+      return {
+        id: record.id,
+        game: `${record.home} vs ${record.away}`,
+        league: record.baseballChallenger?.leagueGroup ?? baseballChallengerLeagueGroup(record.league),
+        capturedAt: Number(record.baseballChallenger?.capturedAt ?? record.readyCapturedAt ?? record.capturedAt),
+        starterHomeStarts,
+        starterAwayStarts,
+        starterFullData,
+        starterApplied,
+        battingHomePlayers,
+        battingAwayPlayers,
+        battingHomeAvg,
+        battingAwayAvg,
+        battingFullData,
+        battingAnyData,
+        battingApplied,
+        battingDeltaHome: Number(audit?.battingDeltaHome ?? 0),
+        battingDeltaAway: Number(audit?.battingDeltaAway ?? 0),
+        battingHomeGamesWithData: Math.max(0, Number(audit?.battingHomeGamesWithData ?? 0)),
+        battingAwayGamesWithData: Math.max(0, Number(audit?.battingAwayGamesWithData ?? 0)),
+        battingHomeAtBats: Math.max(0, Number(audit?.battingHomeAtBats ?? 0)),
+        battingAwayAtBats: Math.max(0, Number(audit?.battingAwayAtBats ?? 0)),
+        bullpenHomeGames,
+        bullpenAwayGames,
+        bullpenFullData,
+        bullpenAnyData,
+        bullpenApplied,
+        bullpenHome24Ip: Number(audit?.bullpenHome24Ip ?? 0),
+        bullpenAway24Ip: Number(audit?.bullpenAway24Ip ?? 0),
+        bullpenHome48Ip: Number(audit?.bullpenHome48Ip ?? 0),
+        bullpenAway48Ip: Number(audit?.bullpenAway48Ip ?? 0),
+        bullpenHome72Ip: Number(audit?.bullpenHome72Ip ?? 0),
+        bullpenAway72Ip: Number(audit?.bullpenAway72Ip ?? 0),
+        bullpenHomeMultiGamePitchers: Math.max(0, Number(audit?.bullpenHomeMultiGamePitchers ?? 0)),
+        bullpenAwayMultiGamePitchers: Math.max(0, Number(audit?.bullpenAwayMultiGamePitchers ?? 0)),
+        bullpenDeltaHome: Number(audit?.bullpenDeltaHome ?? 0),
+        bullpenDeltaAway: Number(audit?.bullpenDeltaAway ?? 0),
+        workloadSource: String(audit?.workloadSource ?? "").trim() || null,
+        scheduleStatus: Number.isFinite(Number(audit?.scheduleStatus)) ? Number(audit?.scheduleStatus) : null,
+        scheduleGames: Math.max(0, Number(audit?.scheduleGames ?? 0)),
+        battingReason,
+        bullpenReason,
+      };
+    }).sort((a, b) => b.capturedAt - a.capturedAt);
+
+    const coverageAudit = {
+      total: coverageRows.length,
+      starterFull: coverageRows.filter((row) => row.starterFullData).length,
+      starterApplied: coverageRows.filter((row) => row.starterApplied).length,
+      battingFull: coverageRows.filter((row) => row.battingFullData).length,
+      battingAny: coverageRows.filter((row) => row.battingAnyData).length,
+      battingApplied: coverageRows.filter((row) => row.battingApplied).length,
+      bullpenFull: coverageRows.filter((row) => row.bullpenFullData).length,
+      bullpenAny: coverageRows.filter((row) => row.bullpenAnyData).length,
+      bullpenApplied: coverageRows.filter((row) => row.bullpenApplied).length,
+      sourceKnown: coverageRows.filter((row) => Boolean(row.workloadSource)).length,
+      rows: coverageRows.slice(0, 20),
+    };
+
     return {
       locked: locked.length,
       verified: verified.length,
@@ -15101,6 +15236,7 @@ export default function Home() {
       battingCoverage: featureCoverage("BATTING_RECENT"),
       bullpenCoverage: featureCoverage("BULLPEN"),
       venueCoverage: featureCoverage("VENUE"),
+      coverageAudit,
     };
   }, [liveTrackerRecords]);
 
@@ -22093,11 +22229,57 @@ export default function Home() {
               <br />현행 λ와 같은 경기에 A Venue / B 선발 최근등판 / C 타선 최근5경기 / D 불펜 workload / E COMBO를 병렬 계산합니다. 실제 추천·Gate·배당판정에는 반영하지 않습니다.
             </div>
             <div className="cards" style={{ marginBottom: 8 }}>
-              <div className="card">Venue 적용<b>{baseballChallengerSummary.venueCoverage.applied}/{baseballChallengerSummary.venueCoverage.total}</b><div className="small">robust 장소 Shadow</div></div>
-              <div className="card">선발 최근 적용<b>{baseballChallengerSummary.starterCoverage.applied}/{baseballChallengerSummary.starterCoverage.total}</b><div className="small">Naver 최근등판 ERA</div></div>
-              <div className="card">타선 최근 적용<b>{baseballChallengerSummary.battingCoverage.applied}/{baseballChallengerSummary.battingCoverage.total}</b><div className="small">라인업 최근5경기 AVG</div></div>
-              <div className="card">불펜 피로 적용<b>{baseballChallengerSummary.bullpenCoverage.applied}/{baseballChallengerSummary.bullpenCoverage.total}</b><div className="small">과사용만 페널티</div></div>
+              <div className="card">Venue λ조정<b>{baseballChallengerSummary.venueCoverage.applied}/{baseballChallengerSummary.venueCoverage.total}</b><div className="small">robust 장소 Shadow</div></div>
+              <div className="card">선발 데이터<b>{baseballChallengerSummary.coverageAudit.starterFull}/{baseballChallengerSummary.coverageAudit.total}</b><div className="small">λ조정 {baseballChallengerSummary.coverageAudit.starterApplied}/{baseballChallengerSummary.coverageAudit.total}</div></div>
+              <div className="card">타선 데이터<b>{baseballChallengerSummary.coverageAudit.battingFull}/{baseballChallengerSummary.coverageAudit.total}</b><div className="small">한쪽 이상 {baseballChallengerSummary.coverageAudit.battingAny} · λ조정 {baseballChallengerSummary.coverageAudit.battingApplied}</div></div>
+              <div className="card">불펜 데이터<b>{baseballChallengerSummary.coverageAudit.bullpenFull}/{baseballChallengerSummary.coverageAudit.total}</b><div className="small">한쪽 이상 {baseballChallengerSummary.coverageAudit.bullpenAny} · 과사용 감지 {baseballChallengerSummary.coverageAudit.bullpenApplied}</div></div>
             </div>
+
+            <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #fde68a", background: "#fffbeb", borderRadius: 8 }}>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>
+                V13.8.75 BASEBALL DATA COVERAGE AUDIT · MODEL OFF · 8.74 OOS 연속 유지
+              </div>
+              <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55, marginBottom: 7 }}>
+                데이터 확보와 λ조정을 분리해서 표시합니다. 불펜은 최근 데이터가 있어도 과사용 기준에 미달하면 <b>정상적으로 λ조정 0</b>입니다. 기존 8.74 snapshot은 저장된 최소 필드로 읽고, 8.75 이후 snapshot부터 schedule/48h/72h/AB 진단을 추가 보존합니다.
+              </div>
+              <div className="cards" style={{ marginBottom: 7 }}>
+                <div className="card">선발 양팀 확보<b>{baseballChallengerSummary.coverageAudit.starterFull}/{baseballChallengerSummary.coverageAudit.total}</b><div className="small">조정 {baseballChallengerSummary.coverageAudit.starterApplied}</div></div>
+                <div className="card">타선 양팀 확보<b>{baseballChallengerSummary.coverageAudit.battingFull}/{baseballChallengerSummary.coverageAudit.total}</b><div className="small">부분 포함 {baseballChallengerSummary.coverageAudit.battingAny}</div></div>
+                <div className="card">불펜 양팀 확보<b>{baseballChallengerSummary.coverageAudit.bullpenFull}/{baseballChallengerSummary.coverageAudit.total}</b><div className="small">과사용 감지 {baseballChallengerSummary.coverageAudit.bullpenApplied}</div></div>
+                <div className="card">workload source 저장<b>{baseballChallengerSummary.coverageAudit.sourceKnown}/{baseballChallengerSummary.coverageAudit.total}</b><div className="small">8.75 이후 상세 진단</div></div>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 1280 }}>
+                  <thead><tr style={{ background: "#fef3c7" }}>
+                    {['경기','리그','선발 최근','타선 최근 데이터','타선 λΔ','불펜 최근 데이터','불펜 λΔ','진단'].map((head) => <th key={head} style={{ border: "1px solid #fde68a", padding: "5px 6px", textAlign: head === '경기' || head === '진단' ? 'left' : 'right' }}>{head}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {baseballChallengerSummary.coverageAudit.rows.length ? baseballChallengerSummary.coverageAudit.rows.map((row) => (
+                      <tr key={`coverage-audit-${row.id}`}>
+                        <td style={{ border: "1px solid #fde68a", padding: "5px 6px", fontWeight: 700 }}>{row.game}</td>
+                        <td style={{ border: "1px solid #fde68a", padding: "5px 6px", textAlign: "right" }}>{row.league}</td>
+                        <td style={{ border: "1px solid #fde68a", padding: "5px 6px", textAlign: "right" }}>{row.starterHomeStarts}/{row.starterAwayStarts}회{row.starterApplied ? ' · 조정' : ''}</td>
+                        <td style={{ border: "1px solid #fde68a", padding: "5px 6px", textAlign: "right" }}>
+                          {row.battingHomePlayers}/{row.battingAwayPlayers}명 · AVG {row.battingHomeAvg === null ? '-' : row.battingHomeAvg.toFixed(3)}/{row.battingAwayAvg === null ? '-' : row.battingAwayAvg.toFixed(3)}
+                          {(row.battingHomeGamesWithData > 0 || row.battingAwayGamesWithData > 0) ? <div className="small">record {row.battingHomeGamesWithData}/{row.battingAwayGamesWithData}G · AB {row.battingHomeAtBats}/{row.battingAwayAtBats}</div> : null}
+                        </td>
+                        <td style={{ border: "1px solid #fde68a", padding: "5px 6px", textAlign: "right" }}>{row.battingDeltaHome >= 0 ? '+' : ''}{row.battingDeltaHome.toFixed(3)} / {row.battingDeltaAway >= 0 ? '+' : ''}{row.battingDeltaAway.toFixed(3)}</td>
+                        <td style={{ border: "1px solid #fde68a", padding: "5px 6px", textAlign: "right" }}>
+                          {row.bullpenHomeGames}/{row.bullpenAwayGames}G · 24h {row.bullpenHome24Ip.toFixed(1)}/{row.bullpenAway24Ip.toFixed(1)}IP
+                          {(row.bullpenHome48Ip > 0 || row.bullpenAway48Ip > 0 || row.bullpenHome72Ip > 0 || row.bullpenAway72Ip > 0) ? <div className="small">48h {row.bullpenHome48Ip.toFixed(1)}/{row.bullpenAway48Ip.toFixed(1)} · 72h {row.bullpenHome72Ip.toFixed(1)}/{row.bullpenAway72Ip.toFixed(1)} · multi {row.bullpenHomeMultiGamePitchers}/{row.bullpenAwayMultiGamePitchers}</div> : null}
+                        </td>
+                        <td style={{ border: "1px solid #fde68a", padding: "5px 6px", textAlign: "right" }}>{row.bullpenDeltaHome >= 0 ? '+' : ''}{row.bullpenDeltaHome.toFixed(3)} / {row.bullpenDeltaAway >= 0 ? '+' : ''}{row.bullpenDeltaAway.toFixed(3)}</td>
+                        <td style={{ border: "1px solid #fde68a", padding: "5px 6px", whiteSpace: "normal", lineHeight: 1.45 }}>
+                          타선: {row.battingReason}<br />불펜: {row.bullpenReason}
+                          {(row.workloadSource || row.scheduleStatus !== null || row.scheduleGames > 0) ? <div className="small">source {row.workloadSource ?? '-'} · schedule HTTP {row.scheduleStatus ?? '-'} · games {row.scheduleGames}</div> : <div className="small">8.74 legacy snapshot · 상세 source 필드 없음</div>}
+                        </td>
+                      </tr>
+                    )) : <tr><td colSpan={8} style={{ border: "1px solid #fde68a", padding: 6 }}>8.74 이후 READY PRE 표본 대기</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 900 }}>
                 <thead><tr style={{ background: "#eff6ff" }}>
