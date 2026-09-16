@@ -1731,6 +1731,7 @@ async function collectNaverPitcherWorkload(args: {
 }
 
 // DEPLOY_MARKER_V13_8_76_NPB_OFFICIAL_DATA_ADAPTER_AUDIT_ONLY_20260915
+// DEPLOY_MARKER_V13_8_79_NPB_OFFICIAL_STARTER_BULLPEN_AUDIT_FIX_20260916
 // DEPLOY_MARKER_V13_8_77_MLB_OFFICIAL_STATSAPI_ADAPTER_AUDIT_ONLY_20260916
 type NpbOfficialTeamMeta = {
   code: string;
@@ -1919,6 +1920,7 @@ function npbParsePitchingTable(tableHtml: string) {
       name,
       normalizedName: normalizePerson(name),
       innings,
+      outs: inningsToOuts(innings),
       pitches: pitchIdx >= 0 ? npbParseNumber(cells[pitchIdx]) : null,
       hits: hitIdx >= 0 ? npbParseNumber(cells[hitIdx]) : 0,
       homeRuns: hrIdx >= 0 ? npbParseNumber(cells[hrIdx]) : 0,
@@ -2006,6 +2008,112 @@ function npbOfficialGameMs(dateKeyRaw: string, startTime: string | null) {
   const mm = time ? Number(time[2]) : 0;
   const ms = Date.parse(`${match[1]}-${match[2]}-${match[3]}T${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:00+09:00`);
   return Number.isFinite(ms) ? ms : null;
+}
+
+
+function npbExtractStarterPairFromScheduleRow(
+  html: string,
+  game: NonNullable<ReturnType<typeof npbGameLinkMeta>> | null,
+) {
+  if (!html || !game) return null;
+  const pathToken = `/scores/${game.year}/${game.mmdd}/${game.homeSlug}-${game.awaySlug}-${game.seriesNo}/`;
+  const rows = html.match(/<tr\b[\s\S]*?<\/tr>/gi) ?? [];
+  const rowHtml = rows.find((row) => row.includes(pathToken)) ?? null;
+  if (!rowHtml) return null;
+
+  const playerNames: string[] = [];
+  const playerAnchor = /<a\b[^>]*href\s*=\s*["'][^"']*\/bis\/players\/[^"']+["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = playerAnchor.exec(rowHtml)) !== null) {
+    const name = decodeHtmlEntityText(match[1]).replace(/\s+/g, " ").trim();
+    if (name && !playerNames.some((value) => normalizePerson(value) === normalizePerson(name))) playerNames.push(name);
+  }
+  if (playerNames.length < 2) return null;
+  return {
+    home: playerNames[0],
+    away: playerNames[1],
+    source: "NPB_SCHEDULE_DETAIL_CURRENT_GAME",
+    rowText: decodeHtmlEntityText(rowHtml).replace(/\s+/g, " ").trim(),
+  };
+}
+
+function npbTeamResultsUrl(team: NpbOfficialTeamMeta, month: number | "index") {
+  const suffix = month === "index" ? "index" : String(month).padStart(2, "0");
+  return `https://npb.jp/bis/teams/results_${team.slug}_${suffix}.html`;
+}
+
+function npbParseTeamStarterRows(html: string, year: number, monthHint: number) {
+  const tables = html.match(/<table\b[\s\S]*?<\/table>/gi) ?? [];
+  const table = tables.find((candidate) => {
+    const text = decodeHtmlEntityText(candidate);
+    return text.includes("月日") && text.includes("先発投手");
+  });
+  if (!table) return [] as Array<{ dateKey: string; starterName: string }>;
+
+  const rows = npbTableRows(table);
+  const headerIndex = rows.findIndex((row) => row.some((cell) => cell.includes("月日")) && row.some((cell) => cell.includes("先発投手")));
+  if (headerIndex < 0) return [] as Array<{ dateKey: string; starterName: string }>;
+  const headers = rows[headerIndex];
+  const dateIdx = npbHeaderIndex(headers, "月日");
+  const starterIdx = npbHeaderIndex(headers, "先発投手");
+  if (dateIdx < 0 || starterIdx < 0) return [] as Array<{ dateKey: string; starterName: string }>;
+
+  let month = monthHint;
+  const out: Array<{ dateKey: string; starterName: string }> = [];
+  for (const cells of rows.slice(headerIndex + 1)) {
+    const rawDate = String(cells[dateIdx] ?? "").replace(/\s+/g, "").trim();
+    const rawStarter = String(cells[starterIdx] ?? "").replace(/\s+/g, " ").trim();
+    if (!rawDate || !rawStarter || /先発投手/.test(rawStarter)) continue;
+    let day: number | null = null;
+    const md = rawDate.match(/^(\d{1,2})\/(\d{1,2})/);
+    if (md) {
+      month = Number(md[1]);
+      day = Number(md[2]);
+    } else {
+      const d = rawDate.match(/^(\d{1,2})/);
+      if (d) day = Number(d[1]);
+    }
+    if (!day || !month) continue;
+    const starterName = rawStarter.replace(/^[○●△\-－–—\s]+/, "").trim();
+    if (!starterName) continue;
+    out.push({ dateKey: `${year}${String(month).padStart(2, "0")}${String(day).padStart(2, "0")}`, starterName });
+  }
+  return out;
+}
+
+async function npbStarterGameMetas(args: {
+  team: NpbOfficialTeamMeta;
+  starterName: string | null;
+  date: string;
+  year: number;
+  month: number;
+  allMetas: NonNullable<ReturnType<typeof npbGameLinkMeta>>[];
+}) {
+  if (!normalizePerson(args.starterName)) {
+    return { metas: [] as NonNullable<ReturnType<typeof npbGameLinkMeta>>[], resultRows: 0, statuses: [] as AnyObj[] };
+  }
+  const prev = npbPrevMonth(args.year, args.month);
+  const urlDefs = [
+    { url: npbTeamResultsUrl(args.team, "index"), monthHint: args.month },
+    { url: npbTeamResultsUrl(args.team, args.month), monthHint: args.month },
+    { url: npbTeamResultsUrl(args.team, prev.month), monthHint: prev.month },
+  ];
+  const results = await Promise.all(urlDefs.map((item) => fetchNpbHtmlCached(item.url, true)));
+  const rows = results.flatMap((result, index) => result.ok ? npbParseTeamStarterRows(result.text, args.year, urlDefs[index].monthHint) : []);
+  const matchingDates = Array.from(new Set(rows
+    .filter((row) => row.dateKey < args.date && personMatches(row.starterName, args.starterName))
+    .map((row) => row.dateKey)))
+    .sort((a, b) => b.localeCompare(a))
+    .slice(0, 5);
+  const metas = matchingDates.flatMap((dateKey) => {
+    const meta = args.allMetas.find((game) => game.dateKey === dateKey && (game.homeSlug === args.team.slug || game.awaySlug === args.team.slug));
+    return meta ? [meta] : [];
+  });
+  return {
+    metas,
+    resultRows: rows.length,
+    statuses: results.map((result, index) => ({ url: urlDefs[index].url, status: result.status, cacheHit: result.cacheHit })),
+  };
 }
 
 function npbExtractStarterFromAnnouncement(html: string, team: NpbOfficialTeamMeta | null) {
@@ -2117,12 +2225,16 @@ function npbAggregateBatting(rowsByGame: { game: any; rows: any[] }[], currentLi
   };
 }
 
-function npbStarterRecentFromGames(rowsByGame: { game: any; rows: any[] }[], starterName: string | null) {
+function npbStarterRecentFromGames(
+  rowsByGame: { game: any; rows: any[] }[],
+  starterName: string | null,
+  source = "NPB_TEAM_BOX_SCAN",
+) {
   const target = normalizePerson(starterName);
-  if (!target) return { startsFound: 0, candidateGames: rowsByGame.length, games: [], summary: null };
+  if (!target) return { source, startsFound: 0, candidateGames: rowsByGame.length, games: [], summary: null };
   const found: AnyObj[] = [];
   for (const entry of rowsByGame) {
-    const row = entry.rows.find((pitcher) => normalizePerson(pitcher.name) === target);
+    const row = entry.rows.find((pitcher) => personMatches(pitcher.name, starterName));
     if (!row) continue;
     found.push({ date: entry.game.dateKey, ...row });
   }
@@ -2135,6 +2247,7 @@ function npbStarterRecentFromGames(rowsByGame: { game: any; rows: any[] }[], sta
     return acc;
   }, { outs: 0, pitches: 0, earnedRuns: 0, strikeouts: 0, walks: 0 });
   return {
+    source,
     startsFound: found.length,
     candidateGames: rowsByGame.length,
     games: found,
@@ -2151,17 +2264,26 @@ function npbStarterRecentFromGames(rowsByGame: { game: any; rows: any[] }[], sta
 
 function npbBullpenFromGames(rowsByGame: { game: any; rows: any[]; gameMs: number | null }[], currentMs: number | null) {
   const appearances: AnyObj[] = [];
+  let parsedPitchingRows = 0;
+  let parsedPitchingOuts = 0;
   for (const entry of rowsByGame) {
     const hoursAgo = currentMs !== null && entry.gameMs !== null ? (currentMs - entry.gameMs) / 3600000 : null;
-    entry.rows.slice(1).forEach((row) => appearances.push({ ...row, date: entry.game.dateKey, hoursAgo }));
+    parsedPitchingRows += entry.rows.length;
+    parsedPitchingOuts += entry.rows.reduce((sum, row) => sum + Number(row?.outs ?? inningsToOuts(row?.innings)), 0);
+    entry.rows.slice(1).forEach((row) => appearances.push({
+      ...row,
+      outs: Number(row?.outs ?? inningsToOuts(row?.innings)),
+      date: entry.game.dateKey,
+      hoursAgo,
+    }));
   }
 
   function windowSummary(hours: number) {
     const rows = appearances.filter((row) => row.hoursAgo === null || (Number(row.hoursAgo) > 0 && Number(row.hoursAgo) <= hours));
     const uniquePitchers = new Set(rows.map((row) => normalizePerson(row.name)).filter(Boolean));
-    const outs = rows.reduce((sum, row) => sum + inningsToOuts(row.innings), 0);
+    const outs = rows.reduce((sum, row) => sum + Number(row?.outs ?? inningsToOuts(row.innings)), 0);
     const pitches = rows.reduce((sum, row) => sum + Number(row.pitches ?? 0), 0);
-    return { appearances: rows.length, pitchersUsed: uniquePitchers.size, innings: outsToInnings(outs), pitches: pitches || null };
+    return { appearances: rows.length, pitchersUsed: uniquePitchers.size, innings: outsToInnings(outs), outs, pitches: pitches || null };
   }
 
   const byPitcher = new Map<string, number>();
@@ -2170,11 +2292,18 @@ function npbBullpenFromGames(rowsByGame: { game: any; rows: any[]; gameMs: numbe
     if (key) byPitcher.set(key, (byPitcher.get(key) ?? 0) + 1);
   });
 
+  const parsedBullpenOuts = appearances.reduce((sum, row) => sum + Number(row?.outs ?? inningsToOuts(row?.innings)), 0);
   return {
+    source: "NPB_OFFICIAL_BOX_PITCHING",
     gamesChecked: rowsByGame.length,
+    pitchingRows: parsedPitchingRows,
+    pitchingOuts: parsedPitchingOuts,
+    bullpenAppearances: appearances.length,
+    bullpenOuts: parsedBullpenOuts,
+    parserOk: rowsByGame.length === 0 ? null : parsedPitchingRows > 0 && parsedPitchingOuts > 0,
     windows: { h24: windowSummary(24), h48: windowSummary(48), h72: windowSummary(72) },
     multiGamePitchers: Array.from(byPitcher.values()).filter((count) => count >= 2).length,
-    games: rowsByGame.map((entry) => ({ date: entry.game.dateKey, url: entry.game.rootUrl })),
+    games: rowsByGame.map((entry) => ({ date: entry.game.dateKey, url: entry.game.rootUrl, pitchers: entry.rows.length })),
   };
 }
 
@@ -2183,6 +2312,8 @@ async function collectNpbOfficialAudit(args: {
   home: string;
   away: string;
   startRaw: string;
+  naverHomeStarterName?: string | null;
+  naverAwayStarterName?: string | null;
 }) {
   const homeTeam = npbOfficialTeamMeta(args.home);
   const awayTeam = npbOfficialTeamMeta(args.away);
@@ -2211,13 +2342,13 @@ async function collectNpbOfficialAudit(args: {
     game.awaySlug === awayTeam.slug
   ) ?? null;
 
-  const recentFor = (team: NpbOfficialTeamMeta) => metas
+  const recentFor = (team: NpbOfficialTeamMeta, limit = 5) => metas
     .filter((game) => game.dateKey < args.date && (game.homeSlug === team.slug || game.awaySlug === team.slug))
     .sort((a, b) => b.dateKey.localeCompare(a.dateKey) || b.seriesNo - a.seriesNo)
-    .slice(0, 5);
+    .slice(0, limit);
 
-  const homeRecentMetas = recentFor(homeTeam);
-  const awayRecentMetas = recentFor(awayTeam);
+  const homeRecentMetas = recentFor(homeTeam, 5);
+  const awayRecentMetas = recentFor(awayTeam, 5);
   const boxMetaByUrl = new Map<string, NonNullable<ReturnType<typeof npbGameLinkMeta>>>();
   [...homeRecentMetas, ...awayRecentMetas].forEach((meta) => boxMetaByUrl.set(meta.boxUrl, meta));
   const currentBoxUrl = currentGame?.boxUrl ?? null;
@@ -2241,10 +2372,16 @@ async function collectNpbOfficialAudit(args: {
     .filter((row: AnyObj) => Number.isFinite(Number(row.order)) && Number(row.order) >= 1 && Number(row.order) <= 9)
     .map((row: AnyObj) => row.name);
 
+  const scheduleStarterPair = scheduleResults[0]?.ok
+    ? npbExtractStarterPairFromScheduleRow(scheduleResults[0].text, currentGame)
+    : null;
   const announcementUrl = "https://npb.jp/announcement/starter/";
-  const announcement = await fetchNpbHtmlCached(announcementUrl, false);
-  const announcedHomeStarter = announcement.ok ? npbExtractStarterFromAnnouncement(announcement.text, homeTeam) : null;
-  const announcedAwayStarter = announcement.ok ? npbExtractStarterFromAnnouncement(announcement.text, awayTeam) : null;
+  const announcement = scheduleStarterPair ? { ok: false, status: 0, text: "" } : await fetchNpbHtmlCached(announcementUrl, false);
+  const announcementHomeFallback = announcement.ok ? npbExtractStarterFromAnnouncement(announcement.text, homeTeam) : null;
+  const announcementAwayFallback = announcement.ok ? npbExtractStarterFromAnnouncement(announcement.text, awayTeam) : null;
+  const announcedHomeStarter = scheduleStarterPair?.home ?? announcementHomeFallback;
+  const announcedAwayStarter = scheduleStarterPair?.away ?? announcementAwayFallback;
+  const starterIdentitySource = scheduleStarterPair?.source ?? (announcementHomeFallback || announcementAwayFallback ? "NPB_ANNOUNCEMENT_FALLBACK" : "UNAVAILABLE");
 
   function rowsForTeam(team: NpbOfficialTeamMeta, recentMetas: NonNullable<ReturnType<typeof npbGameLinkMeta>>[]) {
     return recentMetas.map((meta) => {
@@ -2261,12 +2398,54 @@ async function collectNpbOfficialAudit(args: {
     }).filter((entry) => entry.completed && (entry.batting.length > 0 || entry.pitching.length > 0));
   }
 
-  const homeRows = rowsForTeam(homeTeam, homeRecentMetas);
-  const awayRows = rowsForTeam(awayTeam, awayRecentMetas);
+  let homeRows = rowsForTeam(homeTeam, homeRecentMetas);
+  let awayRows = rowsForTeam(awayTeam, awayRecentMetas);
   const battingHome = npbAggregateBatting(homeRows.slice(0, 5).map((entry) => ({ game: entry.game, rows: entry.batting })), currentHomeLineup);
   const battingAway = npbAggregateBatting(awayRows.slice(0, 5).map((entry) => ({ game: entry.game, rows: entry.batting })), currentAwayLineup);
-  const starterHome = npbStarterRecentFromGames(homeRows.slice(0, 8).map((entry) => ({ game: entry.game, rows: entry.pitching })), announcedHomeStarter);
-  const starterAway = npbStarterRecentFromGames(awayRows.slice(0, 8).map((entry) => ({ game: entry.game, rows: entry.pitching })), announcedAwayStarter);
+
+  const starterMetaHome = await npbStarterGameMetas({
+    team: homeTeam,
+    starterName: announcedHomeStarter,
+    date: args.date,
+    year,
+    month,
+    allMetas: metas,
+  });
+  const starterMetaAway = await npbStarterGameMetas({
+    team: awayTeam,
+    starterName: announcedAwayStarter,
+    date: args.date,
+    year,
+    month,
+    allMetas: metas,
+  });
+  const starterBoxMetas = [...starterMetaHome.metas, ...starterMetaAway.metas];
+  const missingStarterMetas = starterBoxMetas.filter((meta) => !boxEntries.has(meta.boxUrl));
+  if (missingStarterMetas.length) {
+    const starterBoxes = await Promise.all(missingStarterMetas.map(async (meta) => {
+      const response = await fetchNpbHtmlCached(meta.boxUrl, true);
+      const parsed = response.ok ? npbParseBoxHtml(response.text) : null;
+      return [meta.boxUrl, { meta, response, parsed }] as const;
+    }));
+    starterBoxes.forEach(([boxUrl, entry]) => boxEntries.set(boxUrl, entry));
+  }
+
+  const starterHomeRows = rowsForTeam(homeTeam, starterMetaHome.metas);
+  const starterAwayRows = rowsForTeam(awayTeam, starterMetaAway.metas);
+  const starterHome = npbStarterRecentFromGames(
+    starterHomeRows.map((entry) => ({ game: entry.game, rows: entry.pitching })),
+    announcedHomeStarter,
+    "NPB_TEAM_RESULTS_STARTER+OFFICIAL_BOX",
+  );
+  const starterAway = npbStarterRecentFromGames(
+    starterAwayRows.map((entry) => ({ game: entry.game, rows: entry.pitching })),
+    announcedAwayStarter,
+    "NPB_TEAM_RESULTS_STARTER+OFFICIAL_BOX",
+  );
+
+  // starter lookup uses targeted older games; batting/bullpen remain fixed to recent five team games.
+  homeRows = rowsForTeam(homeTeam, homeRecentMetas);
+  awayRows = rowsForTeam(awayTeam, awayRecentMetas);
 
   const currentMs = requestedStartMs(args.startRaw);
   const homeBullpenGames = homeRows
@@ -2301,10 +2480,18 @@ async function collectNpbOfficialAudit(args: {
       currentBoxUrl,
     },
     starterAnnouncement: {
-      url: announcementUrl,
-      status: announcement.status,
+      url: scheduleStarterPair ? scheduleUrls[0] : announcementUrl,
+      status: scheduleStarterPair ? scheduleResults[0]?.status ?? 0 : announcement.status,
+      source: starterIdentitySource,
       home: announcedHomeStarter,
       away: announcedAwayStarter,
+      scheduleRow: scheduleStarterPair?.rowText ?? null,
+      naverHome: args.naverHomeStarterName ?? null,
+      naverAway: args.naverAwayStarterName ?? null,
+    },
+    starterLookup: {
+      home: { resultRows: starterMetaHome.resultRows, matchedGames: starterMetaHome.metas.length, statuses: starterMetaHome.statuses },
+      away: { resultRows: starterMetaAway.resultRows, matchedGames: starterMetaAway.metas.length, statuses: starterMetaAway.statuses },
     },
     currentLineup: {
       home: currentHomeLineup,
@@ -2326,7 +2513,7 @@ async function collectNpbOfficialAudit(args: {
       recentBattingPlayers: Number(battingHome.playersMatched) + Number(battingAway.playersMatched),
       currentLineupPlayers,
     },
-    note: "AUDIT ONLY · V13.8.76에서는 Challenger/추천/λ에 미반영",
+    note: "AUDIT ONLY · V13.8.79 NPB starter identity/recent-start/bullpen parser fix · Challenger/추천/λ 미반영",
   };
 }
 
@@ -3371,6 +3558,8 @@ export async function GET(request: Request) {
           home,
           away,
           startRaw,
+          naverHomeStarterName: String(homeStarter?.name ?? "").trim() || null,
+          naverAwayStarterName: String(awayStarter?.name ?? "").trim() || null,
         }).catch((error: any) => ({
           ok: false,
           source: "NPB_OFFICIAL",
