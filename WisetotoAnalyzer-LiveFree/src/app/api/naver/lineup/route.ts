@@ -2705,14 +2705,18 @@ async function mlbStarterRecentFromGameLog(args: {
     }];
   });
 
-  const deduped: AnyObj[] = Array.from(
-    new Map<string, AnyObj>(
-      dated.map((row: AnyObj, index: number): [string, AnyObj] => [
-        String(row?.gamePk ?? `${row?.gameDate ?? "date"}-${index}`),
-        row,
-      ]),
-    ).values(),
-  ).sort((a, b) => {
+  // V13.8.77.2.2: avoid Array.from(Map.values()) inference drifting to unknown[]
+  // under the Next/Vercel TypeScript checker. Keep the collection explicitly AnyObj[].
+  const dedupedByGame = new Map<string, AnyObj>();
+  dated.forEach((row: AnyObj, index: number) => {
+    const key = String(row?.gamePk ?? `${row?.gameDate ?? "date"}-${index}`);
+    dedupedByGame.set(key, row);
+  });
+  const deduped: AnyObj[] = [];
+  dedupedByGame.forEach((row: AnyObj) => {
+    deduped.push(row);
+  });
+  deduped.sort((a: AnyObj, b: AnyObj) => {
     const dateCmp = String(b?.gameDate ?? "").localeCompare(String(a?.gameDate ?? ""));
     if (dateCmp !== 0) return dateCmp;
     return Number(b?.gamePk ?? 0) - Number(a?.gamePk ?? 0);
