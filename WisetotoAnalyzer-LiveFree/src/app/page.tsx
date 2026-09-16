@@ -20720,7 +20720,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.77.1 · MLB StatsAPI UI GUARD</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.77.2 · MLB STARTER GAMELOG FIX</div>
         </div>
         <div className="bar">
           <button
@@ -23936,11 +23936,13 @@ export default function Home() {
                               </div>
                             </div>
                             <div className="card">
-                              MLB StatsAPI 선발 / 최근등판
+                              V13.8.77.2 MLB StatsAPI 선발 / 최근등판
                               <b>{Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.starterRecentStarts ?? 0) > 0 ? "✓ 수신" : "부분/대기"}</b>
                               <div className="small">
                                 예고 {matched?.naverTodayLineup?.mlbOfficial?.probablePitcher?.home?.name ?? "-"} / {matched?.naverTodayLineup?.mlbOfficial?.probablePitcher?.away?.name ?? "-"}
                                 <br />최근등판 홈 {Number(matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.home?.startsFound ?? 0)}회 · 원정 {Number(matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.away?.startsFound ?? 0)}회
+                                <br />source 홈 {matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.home?.source ?? "-"} · 원정 {matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.away?.source ?? "-"}
+                                <br />gameLog HTTP {Number(matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.home?.status ?? matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.home?.gameLogAudit?.status ?? 0)}/{Number(matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.away?.status ?? matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.away?.gameLogAudit?.status ?? 0)} · splits {Number(matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.home?.splitsFound ?? matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.home?.gameLogAudit?.splitsFound ?? 0)}/{Number(matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.away?.splitsFound ?? matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.away?.gameLogAudit?.splitsFound ?? 0)}
                               </div>
                             </div>
                             <div className="card">
