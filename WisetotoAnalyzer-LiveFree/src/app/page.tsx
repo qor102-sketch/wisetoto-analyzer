@@ -659,6 +659,7 @@ type VenueShadowValidationResult = {
 };
 
 const BASEBALL_CHALLENGER_START_MS = new Date("2026-09-15T10:00:00+09:00").getTime();
+const BASEBALL_MLB_OFFICIAL_BCD_START_MS = new Date("2026-09-16T10:55:00+09:00").getTime();
 
 type BaseballChallengerKey =
   | "CONTROL"
@@ -679,7 +680,7 @@ type BaseballChallengerVariant = {
 
 type BaseballChallengerSnapshot = {
   stage: "READY";
-  version: "V13.8.74";
+  version: "V13.8.74" | "V13.8.78";
   capturedAt: number;
   leagueGroup: "KBO" | "NPB" | "MLB" | "OTHER";
   variants: BaseballChallengerVariant[];
@@ -720,6 +721,17 @@ type BaseballChallengerSnapshot = {
     bullpenAway72Ip?: number;
     bullpenHomeMultiGamePitchers?: number;
     bullpenAwayMultiGamePitchers?: number;
+    /* V13.8.78 MLB official B/C/D source audit. */
+    challengerSourcePolicy?: string | null;
+    starterHomeSource?: string | null;
+    starterAwaySource?: string | null;
+    battingHomeSource?: string | null;
+    battingAwaySource?: string | null;
+    bullpenHomeSource?: string | null;
+    bullpenAwaySource?: string | null;
+    mlbOfficialGamePk?: number | null;
+    mlbOfficialCurrentLineupPlayers?: number;
+    mlbOfficialStarterGameLogSides?: number;
   };
 };
 
@@ -8023,13 +8035,66 @@ function buildBaseballChallengerSnapshot(
   const venueHome = factors.venueShadowFinalHomeScore === null ? controlHome : Math.max(0.1, Number(factors.venueShadowFinalHomeScore));
   const venueAway = factors.venueShadowFinalAwayScore === null ? controlAway : Math.max(0.1, Number(factors.venueShadowFinalAwayScore));
 
-  const workload = matched?.naverTodayLineup?.pitcherWorkload ?? null;
-  const starterHome = workload?.starterRecent?.home ?? null;
-  const starterAway = workload?.starterRecent?.away ?? null;
-  const battingHome = workload?.recentBatting?.home ?? null;
-  const battingAway = workload?.recentBatting?.away ?? null;
-  const bullpenHome = workload?.bullpen?.home ?? null;
-  const bullpenAway = workload?.bullpen?.away ?? null;
+  const naverWorkload = matched?.naverTodayLineup?.pitcherWorkload ?? null;
+  const mlbOfficial = leagueGroup === "MLB" ? (matched?.naverTodayLineup?.mlbOfficial ?? null) : null;
+  const mlbOfficialEligible = Boolean(
+    leagueGroup === "MLB" &&
+    capturedAt >= BASEBALL_MLB_OFFICIAL_BCD_START_MS &&
+    mlbOfficial?.ok
+  );
+
+  const naverStarterHome = naverWorkload?.starterRecent?.home ?? null;
+  const naverStarterAway = naverWorkload?.starterRecent?.away ?? null;
+  const naverBattingHome = naverWorkload?.recentBatting?.home ?? null;
+  const naverBattingAway = naverWorkload?.recentBatting?.away ?? null;
+  const naverBullpenHome = naverWorkload?.bullpen?.home ?? null;
+  const naverBullpenAway = naverWorkload?.bullpen?.away ?? null;
+
+  const officialStarterHome = mlbOfficial?.starterRecent?.home ?? null;
+  const officialStarterAway = mlbOfficial?.starterRecent?.away ?? null;
+  const officialBattingHome = mlbOfficial?.recentBatting?.home ?? null;
+  const officialBattingAway = mlbOfficial?.recentBatting?.away ?? null;
+  const officialBullpenHome = mlbOfficial?.bullpen?.home ?? null;
+  const officialBullpenAway = mlbOfficial?.bullpen?.away ?? null;
+
+  const usableStarter = (row: any) =>
+    row &&
+    String(row?.source ?? "") === "MLB_PERSON_GAMELOG" &&
+    Math.max(0, Number(row?.startsFound ?? 0)) > 0 &&
+    challengerFinite(row?.summary?.era) !== null;
+  const usableBatting = (row: any) =>
+    row &&
+    Math.max(0, Number(row?.playersMatched ?? 0)) > 0 &&
+    Math.max(0, Number(row?.gamesWithData ?? 0)) > 0 &&
+    challengerFinite(row?.summary?.avg) !== null;
+  const usableBullpen = (row: any) =>
+    row && Math.max(0, Number(row?.gamesChecked ?? 0)) > 0;
+
+  const starterHome = mlbOfficialEligible && usableStarter(officialStarterHome) ? officialStarterHome : naverStarterHome;
+  const starterAway = mlbOfficialEligible && usableStarter(officialStarterAway) ? officialStarterAway : naverStarterAway;
+  const battingHome = mlbOfficialEligible && usableBatting(officialBattingHome) ? officialBattingHome : naverBattingHome;
+  const battingAway = mlbOfficialEligible && usableBatting(officialBattingAway) ? officialBattingAway : naverBattingAway;
+  const bullpenHome = mlbOfficialEligible && usableBullpen(officialBullpenHome) ? officialBullpenHome : naverBullpenHome;
+  const bullpenAway = mlbOfficialEligible && usableBullpen(officialBullpenAway) ? officialBullpenAway : naverBullpenAway;
+
+  const starterHomeSource = starterHome === officialStarterHome ? String(officialStarterHome?.source ?? "MLB_STATSAPI") : (starterHome ? "NAVER_SCHEDULE_RECORD" : null);
+  const starterAwaySource = starterAway === officialStarterAway ? String(officialStarterAway?.source ?? "MLB_STATSAPI") : (starterAway ? "NAVER_SCHEDULE_RECORD" : null);
+  const battingHomeSource = battingHome === officialBattingHome ? "MLB_STATSAPI_BOXSCORE" : (battingHome ? "NAVER_SCHEDULE_RECORD" : null);
+  const battingAwaySource = battingAway === officialBattingAway ? "MLB_STATSAPI_BOXSCORE" : (battingAway ? "NAVER_SCHEDULE_RECORD" : null);
+  const bullpenHomeSource = bullpenHome === officialBullpenHome ? "MLB_STATSAPI_BOXSCORE" : (bullpenHome ? "NAVER_SCHEDULE_RECORD" : null);
+  const bullpenAwaySource = bullpenAway === officialBullpenAway ? "MLB_STATSAPI_BOXSCORE" : (bullpenAway ? "NAVER_SCHEDULE_RECORD" : null);
+
+  const mlbOfficialFeatureCount = leagueGroup === "MLB"
+    ? [starterHomeSource, starterAwaySource, battingHomeSource, battingAwaySource, bullpenHomeSource, bullpenAwaySource]
+        .filter((value) => String(value ?? "").startsWith("MLB_")).length
+    : 0;
+  const challengerSourcePolicy = leagueGroup !== "MLB"
+    ? "NAVER_WORKLOAD"
+    : mlbOfficialFeatureCount === 6
+      ? "MLB_STATSAPI_BCD"
+      : mlbOfficialFeatureCount > 0
+        ? "MLB_STATSAPI_PARTIAL_NAVER_FALLBACK"
+        : "NAVER_WORKLOAD_FALLBACK";
 
   const starterNeutralEra = leagueGroup === "NPB" ? 3.5 : leagueGroup === "MLB" ? 4.3 : 4.5;
   const starterDeltaAgainst = (row: any) => {
@@ -8097,15 +8162,15 @@ function buildBaseballChallengerSnapshot(
 
   return {
     stage: "READY",
-    version: "V13.8.74",
+    version: mlbOfficialEligible ? "V13.8.78" : "V13.8.74",
     capturedAt,
     leagueGroup,
     variants: [
       { key: "CONTROL", label: "CONTROL 현행 λ", ...control, applied: true, note: "V13.8 현행 예상득점" },
       { key: "VENUE", label: "A · Venue Shadow", ...venue, applied: venueApplied, note: "robust 장소가중만 병렬 적용" },
-      { key: "STARTER_RECENT", label: "B · 선발 최근등판", ...starter, applied: starterApplied, note: "최근 선발 ERA · 최대 ±0.45점" },
-      { key: "BATTING_RECENT", label: "C · 타선 최근5경기", ...batting, applied: battingApplied, note: "라인업 최근 AVG · 리그별 중립값 대비" },
-      { key: "BULLPEN", label: "D · 불펜 workload", ...bullpen, applied: bullpenApplied, note: "24/48/72h 과사용만 페널티" },
+      { key: "STARTER_RECENT", label: "B · 선발 최근등판", ...starter, applied: starterApplied, note: leagueGroup === "MLB" && mlbOfficialEligible ? "MLB 개인 gameLog 최근 선발 ERA · 최대 ±0.45점" : "최근 선발 ERA · 최대 ±0.45점" },
+      { key: "BATTING_RECENT", label: "C · 타선 최근5경기", ...batting, applied: battingApplied, note: leagueGroup === "MLB" && mlbOfficialEligible ? "MLB 공식 boxscore · 현재 라인업 최근 AVG" : "라인업 최근 AVG · 리그별 중립값 대비" },
+      { key: "BULLPEN", label: "D · 불펜 workload", ...bullpen, applied: bullpenApplied, note: leagueGroup === "MLB" && mlbOfficialEligible ? "MLB 공식 boxscore · 24/48/72h 과사용만 페널티" : "24/48/72h 과사용만 페널티" },
       { key: "COMBO", label: "E · COMBO", ...combo, applied: venueApplied || starterApplied || battingApplied || bullpenApplied, note: "A+B+C+D · MODEL OFF" },
     ],
     featureAudit: {
@@ -8127,9 +8192,13 @@ function buildBaseballChallengerSnapshot(
       battingDeltaAway: Number(battingDeltaAway.toFixed(3)),
       bullpenDeltaHome: Number(bullpenDeltaHome.toFixed(3)),
       bullpenDeltaAway: Number(bullpenDeltaAway.toFixed(3)),
-      workloadSource: String(workload?.source ?? "").trim() || null,
-      scheduleStatus: Number.isFinite(Number(workload?.scheduleStatus)) ? Number(workload.scheduleStatus) : null,
-      scheduleGames: Math.max(0, Number(workload?.coverage?.scheduleGames ?? 0)),
+      workloadSource: leagueGroup === "MLB" ? challengerSourcePolicy : (String(naverWorkload?.source ?? "").trim() || null),
+      scheduleStatus: leagueGroup === "MLB" && mlbOfficialEligible
+        ? (Number.isFinite(Number(mlbOfficial?.schedule?.status)) ? Number(mlbOfficial.schedule.status) : null)
+        : (Number.isFinite(Number(naverWorkload?.scheduleStatus)) ? Number(naverWorkload.scheduleStatus) : null),
+      scheduleGames: leagueGroup === "MLB" && mlbOfficialEligible
+        ? Math.max(0, Number(mlbOfficial?.coverage?.scheduleGames ?? 0))
+        : Math.max(0, Number(naverWorkload?.coverage?.scheduleGames ?? 0)),
       battingHomeLineupPlayers: Math.max(0, Number(battingHome?.lineupPlayers ?? 0)),
       battingAwayLineupPlayers: Math.max(0, Number(battingAway?.lineupPlayers ?? 0)),
       battingHomeGamesChecked: Math.max(0, Number(battingHome?.gamesChecked ?? 0)),
@@ -8144,6 +8213,16 @@ function buildBaseballChallengerSnapshot(
       bullpenAway72Ip: baseballInningsDecimal(bullpenAway?.windows?.h72?.innings),
       bullpenHomeMultiGamePitchers: Math.max(0, Number(bullpenHome?.multiGamePitchers ?? 0)),
       bullpenAwayMultiGamePitchers: Math.max(0, Number(bullpenAway?.multiGamePitchers ?? 0)),
+      challengerSourcePolicy,
+      starterHomeSource,
+      starterAwaySource,
+      battingHomeSource,
+      battingAwaySource,
+      bullpenHomeSource,
+      bullpenAwaySource,
+      mlbOfficialGamePk: Number.isFinite(Number(mlbOfficial?.gamePk)) ? Number(mlbOfficial.gamePk) : null,
+      mlbOfficialCurrentLineupPlayers: Math.max(0, Number(mlbOfficial?.coverage?.currentLineupPlayers ?? 0)),
+      mlbOfficialStarterGameLogSides: Math.max(0, Number(mlbOfficial?.coverage?.starterGameLogSides ?? 0)),
     },
   };
 }
@@ -15207,6 +15286,16 @@ export default function Home() {
         workloadSource: String(audit?.workloadSource ?? "").trim() || null,
         scheduleStatus: Number.isFinite(Number(audit?.scheduleStatus)) ? Number(audit?.scheduleStatus) : null,
         scheduleGames: Math.max(0, Number(audit?.scheduleGames ?? 0)),
+        challengerSourcePolicy: String(audit?.challengerSourcePolicy ?? audit?.workloadSource ?? "").trim() || null,
+        starterHomeSource: String(audit?.starterHomeSource ?? "").trim() || null,
+        starterAwaySource: String(audit?.starterAwaySource ?? "").trim() || null,
+        battingHomeSource: String(audit?.battingHomeSource ?? "").trim() || null,
+        battingAwaySource: String(audit?.battingAwaySource ?? "").trim() || null,
+        bullpenHomeSource: String(audit?.bullpenHomeSource ?? "").trim() || null,
+        bullpenAwaySource: String(audit?.bullpenAwaySource ?? "").trim() || null,
+        mlbOfficialGamePk: Number.isFinite(Number(audit?.mlbOfficialGamePk)) ? Number(audit?.mlbOfficialGamePk) : null,
+        mlbOfficialCurrentLineupPlayers: Math.max(0, Number(audit?.mlbOfficialCurrentLineupPlayers ?? 0)),
+        mlbOfficialStarterGameLogSides: Math.max(0, Number(audit?.mlbOfficialStarterGameLogSides ?? 0)),
         battingReason,
         bullpenReason,
       };
@@ -15805,10 +15894,14 @@ export default function Home() {
         !existingRecord.footballLineup &&
         footballLineupSnapshot
       );
+      const existingLeagueGroup = baseballChallengerLeagueGroup(
+        existingRecord?.league ?? matched?.naverTodayLineup?.league ?? matched?.selectedFixture?.league ?? matched?.fixture?.league ?? (selectedBetman as any)?.league
+      );
       const canAttachBaseballChallenger = Boolean(
         existingRecord &&
         existingRecord.verificationStatus === "PENDING" &&
         existingRecord.capturedAt >= BASEBALL_CHALLENGER_START_MS &&
+        (existingLeagueGroup !== "MLB" || existingRecord.capturedAt >= BASEBALL_MLB_OFFICIAL_BCD_START_MS) &&
         !existingRecord.baseballChallenger &&
         baseballChallengerSnapshot
       );
@@ -20720,7 +20813,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.77.2.2 · MLB STARTER GAMELOG BUILD FIX</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.78 · MLB OFFICIAL B/C/D CHALLENGER · MODEL OFF</div>
         </div>
         <div className="bar">
           <button
@@ -22236,6 +22329,13 @@ export default function Home() {
               <div className="card">불펜 데이터<b>{baseballChallengerSummary.coverageAudit.bullpenFull}/{baseballChallengerSummary.coverageAudit.total}</b><div className="small">한쪽 이상 {baseballChallengerSummary.coverageAudit.bullpenAny} · 과사용 감지 {baseballChallengerSummary.coverageAudit.bullpenApplied}</div></div>
             </div>
 
+            <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.8.78 MLB OFFICIAL B/C/D INPUT · MODEL OFF</div>
+              <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
+                2026-09-16 10:55 KST 이후 새 READY MLB snapshot부터 B는 MLB_PERSON_GAMELOG, C/D는 MLB StatsAPI 공식 boxscore를 우선 사용합니다. 항목별 공식 데이터가 없을 때만 Naver workload로 fallback합니다. CONTROL·실전 추천·Gate·기존 λ는 변경하지 않고 Challenger shadow만 계산합니다. 기존 잠금 snapshot은 다시 쓰지 않습니다.
+              </div>
+            </div>
+
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #fde68a", background: "#fffbeb", borderRadius: 8 }}>
               <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>
                 V13.8.75 BASEBALL DATA COVERAGE AUDIT · MODEL OFF · 8.74 OOS 연속 유지
@@ -22273,6 +22373,7 @@ export default function Home() {
                         <td style={{ border: "1px solid #fde68a", padding: "5px 6px", whiteSpace: "normal", lineHeight: 1.45 }}>
                           타선: {row.battingReason}<br />불펜: {row.bullpenReason}
                           {(row.workloadSource || row.scheduleStatus !== null || row.scheduleGames > 0) ? <div className="small">source {row.workloadSource ?? '-'} · schedule HTTP {row.scheduleStatus ?? '-'} · games {row.scheduleGames}</div> : <div className="small">8.74 legacy snapshot · 상세 source 필드 없음</div>}
+                          {row.league === "MLB" && row.challengerSourcePolicy ? <div className="small">B {row.starterHomeSource ?? '-'}/{row.starterAwaySource ?? '-'} · C {row.battingHomeSource ?? '-'}/{row.battingAwaySource ?? '-'} · D {row.bullpenHomeSource ?? '-'}/{row.bullpenAwaySource ?? '-'}{row.mlbOfficialGamePk ? ` · gamePk ${row.mlbOfficialGamePk}` : ''}</div> : null}
                         </td>
                       </tr>
                     )) : <tr><td colSpan={8} style={{ border: "1px solid #fde68a", padding: 6 }}>8.74 이후 READY PRE 표본 대기</td></tr>}
@@ -23932,11 +24033,11 @@ export default function Home() {
                               <b>{matched?.naverTodayLineup?.mlbOfficial?.ok ? "✓ 수신" : "대기/미수신"}</b>
                               <div className="small">
                                 gamePk {matched?.naverTodayLineup?.mlbOfficial?.gamePk ?? "-"} · schedule {Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.scheduleGames ?? 0)}G · box {Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.boxScores ?? 0)}
-                                <br />AUDIT ONLY · Challenger/추천/λ 미반영 · route league {String(matched?.naverTodayLineup?.league ?? "-")}
+                                <br />Challenger B/C/D MODEL OFF 입력 · CONTROL/추천/Gate/실전 λ 미반영 · route league {String(matched?.naverTodayLineup?.league ?? "-")}
                               </div>
                             </div>
                             <div className="card">
-                              V13.8.77.2.1 MLB StatsAPI 선발 / 최근등판
+                              V13.8.78 MLB StatsAPI 선발 / 최근등판
                               <b>{Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.starterRecentStarts ?? 0) > 0 ? "✓ 수신" : "부분/대기"}</b>
                               <div className="small">
                                 예고 {matched?.naverTodayLineup?.mlbOfficial?.probablePitcher?.home?.name ?? "-"} / {matched?.naverTodayLineup?.mlbOfficial?.probablePitcher?.away?.name ?? "-"}
@@ -24023,19 +24124,19 @@ export default function Home() {
                           <div className="small">홈 {Number(matched?.wisetotoLive?.coverage?.recentDetailGamesHome ?? 0)}/5 · 원정 {Number(matched?.wisetotoLive?.coverage?.recentDetailGamesAway ?? 0)}/5 · 실패 경기 임의 보간 없음</div>
                         </div>
                         <div className="card">
-                          선발 최근 투구
-                          <b>{Number(matched?.naverTodayLineup?.pitcherWorkload?.coverage?.starterRecentStarts ?? 0) > 0 ? "✓ Naver 개인 최근등판" : matched?.naverTodayLineup?.league === "MLB" && (matched?.naverTodayLineup?.homeStarter?.latestStart || matched?.naverTodayLineup?.awayStarter?.latestStart) ? "✓ MLB 직전등판" : Number(matched?.wisetotoLive?.coverage?.currentStarterRecentStarts ?? 0) > 0 ? "✓ 와이즈 최근등판" : "미연결"}</b>
-                          <div className="small">Naver 홈 {Number(matched?.naverTodayLineup?.pitcherWorkload?.starterRecent?.home?.startsFound ?? 0)}회 / 원정 {Number(matched?.naverTodayLineup?.pitcherWorkload?.starterRecent?.away?.startsFound ?? 0)}회 · 최근 40일 schedule→record 검증 · 모델 반영 OFF</div>
+                          선발 최근 투구 · Challenger B
+                          <b>{matched?.naverTodayLineup?.league === "MLB" && Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.starterGameLogSides ?? 0) > 0 ? "✓ MLB_PERSON_GAMELOG" : Number(matched?.naverTodayLineup?.pitcherWorkload?.coverage?.starterRecentStarts ?? 0) > 0 ? "✓ Naver 개인 최근등판" : "미연결"}</b>
+                          <div className="small">{matched?.naverTodayLineup?.league === "MLB" && matched?.naverTodayLineup?.mlbOfficial?.ok ? <>MLB 홈 {Number(matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.home?.startsFound ?? 0)}회 / 원정 {Number(matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.away?.startsFound ?? 0)}회 · 새 READY부터 Challenger B 입력 · 실전 모델 OFF</> : <>Naver 홈 {Number(matched?.naverTodayLineup?.pitcherWorkload?.starterRecent?.home?.startsFound ?? 0)}회 / 원정 {Number(matched?.naverTodayLineup?.pitcherWorkload?.starterRecent?.away?.startsFound ?? 0)}회 · 최근 40일 schedule→record · Challenger B MODEL OFF</>}</div>
                         </div>
                         <div className="card">
-                          타자 최근 타격감
-                          <b>{Number(matched?.naverTodayLineup?.pitcherWorkload?.coverage?.recentBattingPlayers ?? 0) > 0 ? "✓ Naver 라인업 최근5경기" : Number(matched?.wisetotoLive?.coverage?.recentDetailBatterRows ?? 0) > 0 ? "✓ 와이즈 최근 5경기" : Number(matched?.wisetotoLive?.coverage?.latestBatterRows ?? 0) > 0 ? "✓ 직전경기" : "미연결"}</b>
-                          <div className="small">Naver 매칭 홈 {Number(matched?.naverTodayLineup?.pitcherWorkload?.recentBatting?.home?.playersMatched ?? 0)}/9 · 원정 {Number(matched?.naverTodayLineup?.pitcherWorkload?.recentBatting?.away?.playersMatched ?? 0)}/9 · 최근5경기 AB/H/R/RBI/HR/BB/K 집계 · 모델 반영 OFF</div>
+                          타자 최근 타격감 · Challenger C
+                          <b>{matched?.naverTodayLineup?.league === "MLB" && Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.recentBattingPlayers ?? 0) > 0 ? "✓ MLB StatsAPI boxscore" : Number(matched?.naverTodayLineup?.pitcherWorkload?.coverage?.recentBattingPlayers ?? 0) > 0 ? "✓ Naver 라인업 최근5경기" : "미연결"}</b>
+                          <div className="small">{matched?.naverTodayLineup?.league === "MLB" && matched?.naverTodayLineup?.mlbOfficial?.ok ? <>MLB 매칭 홈 {Number(matched?.naverTodayLineup?.mlbOfficial?.recentBatting?.home?.playersMatched ?? 0)}/9 · 원정 {Number(matched?.naverTodayLineup?.mlbOfficial?.recentBatting?.away?.playersMatched ?? 0)}/9 · 최근5경기 · 새 READY부터 Challenger C 입력 · 실전 모델 OFF</> : <>Naver 매칭 홈 {Number(matched?.naverTodayLineup?.pitcherWorkload?.recentBatting?.home?.playersMatched ?? 0)}/9 · 원정 {Number(matched?.naverTodayLineup?.pitcherWorkload?.recentBatting?.away?.playersMatched ?? 0)}/9 · 최근5경기 · Challenger C MODEL OFF</>}</div>
                         </div>
                         <div className="card">
-                          불펜 소모도
-                          <b>{Number(matched?.naverTodayLineup?.pitcherWorkload?.coverage?.bullpenGames ?? 0) > 0 ? "✓ Naver 최근3경기" : "미연결"}</b>
-                          <div className="small">24h 홈 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h24?.innings ?? "0.0"}IP / 원정 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h24?.innings ?? "0.0"}IP · 48h 홈 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h48?.innings ?? "0.0"}IP / 원정 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h48?.innings ?? "0.0"}IP · 72h 홈 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h72?.innings ?? "0.0"}IP / 원정 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h72?.innings ?? "0.0"}IP · 2경기+ 사용 홈 {Number(matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.multiGamePitchers ?? 0)}명 / 원정 {Number(matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.multiGamePitchers ?? 0)}명 · 모델 반영 OFF</div>
+                          불펜 소모도 · Challenger D
+                          <b>{matched?.naverTodayLineup?.league === "MLB" && Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.bullpenGames ?? 0) > 0 ? "✓ MLB StatsAPI boxscore" : Number(matched?.naverTodayLineup?.pitcherWorkload?.coverage?.bullpenGames ?? 0) > 0 ? "✓ Naver 최근3경기" : "미연결"}</b>
+                          <div className="small">{matched?.naverTodayLineup?.league === "MLB" && matched?.naverTodayLineup?.mlbOfficial?.ok ? <>24/48/72h 홈 {matched?.naverTodayLineup?.mlbOfficial?.bullpen?.home?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.home?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.home?.windows?.h72?.innings ?? "0.0"}IP · 원정 {matched?.naverTodayLineup?.mlbOfficial?.bullpen?.away?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.away?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.away?.windows?.h72?.innings ?? "0.0"}IP · 새 READY부터 Challenger D 입력 · 실전 모델 OFF</> : <>24/48/72h 홈 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h72?.innings ?? "0.0"}IP · 원정 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h72?.innings ?? "0.0"}IP · Challenger D MODEL OFF</>}</div>
                         </div>
                         <div className="card">
                           부상/결장
