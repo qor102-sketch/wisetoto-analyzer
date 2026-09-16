@@ -23916,15 +23916,50 @@ export default function Home() {
                           </div>
                         </div>
                         {matched?.naverTodayLineup?.league === "MLB" && (
-                          <div className="card">
-                            MLB PREVIEW 데이터
-                            <b>{matched?.naverTodayLineup?.mlbPreview?.ok ? "✓ 수신" : "대기"}</b>
-                            <div className="small">
-                              시즌타자 {Number(matched?.naverTodayLineup?.mlbPreview?.homeSeasonBatters ?? 0)}/{Number(matched?.naverTodayLineup?.mlbPreview?.awaySeasonBatters ?? 0)}행
-                              {matched?.naverTodayLineup?.coverage?.starters ? ` · 선발 ${matched.naverTodayLineup.coverage.starters}/2` : ""}
-                              {matched?.naverTodayLineup?.previewEndpoint ? " · preview" : ""}
+                          <>
+                            <div className="card">
+                              MLB PREVIEW 데이터 · Naver
+                              <b>{matched?.naverTodayLineup?.mlbPreview?.ok ? "✓ 수신" : "대기"}</b>
+                              <div className="small">
+                                시즌타자 {Number(matched?.naverTodayLineup?.mlbPreview?.homeSeasonBatters ?? 0)}/{Number(matched?.naverTodayLineup?.mlbPreview?.awaySeasonBatters ?? 0)}행
+                                {matched?.naverTodayLineup?.coverage?.starters ? ` · 선발 ${matched.naverTodayLineup.coverage.starters}/2` : ""}
+                                {matched?.naverTodayLineup?.previewEndpoint ? " · preview" : ""}
+                              </div>
                             </div>
-                          </div>
+                            <div className="card">
+                              V13.8.77 MLB StatsAPI 공개 피드
+                              <b>{matched?.naverTodayLineup?.mlbOfficial?.ok ? "✓ 수신" : "대기/미수신"}</b>
+                              <div className="small">
+                                gamePk {matched?.naverTodayLineup?.mlbOfficial?.gamePk ?? "-"} · schedule {Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.scheduleGames ?? 0)}G · box {Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.boxScores ?? 0)}
+                                <br />AUDIT ONLY · Challenger/추천/λ 미반영
+                              </div>
+                            </div>
+                            <div className="card">
+                              MLB StatsAPI 선발 / 최근등판
+                              <b>{Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.starterRecentStarts ?? 0) > 0 ? "✓ 수신" : "부분/대기"}</b>
+                              <div className="small">
+                                예고 {matched?.naverTodayLineup?.mlbOfficial?.probablePitcher?.home?.name ?? "-"} / {matched?.naverTodayLineup?.mlbOfficial?.probablePitcher?.away?.name ?? "-"}
+                                <br />최근등판 홈 {Number(matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.home?.startsFound ?? 0)}회 · 원정 {Number(matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.away?.startsFound ?? 0)}회
+                              </div>
+                            </div>
+                            <div className="card">
+                              MLB StatsAPI 최근 타격
+                              <b>{Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.recentBattingGames ?? 0) > 0 ? "✓ box score" : "미수신"}</b>
+                              <div className="small">
+                                현재 공식 라인업 {Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.currentLineupPlayers ?? 0)}/18
+                                <br />최근 box 홈 {Number(matched?.naverTodayLineup?.mlbOfficial?.recentBatting?.home?.gamesWithData ?? 0)}G · 매칭 {Number(matched?.naverTodayLineup?.mlbOfficial?.recentBatting?.home?.playersMatched ?? 0)}/9 · AVG {matched?.naverTodayLineup?.mlbOfficial?.recentBatting?.home?.summary?.avg ?? matched?.naverTodayLineup?.mlbOfficial?.recentBatting?.home?.summary?.teamAvg ?? "-"}
+                                {" / "}원정 {Number(matched?.naverTodayLineup?.mlbOfficial?.recentBatting?.away?.gamesWithData ?? 0)}G · 매칭 {Number(matched?.naverTodayLineup?.mlbOfficial?.recentBatting?.away?.playersMatched ?? 0)}/9 · AVG {matched?.naverTodayLineup?.mlbOfficial?.recentBatting?.away?.summary?.avg ?? matched?.naverTodayLineup?.mlbOfficial?.recentBatting?.away?.summary?.teamAvg ?? "-"}
+                              </div>
+                            </div>
+                            <div className="card">
+                              MLB StatsAPI 불펜 72h
+                              <b>{Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.bullpenGames ?? 0) > 0 ? "✓ 수신" : "미수신"}</b>
+                              <div className="small">
+                                홈 24/48/72h {matched?.naverTodayLineup?.mlbOfficial?.bullpen?.home?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.home?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.home?.windows?.h72?.innings ?? "0.0"}IP
+                                <br />원정 {matched?.naverTodayLineup?.mlbOfficial?.bullpen?.away?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.away?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.away?.windows?.h72?.innings ?? "0.0"}IP
+                              </div>
+                            </div>
+                          </>
                         )}
                         {matched?.naverTodayLineup?.league === "NPB" && (
                           <>
