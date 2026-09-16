@@ -20720,7 +20720,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.77.2.1 · MLB STARTER GAMELOG BUILD FIX</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.77.2.2 · MLB STARTER GAMELOG BUILD FIX</div>
         </div>
         <div className="bar">
           <button
