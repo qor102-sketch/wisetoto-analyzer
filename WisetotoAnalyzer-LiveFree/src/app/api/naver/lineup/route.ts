@@ -2705,12 +2705,18 @@ async function mlbStarterRecentFromGameLog(args: {
     }];
   });
 
-  const deduped = Array.from(new Map(dated.map((row: AnyObj, index: number) => [String(row?.gamePk ?? `${row?.gameDate ?? "date"}-${index}`), row])).values())
-    .sort((a: AnyObj, b: AnyObj) => {
-      const dateCmp = String(b?.gameDate ?? "").localeCompare(String(a?.gameDate ?? ""));
-      if (dateCmp !== 0) return dateCmp;
-      return Number(b?.gamePk ?? 0) - Number(a?.gamePk ?? 0);
-    });
+  const deduped: AnyObj[] = Array.from(
+    new Map<string, AnyObj>(
+      dated.map((row: AnyObj, index: number): [string, AnyObj] => [
+        String(row?.gamePk ?? `${row?.gameDate ?? "date"}-${index}`),
+        row,
+      ]),
+    ).values(),
+  ).sort((a, b) => {
+    const dateCmp = String(b?.gameDate ?? "").localeCompare(String(a?.gameDate ?? ""));
+    if (dateCmp !== 0) return dateCmp;
+    return Number(b?.gamePk ?? 0) - Number(a?.gamePk ?? 0);
+  });
   const found = deduped.slice(0, 5);
 
   return {
