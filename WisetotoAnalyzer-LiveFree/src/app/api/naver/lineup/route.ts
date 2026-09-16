@@ -2332,6 +2332,7 @@ async function collectNpbOfficialAudit(args: {
 
 
 // DEPLOY_MARKER_V13_8_77_MLB_STATSAPI_AUDIT_ONLY_20260916
+// DEPLOY_MARKER_V13_8_78_MLB_OFFICIAL_BCD_CHALLENGER_MODEL_OFF_20260916
 const MLB_STATS_API = "https://statsapi.mlb.com/api/v1";
 const mlbJsonCache = new Map<string, CacheEntry>();
 const mlbJsonInflight = new Map<string, Promise<any>>();
@@ -2947,7 +2948,9 @@ async function collectMlbStatsApiAudit(args: {
     ok: Boolean(currentSchedule.ok && (homeRows.length > 0 || awayRows.length > 0)),
     source: "MLB_STATSAPI",
     modelApplied: false,
-    auditOnly: true,
+    auditOnly: false,
+    challengerModelOffEligible: true,
+    challengerInput: { starter: "MLB_PERSON_GAMELOG", batting: "MLB_STATSAPI_BOXSCORE", bullpen: "MLB_STATSAPI_BOXSCORE" },
     gamePk: currentGamePk,
     gameDate: currentGame?.gameDate ?? null,
     teams: {
@@ -2991,7 +2994,7 @@ async function collectMlbStatsApiAudit(args: {
       recentBattingPlayers: Number(battingHome.playersMatched) + Number(battingAway.playersMatched),
       currentLineupPlayers,
     },
-    note: "AUDIT ONLY · MLB StatsAPI 공개 피드 · V13.8.77.2 선발 최근등판은 선수별 pitching gameLog 우선 · Challenger/추천/λ 미반영",
+    note: "V13.8.78 · MLB StatsAPI 공개 피드 · B는 선수별 pitching gameLog, C/D는 공식 boxscore를 Challenger MODEL OFF 입력으로 사용 · CONTROL/추천/Gate/실전 λ 미반영",
   };
 }
 
