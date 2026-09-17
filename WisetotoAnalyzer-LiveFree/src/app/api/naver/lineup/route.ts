@@ -1745,6 +1745,7 @@ async function collectNaverPitcherWorkload(args: {
 // DEPLOY_MARKER_V13_8_76_NPB_OFFICIAL_DATA_ADAPTER_AUDIT_ONLY_20260915
 // DEPLOY_MARKER_V13_8_79_NPB_OFFICIAL_STARTER_BULLPEN_AUDIT_FIX_20260916
 // DEPLOY_MARKER_V13_8_80_NPB_OFFICIAL_IDENTITY_PITCHING_ROWS_FIX_20260916
+// DEPLOY_MARKER_V13_8_81_NPB_STARTER_DATE_SECTION_FIX_20260917
 // DEPLOY_MARKER_V13_8_77_MLB_OFFICIAL_STATSAPI_ADAPTER_AUDIT_ONLY_20260916
 type NpbOfficialTeamMeta = {
   code: string;
@@ -2206,8 +2207,57 @@ function npbStarterForTeamBounded(html: string, team: NpbOfficialTeamMeta, ancho
   return null;
 }
 
+function npbRegexEscape(value: string) {
+  return String(value ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function npbStarterDateSection(html: string, dateKey: string) {
+  const md = npbRequestedMonthDay(dateKey);
+  if (!html || !md) return null;
+  const exactLabel = `${md.month}月${md.day}日の予告先発投手`;
+  let start = html.indexOf(exactLabel);
+  if (start < 0) {
+    const loose = new RegExp(`${md.month}\\s*月\\s*${md.day}\\s*日[\\s\\S]{0,120}?予告先発投手`);
+    const match = loose.exec(html);
+    start = match?.index ?? -1;
+  }
+  if (start < 0) return null;
+
+  // The announcement page can contain team names elsewhere (navigation/standings).
+  // Restrict extraction to the requested date heading and the following game cards.
+  const tail = html.slice(start + exactLabel.length);
+  const nextHeading = /<(?:h2|h3|h4)[^>]*>[\s\S]{0,240}?\d{1,2}\s*月\s*\d{1,2}\s*日(?:の)?予告先発投手[\s\S]{0,80}?<\/(?:h2|h3|h4)>/i.exec(tail);
+  const end = nextHeading ? start + exactLabel.length + nextHeading.index : Math.min(html.length, start + 24000);
+  return html.slice(start, end);
+}
+
+function npbStarterForTeamInDateSection(sectionHtml: string, team: NpbOfficialTeamMeta) {
+  const names = [team.fullJa, team.shortJa, ...team.aliases]
+    .filter((name) => /[一-龯々ぁ-んァ-ヶー]/.test(name))
+    .sort((a, b) => b.length - a.length);
+  for (const teamName of names) {
+    const teamPos = sectionHtml.indexOf(teamName);
+    if (teamPos < 0) continue;
+    const window = sectionHtml.slice(teamPos, teamPos + 2600);
+    const player = /<a\b[^>]*href\s*=\s*["'][^"']*\/bis\/players\/[^"']+["'][^>]*>([\s\S]*?)<\/a>/i.exec(window);
+    if (!player) continue;
+    const candidate = decodeHtmlEntityText(player[1]).replace(/\s+/g, " ").trim();
+    if (candidate) return candidate;
+  }
+  return null;
+}
+
 function npbExtractStarterPairFromAnnouncement(html: string, dateKey: string, homeTeam: NpbOfficialTeamMeta, awayTeam: NpbOfficialTeamMeta) {
   if (!html || !npbPageMentionsRequestedStarterDate(html, dateKey)) return null;
+
+  const dateSection = npbStarterDateSection(html, dateKey);
+  if (dateSection) {
+    const home = npbStarterForTeamInDateSection(dateSection, homeTeam);
+    const away = npbStarterForTeamInDateSection(dateSection, awayTeam);
+    if (home && away) return { home, away, source: "NPB_ANNOUNCEMENT_DATE_SECTION" };
+  }
+
+  // Legacy bounded fallback kept for unusual NPB markup variants.
   const anchors = npbPlayerAnchors(html);
   const teamOccurrences = npbTeamOccurrences(html);
   const home = npbStarterForTeamBounded(html, homeTeam, anchors, teamOccurrences);
@@ -2452,16 +2502,19 @@ async function collectNpbOfficialAudit(args: {
     .filter((row: AnyObj) => Number.isFinite(Number(row.order)) && Number(row.order) >= 1 && Number(row.order) <= 9)
     .map((row: AnyObj) => row.name);
 
-  const scheduleStarterPair = scheduleResults[0]?.ok
-    ? npbExtractStarterPairFromScheduleRow(scheduleResults[0].text, currentGame)
-    : null;
-  const gamesIndexUrl = `https://npb.jp/games/${year}/`;
-  const gamesIndex = scheduleStarterPair ? { ok: false, status: 0, text: "" } : await fetchNpbHtmlCached(gamesIndexUrl, false);
-  const gamesIndexStarterPair = gamesIndex.ok ? npbExtractStarterPairFromGamesIndex(gamesIndex.text, args.date, homeTeam, awayTeam) : null;
   const announcementUrl = "https://npb.jp/announcement/starter/";
-  const announcement = (scheduleStarterPair || gamesIndexStarterPair) ? { ok: false, status: 0, text: "" } : await fetchNpbHtmlCached(announcementUrl, false);
+  const announcement = await fetchNpbHtmlCached(announcementUrl, false);
   const announcementStarterPair = announcement.ok ? npbExtractStarterPairFromAnnouncement(announcement.text, args.date, homeTeam, awayTeam) : null;
-  const officialStarterPair = scheduleStarterPair ?? gamesIndexStarterPair ?? announcementStarterPair;
+
+  const gamesIndexUrl = `https://npb.jp/games/${year}/`;
+  const gamesIndex = announcementStarterPair ? { ok: false, status: 0, text: "" } : await fetchNpbHtmlCached(gamesIndexUrl, false);
+  const gamesIndexStarterPair = gamesIndex.ok ? npbExtractStarterPairFromGamesIndex(gamesIndex.text, args.date, homeTeam, awayTeam) : null;
+
+  const scheduleStarterPair = (announcementStarterPair || gamesIndexStarterPair) ? null : (scheduleResults[0]?.ok
+    ? npbExtractStarterPairFromScheduleRow(scheduleResults[0].text, currentGame)
+    : null);
+
+  const officialStarterPair = announcementStarterPair ?? gamesIndexStarterPair ?? scheduleStarterPair;
   const announcedHomeStarter = officialStarterPair?.home ?? null;
   const announcedAwayStarter = officialStarterPair?.away ?? null;
   const starterIdentitySource = officialStarterPair?.source ?? "UNAVAILABLE";
@@ -2565,8 +2618,8 @@ async function collectNpbOfficialAudit(args: {
       currentBoxUrl,
     },
     starterAnnouncement: {
-      url: scheduleStarterPair ? scheduleUrls[0] : (gamesIndexStarterPair ? gamesIndexUrl : announcementUrl),
-      status: scheduleStarterPair ? scheduleResults[0]?.status ?? 0 : (gamesIndexStarterPair ? gamesIndex.status : announcement.status),
+      url: announcementStarterPair ? announcementUrl : (gamesIndexStarterPair ? gamesIndexUrl : (scheduleStarterPair ? scheduleUrls[0] : announcementUrl)),
+      status: announcementStarterPair ? announcement.status : (gamesIndexStarterPair ? gamesIndex.status : (scheduleStarterPair ? scheduleResults[0]?.status ?? 0 : announcement.status)),
       source: starterIdentitySource,
       home: announcedHomeStarter,
       away: announcedAwayStarter,
