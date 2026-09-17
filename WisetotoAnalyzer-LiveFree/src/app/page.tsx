@@ -20813,7 +20813,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.80 · NPB OFFICIAL IDENTITY/PITCHING ROW FIX · MLB B/C/D MODEL OFF</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.81 · NPB STARTER DATE-SECTION FIX · MLB B/C/D MODEL OFF</div>
         </div>
         <div className="bar">
           <button
@@ -24068,7 +24068,7 @@ export default function Home() {
                         {matched?.naverTodayLineup?.league === "NPB" && (
                           <>
                             <div className="card">
-                              V13.8.80 NPB 공식 기록 · IDENTITY/PITCHING ROW FIX
+                              V13.8.81 NPB 공식 기록 · STARTER DATE-SECTION FIX
                               <b>{matched?.naverTodayLineup?.npbOfficial?.ok ? "✓ NPB.jp 수신" : "대기/미수신"}</b>
                               <div className="small">
                                 schedule link {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.scheduleLinks ?? 0)} · box {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.boxScores ?? 0)}
@@ -24077,7 +24077,7 @@ export default function Home() {
                               </div>
                             </div>
                             <div className="card">
-                              V13.8.80 NPB 공식 선발 identity / 최근등판
+                              V13.8.81 NPB 공식 선발 identity / 최근등판
                               <b>{Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.starterRecentStarts ?? 0) > 0 ? "✓ 수신" : "부분/대기"}</b>
                               <div className="small">
                                 공식 {matched?.naverTodayLineup?.npbOfficial?.starterAnnouncement?.home ?? "-"} / {matched?.naverTodayLineup?.npbOfficial?.starterAnnouncement?.away ?? "-"}
@@ -24098,7 +24098,7 @@ export default function Home() {
                               </div>
                             </div>
                             <div className="card">
-                              V13.8.80 NPB 공식 불펜 72h
+                              V13.8.81 NPB 공식 불펜 72h
                               <b>{matched?.naverTodayLineup?.npbOfficial?.bullpen?.home?.parserOk === false || matched?.naverTodayLineup?.npbOfficial?.bullpen?.away?.parserOk === false ? "⚠ parser 확인" : Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.bullpenGames ?? 0) > 0 ? "✓ 수신" : "미수신"}</b>
                               <div className="small">
                                 홈 24/48/72h {matched?.naverTodayLineup?.npbOfficial?.bullpen?.home?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.npbOfficial?.bullpen?.home?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.npbOfficial?.bullpen?.home?.windows?.h72?.innings ?? "0.0"}IP
