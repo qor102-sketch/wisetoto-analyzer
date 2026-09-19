@@ -10196,7 +10196,7 @@ function buildActualMarketPicks(
        * "가장 가치가 높은 선택지"를 고른다. 3-way 승1패에서 특히 중요하다.
        */
       const valueCandidates = selections
-        .map((selection: any) => {
+        .flatMap((selection: any) => {
           const identity = selectionIdentity(selection);
           const rawProbability = Number(probs[identity]);
           const odds = Number(selection?.odds);
@@ -10207,7 +10207,7 @@ function buildActualMarketPicks(
             !Number.isFinite(odds) ||
             odds <= 1
           ) {
-            return null;
+            return [];
           }
 
           const fair = marketFair.probabilities[identity];
@@ -10281,7 +10281,7 @@ function buildActualMarketPicks(
               confidence
             );
 
-          return {
+          return [{
             selection,
             identity,
             label: selectionLabel(selection) || identity,
@@ -10294,9 +10294,8 @@ function buildActualMarketPicks(
             valueGrade,
             calibrated,
             recScore,
-          };
-        })
-        .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
+          }];
+        });
 
       const gradeRank = (grade: ValueGrade) =>
         grade === "STRONG VALUE"
