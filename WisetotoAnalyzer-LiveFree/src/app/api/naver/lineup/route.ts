@@ -1246,6 +1246,9 @@ function summarizeNaverScheduleTeam(rows: AnyObj[], teamName: string) {
 
   for (const g of rows) {
     if (fixtures.length >= 20) break;
+    // V13.8.84: 취소/연기/중단/진행중 경기는 Naver가 0:0 점수 필드를 내려주는 경우가 있어
+    // 완료 상태를 먼저 확인한 뒤 Form/장소 표본에만 포함한다.
+    if (!naverVerifyGameCompleted(g)) continue;
     const score = naverScheduleFinalScore(g);
     if (!score) continue;
 
@@ -1280,6 +1283,11 @@ function summarizeNaverScheduleTeam(rows: AnyObj[], teamName: string) {
       venue: isHome ? "home" : "away",
       teamName,
       source: "NAVER_SCHEDULE",
+      completed: true,
+      statusCode: g?.statusCode ?? null,
+      statusInfo: g?.statusInfo ?? null,
+      gameStatus: g?.gameStatus ?? null,
+      status: g?.status ?? null,
     });
   }
 
@@ -1550,6 +1558,9 @@ async function collectNaverPitcherWorkload(args: {
   const games = rows
     .filter((g: AnyObj) => String(g?.categoryId ?? "").toLowerCase() === categoryId)
     .filter((g: AnyObj) => String(g?.gameDate ?? "").replace(/-/g, "") < args.date)
+    // V13.8.84: 과거 날짜라도 취소/연기/중단 경기는 0:0으로 보일 수 있으므로
+    // 완료 경기만 B/C/D 및 최근 팀 전력 입력 후보로 전달한다.
+    .filter((g: AnyObj) => naverVerifyGameCompleted(g))
     .sort((a: AnyObj, b: AnyObj) => String(b?.gameDateTime ?? b?.gameDate ?? "").localeCompare(String(a?.gameDateTime ?? a?.gameDate ?? "")));
 
   function teamGames(team: string) {
@@ -2728,7 +2739,7 @@ async function collectNpbOfficialAudit(args: {
       recentBattingPlayers: Number(battingHome.playersMatched) + Number(battingAway.playersMatched),
       currentLineupPlayers,
     },
-    note: "V13.8.83 NPB 공식 team-strength + B/C/D · C/D는 NPB 공식 boxscore를 coverage gate 통과 시 실전 Challenger λ에 직접 반영",
+    note: "V13.8.84 NPB 공식 team-strength + B/C/D · C/D는 NPB 공식 boxscore를 coverage gate 통과 시 실전 Challenger λ에 직접 반영",
   };
 }
 
@@ -3429,7 +3440,7 @@ async function collectMlbStatsApiAudit(args: {
       recentBattingPlayers: Number(battingHome.playersMatched) + Number(battingAway.playersMatched),
       currentLineupPlayers,
     },
-    note: "V13.8.83 · MLB StatsAPI 공개 피드 · 최근 일정 득실 team-strength fallback + B 개인 gameLog + C/D 공식 boxscore를 실전 recent blend에 사용",
+    note: "V13.8.84 · MLB StatsAPI 공개 피드 · 최근 일정 득실 team-strength fallback + B 개인 gameLog + C/D 공식 boxscore를 실전 recent blend에 사용",
   };
 }
 
