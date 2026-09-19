@@ -1746,6 +1746,7 @@ async function collectNaverPitcherWorkload(args: {
 // DEPLOY_MARKER_V13_8_79_NPB_OFFICIAL_STARTER_BULLPEN_AUDIT_FIX_20260916
 // DEPLOY_MARKER_V13_8_80_NPB_OFFICIAL_IDENTITY_PITCHING_ROWS_FIX_20260916
 // DEPLOY_MARKER_V13_8_81_NPB_STARTER_DATE_SECTION_FIX_20260917
+// DEPLOY_MARKER_V13_8_82_NPB_OFFICIAL_BCD_ACTIVE_20260919
 // DEPLOY_MARKER_V13_8_77_MLB_OFFICIAL_STATSAPI_ADAPTER_AUDIT_ONLY_20260916
 type NpbOfficialTeamMeta = {
   code: string;
@@ -2336,6 +2337,7 @@ function npbAggregateBatting(rowsByGame: { game: any; rows: any[] }[], currentLi
     : teamTotals;
 
   return {
+    source: "NPB_OFFICIAL_BOX_BATTING",
     mode: lineupSet.size > 0 ? "OFFICIAL_LINEUP_RECENT" : "TEAM_RECENT_AUDIT",
     gamesChecked: rowsByGame.length,
     gamesWithData,
@@ -2444,6 +2446,8 @@ async function collectNpbOfficialAudit(args: {
   startRaw: string;
   naverHomeStarterName?: string | null;
   naverAwayStarterName?: string | null;
+  naverHomeLineup?: AnyObj[];
+  naverAwayLineup?: AnyObj[];
 }) {
   const homeTeam = npbOfficialTeamMeta(args.home);
   const awayTeam = npbOfficialTeamMeta(args.away);
@@ -2495,12 +2499,31 @@ async function collectNpbOfficialAudit(args: {
   fetchedBoxes.forEach(([boxUrl, entry]) => boxEntries.set(boxUrl, entry));
 
   const currentBox = currentBoxUrl ? boxEntries.get(currentBoxUrl) : null;
-  const currentHomeLineup = (currentBox?.parsed?.batting?.home ?? [])
+  const officialCurrentHomeLineup = (currentBox?.parsed?.batting?.home ?? [])
     .filter((row: AnyObj) => Number.isFinite(Number(row.order)) && Number(row.order) >= 1 && Number(row.order) <= 9)
     .map((row: AnyObj) => row.name);
-  const currentAwayLineup = (currentBox?.parsed?.batting?.away ?? [])
+  const officialCurrentAwayLineup = (currentBox?.parsed?.batting?.away ?? [])
     .filter((row: AnyObj) => Number.isFinite(Number(row.order)) && Number(row.order) >= 1 && Number(row.order) <= 9)
     .map((row: AnyObj) => row.name);
+
+  // NPB 공식 current box는 경기 전 타순이 늦게 열리는 경우가 있다.
+  // 이미 Naver /record에서 확인된 당일 1~9번이 있으면 이름만 fallback하여
+  // NPB 공식 과거 box와 매칭한다. 경기 후 데이터는 사용하지 않는다.
+  const naverCurrentHomeLineup = (args.naverHomeLineup ?? [])
+    .map((row: AnyObj) => String(row?.name ?? row?.playerName ?? "").trim())
+    .filter(Boolean)
+    .slice(0, 9);
+  const naverCurrentAwayLineup = (args.naverAwayLineup ?? [])
+    .map((row: AnyObj) => String(row?.name ?? row?.playerName ?? "").trim())
+    .filter(Boolean)
+    .slice(0, 9);
+
+  const currentHomeLineup = officialCurrentHomeLineup.length >= 7
+    ? officialCurrentHomeLineup
+    : naverCurrentHomeLineup;
+  const currentAwayLineup = officialCurrentAwayLineup.length >= 7
+    ? officialCurrentAwayLineup
+    : naverCurrentAwayLineup;
 
   const announcementUrl = "https://npb.jp/announcement/starter/";
   const announcement = await fetchNpbHtmlCached(announcementUrl, false);
@@ -2517,7 +2540,10 @@ async function collectNpbOfficialAudit(args: {
   const officialStarterPair = announcementStarterPair ?? gamesIndexStarterPair ?? scheduleStarterPair;
   const announcedHomeStarter = officialStarterPair?.home ?? null;
   const announcedAwayStarter = officialStarterPair?.away ?? null;
-  const starterIdentitySource = officialStarterPair?.source ?? "UNAVAILABLE";
+  const effectiveHomeStarter = announcedHomeStarter ?? args.naverHomeStarterName ?? null;
+  const effectiveAwayStarter = announcedAwayStarter ?? args.naverAwayStarterName ?? null;
+  const starterIdentitySource = officialStarterPair?.source
+    ?? ((effectiveHomeStarter || effectiveAwayStarter) ? "NAVER_CONFIRMED_FALLBACK" : "UNAVAILABLE");
 
   function rowsForTeam(team: NpbOfficialTeamMeta, recentMetas: NonNullable<ReturnType<typeof npbGameLinkMeta>>[]) {
     return recentMetas.map((meta) => {
@@ -2543,7 +2569,7 @@ async function collectNpbOfficialAudit(args: {
 
   const starterMetaHome = await npbStarterGameMetas({
     team: homeTeam,
-    starterName: announcedHomeStarter,
+    starterName: effectiveHomeStarter,
     date: args.date,
     year,
     month,
@@ -2551,7 +2577,7 @@ async function collectNpbOfficialAudit(args: {
   });
   const starterMetaAway = await npbStarterGameMetas({
     team: awayTeam,
-    starterName: announcedAwayStarter,
+    starterName: effectiveAwayStarter,
     date: args.date,
     year,
     month,
@@ -2572,12 +2598,12 @@ async function collectNpbOfficialAudit(args: {
   const starterAwayRows = rowsForTeam(awayTeam, starterMetaAway.metas);
   const starterHome = npbStarterRecentFromGames(
     starterHomeRows.map((entry) => ({ game: entry.game, rows: entry.pitching })),
-    announcedHomeStarter,
+    effectiveHomeStarter,
     "NPB_TEAM_RESULTS_STARTER+OFFICIAL_BOX",
   );
   const starterAway = npbStarterRecentFromGames(
     starterAwayRows.map((entry) => ({ game: entry.game, rows: entry.pitching })),
-    announcedAwayStarter,
+    effectiveAwayStarter,
     "NPB_TEAM_RESULTS_STARTER+OFFICIAL_BOX",
   );
 
@@ -2603,8 +2629,8 @@ async function collectNpbOfficialAudit(args: {
   return {
     ok: scheduleResults.some((result) => result.ok) && (homeRows.length > 0 || awayRows.length > 0),
     source: "NPB_OFFICIAL_BOX_SCORE",
-    modelApplied: false,
-    auditOnly: true,
+    modelApplied: true,
+    auditOnly: false,
     date: args.date,
     teams: {
       home: { code: homeTeam.code, slug: homeTeam.slug, name: homeTeam.fullJa },
@@ -2621,8 +2647,10 @@ async function collectNpbOfficialAudit(args: {
       url: announcementStarterPair ? announcementUrl : (gamesIndexStarterPair ? gamesIndexUrl : (scheduleStarterPair ? scheduleUrls[0] : announcementUrl)),
       status: announcementStarterPair ? announcement.status : (gamesIndexStarterPair ? gamesIndex.status : (scheduleStarterPair ? scheduleResults[0]?.status ?? 0 : announcement.status)),
       source: starterIdentitySource,
-      home: announcedHomeStarter,
-      away: announcedAwayStarter,
+      home: effectiveHomeStarter,
+      away: effectiveAwayStarter,
+      officialHome: announcedHomeStarter,
+      officialAway: announcedAwayStarter,
       scheduleRow: scheduleStarterPair?.rowText ?? null,
       requestedDate: args.date,
       gamesIndexStatus: gamesIndex.status,
@@ -2638,7 +2666,11 @@ async function collectNpbOfficialAudit(args: {
       home: currentHomeLineup,
       away: currentAwayLineup,
       total: currentLineupPlayers,
-      source: currentLineupPlayers > 0 ? "NPB_CURRENT_BOX" : "UNAVAILABLE_PRE_GAME",
+      source: currentLineupPlayers > 0
+        ? (officialCurrentHomeLineup.length + officialCurrentAwayLineup.length >= 14
+            ? "NPB_CURRENT_BOX"
+            : "NAVER_CONFIRMED_LINEUP+NPB_OFFICIAL_HISTORY")
+        : "UNAVAILABLE_PRE_GAME",
     },
     starterRecent: { home: starterHome, away: starterAway },
     recentBatting: { home: battingHome, away: battingAway },
@@ -2654,7 +2686,7 @@ async function collectNpbOfficialAudit(args: {
       recentBattingPlayers: Number(battingHome.playersMatched) + Number(battingAway.playersMatched),
       currentLineupPlayers,
     },
-    note: "AUDIT ONLY · V13.8.80 NPB date-guarded starter identity + global pitching row parser · Challenger/추천/λ 미반영",
+    note: "V13.8.82 NPB 공식 B/C/D · 당일 확정 라인업 fallback + official history · coverage gate 통과 feature만 Challenger λ 반영",
   };
 }
 
@@ -3701,6 +3733,8 @@ export async function GET(request: Request) {
           startRaw,
           naverHomeStarterName: String(homeStarter?.name ?? "").trim() || null,
           naverAwayStarterName: String(awayStarter?.name ?? "").trim() || null,
+          naverHomeLineup: homeLineup,
+          naverAwayLineup: awayLineup,
         }).catch((error: any) => ({
           ok: false,
           source: "NPB_OFFICIAL",
