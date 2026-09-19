@@ -2439,6 +2439,42 @@ function npbBullpenFromGames(rowsByGame: { game: any; rows: any[]; gameMs: numbe
   };
 }
 
+function npbTeamStrengthFromBoxGames(
+  team: NpbOfficialTeamMeta,
+  recentMetas: NonNullable<ReturnType<typeof npbGameLinkMeta>>[],
+  boxEntries: Map<string, AnyObj>,
+  limit = 5,
+) {
+  const rows = recentMetas.slice(0, limit).flatMap((meta) => {
+    const entry = boxEntries.get(meta.boxUrl);
+    if (!entry?.parsed?.completed) return [];
+    const side = meta.homeSlug === team.slug ? "home" : meta.awaySlug === team.slug ? "away" : null;
+    if (!side) return [];
+    const other = side === "home" ? "away" : "home";
+    const ownRows = Array.isArray(entry?.parsed?.batting?.[side]) ? entry.parsed.batting[side] : [];
+    const oppRows = Array.isArray(entry?.parsed?.batting?.[other]) ? entry.parsed.batting[other] : [];
+    if (!ownRows.length || !oppRows.length) return [];
+    const scored = ownRows.reduce((sum: number, row: AnyObj) => sum + Number(row?.runs ?? 0), 0);
+    const allowed = oppRows.reduce((sum: number, row: AnyObj) => sum + Number(row?.runs ?? 0), 0);
+    return [{ scored, allowed, win: scored > allowed ? 1 : 0, loss: scored < allowed ? 1 : 0, tie: scored === allowed ? 1 : 0 }];
+  });
+  const games = rows.length;
+  const scored = rows.reduce((sum, row) => sum + row.scored, 0);
+  const allowed = rows.reduce((sum, row) => sum + row.allowed, 0);
+  const wins = rows.reduce((sum, row) => sum + row.win, 0);
+  const losses = rows.reduce((sum, row) => sum + row.loss, 0);
+  const ties = rows.reduce((sum, row) => sum + row.tie, 0);
+  const decisions = wins + losses;
+  return {
+    source: "NPB_OFFICIAL_BOX_RECENT",
+    games,
+    avgScored: games > 0 ? Number((scored / games).toFixed(3)) : null,
+    avgAllowed: games > 0 ? Number((allowed / games).toFixed(3)) : null,
+    winPct: decisions > 0 ? Number((wins / decisions).toFixed(3)) : null,
+    wins, losses, ties,
+  };
+}
+
 async function collectNpbOfficialAudit(args: {
   date: string;
   home: string;
@@ -2610,6 +2646,11 @@ async function collectNpbOfficialAudit(args: {
   // starter lookup uses targeted older games; batting/bullpen remain fixed to recent five team games.
   homeRows = rowsForTeam(homeTeam, homeRecentMetas);
   awayRows = rowsForTeam(awayTeam, awayRecentMetas);
+  const teamStrength = {
+    source: "NPB_OFFICIAL_BOX_RECENT",
+    home: npbTeamStrengthFromBoxGames(homeTeam, homeRecentMetas, boxEntries, 5),
+    away: npbTeamStrengthFromBoxGames(awayTeam, awayRecentMetas, boxEntries, 5),
+  };
 
   const currentMs = requestedStartMs(args.startRaw);
   const homeBullpenGames = homeRows
@@ -2672,6 +2713,7 @@ async function collectNpbOfficialAudit(args: {
             : "NAVER_CONFIRMED_LINEUP+NPB_OFFICIAL_HISTORY")
         : "UNAVAILABLE_PRE_GAME",
     },
+    teamStrength,
     starterRecent: { home: starterHome, away: starterAway },
     recentBatting: { home: battingHome, away: battingAway },
     bullpen: { home: bullpenHome, away: bullpenAway },
@@ -2686,7 +2728,7 @@ async function collectNpbOfficialAudit(args: {
       recentBattingPlayers: Number(battingHome.playersMatched) + Number(battingAway.playersMatched),
       currentLineupPlayers,
     },
-    note: "V13.8.82 NPB 공식 B/C/D · 당일 확정 라인업 fallback + official history · coverage gate 통과 feature만 Challenger λ 반영",
+    note: "V13.8.83 NPB 공식 team-strength + B/C/D · C/D는 NPB 공식 boxscore를 coverage gate 통과 시 실전 Challenger λ에 직접 반영",
   };
 }
 
@@ -2755,6 +2797,33 @@ function mlbTeamSideForId(game: AnyObj, teamId: number): "home" | "away" | null 
   if (Number(game?.teams?.home?.team?.id) === teamId) return "home";
   if (Number(game?.teams?.away?.team?.id) === teamId) return "away";
   return null;
+}
+
+function mlbTeamStrengthFromSchedule(games: AnyObj[], teamId: number, limit = 12) {
+  const rows = games.slice(0, limit).flatMap((game) => {
+    const side = mlbTeamSideForId(game, teamId);
+    if (!side) return [];
+    const other = side === "home" ? "away" : "home";
+    const scored = Number(game?.teams?.[side]?.score);
+    const allowed = Number(game?.teams?.[other]?.score);
+    if (!Number.isFinite(scored) || !Number.isFinite(allowed)) return [];
+    return [{ scored, allowed, win: scored > allowed ? 1 : 0, loss: scored < allowed ? 1 : 0, tie: scored === allowed ? 1 : 0 }];
+  });
+  const gamesUsed = rows.length;
+  const scored = rows.reduce((sum, row) => sum + row.scored, 0);
+  const allowed = rows.reduce((sum, row) => sum + row.allowed, 0);
+  const wins = rows.reduce((sum, row) => sum + row.win, 0);
+  const losses = rows.reduce((sum, row) => sum + row.loss, 0);
+  const ties = rows.reduce((sum, row) => sum + row.tie, 0);
+  const decisions = wins + losses;
+  return {
+    source: "MLB_STATSAPI_SCHEDULE_RECENT",
+    games: gamesUsed,
+    avgScored: gamesUsed > 0 ? Number((scored / gamesUsed).toFixed(3)) : null,
+    avgAllowed: gamesUsed > 0 ? Number((allowed / gamesUsed).toFixed(3)) : null,
+    winPct: decisions > 0 ? Number((wins / decisions).toFixed(3)) : null,
+    wins, losses, ties,
+  };
 }
 
 function mlbBoxPlayer(teamBox: AnyObj, playerId: any) {
@@ -3304,6 +3373,11 @@ async function collectMlbStatsApiAudit(args: {
 
   const boxScores = Array.from(boxEntries.values()).filter((entry) => Boolean(entry.payload)).length + Number(currentBox.ok);
   const currentLineupPlayers = currentHomeLineup.length + currentAwayLineup.length;
+  const teamStrength = {
+    source: "MLB_STATSAPI_SCHEDULE_RECENT",
+    home: mlbTeamStrengthFromSchedule(homeSchedule.games, homeTeamId, 12),
+    away: mlbTeamStrengthFromSchedule(awaySchedule.games, awayTeamId, 12),
+  };
   return {
     ok: Boolean(currentSchedule.ok && (homeRows.length > 0 || awayRows.length > 0)),
     source: "MLB_STATSAPI",
@@ -3339,6 +3413,7 @@ async function collectMlbStatsApiAudit(args: {
       away: { id: awayProbable?.id ?? null, name: awayProbable?.fullName ?? null },
     },
     currentLineup: { home: currentHomeLineup, away: currentAwayLineup, total: currentLineupPlayers },
+    teamStrength,
     starterRecent: { home: homeStarter, away: awayStarter },
     recentBatting: { home: battingHome, away: battingAway },
     bullpen: { home: bullpenHome, away: bullpenAway },
@@ -3354,7 +3429,7 @@ async function collectMlbStatsApiAudit(args: {
       recentBattingPlayers: Number(battingHome.playersMatched) + Number(battingAway.playersMatched),
       currentLineupPlayers,
     },
-    note: "V13.8.78 · MLB StatsAPI 공개 피드 · B는 선수별 pitching gameLog, C/D는 공식 boxscore를 Challenger MODEL OFF 입력으로 사용 · CONTROL/추천/Gate/실전 λ 미반영",
+    note: "V13.8.83 · MLB StatsAPI 공개 피드 · 최근 일정 득실 team-strength fallback + B 개인 gameLog + C/D 공식 boxscore를 실전 recent blend에 사용",
   };
 }
 
