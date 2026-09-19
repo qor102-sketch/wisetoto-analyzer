@@ -1,5 +1,5 @@
-// DEPLOY_MARKER_V13_8_82_FIX2_BASEBALL_PRIOR_FALLBACK_ACTIVE_20260919
-// V13.8.82 FIX2: baseball league-prior fallback when recent score feed is missing · B/C/D recent blend preserved
+// DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
+// V13.8.83 FIX3: official team-strength fallback + NPB official C/D live λ connection + diagnostics
 // DEPLOY_MARKER_V13_8_32_POST_START_30MIN_VISIBILITY_20260903
 // DEPLOY_MARKER_V13_8_28_FOOTBALL_NAVER_LINEUP_V1_20260830
 // DEPLOY_MARKER_V13_8_19_MLB_SPORTSAPI_ALIAS_FIX_20260829
@@ -230,6 +230,13 @@ type AnalysisFactors = {
   baseballPreMarketMargin: number | null;
   baseballPreRecentSample: number;
   baseballPreVenueSample: number;
+
+  baseballTeamStrengthApplied: boolean;
+  baseballTeamStrengthSource: string | null;
+  baseballTeamStrengthHomeGames: number;
+  baseballTeamStrengthAwayGames: number;
+  baseballTeamStrengthRawHome: number | null;
+  baseballTeamStrengthRawAway: number | null;
 };
 
 
@@ -682,7 +689,7 @@ type BaseballChallengerVariant = {
 
 type BaseballChallengerSnapshot = {
   stage: "READY";
-  version: "V13.8.74" | "V13.8.78" | "V13.8.82";
+  version: "V13.8.74" | "V13.8.78" | "V13.8.82" | "V13.8.83";
   capturedAt: number;
   leagueGroup: "KBO" | "NPB" | "MLB" | "OTHER";
   variants: BaseballChallengerVariant[];
@@ -4289,6 +4296,32 @@ function baseballLeagueRunPrior(value: any) {
   return 4.50;
 }
 
+function baseballOfficialTeamStrength(sportsDetail: any, leagueRaw: any) {
+  const group = baseballChallengerLeagueGroup(leagueRaw);
+  const adapter =
+    group === "MLB"
+      ? sportsDetail?.naverTodayLineup?.mlbOfficial
+      : group === "NPB"
+        ? sportsDetail?.naverTodayLineup?.npbOfficial
+        : null;
+  const raw = adapter?.teamStrength ?? null;
+  const normalizeSide = (side: any) => {
+    const games = Math.max(0, Number(side?.games ?? 0));
+    const avgScored = Number(side?.avgScored);
+    const avgAllowed = Number(side?.avgAllowed);
+    if (games < 3 || !Number.isFinite(avgScored) || !Number.isFinite(avgAllowed)) return null;
+    return { games, avgScored, avgAllowed, winPct: Number.isFinite(Number(side?.winPct)) ? Number(side.winPct) : null };
+  };
+  const home = normalizeSide(raw?.home);
+  const away = normalizeSide(raw?.away);
+  if (!home || !away) return null;
+  return {
+    source: String(raw?.source ?? adapter?.source ?? `${group}_TEAM_STRENGTH`),
+    home,
+    away,
+  };
+}
+
 function neutralScorePrior(
   sport: Exclude<Sport, "전체">
 ) {
@@ -6134,6 +6167,11 @@ function buildAnalysis(
       ? baseballLeagueRunPrior(baseballLeagueRaw)
       : null;
 
+  const baseballTeamStrength =
+    sport === "야구"
+      ? baseballOfficialTeamStrength(sportsDetail, baseballLeagueRaw)
+      : null;
+
   const homeWeighted =
     buildWeightedRecentProfile(
       recentSummary?.home ?? null,
@@ -6489,6 +6527,13 @@ function buildAnalysis(
     | number
     | null = null;
 
+  let baseballTeamStrengthApplied = false;
+  let baseballTeamStrengthSource: string | null = null;
+  let baseballTeamStrengthHomeGames = 0;
+  let baseballTeamStrengthAwayGames = 0;
+  let baseballTeamStrengthRawHome: number | null = null;
+  let baseballTeamStrengthRawAway: number | null = null;
+
   let venueShadowFinalHomeScore: number | null = null;
   let venueShadowFinalAwayScore: number | null = null;
 
@@ -6505,21 +6550,44 @@ function buildAnalysis(
     baseballRunPrior !== null;
 
   if (scoringUsed || baseballPriorFallback) {
-    const rawHome =
-      scoringUsed
-        ? (homeAvgScored! + awayAvgConceded!) / 2
-        : baseballRunPrior!;
+    let rawHome: number;
+    let rawAway: number;
 
-    const rawAway =
-      scoringUsed
-        ? (awayAvgScored! + homeAvgConceded!) / 2
-        : baseballRunPrior!;
+    if (scoringUsed) {
+      rawHome = (homeAvgScored! + awayAvgConceded!) / 2;
+      rawAway = (awayAvgScored! + homeAvgConceded!) / 2;
+    } else if (baseballTeamStrength && baseballRunPrior !== null) {
+      // Naver Form이 비어도 공식 최근 팀 득실이 있으면 4.5:4.5 같은 중립 시작을 피한다.
+      // 공격력과 상대 실점력을 교차해 만든 뒤 아래 neutral shrink에서 다시 보수적으로 수축한다.
+      rawHome = (baseballTeamStrength.home.avgScored + baseballTeamStrength.away.avgAllowed) / 2;
+      rawAway = (baseballTeamStrength.away.avgScored + baseballTeamStrength.home.avgAllowed) / 2;
+      rawHome = clamp(rawHome, baseballRunPrior - 1.75, baseballRunPrior + 1.75);
+      rawAway = clamp(rawAway, baseballRunPrior - 1.75, baseballRunPrior + 1.75);
+      baseballTeamStrengthApplied = true;
+      baseballTeamStrengthSource = baseballTeamStrength.source;
+      baseballTeamStrengthHomeGames = baseballTeamStrength.home.games;
+      baseballTeamStrengthAwayGames = baseballTeamStrength.away.games;
+      baseballTeamStrengthRawHome = rawHome;
+      baseballTeamStrengthRawAway = rawAway;
+    } else if (baseballRunPrior !== null && moneylineFair.home !== null && moneylineFair.away !== null) {
+      // 공식 팀 전력도 없으면 시장을 모델로 복사하지 않고 방향만 약한 안전장치로 사용한다.
+      // 이 경로의 목적은 강팀/약팀을 무조건 50:50으로 만드는 가짜 엣지 방지다.
+      const fairDiff = moneylineFair.home - moneylineFair.away;
+      const strengthMargin = clamp((fairDiff / 100) * 2.0, -1.2, 1.2);
+      rawHome = baseballRunPrior + strengthMargin / 2;
+      rawAway = baseballRunPrior - strengthMargin / 2;
+      baseballTeamStrengthApplied = true;
+      baseballTeamStrengthSource = "BETMAN_DIRECTION_GUARD";
+      baseballTeamStrengthRawHome = rawHome;
+      baseballTeamStrengthRawAway = rawAway;
+    } else {
+      rawHome = baseballRunPrior!;
+      rawAway = baseballRunPrior!;
+      baseballTeamStrengthSource = "LEAGUE_NEUTRAL_ONLY";
+    }
 
-    rawExpectedHomeScore =
-      rawHome;
-
-    rawExpectedAwayScore =
-      rawAway;
+    rawExpectedHomeScore = rawHome;
+    rawExpectedAwayScore = rawAway;
 
     const recentSample =
       Math.min(
@@ -6559,6 +6627,15 @@ function buildAnalysis(
         0.35,
         0.82
       );
+
+    if (sport === "야구" && baseballPriorFallback && baseballTeamStrengthApplied) {
+      if (baseballTeamStrengthSource === "BETMAN_DIRECTION_GUARD") {
+        sampleStrength = 0.45;
+      } else {
+        const strengthGames = Math.min(baseballTeamStrengthHomeGames, baseballTeamStrengthAwayGames);
+        sampleStrength = clamp(0.40 + (strengthGames / 12) * 0.20, 0.40, 0.60);
+      }
+    }
 
     /*
      * 야구 PRE에서는 선발/라인업 미확정 리스크를 별도로 반영.
@@ -7711,6 +7788,12 @@ function buildAnalysis(
       baseballPreMarketMargin,
       baseballPreRecentSample,
       baseballPreVenueSample,
+      baseballTeamStrengthApplied,
+      baseballTeamStrengthSource,
+      baseballTeamStrengthHomeGames,
+      baseballTeamStrengthAwayGames,
+      baseballTeamStrengthRawHome,
+      baseballTeamStrengthRawAway,
     } as AnalysisFactors,
   };
 }
@@ -8148,11 +8231,13 @@ function buildBaseballChallengerSnapshot(
     challengerFinite(row?.summary?.era) !== null;
   const usableBatting = (row: any) =>
     row &&
+    trustedOfficialSource(row) &&
     Math.max(0, Number(row?.playersMatched ?? 0)) > 0 &&
     Math.max(0, Number(row?.gamesWithData ?? 0)) > 0 &&
     challengerFinite(row?.summary?.avg) !== null;
   const usableBullpen = (row: any) =>
     row &&
+    trustedOfficialSource(row) &&
     row?.parserOk !== false &&
     Math.max(0, Number(row?.gamesChecked ?? 0)) > 0;
 
@@ -8260,15 +8345,15 @@ function buildBaseballChallengerSnapshot(
 
   return {
     stage: "READY",
-    version: "V13.8.82",
+    version: "V13.8.83",
     capturedAt,
     leagueGroup,
     variants: [
       { key: "CONTROL", label: "CONTROL 현행 λ", ...control, applied: true, note: "V13.8 현행 예상득점" },
       { key: "VENUE", label: "A · Venue Shadow", ...venue, applied: venueApplied, note: "robust 장소가중만 병렬 적용" },
       { key: "STARTER_RECENT", label: "B · 선발 최근등판", ...starter, applied: starterApplied, note: leagueGroup === "MLB" && mlbOfficialEligible ? "MLB 개인 gameLog 최근 선발 ERA · 최대 ±0.45점" : "최근 선발 ERA · 최대 ±0.45점" },
-      { key: "BATTING_RECENT", label: "C · 타선 최근5경기", ...batting, applied: battingApplied, note: leagueGroup === "MLB" && mlbOfficialEligible ? "MLB 공식 boxscore · 현재 라인업 최근 AVG" : "라인업 최근 AVG · 리그별 중립값 대비" },
-      { key: "BULLPEN", label: "D · 불펜 workload", ...bullpen, applied: bullpenApplied, note: leagueGroup === "MLB" && mlbOfficialEligible ? "MLB 공식 boxscore · 24/48/72h 과사용만 페널티" : "24/48/72h 과사용만 페널티" },
+      { key: "BATTING_RECENT", label: "C · 타선 최근5경기", ...batting, applied: battingApplied, note: leagueGroup === "MLB" && mlbOfficialEligible ? "MLB 공식 boxscore · 현재 라인업 최근 AVG" : leagueGroup === "NPB" && npbOfficialEligible ? "NPB 공식 boxscore · 현재 라인업 최근 AVG · 실전 λ 연결" : "라인업 최근 AVG · 리그별 중립값 대비" },
+      { key: "BULLPEN", label: "D · 불펜 workload", ...bullpen, applied: bullpenApplied, note: leagueGroup === "MLB" && mlbOfficialEligible ? "MLB 공식 boxscore · 24/48/72h 과사용만 페널티" : leagueGroup === "NPB" && npbOfficialEligible ? "NPB 공식 boxscore · 24/48/72h 과사용 · 실전 λ 연결" : "24/48/72h 과사용만 페널티" },
       { key: "COMBO", label: "E · COMBO", ...combo, applied: venueApplied || starterApplied || battingApplied || bullpenApplied, note: "A+B+C+D · SHADOW 비교 유지 / 의사결정은 recent blend 사용" },
     ],
     featureAudit: {
@@ -8444,10 +8529,12 @@ function baseballDecisionLambda(
   const finalHomeDelta = clamp(homeDelta, -0.60, 0.60);
   const finalAwayDelta = clamp(awayDelta, -0.60, 0.60);
 
+  const npbOfficialBattingUsed = battingUsed && String(audit.battingHomeSource ?? "").startsWith("NPB_") && String(audit.battingAwaySource ?? "").startsWith("NPB_");
+  const npbOfficialBullpenUsed = bullpenUsed && String(audit.bullpenHomeSource ?? "").startsWith("NPB_") && String(audit.bullpenAwaySource ?? "").startsWith("NPB_");
   const labels = [
     starterUsed ? "선발최근" : null,
-    battingUsed ? "타선최근" : null,
-    bullpenUsed ? "불펜피로" : null,
+    battingUsed ? (npbOfficialBattingUsed ? "NPB공식타선" : "타선최근") : null,
+    bullpenUsed ? (npbOfficialBullpenUsed ? "NPB공식불펜" : "불펜피로") : null,
   ].filter(Boolean);
 
   return {
@@ -15603,7 +15690,7 @@ export default function Home() {
     const locked = liveTrackerRecords.filter(
       (record) =>
         record.sport === "야구" &&
-        ["V13.8.74", "V13.8.78", "V13.8.82"].includes(
+        ["V13.8.74", "V13.8.78", "V13.8.82", "V13.8.83"].includes(
           String(record.baseballChallenger?.version ?? "")
         )
     );
@@ -21314,7 +21401,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.82 FIX2 · BASEBALL PRIOR FALLBACK · RECENT B/C/D BLEND ACTIVE</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.83 FIX3 · TEAM STRENGTH + NPB C/D LIVE λ</div>
         </div>
         <div className="bar">
           <button
@@ -22817,7 +22904,7 @@ export default function Home() {
 
           <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid #bfdbfe", background: "#f8fbff" }}>
             <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-              V13.8.82 FIX2 BASEBALL VALUE ENGINE · PRIOR FALLBACK + B/C/D RECENT BLEND ACTIVE
+              V13.8.83 FIX3 BASEBALL VALUE ENGINE · TEAM STRENGTH + NPB OFFICIAL C/D LIVE λ
             </div>
             <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.65, marginBottom: 8 }}>
               시작점 2026-09-15 10:00 KST · 이후 READY 야구 PRE만 신규 OOS 저장 · 잠금 {baseballChallengerSummary.locked}경기 · VERIFY {baseballChallengerSummary.verified}경기 · 결과대기 {baseballChallengerSummary.pending}경기
@@ -22831,7 +22918,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.8.82 MLB OFFICIAL B/C/D INPUT · COVERAGE 충족 시 RECENT BLEND ACTIVE</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.8.83 MLB/NPB OFFICIAL B/C/D INPUT · COVERAGE 충족 시 RECENT BLEND ACTIVE</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 2026-09-16 10:55 KST 이후 새 READY MLB snapshot부터 B는 MLB_PERSON_GAMELOG, C/D는 MLB StatsAPI 공식 boxscore를 우선 사용합니다. 항목별 공식 데이터가 없을 때만 Naver workload로 fallback합니다. CONTROL·실전 추천·Gate·기존 λ는 변경하지 않고 Challenger shadow만 계산합니다. 기존 잠금 snapshot은 다시 쓰지 않습니다.
               </div>
@@ -22839,7 +22926,7 @@ export default function Home() {
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #fde68a", background: "#fffbeb", borderRadius: 8 }}>
               <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>
-                V13.8.82 BASEBALL DATA COVERAGE AUDIT · 픽별 λ source/coverage 저장
+                V13.8.83 BASEBALL DATA COVERAGE AUDIT · 픽별 λ source/coverage 저장
               </div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55, marginBottom: 7 }}>
                 데이터 확보와 λ조정을 분리해서 표시합니다. 불펜은 최근 데이터가 있어도 과사용 기준에 미달하면 <b>정상적으로 λ조정 0</b>입니다. 기존 8.74 snapshot은 저장된 최소 필드로 읽고, 8.75 이후 snapshot부터 schedule/48h/72h/AB 진단을 추가 보존합니다.
@@ -24574,7 +24661,7 @@ export default function Home() {
                               <div className="small">
                                 schedule link {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.scheduleLinks ?? 0)} · box {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.boxScores ?? 0)}
                                 {matched?.naverTodayLineup?.npbOfficial?.schedule?.currentGameUrl ? " · 현재경기 resolve ✓" : " · 현재경기 resolve 대기"}
-                                <br />V13.8.82 · NPB 공식 B/C/D · coverage 충족 feature만 Challenger λ recent blend 반영
+                                <br />V13.8.83 · NPB 공식 C/D 실전 λ 연결 · coverage gate 통과 시 recent blend 반영
                               </div>
                             </div>
                             <div className="card">
@@ -24638,13 +24725,33 @@ export default function Home() {
                         </div>
                         <div className="card">
                           타자 최근 타격감 · Challenger C
-                          <b>{matched?.naverTodayLineup?.league === "MLB" && Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.recentBattingPlayers ?? 0) > 0 ? "✓ MLB StatsAPI boxscore" : Number(matched?.naverTodayLineup?.pitcherWorkload?.coverage?.recentBattingPlayers ?? 0) > 0 ? "✓ Naver 라인업 최근5경기" : "미연결"}</b>
-                          <div className="small">{matched?.naverTodayLineup?.league === "MLB" && matched?.naverTodayLineup?.mlbOfficial?.ok ? <>MLB 매칭 홈 {Number(matched?.naverTodayLineup?.mlbOfficial?.recentBatting?.home?.playersMatched ?? 0)}/9 · 원정 {Number(matched?.naverTodayLineup?.mlbOfficial?.recentBatting?.away?.playersMatched ?? 0)}/9 · 최근5경기 · 새 READY부터 Challenger C 입력 · coverage 충족 시 실전 recent blend</> : <>Naver 매칭 홈 {Number(matched?.naverTodayLineup?.pitcherWorkload?.recentBatting?.home?.playersMatched ?? 0)}/9 · 원정 {Number(matched?.naverTodayLineup?.pitcherWorkload?.recentBatting?.away?.playersMatched ?? 0)}/9 · 최근5경기 · Challenger C coverage gate</>}</div>
+                          <b>{matched?.naverTodayLineup?.league === "MLB" && Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.recentBattingPlayers ?? 0) > 0
+                            ? "✓ MLB StatsAPI boxscore → 실전 λ"
+                            : matched?.naverTodayLineup?.league === "NPB" && Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.recentBattingPlayers ?? 0) > 0
+                              ? "✓ NPB.jp boxscore → 실전 λ"
+                              : Number(matched?.naverTodayLineup?.pitcherWorkload?.coverage?.recentBattingPlayers ?? 0) > 0
+                                ? "✓ Naver 라인업 최근5경기"
+                                : "미연결"}</b>
+                          <div className="small">{matched?.naverTodayLineup?.league === "MLB" && matched?.naverTodayLineup?.mlbOfficial?.ok
+                            ? <>MLB 매칭 홈 {Number(matched?.naverTodayLineup?.mlbOfficial?.recentBatting?.home?.playersMatched ?? 0)}/9 · 원정 {Number(matched?.naverTodayLineup?.mlbOfficial?.recentBatting?.away?.playersMatched ?? 0)}/9 · coverage 통과 시 baseballDecisionLambda C 반영</>
+                            : matched?.naverTodayLineup?.league === "NPB" && matched?.naverTodayLineup?.npbOfficial?.ok
+                              ? <>NPB 공식 매칭 홈 {Number(matched?.naverTodayLineup?.npbOfficial?.recentBatting?.home?.playersMatched ?? 0)}/9 · 원정 {Number(matched?.naverTodayLineup?.npbOfficial?.recentBatting?.away?.playersMatched ?? 0)}/9 · 최근 {Number(matched?.naverTodayLineup?.npbOfficial?.recentBatting?.home?.gamesWithData ?? 0)}/{Number(matched?.naverTodayLineup?.npbOfficial?.recentBatting?.away?.gamesWithData ?? 0)}G · coverage 통과 시 실전 λ 직접 반영</>
+                              : <>Naver 매칭 홈 {Number(matched?.naverTodayLineup?.pitcherWorkload?.recentBatting?.home?.playersMatched ?? 0)}/9 · 원정 {Number(matched?.naverTodayLineup?.pitcherWorkload?.recentBatting?.away?.playersMatched ?? 0)}/9 · Challenger C coverage gate</>}</div>
                         </div>
                         <div className="card">
                           불펜 소모도 · Challenger D
-                          <b>{matched?.naverTodayLineup?.league === "MLB" && Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.bullpenGames ?? 0) > 0 ? "✓ MLB StatsAPI boxscore" : Number(matched?.naverTodayLineup?.pitcherWorkload?.coverage?.bullpenGames ?? 0) > 0 ? "✓ Naver 최근3경기" : "미연결"}</b>
-                          <div className="small">{matched?.naverTodayLineup?.league === "MLB" && matched?.naverTodayLineup?.mlbOfficial?.ok ? <>24/48/72h 홈 {matched?.naverTodayLineup?.mlbOfficial?.bullpen?.home?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.home?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.home?.windows?.h72?.innings ?? "0.0"}IP · 원정 {matched?.naverTodayLineup?.mlbOfficial?.bullpen?.away?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.away?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.away?.windows?.h72?.innings ?? "0.0"}IP · 새 READY부터 Challenger D 입력 · coverage 충족 시 실전 recent blend</> : <>24/48/72h 홈 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h72?.innings ?? "0.0"}IP · 원정 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h72?.innings ?? "0.0"}IP · Challenger D coverage gate</>}</div>
+                          <b>{matched?.naverTodayLineup?.league === "MLB" && Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.bullpenGames ?? 0) > 0
+                            ? "✓ MLB StatsAPI boxscore → 실전 λ"
+                            : matched?.naverTodayLineup?.league === "NPB" && Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.bullpenGames ?? 0) > 0
+                              ? "✓ NPB.jp boxscore → 실전 λ"
+                              : Number(matched?.naverTodayLineup?.pitcherWorkload?.coverage?.bullpenGames ?? 0) > 0
+                                ? "✓ Naver 최근3경기"
+                                : "미연결"}</b>
+                          <div className="small">{matched?.naverTodayLineup?.league === "MLB" && matched?.naverTodayLineup?.mlbOfficial?.ok
+                            ? <>24/48/72h 홈 {matched?.naverTodayLineup?.mlbOfficial?.bullpen?.home?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.home?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.home?.windows?.h72?.innings ?? "0.0"}IP · 원정 {matched?.naverTodayLineup?.mlbOfficial?.bullpen?.away?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.away?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.away?.windows?.h72?.innings ?? "0.0"}IP · coverage 통과 시 baseballDecisionLambda D 반영</>
+                            : matched?.naverTodayLineup?.league === "NPB" && matched?.naverTodayLineup?.npbOfficial?.ok
+                              ? <>NPB 공식 24/48/72h 홈 {matched?.naverTodayLineup?.npbOfficial?.bullpen?.home?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.npbOfficial?.bullpen?.home?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.npbOfficial?.bullpen?.home?.windows?.h72?.innings ?? "0.0"}IP · 원정 {matched?.naverTodayLineup?.npbOfficial?.bullpen?.away?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.npbOfficial?.bullpen?.away?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.npbOfficial?.bullpen?.away?.windows?.h72?.innings ?? "0.0"}IP · coverage 통과 시 실전 λ 직접 반영</>
+                              : <>24/48/72h 홈 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h72?.innings ?? "0.0"}IP · 원정 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h72?.innings ?? "0.0"}IP · Challenger D coverage gate</>}</div>
                         </div>
                         <div className="card">
                           부상/결장
@@ -25798,6 +25905,16 @@ export default function Home() {
                         <b>{analysisFactors.scorePrior?.toFixed(2) ?? "-"}</b>
                       </div>
                       <div className="card">
+                        팀 기본전력 fallback
+                        <b>{analysisFactors.baseballTeamStrengthApplied ? "✓ 적용" : "미적용"}</b>
+                        <div className="small">
+                          {analysisFactors.baseballTeamStrengthSource ?? "최근 Form 사용"}
+                          {analysisFactors.baseballTeamStrengthHomeGames || analysisFactors.baseballTeamStrengthAwayGames
+                            ? ` · 표본 ${analysisFactors.baseballTeamStrengthHomeGames}/${analysisFactors.baseballTeamStrengthAwayGames}G`
+                            : ""}
+                        </div>
+                      </div>
+                      <div className="card">
                         시장 공정 승률
                         <b>{analysisFactors.marketHomeFair?.toFixed(1) ?? "-"}% / {analysisFactors.marketAwayFair?.toFixed(1) ?? "-"}%</b>
                       </div>
@@ -25811,9 +25928,9 @@ export default function Home() {
                     </div>
 
                     <div className="notice" style={{ margin: "8px 0" }}>
-                      예상득점은 배당을 그대로 점수로 바꾸지 않습니다. 최근 득실을 robust 처리한 뒤 공격×상대수비로 독립 λ를 먼저 만듭니다.
-                      장소표본이 부족하고 독립 λ의 방향이 시장 공정확률과 강하게 반대일 때만 시장 방향을 최대 38%의 약한 prior로 사용합니다.
-                      총 예상득점은 유지하고 홈-원정 점수차만 보수적으로 조정합니다.
+                      예상득점은 배당을 그대로 점수로 바꾸지 않습니다. 최근 득실을 robust 처리하고, Form이 비면 MLB/NPB 공식 최근 팀 득실을 기본전력 fallback으로 먼저 사용합니다.
+                      공식 팀 전력도 없을 때만 시장 방향을 약한 안전장치로 써서 강팀/약팀을 무조건 50:50으로 시작하는 가짜 엣지를 막습니다.
+                      선발·라인업·Challenger B/C/D는 그 뒤 별도로 반영합니다.
                     </div>
                   </div>
 
