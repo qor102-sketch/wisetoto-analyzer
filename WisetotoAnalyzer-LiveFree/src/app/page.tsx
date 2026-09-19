@@ -1,4 +1,5 @@
-// DEPLOY_MARKER_V13_8_74_BASEBALL_CHALLENGER_LAB_MODEL_OFF_20260915
+// DEPLOY_MARKER_V13_8_82_BASEBALL_VALUE_ENGINE_ACTIVE_20260919
+// V13.8.82: league-aware run prior · challenger recent-form blend · push-adjusted EV · best-value selection
 // DEPLOY_MARKER_V13_8_32_POST_START_30MIN_VISIBILITY_20260903
 // DEPLOY_MARKER_V13_8_28_FOOTBALL_NAVER_LINEUP_V1_20260830
 // DEPLOY_MARKER_V13_8_19_MLB_SPORTSAPI_ALIAS_FIX_20260829
@@ -660,6 +661,7 @@ type VenueShadowValidationResult = {
 
 const BASEBALL_CHALLENGER_START_MS = new Date("2026-09-15T10:00:00+09:00").getTime();
 const BASEBALL_MLB_OFFICIAL_BCD_START_MS = new Date("2026-09-16T10:55:00+09:00").getTime();
+const BASEBALL_NPB_OFFICIAL_BCD_START_MS = new Date("2026-09-19T10:24:00+09:00").getTime();
 
 type BaseballChallengerKey =
   | "CONTROL"
@@ -680,7 +682,7 @@ type BaseballChallengerVariant = {
 
 type BaseballChallengerSnapshot = {
   stage: "READY";
-  version: "V13.8.74" | "V13.8.78";
+  version: "V13.8.74" | "V13.8.78" | "V13.8.82";
   capturedAt: number;
   leagueGroup: "KBO" | "NPB" | "MLB" | "OTHER";
   variants: BaseballChallengerVariant[];
@@ -732,6 +734,12 @@ type BaseballChallengerSnapshot = {
     mlbOfficialGamePk?: number | null;
     mlbOfficialCurrentLineupPlayers?: number;
     mlbOfficialStarterGameLogSides?: number;
+    /* V13.8.82 NPB official B/C/D source audit. */
+    npbOfficialBoxScores?: number;
+    npbOfficialCurrentLineupPlayers?: number;
+    npbOfficialStarterRecentStarts?: number;
+    npbOfficialRecentBattingPlayers?: number;
+    npbOfficialBullpenGames?: number;
   };
 };
 
@@ -4266,6 +4274,21 @@ function venueRobustShadow(
   };
 }
 
+function baseballLeagueRunPrior(value: any) {
+  const group = baseballChallengerLeagueGroup(value);
+
+  /*
+   * V13.8.82
+   * 야구 세 리그의 득점 환경을 하나의 4.5점 prior로 묶지 않는다.
+   * 최근 5경기 raw를 그대로 쓰는 것이 아니라 shrink 중심값만 리그별로 분리한다.
+   * 향후 시즌 리그 평균 득점 API가 들어오면 이 값을 동적 prior로 교체한다.
+   */
+  if (group === "KBO") return 4.70;
+  if (group === "NPB") return 3.85;
+  if (group === "MLB") return 4.50;
+  return 4.50;
+}
+
 function neutralScorePrior(
   sport: Exclude<Sport, "전체">
 ) {
@@ -4472,12 +4495,14 @@ function robustRecentMetric(input: {
   played: number;
   venuePlayed: number;
   sport: Exclude<Sport, "전체">;
+  priorOverride?: number | null;
 }) {
   const {
     value,
     played,
     venuePlayed,
     sport,
+    priorOverride = null,
   } = input;
 
   if (
@@ -4491,9 +4516,12 @@ function robustRecentMetric(input: {
   }
 
   const prior =
-    sportMetricPrior(
-      sport
-    );
+    priorOverride !== null &&
+    Number.isFinite(priorOverride)
+      ? Number(priorOverride)
+      : sportMetricPrior(
+          sport
+        );
 
   let lower = 0;
   let upper = prior * 2;
@@ -6094,6 +6122,18 @@ function buildAnalysis(
       betmanMatch
     );
 
+  const baseballLeagueRaw =
+    sportsDetail?.naverTodayLineup?.league ??
+    sportsDetail?.selectedFixture?.league ??
+    sportsDetail?.fixture?.league ??
+    (betmanMatch as any)?.league ??
+    null;
+
+  const baseballRunPrior =
+    sport === "야구"
+      ? baseballLeagueRunPrior(baseballLeagueRaw)
+      : null;
+
   const homeWeighted =
     buildWeightedRecentProfile(
       recentSummary?.home ?? null,
@@ -6125,24 +6165,28 @@ function buildAnalysis(
     played: homeWeighted.played,
     venuePlayed: homeWeighted.venuePlayed,
     sport,
+    priorOverride: baseballRunPrior,
   }).value;
   const homeVenueShadowRobustConceded = robustRecentMetric({
     value: homeVenueShadow.conceded,
     played: homeWeighted.played,
     venuePlayed: homeWeighted.venuePlayed,
     sport,
+    priorOverride: baseballRunPrior,
   }).value;
   const awayVenueShadowRobustScored = robustRecentMetric({
     value: awayVenueShadow.scored,
     played: awayWeighted.played,
     venuePlayed: awayWeighted.venuePlayed,
     sport,
+    priorOverride: baseballRunPrior,
   }).value;
   const awayVenueShadowRobustConceded = robustRecentMetric({
     value: awayVenueShadow.conceded,
     played: awayWeighted.played,
     venuePlayed: awayWeighted.venuePlayed,
     sport,
+    priorOverride: baseballRunPrior,
   }).value;
 
   const venueShadowRawHomeScore =
@@ -6163,6 +6207,7 @@ function buildAnalysis(
       venuePlayed:
         homeWeighted.venuePlayed,
       sport,
+      priorOverride: baseballRunPrior,
     });
 
   const homeRobustConceded =
@@ -6174,6 +6219,7 @@ function buildAnalysis(
       venuePlayed:
         homeWeighted.venuePlayed,
       sport,
+      priorOverride: baseballRunPrior,
     });
 
   const awayRobustScored =
@@ -6185,6 +6231,7 @@ function buildAnalysis(
       venuePlayed:
         awayWeighted.venuePlayed,
       sport,
+      priorOverride: baseballRunPrior,
     });
 
   const awayRobustConceded =
@@ -6196,6 +6243,7 @@ function buildAnalysis(
       venuePlayed:
         awayWeighted.venuePlayed,
       sport,
+      priorOverride: baseballRunPrior,
     });
 
   const homeAvgScored =
@@ -6547,9 +6595,12 @@ function buildAnalysis(
       sampleStrength;
 
     const prior =
-      neutralScorePrior(
-        sport
-      );
+      sport === "야구" &&
+      baseballRunPrior !== null
+        ? baseballRunPrior
+        : neutralScorePrior(
+            sport
+          );
 
     scorePrior =
       prior;
@@ -7690,6 +7741,12 @@ type MarketPick = {
   preUncertaintyWeight?: number;
   preUncertaintyTarget?: number | null;
 
+  /* V13.8.82: 야구 최종 의사결정 λ 출처/보조 데이터 감사 필드. */
+  baseballLambdaSource?: "CONTROL" | "RECENT_BLEND";
+  baseballRecentBlendWeight?: number;
+  baseballRecentCoverage?: string | null;
+  decidedProbability?: number | null;
+
   detail: string;
 };
 
@@ -8037,11 +8094,23 @@ function buildBaseballChallengerSnapshot(
 
   const naverWorkload = matched?.naverTodayLineup?.pitcherWorkload ?? null;
   const mlbOfficial = leagueGroup === "MLB" ? (matched?.naverTodayLineup?.mlbOfficial ?? null) : null;
+  const npbOfficial = leagueGroup === "NPB" ? (matched?.naverTodayLineup?.npbOfficial ?? null) : null;
+
   const mlbOfficialEligible = Boolean(
     leagueGroup === "MLB" &&
     capturedAt >= BASEBALL_MLB_OFFICIAL_BCD_START_MS &&
     mlbOfficial?.ok
   );
+  const npbOfficialEligible = Boolean(
+    leagueGroup === "NPB" &&
+    capturedAt >= BASEBALL_NPB_OFFICIAL_BCD_START_MS &&
+    npbOfficial?.ok
+  );
+  const officialAdapter = mlbOfficialEligible
+    ? mlbOfficial
+    : npbOfficialEligible
+      ? npbOfficial
+      : null;
 
   const naverStarterHome = naverWorkload?.starterRecent?.home ?? null;
   const naverStarterAway = naverWorkload?.starterRecent?.away ?? null;
@@ -8050,16 +8119,22 @@ function buildBaseballChallengerSnapshot(
   const naverBullpenHome = naverWorkload?.bullpen?.home ?? null;
   const naverBullpenAway = naverWorkload?.bullpen?.away ?? null;
 
-  const officialStarterHome = mlbOfficial?.starterRecent?.home ?? null;
-  const officialStarterAway = mlbOfficial?.starterRecent?.away ?? null;
-  const officialBattingHome = mlbOfficial?.recentBatting?.home ?? null;
-  const officialBattingAway = mlbOfficial?.recentBatting?.away ?? null;
-  const officialBullpenHome = mlbOfficial?.bullpen?.home ?? null;
-  const officialBullpenAway = mlbOfficial?.bullpen?.away ?? null;
+  const officialStarterHome = officialAdapter?.starterRecent?.home ?? null;
+  const officialStarterAway = officialAdapter?.starterRecent?.away ?? null;
+  const officialBattingHome = officialAdapter?.recentBatting?.home ?? null;
+  const officialBattingAway = officialAdapter?.recentBatting?.away ?? null;
+  const officialBullpenHome = officialAdapter?.bullpen?.home ?? null;
+  const officialBullpenAway = officialAdapter?.bullpen?.away ?? null;
 
+  const trustedOfficialSource = (row: any) => {
+    const source = String(row?.source ?? "");
+    if (leagueGroup === "MLB") return source.startsWith("MLB_");
+    if (leagueGroup === "NPB") return source.startsWith("NPB_");
+    return false;
+  };
   const usableStarter = (row: any) =>
     row &&
-    String(row?.source ?? "") === "MLB_PERSON_GAMELOG" &&
+    trustedOfficialSource(row) &&
     Math.max(0, Number(row?.startsFound ?? 0)) > 0 &&
     challengerFinite(row?.summary?.era) !== null;
   const usableBatting = (row: any) =>
@@ -8068,33 +8143,47 @@ function buildBaseballChallengerSnapshot(
     Math.max(0, Number(row?.gamesWithData ?? 0)) > 0 &&
     challengerFinite(row?.summary?.avg) !== null;
   const usableBullpen = (row: any) =>
-    row && Math.max(0, Number(row?.gamesChecked ?? 0)) > 0;
+    row &&
+    row?.parserOk !== false &&
+    Math.max(0, Number(row?.gamesChecked ?? 0)) > 0;
 
-  const starterHome = mlbOfficialEligible && usableStarter(officialStarterHome) ? officialStarterHome : naverStarterHome;
-  const starterAway = mlbOfficialEligible && usableStarter(officialStarterAway) ? officialStarterAway : naverStarterAway;
-  const battingHome = mlbOfficialEligible && usableBatting(officialBattingHome) ? officialBattingHome : naverBattingHome;
-  const battingAway = mlbOfficialEligible && usableBatting(officialBattingAway) ? officialBattingAway : naverBattingAway;
-  const bullpenHome = mlbOfficialEligible && usableBullpen(officialBullpenHome) ? officialBullpenHome : naverBullpenHome;
-  const bullpenAway = mlbOfficialEligible && usableBullpen(officialBullpenAway) ? officialBullpenAway : naverBullpenAway;
+  const officialEligible = mlbOfficialEligible || npbOfficialEligible;
+  const starterHome = officialEligible && usableStarter(officialStarterHome) ? officialStarterHome : naverStarterHome;
+  const starterAway = officialEligible && usableStarter(officialStarterAway) ? officialStarterAway : naverStarterAway;
+  const battingHome = officialEligible && usableBatting(officialBattingHome) ? officialBattingHome : naverBattingHome;
+  const battingAway = officialEligible && usableBatting(officialBattingAway) ? officialBattingAway : naverBattingAway;
+  const bullpenHome = officialEligible && usableBullpen(officialBullpenHome) ? officialBullpenHome : naverBullpenHome;
+  const bullpenAway = officialEligible && usableBullpen(officialBullpenAway) ? officialBullpenAway : naverBullpenAway;
 
-  const starterHomeSource = starterHome === officialStarterHome ? String(officialStarterHome?.source ?? "MLB_STATSAPI") : (starterHome ? "NAVER_SCHEDULE_RECORD" : null);
-  const starterAwaySource = starterAway === officialStarterAway ? String(officialStarterAway?.source ?? "MLB_STATSAPI") : (starterAway ? "NAVER_SCHEDULE_RECORD" : null);
-  const battingHomeSource = battingHome === officialBattingHome ? "MLB_STATSAPI_BOXSCORE" : (battingHome ? "NAVER_SCHEDULE_RECORD" : null);
-  const battingAwaySource = battingAway === officialBattingAway ? "MLB_STATSAPI_BOXSCORE" : (battingAway ? "NAVER_SCHEDULE_RECORD" : null);
-  const bullpenHomeSource = bullpenHome === officialBullpenHome ? "MLB_STATSAPI_BOXSCORE" : (bullpenHome ? "NAVER_SCHEDULE_RECORD" : null);
-  const bullpenAwaySource = bullpenAway === officialBullpenAway ? "MLB_STATSAPI_BOXSCORE" : (bullpenAway ? "NAVER_SCHEDULE_RECORD" : null);
+  const fallbackSource = (row: any) => row ? "NAVER_SCHEDULE_RECORD" : null;
+  const officialSource = (row: any, fallback: string) => String(row?.source ?? fallback);
+  const starterHomeSource = starterHome === officialStarterHome ? officialSource(officialStarterHome, `${leagueGroup}_OFFICIAL_STARTER`) : fallbackSource(starterHome);
+  const starterAwaySource = starterAway === officialStarterAway ? officialSource(officialStarterAway, `${leagueGroup}_OFFICIAL_STARTER`) : fallbackSource(starterAway);
+  const battingHomeSource = battingHome === officialBattingHome ? officialSource(officialBattingHome, `${leagueGroup}_OFFICIAL_BATTING`) : fallbackSource(battingHome);
+  const battingAwaySource = battingAway === officialBattingAway ? officialSource(officialBattingAway, `${leagueGroup}_OFFICIAL_BATTING`) : fallbackSource(battingAway);
+  const bullpenHomeSource = bullpenHome === officialBullpenHome ? officialSource(officialBullpenHome, `${leagueGroup}_OFFICIAL_BULLPEN`) : fallbackSource(bullpenHome);
+  const bullpenAwaySource = bullpenAway === officialBullpenAway ? officialSource(officialBullpenAway, `${leagueGroup}_OFFICIAL_BULLPEN`) : fallbackSource(bullpenAway);
 
-  const mlbOfficialFeatureCount = leagueGroup === "MLB"
+  const officialPrefix = leagueGroup === "MLB" ? "MLB_" : leagueGroup === "NPB" ? "NPB_" : "";
+  const officialFeatureCount = officialPrefix
     ? [starterHomeSource, starterAwaySource, battingHomeSource, battingAwaySource, bullpenHomeSource, bullpenAwaySource]
-        .filter((value) => String(value ?? "").startsWith("MLB_")).length
+        .filter((value) => String(value ?? "").startsWith(officialPrefix)).length
     : 0;
-  const challengerSourcePolicy = leagueGroup !== "MLB"
-    ? "NAVER_WORKLOAD"
-    : mlbOfficialFeatureCount === 6
-      ? "MLB_STATSAPI_BCD"
-      : mlbOfficialFeatureCount > 0
-        ? "MLB_STATSAPI_PARTIAL_NAVER_FALLBACK"
-        : "NAVER_WORKLOAD_FALLBACK";
+
+  const challengerSourcePolicy =
+    leagueGroup === "MLB"
+      ? officialFeatureCount === 6
+        ? "MLB_STATSAPI_BCD"
+        : officialFeatureCount > 0
+          ? "MLB_STATSAPI_PARTIAL_NAVER_FALLBACK"
+          : "NAVER_WORKLOAD_FALLBACK"
+      : leagueGroup === "NPB"
+        ? officialFeatureCount === 6
+          ? "NPB_OFFICIAL_BCD"
+          : officialFeatureCount > 0
+            ? "NPB_OFFICIAL_PARTIAL_NAVER_FALLBACK"
+            : "NAVER_WORKLOAD_FALLBACK"
+        : "NAVER_WORKLOAD";
 
   const starterNeutralEra = leagueGroup === "NPB" ? 3.5 : leagueGroup === "MLB" ? 4.3 : 4.5;
   const starterDeltaAgainst = (row: any) => {
@@ -8162,7 +8251,7 @@ function buildBaseballChallengerSnapshot(
 
   return {
     stage: "READY",
-    version: mlbOfficialEligible ? "V13.8.78" : "V13.8.74",
+    version: "V13.8.82",
     capturedAt,
     leagueGroup,
     variants: [
@@ -8171,7 +8260,7 @@ function buildBaseballChallengerSnapshot(
       { key: "STARTER_RECENT", label: "B · 선발 최근등판", ...starter, applied: starterApplied, note: leagueGroup === "MLB" && mlbOfficialEligible ? "MLB 개인 gameLog 최근 선발 ERA · 최대 ±0.45점" : "최근 선발 ERA · 최대 ±0.45점" },
       { key: "BATTING_RECENT", label: "C · 타선 최근5경기", ...batting, applied: battingApplied, note: leagueGroup === "MLB" && mlbOfficialEligible ? "MLB 공식 boxscore · 현재 라인업 최근 AVG" : "라인업 최근 AVG · 리그별 중립값 대비" },
       { key: "BULLPEN", label: "D · 불펜 workload", ...bullpen, applied: bullpenApplied, note: leagueGroup === "MLB" && mlbOfficialEligible ? "MLB 공식 boxscore · 24/48/72h 과사용만 페널티" : "24/48/72h 과사용만 페널티" },
-      { key: "COMBO", label: "E · COMBO", ...combo, applied: venueApplied || starterApplied || battingApplied || bullpenApplied, note: "A+B+C+D · MODEL OFF" },
+      { key: "COMBO", label: "E · COMBO", ...combo, applied: venueApplied || starterApplied || battingApplied || bullpenApplied, note: "A+B+C+D · SHADOW 비교 유지 / 의사결정은 recent blend 사용" },
     ],
     featureAudit: {
       starterRecentHomeStarts: Math.max(0, Number(starterHome?.startsFound ?? 0)),
@@ -8192,13 +8281,17 @@ function buildBaseballChallengerSnapshot(
       battingDeltaAway: Number(battingDeltaAway.toFixed(3)),
       bullpenDeltaHome: Number(bullpenDeltaHome.toFixed(3)),
       bullpenDeltaAway: Number(bullpenDeltaAway.toFixed(3)),
-      workloadSource: leagueGroup === "MLB" ? challengerSourcePolicy : (String(naverWorkload?.source ?? "").trim() || null),
+      workloadSource: (leagueGroup === "MLB" || leagueGroup === "NPB")
+        ? challengerSourcePolicy
+        : (String(naverWorkload?.source ?? "").trim() || null),
       scheduleStatus: leagueGroup === "MLB" && mlbOfficialEligible
         ? (Number.isFinite(Number(mlbOfficial?.schedule?.status)) ? Number(mlbOfficial.schedule.status) : null)
         : (Number.isFinite(Number(naverWorkload?.scheduleStatus)) ? Number(naverWorkload.scheduleStatus) : null),
       scheduleGames: leagueGroup === "MLB" && mlbOfficialEligible
         ? Math.max(0, Number(mlbOfficial?.coverage?.scheduleGames ?? 0))
-        : Math.max(0, Number(naverWorkload?.coverage?.scheduleGames ?? 0)),
+        : leagueGroup === "NPB" && npbOfficialEligible
+          ? Math.max(0, Number(npbOfficial?.coverage?.scheduleLinks ?? 0))
+          : Math.max(0, Number(naverWorkload?.coverage?.scheduleGames ?? 0)),
       battingHomeLineupPlayers: Math.max(0, Number(battingHome?.lineupPlayers ?? 0)),
       battingAwayLineupPlayers: Math.max(0, Number(battingAway?.lineupPlayers ?? 0)),
       battingHomeGamesChecked: Math.max(0, Number(battingHome?.gamesChecked ?? 0)),
@@ -8223,7 +8316,146 @@ function buildBaseballChallengerSnapshot(
       mlbOfficialGamePk: Number.isFinite(Number(mlbOfficial?.gamePk)) ? Number(mlbOfficial.gamePk) : null,
       mlbOfficialCurrentLineupPlayers: Math.max(0, Number(mlbOfficial?.coverage?.currentLineupPlayers ?? 0)),
       mlbOfficialStarterGameLogSides: Math.max(0, Number(mlbOfficial?.coverage?.starterGameLogSides ?? 0)),
+      npbOfficialBoxScores: Math.max(0, Number(npbOfficial?.coverage?.boxScores ?? 0)),
+      npbOfficialCurrentLineupPlayers: Math.max(0, Number(npbOfficial?.coverage?.currentLineupPlayers ?? 0)),
+      npbOfficialStarterRecentStarts: Math.max(0, Number(npbOfficial?.coverage?.starterRecentStarts ?? 0)),
+      npbOfficialRecentBattingPlayers: Math.max(0, Number(npbOfficial?.coverage?.recentBattingPlayers ?? 0)),
+      npbOfficialBullpenGames: Math.max(0, Number(npbOfficial?.coverage?.bullpenGames ?? 0)),
     },
+  };
+}
+
+
+type BaseballDecisionLambda = {
+  home: number;
+  away: number;
+  source: "CONTROL" | "RECENT_BLEND";
+  blendWeight: number;
+  coverage: string | null;
+  starterUsed: boolean;
+  battingUsed: boolean;
+  bullpenUsed: boolean;
+};
+
+function baseballDecisionLambda(
+  factors: AnalysisFactors,
+  challenger: BaseballChallengerSnapshot | null | undefined
+): BaseballDecisionLambda {
+  const controlHome = Math.max(0.1, Number(factors.expectedHomeScore ?? 0.1));
+  const controlAway = Math.max(0.1, Number(factors.expectedAwayScore ?? 0.1));
+
+  if (
+    factors.baseballAnalysisStage !== "READY" ||
+    !challenger ||
+    challenger.stage !== "READY"
+  ) {
+    return {
+      home: controlHome,
+      away: controlAway,
+      source: "CONTROL",
+      blendWeight: 0,
+      coverage: null,
+      starterUsed: false,
+      battingUsed: false,
+      bullpenUsed: false,
+    };
+  }
+
+  const audit = challenger.featureAudit;
+  const starterUsed =
+    Math.min(
+      Math.max(0, Number(audit.starterRecentHomeStarts ?? 0)),
+      Math.max(0, Number(audit.starterRecentAwayStarts ?? 0))
+    ) >= 2 &&
+    challengerFinite(audit.starterRecentHomeEra) !== null &&
+    challengerFinite(audit.starterRecentAwayEra) !== null;
+
+  const battingUsed =
+    Math.min(
+      Math.max(0, Number(audit.battingHomePlayers ?? 0)),
+      Math.max(0, Number(audit.battingAwayPlayers ?? 0))
+    ) >= 7 &&
+    Math.min(
+      Math.max(0, Number(audit.battingHomeGamesWithData ?? 0)),
+      Math.max(0, Number(audit.battingAwayGamesWithData ?? 0))
+    ) >= 3 &&
+    Math.min(
+      Math.max(0, Number(audit.battingHomeAtBats ?? 0)),
+      Math.max(0, Number(audit.battingAwayAtBats ?? 0))
+    ) >= 60;
+
+  const bullpenUsed =
+    Math.min(
+      Math.max(0, Number(audit.bullpenHomeGames ?? 0)),
+      Math.max(0, Number(audit.bullpenAwayGames ?? 0))
+    ) >= 2;
+
+  /*
+   * 최근 ERA/AVG/workload는 유용하지만 표본이 짧고 서로 상관되어 있다.
+   * 그래서 COMBO를 100% 대입하지 않고 이미 reliability/cap이 들어간 delta를
+   * 한 번 더 보수적으로 축소해 CONTROL λ에 가산한다.
+   * Venue shadow는 현재 OOS 표본에서 일관된 개선이 확인되지 않아 의사결정 λ에서는 제외한다.
+   */
+  const starterWeight = starterUsed ? 0.65 : 0;
+  const battingWeight = battingUsed ? 0.45 : 0;
+  const bullpenWeight = bullpenUsed ? 0.55 : 0;
+
+  const featureCount =
+    Number(starterUsed) +
+    Number(battingUsed) +
+    Number(bullpenUsed);
+
+  if (featureCount === 0) {
+    return {
+      home: controlHome,
+      away: controlAway,
+      source: "CONTROL",
+      blendWeight: 0,
+      coverage: "recent feature coverage 부족",
+      starterUsed,
+      battingUsed,
+      bullpenUsed,
+    };
+  }
+
+  const homeDelta =
+    Number(audit.starterDeltaHome ?? 0) * starterWeight +
+    Number(audit.battingDeltaHome ?? 0) * battingWeight +
+    Number(audit.bullpenDeltaHome ?? 0) * bullpenWeight;
+
+  const awayDelta =
+    Number(audit.starterDeltaAway ?? 0) * starterWeight +
+    Number(audit.battingDeltaAway ?? 0) * battingWeight +
+    Number(audit.bullpenDeltaAway ?? 0) * bullpenWeight;
+
+  /*
+   * 세 feature가 모두 있을 때도 보조 신호가 한 경기 λ를 과도하게 움직이지 않도록
+   * 최종 이동량을 팀당 ±0.60점으로 제한한다.
+   */
+  const finalHomeDelta = clamp(homeDelta, -0.60, 0.60);
+  const finalAwayDelta = clamp(awayDelta, -0.60, 0.60);
+
+  const labels = [
+    starterUsed ? "선발최근" : null,
+    battingUsed ? "타선최근" : null,
+    bullpenUsed ? "불펜피로" : null,
+  ].filter(Boolean);
+
+  return {
+    home: Math.max(0.1, controlHome + finalHomeDelta),
+    away: Math.max(0.1, controlAway + finalAwayDelta),
+    source: "RECENT_BLEND",
+    blendWeight: Number(
+      (
+        starterWeight +
+        battingWeight +
+        bullpenWeight
+      ).toFixed(2)
+    ),
+    coverage: labels.join("+"),
+    starterUsed,
+    battingUsed,
+    bullpenUsed,
   };
 }
 
@@ -8667,7 +8899,8 @@ function buildSignalConflict(
   game: BetmanMatch | null | undefined,
   factors: AnalysisFactors,
   recentSummary: RecentSummary | null | undefined,
-  h2h: any
+  h2h: any,
+  sport: Exclude<Sport, "전체"> = "축구"
 ): SignalConflict {
   const reasons: string[] = [];
   let score = 0;
@@ -8784,7 +9017,7 @@ function buildSignalConflict(
       homeShare >= 0.7 &&
       modelMargin < -0.05
     ) {
-      score += 16;
+      score += sport === "야구" ? 4 : 16;
       reasons.push(
         `H2H 홈 ${homeWins}-${awayWins} 우세와 득점모델 방향 충돌`
       );
@@ -8794,7 +9027,7 @@ function buildSignalConflict(
       homeShare <= 0.3 &&
       modelMargin > 0.05
     ) {
-      score += 16;
+      score += sport === "야구" ? 4 : 16;
       reasons.push(
         `H2H 원정 ${awayWins}-${homeWins} 우세와 득점모델 방향 충돌`
       );
@@ -8825,7 +9058,7 @@ function buildSignalConflict(
       formDiff >= 18 &&
       modelMargin < -0.05
     ) {
-      score += 8;
+      score += sport === "야구" ? 4 : 8;
       reasons.push(
         "최근 Form 홈우세와 득점모델 방향 충돌"
       );
@@ -8835,7 +9068,7 @@ function buildSignalConflict(
       formDiff <= -18 &&
       modelMargin > 0.05
     ) {
-      score += 8;
+      score += sport === "야구" ? 4 : 8;
       reasons.push(
         "최근 Form 원정우세와 득점모델 방향 충돌"
       );
@@ -9003,21 +9236,24 @@ function marketConfidence(
   h2h: any,
   market: any,
   overround: number,
-  signalConflict: SignalConflict
+  signalConflict: SignalConflict,
+  sport: Exclude<Sport, "전체"> = "축구"
 ) {
   const homePlayed = Math.max(0, Number(recentSummary?.home?.form?.played ?? 0));
   const awayPlayed = Math.max(0, Number(recentSummary?.away?.form?.played ?? 0));
 
-  // 최근 경기 표본: 양 팀 각각 5경기를 확보해야 최대점.
+  // 야구는 최근 5경기 결과와 H2H의 변동성이 특히 커서 coverage 점수를 축소한다.
   const recentCoverage =
-    ((Math.min(homePlayed, 5) + Math.min(awayPlayed, 5)) / 10) * 30;
+    ((Math.min(homePlayed, 5) + Math.min(awayPlayed, 5)) / 10) *
+    (sport === "야구" ? 18 : 30);
 
-  // H2H는 과거 상대전적이 현재 전력보다 과대평가되지 않도록 최대 10점만 반영.
   const h2hCount =
     Math.max(0, Number(h2h?.homeWins ?? 0)) +
     Math.max(0, Number(h2h?.awayWins ?? 0)) +
     Math.max(0, Number(h2h?.draws ?? 0));
-  const h2hCoverage = (Math.min(h2hCount, 5) / 5) * 10;
+  const h2hCoverage =
+    (Math.min(h2hCount, 5) / 5) *
+    (sport === "야구" ? 2 : 10);
 
   // 실제 최근 득점/실점이 모두 확보됐을 때만 점수모델 가점.
   const scoringCoverage = factors.scoringUsed ? 16 : 0;
@@ -9039,13 +9275,30 @@ function marketConfidence(
   const isFirstHalf = /전반|1st\s*half|first\s*half/i.test(betName);
   const isOddEven = /sum|홀짝|odd|even/i.test(`${betName} ${betTypeName}`);
 
+  const baseballDataQuality =
+    sport === "야구"
+      ? (
+          clamp(factors.baseballDataCompleteness / 100, 0, 1) * 10 +
+          clamp(
+            Math.min(
+              factors.homeStarterSampleReliability,
+              factors.awayStarterSampleReliability
+            ),
+            0,
+            1
+          ) * 12 +
+          clamp(factors.lineupStatsCoverage, 0, 1) * 10
+        )
+      : 0;
+
   let score =
-    22 +                 // 기본 데이터 품질
+    (sport === "야구" ? 16 : 22) +
     recentCoverage +
     h2hCoverage +
     scoringCoverage +
     venueCoverage +
-    marketQuality * 0.08;
+    marketQuality * 0.08 +
+    baseballDataQuality;
 
   // 현재 전반 예상은 전체경기 예상득점의 45% 근사치이므로 강하게 감점.
   if (isFirstHalf) score -= 18;
@@ -9057,6 +9310,24 @@ function marketConfidence(
   // 데이터 수신 성공과 예측 신뢰도를 구분하여 강하게 감점.
   score -=
     signalConflict.confidencePenalty;
+
+  // 야구는 발표 단계/타격 stats coverage가 낮으면 confidence 상한도 낮춘다.
+  if (sport === "야구") {
+    const stageCap =
+      factors.baseballAnalysisStage === "READY"
+        ? factors.lineupValueGate === "OPEN"
+          ? 84
+          : factors.lineupValueGate === "LIMIT"
+            ? 70
+            : 60
+        : factors.baseballAnalysisStage === "LINEUP"
+          ? 68
+          : factors.baseballAnalysisStage === "STARTER"
+            ? 60
+            : 54;
+
+    return clamp(score, 28, stageCap);
+  }
 
   // 현재 SportsAPI recentSummary는 홈/원정 분리 표본이 제한적이므로 상한 유지.
   return clamp(score, 28, 84);
@@ -9127,7 +9398,8 @@ function recommendationScore(
 
 function betExpectedValue(
   probabilityPercent: number,
-  odds: number | null
+  odds: number | null,
+  decidedProbability = 1
 ) {
   if (
     odds === null ||
@@ -9146,11 +9418,29 @@ function betExpectedValue(
 
   // 1단위 베팅 기준 순 기대수익률.
   // EV% = P(win) * odds - 1
-  const expectedValue =
+  const conditionalExpectedValue =
     (probabilityPercent / 100) *
       odds *
       100 -
     100;
+
+  /*
+   * 야구 승패/정수 U/O/정수 핸디처럼 적중무효(push)가 가능한 시장은
+   * push 확률만큼 실제 노출되는 EV 크기가 줄어든다.
+   * 부호는 conditional EV와 같지만 기존 코드는 magnitude를 과대평가했다.
+   */
+  const exposure =
+    clamp(
+      Number.isFinite(decidedProbability)
+        ? decidedProbability
+        : 1,
+      0,
+      1
+    );
+
+  const expectedValue =
+    conditionalExpectedValue *
+    exposure;
 
   return {
     breakEvenProbability:
@@ -9486,12 +9776,26 @@ function buildActualMarketPicks(
   sport: Exclude<Sport, "전체">,
   factors: AnalysisFactors,
   recentSummary: RecentSummary | null | undefined,
-  h2h: any
+  h2h: any,
+  baseballChallenger: BaseballChallengerSnapshot | null = null
 ): MarketPick[] {
   if (!game || !Array.isArray(game?.markets) || !factors.hasRealData) return [];
 
-  const expectedHome = factors.expectedHomeScore;
-  const expectedAway = factors.expectedAwayScore;
+  const baseballLambda =
+    sport === "야구"
+      ? baseballDecisionLambda(factors, baseballChallenger)
+      : null;
+
+  const expectedHome =
+    sport === "야구" && baseballLambda
+      ? baseballLambda.home
+      : factors.expectedHomeScore;
+
+  const expectedAway =
+    sport === "야구" && baseballLambda
+      ? baseballLambda.away
+      : factors.expectedAwayScore;
+
   const canScoreModel =
     expectedHome !== null && expectedAway !== null &&
     Number.isFinite(expectedHome) && Number.isFinite(expectedAway);
@@ -9503,7 +9807,8 @@ function buildActualMarketPicks(
       game,
       factors,
       recentSummary,
-      h2h
+      h2h,
+      sport
     );
 
   for (let index = 0; index < game.markets.length; index++) {
@@ -9609,7 +9914,8 @@ function buildActualMarketPicks(
               ),
             label:
               decisionRisk.reason,
-          }
+          },
+          sport
         );
 
         const calibrated =
@@ -9836,67 +10142,189 @@ function buildActualMarketPicks(
         baseballPush = draw;
       }
 
-      const best = bestSelection(market, probs);
+      const baseConfidence = marketConfidence(
+        factors,
+        recentSummary,
+        h2h,
+        market,
+        marketFair.overround,
+        {
+          ...signalConflict,
+          score: decisionRisk.score,
+          confidencePenalty: Number(
+            clamp(decisionRisk.score * 0.28, 0, 24).toFixed(1)
+          ),
+          label: decisionRisk.reason,
+        },
+        sport
+      );
 
-      if (best) {
-        const odds = Number(best.selection?.odds);
-        const safeOdds =
-          Number.isFinite(odds) && odds > 1 ? odds : null;
+      /*
+       * 최근 선발/타선/불펜 coverage가 비어 있는데도 READY만으로 B+가 찍히는 현상을 막는다.
+       * 0개면 STRONG VALUE 불가, 1~2개면 단계적으로 상한을 완화한다.
+       */
+      const recentFeatureCount =
+        Number(Boolean(baseballLambda?.starterUsed)) +
+        Number(Boolean(baseballLambda?.battingUsed)) +
+        Number(Boolean(baseballLambda?.bullpenUsed));
 
-        const fair = marketFair.probabilities[best.identity];
-        const marketProbability =
-          Number.isFinite(fair) ? Number(fair.toFixed(1)) : null;
+      const recentCoverageConfidenceCap =
+        recentFeatureCount >= 3
+          ? 84
+          : recentFeatureCount === 2
+            ? 76
+            : recentFeatureCount === 1
+              ? 70
+              : 64;
 
-        const confidence = marketConfidence(
-          factors,
-          recentSummary,
-          h2h,
-          market,
-          marketFair.overround,
-          {
-            ...signalConflict,
-            score: decisionRisk.score,
-            confidencePenalty: Number(
-              clamp(decisionRisk.score * 0.28, 0, 24).toFixed(1)
-            ),
-            label: decisionRisk.reason,
+      const confidence =
+        Math.min(
+          baseConfidence,
+          recentCoverageConfidenceCap
+        );
+
+      const decidedProbability =
+        clamp(
+          1 - baseballPush,
+          0,
+          1
+        );
+
+      /*
+       * V13.8.82
+       * "가장 맞을 확률이 높은 선택지"가 아니라 각 선택지의 배당까지 포함한
+       * "가장 가치가 높은 선택지"를 고른다. 3-way 승1패에서 특히 중요하다.
+       */
+      const valueCandidates = selections
+        .map((selection: any) => {
+          const identity = selectionIdentity(selection);
+          const rawProbability = Number(probs[identity]);
+          const odds = Number(selection?.odds);
+
+          if (
+            !identity ||
+            !Number.isFinite(rawProbability) ||
+            !Number.isFinite(odds) ||
+            odds <= 1
+          ) {
+            return null;
           }
-        );
 
-        const calibrated = calibrateModelProbability(
-          best.probability,
-          marketProbability,
-          confidence
-        );
+          const fair = marketFair.probabilities[identity];
+          const marketProbability =
+            Number.isFinite(fair)
+              ? Number(fair.toFixed(1))
+              : null;
 
-        const calibratedProbability =
-          Number(calibrated.probability.toFixed(1));
-
-        const edge =
-          marketProbability === null
-            ? null
-            : Number((calibratedProbability - marketProbability).toFixed(1));
-
-        const ev = betExpectedValue(calibratedProbability, safeOdds);
-
-        const baseValueGrade = evaluateValueGrade({
-          odds: safeOdds,
-          expectedValue: ev.expectedValue,
-          edge,
-          confidence,
-          decisionRiskScore: decisionRisk.score,
-          decisionRiskReason: decisionRisk.reason,
-        });
-
-        const valueGrade =
-          applyBaseballStageGate(
-            baseValueGrade,
-            factors
+          const calibrated = calibrateModelProbability(
+            rawProbability,
+            marketProbability,
+            confidence
           );
 
-        const recScore =
-          recommendationScore(calibratedProbability, edge, confidence);
+          const calibratedProbability =
+            Number(calibrated.probability.toFixed(1));
 
+          const edge =
+            marketProbability === null
+              ? null
+              : Number(
+                  (
+                    calibratedProbability -
+                    marketProbability
+                  ).toFixed(1)
+                );
+
+          const ev = betExpectedValue(
+            calibratedProbability,
+            odds,
+            decidedProbability
+          );
+
+          const baseValueGrade =
+            evaluateValueGrade({
+              odds,
+              expectedValue: ev.expectedValue,
+              edge,
+              confidence,
+              decisionRiskScore: decisionRisk.score,
+              decisionRiskReason: decisionRisk.reason,
+            });
+
+          const stagedValueGrade =
+            applyBaseballStageGate(
+              baseValueGrade,
+              factors
+            );
+
+          const valueGrade =
+            isSumMarket
+              ? {
+                  grade: "PASS" as const,
+                  score: Math.min(stagedValueGrade.score, 49),
+                  reason: "SUM 홀짝은 예측 구조상 검증용 · VALUE 비활성",
+                  stageGradeLabel: null as string | null,
+                }
+              : isFirstHalf
+                ? {
+                    grade: "PASS" as const,
+                    score: Math.min(stagedValueGrade.score, 49),
+                    reason: "전반 5이닝 전용 F5 모델 미구축 · 검증용 · VALUE 비활성",
+                    stageGradeLabel: null as string | null,
+                  }
+                : stagedValueGrade;
+
+          const recScore =
+            recommendationScore(
+              calibratedProbability,
+              edge,
+              confidence
+            );
+
+          return {
+            selection,
+            identity,
+            label: selectionLabel(selection) || identity,
+            probability: rawProbability,
+            calibratedProbability,
+            odds,
+            marketProbability,
+            edge,
+            ev,
+            valueGrade,
+            calibrated,
+            recScore,
+          };
+        })
+        .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
+
+      const gradeRank = (grade: ValueGrade) =>
+        grade === "STRONG VALUE"
+          ? 4
+          : grade === "VALUE"
+            ? 3
+            : grade === "WATCH"
+              ? 2
+              : 1;
+
+      const best =
+        valueCandidates.length
+          ? [...valueCandidates].sort(
+              (a, b) =>
+                gradeRank(b.valueGrade.grade) -
+                  gradeRank(a.valueGrade.grade) ||
+                (b.ev.expectedValue ?? -999) -
+                  (a.ev.expectedValue ?? -999) ||
+                b.valueGrade.score -
+                  a.valueGrade.score ||
+                (b.edge ?? -999) -
+                  (a.edge ?? -999) ||
+                b.calibratedProbability -
+                  a.calibratedProbability
+            )[0]
+          : null;
+
+      if (best) {
         const periodText =
           isFirstHalf ? "야구 전반 5이닝" : "야구 최종";
 
@@ -9916,8 +10344,13 @@ function buildActualMarketPicks(
 
         const pushText =
           baseballPush > 0.001
-            ? ` · 미결정/적중무효 ${(baseballPush * 100).toFixed(1)}% 제외`
+            ? ` · 미결정/적중무효 ${(baseballPush * 100).toFixed(1)}% EV노출 반영`
             : "";
+
+        const lambdaText =
+          baseballLambda?.source === "RECENT_BLEND"
+            ? ` · λ 최근보정(${baseballLambda.coverage ?? "-"})`
+            : " · λ CONTROL";
 
         result.push({
           key,
@@ -9929,29 +10362,37 @@ function buildActualMarketPicks(
             combinedName
           ),
           rawProbability: Number(best.probability.toFixed(1)),
-          probability: calibratedProbability,
-          odds: safeOdds,
-          marketProbability,
-          edge,
-          breakEvenProbability: ev.breakEvenProbability,
-          expectedValue: ev.expectedValue,
-          valueGrade: valueGrade.grade,
-          valueGradeScore: valueGrade.score,
-          valueGradeReason: valueGrade.reason,
+          probability: best.calibratedProbability,
+          odds: best.odds,
+          marketProbability: best.marketProbability,
+          edge: best.edge,
+          breakEvenProbability: best.ev.breakEvenProbability,
+          expectedValue: best.ev.expectedValue,
+          valueGrade: best.valueGrade.grade,
+          valueGradeScore: best.valueGrade.score,
+          valueGradeReason: best.valueGrade.reason,
           stageGradeLabel:
-            valueGrade.stageGradeLabel,
+            best.valueGrade.stageGradeLabel,
           calibrationWeight:
-            calibrated.modelWeight === null
+            best.calibrated.modelWeight === null
               ? null
-              : Number(calibrated.modelWeight.toFixed(2)),
+              : Number(best.calibrated.modelWeight.toFixed(2)),
           signalConflictScore: signalConflict.score,
           signalConflictLabel: signalConflict.label,
           decisionRiskScore: decisionRisk.score,
           decisionRiskReason: decisionRisk.reason,
           confidenceScore: Number(confidence.toFixed(1)),
           confidenceGrade: confidenceGrade(confidence),
-          recommendationScore: Number(recScore.toFixed(1)),
-          detail: `${periodText}${lineText}${ruleText}${pushText}`,
+          recommendationScore: Number(best.recScore.toFixed(1)),
+          baseballLambdaSource:
+            baseballLambda?.source ?? "CONTROL",
+          baseballRecentBlendWeight:
+            baseballLambda?.blendWeight ?? 0,
+          baseballRecentCoverage:
+            baseballLambda?.coverage ?? null,
+          decidedProbability:
+            Number(decidedProbability.toFixed(4)),
+          detail: `${periodText}${lineText}${ruleText}${pushText}${lambdaText}`,
         });
 
         continue;
@@ -9991,7 +10432,8 @@ function buildActualMarketPicks(
           ),
         label:
           decisionRisk.reason,
-      }
+      },
+      sport
       );
       result.push({
         key,
@@ -10066,7 +10508,8 @@ function buildActualMarketPicks(
           ),
         label:
           decisionRisk.reason,
-      }
+      },
+      sport
       );
 
       const calibrated =
@@ -14390,6 +14833,20 @@ export default function Home() {
     matched
   );
   const analysisFactors = analysis.factors;
+
+  const currentBaseballChallenger: BaseballChallengerSnapshot | null =
+    currentSport === "야구" && Date.now() >= BASEBALL_CHALLENGER_START_MS
+      ? buildBaseballChallengerSnapshot(
+          analysisFactors,
+          matched,
+          matched?.naverTodayLineup?.league ??
+            matched?.selectedFixture?.league ??
+            matched?.fixture?.league ??
+            (selectedBetman as any)?.league,
+          Date.now(),
+        )
+      : null;
+
   const betmanHandicap = chooseBetmanHandicap(betman.matched);
   const betmanTotal = chooseBetmanTotal(betman.matched);
   const actualMarketPicksRaw = buildActualMarketPicks(
@@ -14397,7 +14854,8 @@ export default function Home() {
     currentSport,
     analysisFactors,
     recentSummary,
-    h2h
+    h2h,
+    currentBaseballChallenger
   );
 
   const actualMarketPicks =
@@ -14978,7 +15436,8 @@ export default function Home() {
       betman.matched,
       analysisFactors,
       recentSummary,
-      h2h
+      h2h,
+      currentSport
     );
 
   const displayPicks: Pick[] = actualMarketPicks.length
@@ -15017,8 +15476,12 @@ export default function Home() {
         (a, b) =>
           valueGradeRank(b.valueGrade) -
             valueGradeRank(a.valueGrade) ||
+          (b.expectedValue ?? -999) -
+            (a.expectedValue ?? -999) ||
           b.valueGradeScore -
             a.valueGradeScore ||
+          (b.edge ?? -999) -
+            (a.edge ?? -999) ||
           b.recommendationScore -
             a.recommendationScore
       )[0]
@@ -15130,7 +15593,11 @@ export default function Home() {
 
   const baseballChallengerSummary = useMemo(() => {
     const locked = liveTrackerRecords.filter(
-      (record) => record.sport === "야구" && record.baseballChallenger?.version === "V13.8.74"
+      (record) =>
+        record.sport === "야구" &&
+        ["V13.8.74", "V13.8.78", "V13.8.82"].includes(
+          String(record.baseballChallenger?.version ?? "")
+        )
     );
     const verified = locked.filter(
       (record) => record.verificationStatus === "VERIFIED" && record.result
@@ -15868,14 +16335,7 @@ export default function Home() {
           : null;
 
       const baseballChallengerSnapshot: BaseballChallengerSnapshot | null =
-        currentSport === "야구" && Date.now() >= BASEBALL_CHALLENGER_START_MS
-          ? buildBaseballChallengerSnapshot(
-              analysisFactors,
-              matched,
-              matched?.naverTodayLineup?.league ?? matched?.selectedFixture?.league ?? matched?.fixture?.league ?? (selectedBetman as any)?.league,
-              Date.now(),
-            )
-          : null;
+        currentBaseballChallenger;
 
       const canPromoteBaseballReady = Boolean(
         existingRecord &&
@@ -15902,6 +16362,7 @@ export default function Home() {
         existingRecord.verificationStatus === "PENDING" &&
         existingRecord.capturedAt >= BASEBALL_CHALLENGER_START_MS &&
         (existingLeagueGroup !== "MLB" || existingRecord.capturedAt >= BASEBALL_MLB_OFFICIAL_BCD_START_MS) &&
+        (existingLeagueGroup !== "NPB" || existingRecord.capturedAt >= BASEBALL_NPB_OFFICIAL_BCD_START_MS) &&
         !existingRecord.baseballChallenger &&
         baseballChallengerSnapshot
       );
@@ -15911,8 +16372,12 @@ export default function Home() {
       }
 
       const markets = marketRows(selectedBetman);
+      /*
+       * V13.8.82: 실전 tracker의 PICK은 경기당 최고 1개만 잠근다.
+       * 전체 마켓은 marketResults에 계속 저장해 학습/검증 표본은 잃지 않는다.
+       */
       const trackerPicks: LiveTrackerPick[] =
-        eligibleMarketPicks.map((pick) => {
+        (bestActualPick ? [bestActualPick] : []).map((pick) => {
           const marketIndex = markets.findIndex(
             (market: any, index: number) =>
               marketStableKey(market, index) === pick.key
@@ -16961,13 +17426,27 @@ export default function Home() {
         combined
       );
 
+    const directBaseballChallenger =
+      currentSport === "야구"
+        ? buildBaseballChallengerSnapshot(
+            analysisDirect.factors,
+            combined,
+            combined?.naverTodayLineup?.league ??
+              combined?.selectedFixture?.league ??
+              combined?.fixture?.league ??
+              (game as any)?.league,
+            Date.now(),
+          )
+        : null;
+
     const modelPicksRaw =
       buildActualMarketPicks(
         game,
         currentSport,
         analysisDirect.factors,
         recent,
-        directH2h
+        directH2h,
+        directBaseballChallenger
       );
 
     const zeroPickFallback =
@@ -17871,13 +18350,27 @@ export default function Home() {
         combined
       );
 
+    const directBaseballChallenger =
+      currentSport === "야구"
+        ? buildBaseballChallengerSnapshot(
+            analysisDirect.factors,
+            combined,
+            combined?.naverTodayLineup?.league ??
+              combined?.selectedFixture?.league ??
+              combined?.fixture?.league ??
+              (game as any)?.league,
+            Date.now(),
+          )
+        : null;
+
     const modelPicksRaw =
       buildActualMarketPicks(
         game,
         currentSport,
         analysisDirect.factors,
         recent,
-        directH2h
+        directH2h,
+        directBaseballChallenger
       );
 
     const fallback =
@@ -20813,7 +21306,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.81 · NPB STARTER DATE-SECTION FIX · MLB B/C/D MODEL OFF</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.82 · BASEBALL VALUE ENGINE · RECENT B/C/D COVERAGE BLEND ACTIVE</div>
         </div>
         <div className="bar">
           <button
@@ -22316,7 +22809,7 @@ export default function Home() {
 
           <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid #bfdbfe", background: "#f8fbff" }}>
             <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-              V13.8.74 BASEBALL CHALLENGER LAB · MODEL OFF · CONTROL 추천 유지
+              V13.8.82 BASEBALL VALUE ENGINE · B/C/D RECENT BLEND ACTIVE · VENUE/COMBO SHADOW 유지
             </div>
             <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.65, marginBottom: 8 }}>
               시작점 2026-09-15 10:00 KST · 이후 READY 야구 PRE만 신규 OOS 저장 · 잠금 {baseballChallengerSummary.locked}경기 · VERIFY {baseballChallengerSummary.verified}경기 · 결과대기 {baseballChallengerSummary.pending}경기
@@ -22330,7 +22823,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.8.78 MLB OFFICIAL B/C/D INPUT · MODEL OFF</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.8.82 MLB OFFICIAL B/C/D INPUT · COVERAGE 충족 시 RECENT BLEND ACTIVE</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 2026-09-16 10:55 KST 이후 새 READY MLB snapshot부터 B는 MLB_PERSON_GAMELOG, C/D는 MLB StatsAPI 공식 boxscore를 우선 사용합니다. 항목별 공식 데이터가 없을 때만 Naver workload로 fallback합니다. CONTROL·실전 추천·Gate·기존 λ는 변경하지 않고 Challenger shadow만 계산합니다. 기존 잠금 snapshot은 다시 쓰지 않습니다.
               </div>
@@ -22338,7 +22831,7 @@ export default function Home() {
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #fde68a", background: "#fffbeb", borderRadius: 8 }}>
               <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>
-                V13.8.75 BASEBALL DATA COVERAGE AUDIT · MODEL OFF · 8.74 OOS 연속 유지
+                V13.8.82 BASEBALL DATA COVERAGE AUDIT · 픽별 λ source/coverage 저장
               </div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55, marginBottom: 7 }}>
                 데이터 확보와 λ조정을 분리해서 표시합니다. 불펜은 최근 데이터가 있어도 과사용 기준에 미달하면 <b>정상적으로 λ조정 0</b>입니다. 기존 8.74 snapshot은 저장된 최소 필드로 읽고, 8.75 이후 snapshot부터 schedule/48h/72h/AB 진단을 추가 보존합니다.
@@ -24033,7 +24526,7 @@ export default function Home() {
                               <b>{matched?.naverTodayLineup?.mlbOfficial?.ok ? "✓ 수신" : "대기/미수신"}</b>
                               <div className="small">
                                 gamePk {matched?.naverTodayLineup?.mlbOfficial?.gamePk ?? "-"} · schedule {Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.scheduleGames ?? 0)}G · box {Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.boxScores ?? 0)}
-                                <br />Challenger B/C/D MODEL OFF 입력 · CONTROL/추천/Gate/실전 λ 미반영 · route league {String(matched?.naverTodayLineup?.league ?? "-")}
+                                <br />Challenger B/C/D 입력 · coverage 충족 시 실전 λ에 보수적 recent blend 반영 · route league {String(matched?.naverTodayLineup?.league ?? "-")}
                               </div>
                             </div>
                             <div className="card">
@@ -24073,7 +24566,7 @@ export default function Home() {
                               <div className="small">
                                 schedule link {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.scheduleLinks ?? 0)} · box {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.boxScores ?? 0)}
                                 {matched?.naverTodayLineup?.npbOfficial?.schedule?.currentGameUrl ? " · 현재경기 resolve ✓" : " · 현재경기 resolve 대기"}
-                                <br />AUDIT ONLY · NPB B/D parser 검증 · Challenger/추천/λ 미반영
+                                <br />V13.8.82 · NPB 공식 B/C/D · coverage 충족 feature만 Challenger λ recent blend 반영
                               </div>
                             </div>
                             <div className="card">
@@ -24092,7 +24585,7 @@ export default function Home() {
                               NPB 공식 최근 타격
                               <b>{Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.recentBattingGames ?? 0) > 0 ? "✓ box score" : "미수신"}</b>
                               <div className="small">
-                                현재 공식 라인업 {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.currentLineupPlayers ?? 0)}/18
+                                현재 매칭 라인업 {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.currentLineupPlayers ?? 0)}/18 · source {matched?.naverTodayLineup?.npbOfficial?.currentLineup?.source ?? "-"}
                                 <br />최근 box 홈 {Number(matched?.naverTodayLineup?.npbOfficial?.recentBatting?.home?.gamesWithData ?? 0)}G · AVG {matched?.naverTodayLineup?.npbOfficial?.recentBatting?.home?.summary?.avg ?? matched?.naverTodayLineup?.npbOfficial?.recentBatting?.home?.summary?.teamAvg ?? "-"}
                                 {" / "}원정 {Number(matched?.naverTodayLineup?.npbOfficial?.recentBatting?.away?.gamesWithData ?? 0)}G · AVG {matched?.naverTodayLineup?.npbOfficial?.recentBatting?.away?.summary?.avg ?? matched?.naverTodayLineup?.npbOfficial?.recentBatting?.away?.summary?.teamAvg ?? "-"}
                               </div>
@@ -24133,17 +24626,17 @@ export default function Home() {
                         <div className="card">
                           선발 최근 투구 · Challenger B
                           <b>{matched?.naverTodayLineup?.league === "MLB" && Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.starterGameLogSides ?? 0) > 0 ? "✓ MLB_PERSON_GAMELOG" : Number(matched?.naverTodayLineup?.pitcherWorkload?.coverage?.starterRecentStarts ?? 0) > 0 ? "✓ Naver 개인 최근등판" : "미연결"}</b>
-                          <div className="small">{matched?.naverTodayLineup?.league === "MLB" && matched?.naverTodayLineup?.mlbOfficial?.ok ? <>MLB 홈 {Number(matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.home?.startsFound ?? 0)}회 / 원정 {Number(matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.away?.startsFound ?? 0)}회 · 새 READY부터 Challenger B 입력 · 실전 모델 OFF</> : <>Naver 홈 {Number(matched?.naverTodayLineup?.pitcherWorkload?.starterRecent?.home?.startsFound ?? 0)}회 / 원정 {Number(matched?.naverTodayLineup?.pitcherWorkload?.starterRecent?.away?.startsFound ?? 0)}회 · 최근 40일 schedule→record · Challenger B MODEL OFF</>}</div>
+                          <div className="small">{matched?.naverTodayLineup?.league === "MLB" && matched?.naverTodayLineup?.mlbOfficial?.ok ? <>MLB 홈 {Number(matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.home?.startsFound ?? 0)}회 / 원정 {Number(matched?.naverTodayLineup?.mlbOfficial?.starterRecent?.away?.startsFound ?? 0)}회 · 새 READY부터 Challenger B 입력 · coverage 충족 시 실전 recent blend</> : <>Naver 홈 {Number(matched?.naverTodayLineup?.pitcherWorkload?.starterRecent?.home?.startsFound ?? 0)}회 / 원정 {Number(matched?.naverTodayLineup?.pitcherWorkload?.starterRecent?.away?.startsFound ?? 0)}회 · 최근 40일 schedule→record · Challenger B coverage gate</>}</div>
                         </div>
                         <div className="card">
                           타자 최근 타격감 · Challenger C
                           <b>{matched?.naverTodayLineup?.league === "MLB" && Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.recentBattingPlayers ?? 0) > 0 ? "✓ MLB StatsAPI boxscore" : Number(matched?.naverTodayLineup?.pitcherWorkload?.coverage?.recentBattingPlayers ?? 0) > 0 ? "✓ Naver 라인업 최근5경기" : "미연결"}</b>
-                          <div className="small">{matched?.naverTodayLineup?.league === "MLB" && matched?.naverTodayLineup?.mlbOfficial?.ok ? <>MLB 매칭 홈 {Number(matched?.naverTodayLineup?.mlbOfficial?.recentBatting?.home?.playersMatched ?? 0)}/9 · 원정 {Number(matched?.naverTodayLineup?.mlbOfficial?.recentBatting?.away?.playersMatched ?? 0)}/9 · 최근5경기 · 새 READY부터 Challenger C 입력 · 실전 모델 OFF</> : <>Naver 매칭 홈 {Number(matched?.naverTodayLineup?.pitcherWorkload?.recentBatting?.home?.playersMatched ?? 0)}/9 · 원정 {Number(matched?.naverTodayLineup?.pitcherWorkload?.recentBatting?.away?.playersMatched ?? 0)}/9 · 최근5경기 · Challenger C MODEL OFF</>}</div>
+                          <div className="small">{matched?.naverTodayLineup?.league === "MLB" && matched?.naverTodayLineup?.mlbOfficial?.ok ? <>MLB 매칭 홈 {Number(matched?.naverTodayLineup?.mlbOfficial?.recentBatting?.home?.playersMatched ?? 0)}/9 · 원정 {Number(matched?.naverTodayLineup?.mlbOfficial?.recentBatting?.away?.playersMatched ?? 0)}/9 · 최근5경기 · 새 READY부터 Challenger C 입력 · coverage 충족 시 실전 recent blend</> : <>Naver 매칭 홈 {Number(matched?.naverTodayLineup?.pitcherWorkload?.recentBatting?.home?.playersMatched ?? 0)}/9 · 원정 {Number(matched?.naverTodayLineup?.pitcherWorkload?.recentBatting?.away?.playersMatched ?? 0)}/9 · 최근5경기 · Challenger C coverage gate</>}</div>
                         </div>
                         <div className="card">
                           불펜 소모도 · Challenger D
                           <b>{matched?.naverTodayLineup?.league === "MLB" && Number(matched?.naverTodayLineup?.mlbOfficial?.coverage?.bullpenGames ?? 0) > 0 ? "✓ MLB StatsAPI boxscore" : Number(matched?.naverTodayLineup?.pitcherWorkload?.coverage?.bullpenGames ?? 0) > 0 ? "✓ Naver 최근3경기" : "미연결"}</b>
-                          <div className="small">{matched?.naverTodayLineup?.league === "MLB" && matched?.naverTodayLineup?.mlbOfficial?.ok ? <>24/48/72h 홈 {matched?.naverTodayLineup?.mlbOfficial?.bullpen?.home?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.home?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.home?.windows?.h72?.innings ?? "0.0"}IP · 원정 {matched?.naverTodayLineup?.mlbOfficial?.bullpen?.away?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.away?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.away?.windows?.h72?.innings ?? "0.0"}IP · 새 READY부터 Challenger D 입력 · 실전 모델 OFF</> : <>24/48/72h 홈 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h72?.innings ?? "0.0"}IP · 원정 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h72?.innings ?? "0.0"}IP · Challenger D MODEL OFF</>}</div>
+                          <div className="small">{matched?.naverTodayLineup?.league === "MLB" && matched?.naverTodayLineup?.mlbOfficial?.ok ? <>24/48/72h 홈 {matched?.naverTodayLineup?.mlbOfficial?.bullpen?.home?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.home?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.home?.windows?.h72?.innings ?? "0.0"}IP · 원정 {matched?.naverTodayLineup?.mlbOfficial?.bullpen?.away?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.away?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.mlbOfficial?.bullpen?.away?.windows?.h72?.innings ?? "0.0"}IP · 새 READY부터 Challenger D 입력 · coverage 충족 시 실전 recent blend</> : <>24/48/72h 홈 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.home?.windows?.h72?.innings ?? "0.0"}IP · 원정 {matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h24?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h48?.innings ?? "0.0"}/{matched?.naverTodayLineup?.pitcherWorkload?.bullpen?.away?.windows?.h72?.innings ?? "0.0"}IP · Challenger D coverage gate</>}</div>
                         </div>
                         <div className="card">
                           부상/결장
