@@ -1,5 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
-// V13.8.84 FIX4: canceled/postponed baseball games excluded from recent Form/venue/B-C-D samples
+// V13.8.85 FIX5: recent B/C/D coverage promotion gate; incomplete starter-recent data cannot become STRONG VALUE
 // DEPLOY_MARKER_V13_8_32_POST_START_30MIN_VISIBILITY_20260903
 // DEPLOY_MARKER_V13_8_28_FOOTBALL_NAVER_LINEUP_V1_20260830
 // DEPLOY_MARKER_V13_8_19_MLB_SPORTSAPI_ALIAS_FIX_20260829
@@ -689,7 +689,7 @@ type BaseballChallengerVariant = {
 
 type BaseballChallengerSnapshot = {
   stage: "READY";
-  version: "V13.8.74" | "V13.8.78" | "V13.8.82" | "V13.8.83" | "V13.8.84";
+  version: "V13.8.74" | "V13.8.78" | "V13.8.82" | "V13.8.83" | "V13.8.84" | "V13.8.85";
   capturedAt: number;
   leagueGroup: "KBO" | "NPB" | "MLB" | "OTHER";
   variants: BaseballChallengerVariant[];
@@ -8345,7 +8345,7 @@ function buildBaseballChallengerSnapshot(
 
   return {
     stage: "READY",
-    version: "V13.8.84",
+    version: "V13.8.85",
     capturedAt,
     leagueGroup,
     variants: [
@@ -9465,6 +9465,50 @@ function calibrateModelProbability(
   };
 }
 
+function applyBaseballRecentCoverageGradeCap(
+  valueGrade: {
+    grade: ValueGrade;
+    score: number;
+    reason: string;
+    stageGradeLabel?: string | null;
+  },
+  recentFeatureCount: number,
+  starterUsed: boolean
+) {
+  if (valueGrade.grade === "PASS" || valueGrade.grade === "WATCH") {
+    return valueGrade;
+  }
+
+  /*
+   * V13.8.85 FIX5
+   * 최고의 픽만 남기기 위한 coverage 승격 상한.
+   * - B/C/D 3개 모두 사용 가능: STRONG VALUE 허용
+   * - 2개만 사용 가능(특히 선발 B 한쪽 부족): 최대 VALUE
+   * - 0~1개만 사용 가능: 최대 WATCH
+   */
+  if (recentFeatureCount >= 3 && starterUsed) {
+    return valueGrade;
+  }
+
+  if (recentFeatureCount >= 2) {
+    if (valueGrade.grade === "STRONG VALUE") {
+      return {
+        ...valueGrade,
+        grade: "VALUE" as ValueGrade,
+        score: Math.min(valueGrade.score, 71.9),
+        reason: `${valueGrade.reason} · B/C/D 2/3 coverage · STRONG 승격 제한`,
+      };
+    }
+    return valueGrade;
+  }
+
+  return {
+    ...valueGrade,
+    grade: "WATCH" as ValueGrade,
+    reason: `${valueGrade.reason} · B/C/D coverage ${recentFeatureCount}/3 · VALUE 승격 제한`,
+  };
+}
+
 function recommendationScore(
   modelProbability: number,
   edge: number | null,
@@ -10353,22 +10397,29 @@ function buildActualMarketPicks(
               factors
             );
 
+          const coverageGatedValueGrade =
+            applyBaseballRecentCoverageGradeCap(
+              stagedValueGrade,
+              recentFeatureCount,
+              Boolean(baseballLambda?.starterUsed)
+            );
+
           const valueGrade =
             isSumMarket
               ? {
                   grade: "PASS" as const,
-                  score: Math.min(stagedValueGrade.score, 49),
+                  score: Math.min(coverageGatedValueGrade.score, 49),
                   reason: "SUM 홀짝은 예측 구조상 검증용 · VALUE 비활성",
                   stageGradeLabel: null as string | null,
                 }
               : isFirstHalf
                 ? {
                     grade: "PASS" as const,
-                    score: Math.min(stagedValueGrade.score, 49),
+                    score: Math.min(coverageGatedValueGrade.score, 49),
                     reason: "전반 5이닝 전용 F5 모델 미구축 · 검증용 · VALUE 비활성",
                     stageGradeLabel: null as string | null,
                   }
-                : stagedValueGrade;
+                : coverageGatedValueGrade;
 
           const recScore =
             recommendationScore(
@@ -14942,6 +14993,32 @@ export default function Home() {
         )
       : null;
 
+  const currentBaseballDecisionCoverage =
+    currentSport === "야구"
+      ? baseballDecisionLambda(analysisFactors, currentBaseballChallenger)
+      : null;
+
+  const currentBaseballRecentFeatureCount =
+    currentBaseballDecisionCoverage
+      ? Number(currentBaseballDecisionCoverage.starterUsed) +
+        Number(currentBaseballDecisionCoverage.battingUsed) +
+        Number(currentBaseballDecisionCoverage.bullpenUsed)
+      : 0;
+
+  const currentBaseballEffectiveCompleteness =
+    currentSport === "야구"
+      ? Math.min(
+          analysisFactors.baseballDataCompleteness,
+          currentBaseballRecentFeatureCount >= 3
+            ? 100
+            : currentBaseballRecentFeatureCount === 2
+              ? 88
+              : currentBaseballRecentFeatureCount === 1
+                ? 72
+                : 58
+        )
+      : analysisFactors.baseballDataCompleteness;
+
   const betmanHandicap = chooseBetmanHandicap(betman.matched);
   const betmanTotal = chooseBetmanTotal(betman.matched);
   const actualMarketPicksRaw = buildActualMarketPicks(
@@ -15690,7 +15767,7 @@ export default function Home() {
     const locked = liveTrackerRecords.filter(
       (record) =>
         record.sport === "야구" &&
-        ["V13.8.74", "V13.8.78", "V13.8.82", "V13.8.83", "V13.8.84"].includes(
+        ["V13.8.74", "V13.8.78", "V13.8.82", "V13.8.83", "V13.8.84", "V13.8.85"].includes(
           String(record.baseballChallenger?.version ?? "")
         )
     );
@@ -21401,7 +21478,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.84 FIX4 · CANCEL/POSTPONE FILTER + TEAM STRENGTH + NPB C/D</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.85 FIX5 · B/C/D COVERAGE GATE + CANCEL FILTER + TEAM STRENGTH + NPB C/D</div>
         </div>
         <div className="bar">
           <button
@@ -22904,7 +22981,7 @@ export default function Home() {
 
           <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid #bfdbfe", background: "#f8fbff" }}>
             <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-              V13.8.84 FIX4 BASEBALL VALUE ENGINE · CANCEL/POSTPONE FILTER + TEAM STRENGTH + NPB C/D
+              V13.8.85 FIX5 BASEBALL VALUE ENGINE · B/C/D COVERAGE GATE + CANCEL FILTER + TEAM STRENGTH + NPB C/D
             </div>
             <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.65, marginBottom: 8 }}>
               시작점 2026-09-15 10:00 KST · 이후 READY 야구 PRE만 신규 OOS 저장 · 잠금 {baseballChallengerSummary.locked}경기 · VERIFY {baseballChallengerSummary.verified}경기 · 결과대기 {baseballChallengerSummary.pending}경기
@@ -22918,7 +22995,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.8.84 MLB/NPB OFFICIAL B/C/D INPUT · COVERAGE 충족 시 RECENT BLEND ACTIVE</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.8.85 MLB/NPB OFFICIAL B/C/D INPUT · 3/3 STRONG · 2/3 최대 VALUE · 0~1/3 최대 WATCH</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 2026-09-16 10:55 KST 이후 새 READY MLB snapshot부터 B는 MLB_PERSON_GAMELOG, C/D는 MLB StatsAPI 공식 boxscore를 우선 사용합니다. 항목별 공식 데이터가 없을 때만 Naver workload로 fallback합니다. CONTROL·실전 추천·Gate·기존 λ는 변경하지 않고 Challenger shadow만 계산합니다. 기존 잠금 snapshot은 다시 쓰지 않습니다.
               </div>
@@ -22926,7 +23003,7 @@ export default function Home() {
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #fde68a", background: "#fffbeb", borderRadius: 8 }}>
               <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>
-                V13.8.84 BASEBALL DATA COVERAGE AUDIT · 픽별 λ source/coverage 저장
+                V13.8.85 BASEBALL DATA COVERAGE AUDIT · 픽별 λ source/coverage + 승격 상한 저장
               </div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55, marginBottom: 7 }}>
                 데이터 확보와 λ조정을 분리해서 표시합니다. 불펜은 최근 데이터가 있어도 과사용 기준에 미달하면 <b>정상적으로 λ조정 0</b>입니다. 기존 8.74 snapshot은 저장된 최소 필드로 읽고, 8.75 이후 snapshot부터 schedule/48h/72h/AB 진단을 추가 보존합니다.
@@ -24661,7 +24738,7 @@ export default function Home() {
                               <div className="small">
                                 schedule link {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.scheduleLinks ?? 0)} · box {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.boxScores ?? 0)}
                                 {matched?.naverTodayLineup?.npbOfficial?.schedule?.currentGameUrl ? " · 현재경기 resolve ✓" : " · 현재경기 resolve 대기"}
-                                <br />V13.8.84 · NPB 공식 C/D 실전 λ 연결 · 취소/연기 표본 제외 · coverage gate 통과 시 recent blend 반영
+                                <br />V13.8.85 · NPB 공식 C/D 실전 λ 연결 · 취소/연기 표본 제외 · B/C/D coverage별 추천 승격 상한 적용
                               </div>
                             </div>
                             <div className="card">
@@ -24780,22 +24857,33 @@ export default function Home() {
 
                         <div className="card">
                           데이터 완성도
-                          <b>{analysisFactors.baseballDataCompleteness}%</b>
+                          <b>{currentBaseballEffectiveCompleteness}%</b>
                           <div className="small">
                             선발 {analysisFactors.baseballStarterCount}/2
-                            {" · "}라인업 감지 {analysisFactors.baseballLineupPlayerCount}명
+                            {" · "}라인업 {analysisFactors.baseballLineupPlayerCount}명
+                            {" · "}B/C/D {currentBaseballRecentFeatureCount}/3
                           </div>
                         </div>
 
                         <div className="card">
                           추천 승격 규칙
                           <b>
-                            {analysisFactors.baseballAnalysisStage === "READY"
-                              ? "VALUE 확정 가능"
-                              : "VALUE 후보만 표시"}
+                            {analysisFactors.baseballAnalysisStage !== "READY"
+                              ? "VALUE 후보만 표시"
+                              : currentBaseballRecentFeatureCount >= 3 && currentBaseballDecisionCoverage?.starterUsed
+                                ? "STRONG VALUE 가능"
+                                : currentBaseballRecentFeatureCount >= 2
+                                  ? "최대 VALUE"
+                                  : "최대 WATCH"}
                           </b>
                           <div className="small">
-                            미발표 단계에서는 최고 가치픽 승격 제한
+                            {analysisFactors.baseballAnalysisStage !== "READY"
+                              ? "미발표 단계에서는 최고 가치픽 승격 제한"
+                              : !currentBaseballDecisionCoverage?.starterUsed
+                                ? "선발 최근 B 양팀 coverage 부족 · STRONG 제한"
+                                : currentBaseballRecentFeatureCount < 3
+                                  ? "B/C/D 일부 부족 · 추천 등급 자동 제한"
+                                  : "B/C/D 3/3 coverage 충족"}
                           </div>
                         </div>
                       </div>
