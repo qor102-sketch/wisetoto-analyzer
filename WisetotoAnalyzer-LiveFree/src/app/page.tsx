@@ -1,5 +1,5 @@
-// DEPLOY_MARKER_V13_8_82_BASEBALL_VALUE_ENGINE_ACTIVE_20260919
-// V13.8.82: league-aware run prior · challenger recent-form blend · push-adjusted EV · best-value selection
+// DEPLOY_MARKER_V13_8_82_FIX2_BASEBALL_PRIOR_FALLBACK_ACTIVE_20260919
+// V13.8.82 FIX2: baseball league-prior fallback when recent score feed is missing · B/C/D recent blend preserved
 // DEPLOY_MARKER_V13_8_32_POST_START_30MIN_VISIBILITY_20260903
 // DEPLOY_MARKER_V13_8_28_FOOTBALL_NAVER_LINEUP_V1_20260830
 // DEPLOY_MARKER_V13_8_19_MLB_SPORTSAPI_ALIAS_FIX_20260829
@@ -6492,20 +6492,28 @@ function buildAnalysis(
   let venueShadowFinalHomeScore: number | null = null;
   let venueShadowFinalAwayScore: number | null = null;
 
-  if (scoringUsed) {
+  /*
+   * V13.8.83 BASEBALL PRIOR FALLBACK
+   * MLB/NPB/KBO의 최근 득실 feed가 비어 있어도 선발/라인업/공식 B/C/D 데이터가
+   * 준비된 경기를 "분석 대기"에 묶어 두지 않는다. 야구는 리그별 득점 prior를
+   * CONTROL λ의 시작점으로 사용하고 이후 기존 선발/타선 보정과 Challenger recent
+   * blend를 동일하게 적용한다. recent scoring이 실제로 있으면 기존 계산을 그대로 사용한다.
+   */
+  const baseballPriorFallback =
+    sport === "야구" &&
+    !scoringUsed &&
+    baseballRunPrior !== null;
+
+  if (scoringUsed || baseballPriorFallback) {
     const rawHome =
-      (
-        homeAvgScored! +
-        awayAvgConceded!
-      ) /
-      2;
+      scoringUsed
+        ? (homeAvgScored! + awayAvgConceded!) / 2
+        : baseballRunPrior!;
 
     const rawAway =
-      (
-        awayAvgScored! +
-        homeAvgConceded!
-      ) /
-      2;
+      scoringUsed
+        ? (awayAvgScored! + homeAvgConceded!) / 2
+        : baseballRunPrior!;
 
     rawExpectedHomeScore =
       rawHome;
@@ -6918,7 +6926,8 @@ function buildAnalysis(
   const hasRealData =
     formUsed ||
     h2hUsed ||
-    scoringUsed;
+    scoringUsed ||
+    baseballPriorFallback;
 
   let homeProbability =
     50;
@@ -6956,8 +6965,8 @@ function buildAnalysis(
     }
 
     if (
-      scoringUsed &&
-      expectedMargin !== null
+      expectedMargin !== null &&
+      (scoringUsed || baseballPriorFallback)
     ) {
       const marginSignal =
         clamp(
@@ -21305,7 +21314,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.82 · BASEBALL VALUE ENGINE · RECENT B/C/D COVERAGE BLEND ACTIVE</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.82 FIX2 · BASEBALL PRIOR FALLBACK · RECENT B/C/D BLEND ACTIVE</div>
         </div>
         <div className="bar">
           <button
@@ -22808,7 +22817,7 @@ export default function Home() {
 
           <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid #bfdbfe", background: "#f8fbff" }}>
             <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-              V13.8.82 BASEBALL VALUE ENGINE · B/C/D RECENT BLEND ACTIVE · VENUE/COMBO SHADOW 유지
+              V13.8.82 FIX2 BASEBALL VALUE ENGINE · PRIOR FALLBACK + B/C/D RECENT BLEND ACTIVE
             </div>
             <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.65, marginBottom: 8 }}>
               시작점 2026-09-15 10:00 KST · 이후 READY 야구 PRE만 신규 OOS 저장 · 잠금 {baseballChallengerSummary.locked}경기 · VERIFY {baseballChallengerSummary.verified}경기 · 결과대기 {baseballChallengerSummary.pending}경기
