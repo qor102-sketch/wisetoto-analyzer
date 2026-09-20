@@ -1,5 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
-// V13.8.87 FIX7: official MLB/NPB bullpen workload gate accepts 1+ verified boxscore; NAVER fallback keeps 2-game gate
+// V13.8.88 FIX8: STRONG VALUE requires baseball model strength >= 70%; lower strength is capped at VALUE
 // DEPLOY_MARKER_V13_8_32_POST_START_30MIN_VISIBILITY_20260903
 // DEPLOY_MARKER_V13_8_28_FOOTBALL_NAVER_LINEUP_V1_20260830
 // DEPLOY_MARKER_V13_8_19_MLB_SPORTSAPI_ALIAS_FIX_20260829
@@ -9488,30 +9488,43 @@ function applyBaseballRecentCoverageGradeCap(
     stageGradeLabel?: string | null;
   },
   recentFeatureCount: number,
-  starterUsed: boolean
+  starterUsed: boolean,
+  modelStrength: number | null | undefined
 ) {
   if (valueGrade.grade === "PASS" || valueGrade.grade === "WATCH") {
     return valueGrade;
   }
 
   /*
-   * V13.8.85 FIX5
-   * 최고의 픽만 남기기 위한 coverage 승격 상한.
-   * - B/C/D 3개 모두 사용 가능: STRONG VALUE 허용
-   * - 2개만 사용 가능(특히 선발 B 한쪽 부족): 최대 VALUE
+   * V13.8.88 FIX8
+   * 최고의 픽만 남기기 위한 coverage + 기본 표본강도 승격 상한.
+   * - B/C/D 3개 + 선발 B 정상 + 모델 강도 70% 이상: STRONG VALUE 허용
+   * - B/C/D 3개라도 모델 강도 70% 미만: 최대 VALUE
+   * - B/C/D 2개만 사용 가능: 최대 VALUE
    * - 0~1개만 사용 가능: 최대 WATCH
    */
-  if (recentFeatureCount >= 3 && starterUsed) {
+  const strength = Number(modelStrength);
+  const strengthKnown = Number.isFinite(strength);
+  const strongSampleReady = strengthKnown && strength >= 0.70;
+
+  if (recentFeatureCount >= 3 && starterUsed && strongSampleReady) {
     return valueGrade;
   }
 
   if (recentFeatureCount >= 2) {
     if (valueGrade.grade === "STRONG VALUE") {
+      const capReason =
+        recentFeatureCount >= 3 && starterUsed && strengthKnown && strength < 0.70
+          ? `모델 강도 ${Math.round(strength * 100)}% · STRONG 승격 기준 70% 미달`
+          : recentFeatureCount >= 3 && starterUsed && !strengthKnown
+            ? "모델 강도 미확인 · STRONG 승격 제한"
+            : `B/C/D ${recentFeatureCount}/3 coverage · STRONG 승격 제한`;
+
       return {
         ...valueGrade,
         grade: "VALUE" as ValueGrade,
         score: Math.min(valueGrade.score, 71.9),
-        reason: `${valueGrade.reason} · B/C/D 2/3 coverage · STRONG 승격 제한`,
+        reason: `${valueGrade.reason} · ${capReason}`,
       };
     }
     return valueGrade;
@@ -10416,7 +10429,8 @@ function buildActualMarketPicks(
             applyBaseballRecentCoverageGradeCap(
               stagedValueGrade,
               recentFeatureCount,
-              Boolean(baseballLambda?.starterUsed)
+              Boolean(baseballLambda?.starterUsed),
+              factors.scoreShrinkage
             );
 
           const valueGrade =
@@ -21493,7 +21507,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.87 FIX7 · OFFICIAL BULLPEN WORKLOAD GATE</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.88 FIX8 · MODEL STRENGTH 70% STRONG GATE</div>
         </div>
         <div className="bar">
           <button
@@ -22996,7 +23010,7 @@ export default function Home() {
 
           <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid #bfdbfe", background: "#f8fbff" }}>
             <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-              V13.8.87 FIX7 BASEBALL VALUE ENGINE · OFFICIAL BULLPEN WORKLOAD GATE
+              V13.8.88 FIX8 BASEBALL VALUE ENGINE · MODEL STRENGTH 70% STRONG GATE
             </div>
             <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.65, marginBottom: 8 }}>
               시작점 2026-09-15 10:00 KST · 이후 READY 야구 PRE만 신규 OOS 저장 · 잠금 {baseballChallengerSummary.locked}경기 · VERIFY {baseballChallengerSummary.verified}경기 · 결과대기 {baseballChallengerSummary.pending}경기
@@ -23010,7 +23024,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.8.87 MLB/NPB OFFICIAL B/C/D INPUT · 공식 불펜 1+ boxscore면 D 사용 · 3/3 STRONG · 2/3 최대 VALUE · 0~1/3 최대 WATCH</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.8.88 MLB/NPB B/C/D + MODEL STRENGTH GATE · 3/3 + 강도 70%↑ STRONG · 강도 70%↓ 최대 VALUE · 0~1/3 최대 WATCH</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 2026-09-16 10:55 KST 이후 새 READY MLB snapshot부터 B는 MLB_PERSON_GAMELOG, C/D는 MLB StatsAPI 공식 boxscore를 우선 사용합니다. 항목별 공식 데이터가 없을 때만 Naver workload로 fallback합니다. CONTROL·실전 추천·Gate·기존 λ는 변경하지 않고 Challenger shadow만 계산합니다. 기존 잠금 snapshot은 다시 쓰지 않습니다.
               </div>
@@ -24753,7 +24767,7 @@ export default function Home() {
                               <div className="small">
                                 schedule link {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.scheduleLinks ?? 0)} · box {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.boxScores ?? 0)}
                                 {matched?.naverTodayLineup?.npbOfficial?.schedule?.currentGameUrl ? " · 현재경기 resolve ✓" : " · 현재경기 resolve 대기"}
-                                <br />V13.8.87 · NPB 공식 C/D 실전 λ 연결 · 공식 불펜 1+ boxscore D 허용 · 취소/연기 표본 제외
+                                <br />V13.8.88 · NPB 공식 C/D 실전 λ 연결 · 공식 불펜 1+ boxscore D 허용 · STRONG은 모델 강도 70% 이상 · 취소/연기 표본 제외
                               </div>
                             </div>
                             <div className="card">
@@ -24893,7 +24907,10 @@ export default function Home() {
                           <b>
                             {analysisFactors.baseballAnalysisStage !== "READY"
                               ? "VALUE 후보만 표시"
-                              : currentBaseballRecentFeatureCount >= 3 && currentBaseballDecisionCoverage?.starterUsed
+                              : currentBaseballRecentFeatureCount >= 3 &&
+                                  currentBaseballDecisionCoverage?.starterUsed &&
+                                  Number.isFinite(Number(analysisFactors.scoreShrinkage)) &&
+                                  Number(analysisFactors.scoreShrinkage) >= 0.70
                                 ? "STRONG VALUE 가능"
                                 : currentBaseballRecentFeatureCount >= 2
                                   ? "최대 VALUE"
@@ -24906,7 +24923,11 @@ export default function Home() {
                                 ? "선발 최근 B 양팀 coverage 부족 · STRONG 제한"
                                 : currentBaseballRecentFeatureCount < 3
                                   ? "B/C/D 일부 부족 · 추천 등급 자동 제한"
-                                  : "B/C/D 3/3 coverage 충족"}
+                                  : !Number.isFinite(Number(analysisFactors.scoreShrinkage))
+                                    ? "모델 강도 미확인 · STRONG 제한"
+                                    : Number(analysisFactors.scoreShrinkage) < 0.70
+                                      ? `모델 강도 ${Math.round(Number(analysisFactors.scoreShrinkage) * 100)}% · STRONG 기준 70% 미달`
+                                      : "B/C/D 3/3 + 모델 강도 70% 이상"}
                           </div>
                         </div>
                       </div>
@@ -26178,7 +26199,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    STRONG VALUE는 EV 8% 이상, 엣지 8%p 이상, 신뢰도 68 이상, 신호충돌 15 미만 및 정상 배당구간을 동시에 만족해야 합니다.
+                    STRONG VALUE는 EV 8% 이상, 엣지 8%p 이상, 신뢰도 68 이상, 신호충돌 15 미만, B/C/D 3/3, 모델 강도 70% 이상 및 정상 배당구간을 동시에 만족해야 합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
