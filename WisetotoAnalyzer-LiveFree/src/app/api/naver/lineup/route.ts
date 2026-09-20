@@ -2979,6 +2979,7 @@ function mlbAggregateBatting(
     : teamTotals;
 
   return {
+    source: "MLB_STATSAPI_BOXSCORE",
     mode: hasLineup ? "CURRENT_LINEUP_RECENT" : "TEAM_RECENT_AUDIT",
     gamesChecked: rowsByGame.length,
     gamesWithData,
@@ -3206,6 +3207,8 @@ function mlbBullpenFromGames(rowsByGame: { game: AnyObj; rows: AnyObj[] }[], cur
   });
 
   return {
+    source: "MLB_STATSAPI_BOXSCORE",
+    parserOk: true,
     gamesChecked: rowsByGame.length,
     windows: { h24: windowSummary(24), h48: windowSummary(48), h72: windowSummary(72) },
     multiGamePitchers: Array.from(byPitcher.values()).filter((count) => count >= 2).length,
@@ -3440,7 +3443,7 @@ async function collectMlbStatsApiAudit(args: {
       recentBattingPlayers: Number(battingHome.playersMatched) + Number(battingAway.playersMatched),
       currentLineupPlayers,
     },
-    note: "V13.8.84 · MLB StatsAPI 공개 피드 · 최근 일정 득실 team-strength fallback + B 개인 gameLog + C/D 공식 boxscore를 실전 recent blend에 사용",
+    note: "V13.8.86 · MLB StatsAPI 공개 피드 · C/D source 명시 + B/C/D 공식 coverage 통과 시 실전 recent blend 사용",
   };
 }
 
