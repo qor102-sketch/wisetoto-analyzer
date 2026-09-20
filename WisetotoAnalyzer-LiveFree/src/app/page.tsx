@@ -1,5 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
-// V13.8.86 FIX6: MLB official C/D source wiring + actual decision-lambda usage display; keeps FIX5 coverage gate
+// V13.8.87 FIX7: official MLB/NPB bullpen workload gate accepts 1+ verified boxscore; NAVER fallback keeps 2-game gate
 // DEPLOY_MARKER_V13_8_32_POST_START_30MIN_VISIBILITY_20260903
 // DEPLOY_MARKER_V13_8_28_FOOTBALL_NAVER_LINEUP_V1_20260830
 // DEPLOY_MARKER_V13_8_19_MLB_SPORTSAPI_ALIAS_FIX_20260829
@@ -8478,11 +8478,24 @@ function baseballDecisionLambda(
       Math.max(0, Number(audit.battingAwayAtBats ?? 0))
     ) >= 60;
 
-  const bullpenUsed =
-    Math.min(
-      Math.max(0, Number(audit.bullpenHomeGames ?? 0)),
-      Math.max(0, Number(audit.bullpenAwayGames ?? 0))
-    ) >= 2;
+  /*
+   * V13.8.87 FIX7
+   * 공식 MLB/NPB 불펜 workload는 24/48/72h 실제 사용량 자체가 핵심 신호다.
+   * 양쪽 모두 공식 source가 확인되고 최소 1경기 이상의 boxscore가 있으면 D 사용을 허용한다.
+   * NAVER fallback은 짧은 표본 오인식을 막기 위해 기존 2경기 기준을 유지한다.
+   */
+  const bullpenHomeSource = String(audit.bullpenHomeSource ?? "");
+  const bullpenAwaySource = String(audit.bullpenAwaySource ?? "");
+  const officialBullpenPair =
+    (bullpenHomeSource.startsWith("MLB_") && bullpenAwaySource.startsWith("MLB_")) ||
+    (bullpenHomeSource.startsWith("NPB_") && bullpenAwaySource.startsWith("NPB_"));
+  const bullpenMinGames = Math.min(
+    Math.max(0, Number(audit.bullpenHomeGames ?? 0)),
+    Math.max(0, Number(audit.bullpenAwayGames ?? 0))
+  );
+  const bullpenUsed = officialBullpenPair
+    ? bullpenMinGames >= 1
+    : bullpenMinGames >= 2;
 
   /*
    * 최근 ERA/AVG/workload는 유용하지만 표본이 짧고 서로 상관되어 있다.
@@ -21480,7 +21493,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.86 FIX6 · MLB C/D SOURCE WIRING + ACTUAL λ STATUS</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.87 FIX7 · OFFICIAL BULLPEN WORKLOAD GATE</div>
         </div>
         <div className="bar">
           <button
@@ -22983,7 +22996,7 @@ export default function Home() {
 
           <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid #bfdbfe", background: "#f8fbff" }}>
             <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-              V13.8.86 FIX6 BASEBALL VALUE ENGINE · MLB C/D SOURCE + ACTUAL λ STATUS
+              V13.8.87 FIX7 BASEBALL VALUE ENGINE · OFFICIAL BULLPEN WORKLOAD GATE
             </div>
             <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.65, marginBottom: 8 }}>
               시작점 2026-09-15 10:00 KST · 이후 READY 야구 PRE만 신규 OOS 저장 · 잠금 {baseballChallengerSummary.locked}경기 · VERIFY {baseballChallengerSummary.verified}경기 · 결과대기 {baseballChallengerSummary.pending}경기
@@ -22997,7 +23010,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.8.86 MLB/NPB OFFICIAL B/C/D INPUT · 실제 λ 사용 상태 기준 · 3/3 STRONG · 2/3 최대 VALUE · 0~1/3 최대 WATCH</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.8.87 MLB/NPB OFFICIAL B/C/D INPUT · 공식 불펜 1+ boxscore면 D 사용 · 3/3 STRONG · 2/3 최대 VALUE · 0~1/3 최대 WATCH</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 2026-09-16 10:55 KST 이후 새 READY MLB snapshot부터 B는 MLB_PERSON_GAMELOG, C/D는 MLB StatsAPI 공식 boxscore를 우선 사용합니다. 항목별 공식 데이터가 없을 때만 Naver workload로 fallback합니다. CONTROL·실전 추천·Gate·기존 λ는 변경하지 않고 Challenger shadow만 계산합니다. 기존 잠금 snapshot은 다시 쓰지 않습니다.
               </div>
@@ -24740,7 +24753,7 @@ export default function Home() {
                               <div className="small">
                                 schedule link {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.scheduleLinks ?? 0)} · box {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.boxScores ?? 0)}
                                 {matched?.naverTodayLineup?.npbOfficial?.schedule?.currentGameUrl ? " · 현재경기 resolve ✓" : " · 현재경기 resolve 대기"}
-                                <br />V13.8.86 · NPB 공식 C/D 실전 λ 연결 · 취소/연기 표본 제외 · B/C/D coverage별 추천 승격 상한 적용
+                                <br />V13.8.87 · NPB 공식 C/D 실전 λ 연결 · 공식 불펜 1+ boxscore D 허용 · 취소/연기 표본 제외
                               </div>
                             </div>
                             <div className="card">
