@@ -1,4 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
+// V13.8.89 FIX9: cancelled/postponed/suspended/no-game VERIFY is VOID and excluded from HIT/MISS/ROI/MAE/Brier
 // V13.8.88 FIX8: STRONG VALUE requires baseball model strength >= 70%; lower strength is capped at VALUE
 // DEPLOY_MARKER_V13_8_32_POST_START_30MIN_VISIBILITY_20260903
 // DEPLOY_MARKER_V13_8_28_FOOTBALL_NAVER_LINEUP_V1_20260830
@@ -810,8 +811,11 @@ type LiveTrackerRecord = {
   decision: "PICK" | "PASS";
   picks: LiveTrackerPick[];
   marketResults?: LiveTrackerPick[];
-  verificationStatus: "PENDING" | "VERIFIED";
+  verificationStatus: "PENDING" | "VERIFIED" | "VOID";
   verifiedAt: number | null;
+  voidedAt?: number | null;
+  voidReason?: string | null;
+  verifyVoidCheckedAt?: number | null;
   result: BacktestValidationResult | null;
   venueShadow?: VenueShadowValidationSnapshot | null;
   venueShadowResult?: VenueShadowValidationResult | null;
@@ -1706,6 +1710,38 @@ type LiveTrackerStorageAudit = {
   appendOnlyUniqueRecords: number;
 };
 
+function liveTrackerStoredVoidReason(row: any): string | null {
+  const text = [row?.voidReason, row?.verifyNaverAudit, row?.verifyMatchAudit, row?.result?.sourceLabel]
+    .map((v) => String(v ?? "").toLowerCase())
+    .join(" ");
+  if (/cancel|cancell|postpon|suspend|abandon|no[\s-]?game|void|취소|연기|중단|노게임|무효/.test(text)) {
+    return String(row?.voidReason ?? row?.verifyNaverAudit ?? row?.verifyMatchAudit ?? "취소/연기/중단/노게임").trim();
+  }
+  return null;
+}
+
+function resetLiveTrackerPickForVoid(pick: LiveTrackerPick): LiveTrackerPick {
+  return { ...pick, resultStatus: "PENDING", actualLabel: null, resultNote: null };
+}
+
+function liveTrackerMarkVoid(record: LiveTrackerRecord, reason: string, audit?: string | null): LiveTrackerRecord {
+  return {
+    ...record,
+    verificationStatus: "VOID",
+    verifiedAt: null,
+    voidedAt: record.voidedAt ?? Date.now(),
+    voidReason: reason,
+    result: null,
+    venueShadowResult: null,
+    footballPreResult: null,
+    picks: (record.picks ?? []).map(resetLiveTrackerPickForVoid),
+    marketResults: (record.marketResults ?? []).map(resetLiveTrackerPickForVoid),
+    verifyWaitReason: null,
+    verifyLastCheckedAt: Date.now(),
+    verifyNaverAudit: audit ?? record.verifyNaverAudit ?? null,
+  };
+}
+
 function normalizeLiveTrackerRows(input: any): LiveTrackerRecord[] {
   const rows = Array.isArray(input)
     ? input
@@ -1718,6 +1754,13 @@ function normalizeLiveTrackerRows(input: any): LiveTrackerRecord[] {
       (row.fixtureId === null || row.fixtureId === undefined || Number.isFinite(Number(row.fixtureId))) &&
       Number.isFinite(Number(row.startMs))
     )
+    .map((row: any) => {
+      const normalized = row as LiveTrackerRecord;
+      const storedVoidReason = liveTrackerStoredVoidReason(row);
+      return storedVoidReason && normalized.verificationStatus !== "VOID"
+        ? liveTrackerMarkVoid(normalized, storedVoidReason, normalized.verifyNaverAudit ?? null)
+        : normalized;
+    })
     .slice(0, 300) as LiveTrackerRecord[];
 }
 
@@ -1745,7 +1788,7 @@ function readLiveTrackerRecords(): LiveTrackerRecord[] {
 type LiveTrackerAppendOnlySnapshot = {
   snapshotKey: string;
   savedAt: number;
-  stage: "PRE" | "BASEBALL_READY" | "FOOTBALL_LINEUP_READY" | "VERIFIED";
+  stage: "PRE" | "BASEBALL_READY" | "FOOTBALL_LINEUP_READY" | "VERIFIED" | "VOID";
   record: LiveTrackerRecord;
 };
 
@@ -1760,6 +1803,7 @@ type LiveTrackerPortableBundle = {
 };
 
 function liveTrackerRecordStageRank(record: LiveTrackerRecord) {
+  if (record.verificationStatus === "VOID") return 5;
   if (record.verificationStatus === "VERIFIED") return 4;
   if (record.footballLineup?.stage === "LINEUP_READY") return 3;
   if (record.venueShadow?.stage === "READY") return 3;
@@ -1822,6 +1866,7 @@ function mergePortableAppendOnlySnapshots(
 }
 
 function liveTrackerSnapshotStage(record: LiveTrackerRecord): LiveTrackerAppendOnlySnapshot["stage"] {
+  if (record.verificationStatus === "VOID") return "VOID";
   if (record.verificationStatus === "VERIFIED") return "VERIFIED";
   if (record.footballLineup?.stage === "LINEUP_READY") return "FOOTBALL_LINEUP_READY";
   if (record.venueShadow?.stage === "READY") return "BASEBALL_READY";
@@ -3440,6 +3485,27 @@ function betmanFinalStatusLike(game: any) {
   const value = betmanStatusText(game).toLowerCase().replace(/\s+/g, "");
   if (!value) return false;
   return /final|finished|finish|ended|end|complete|completed|종료|경기종료|확정/.test(value);
+}
+
+function betmanVoidReason(game: any): string | null {
+  const text = [
+    betmanStatusText(game),
+    game?.statusInfo,
+    game?.statusCode,
+    game?.gameStatus,
+    game?.matchStatus,
+    game?.state,
+    game?.resultStatus,
+    game?.note,
+    game?.remark,
+  ].map((v) => String(v ?? "").toLowerCase()).join(" ");
+  if (game?.postponed === true || game?.cancelled === true || game?.canceled === true) {
+    return `Betman 상태 플래그 · ${text || "postponed/cancelled"}`;
+  }
+  if (/cancel|cancell|postpon|suspend|abandon|no[\s-]?game|void|취소|연기|중단|노게임|무효/.test(text)) {
+    return `Betman 상태 · ${text || "VOID"}`;
+  }
+  return null;
 }
 
 function betmanHasScoreField(game: any) {
@@ -13208,6 +13274,10 @@ export default function Home() {
 
   useEffect(() => {
     const stored = readLiveTrackerRecords();
+    // FIX9: old saved rows whose audit already says cancel/postpone are migrated to VOID immediately.
+    if (stored.some((record) => record.verificationStatus === "VOID")) {
+      saveLiveTrackerRecords(stored);
+    }
     setLiveTrackerRecords(stored);
     setLiveTrackerStorageAudit(auditLiveTrackerStorage());
     setLiveTrackerOrigin(window.location.origin);
@@ -15710,7 +15780,10 @@ export default function Home() {
     let pickGames = 0;
     let passGames = 0;
 
-    for (const record of liveTrackerRecords) {
+    const validRecords = liveTrackerRecords.filter((record) => record.verificationStatus !== "VOID");
+    const voidGames = liveTrackerRecords.length - validRecords.length;
+
+    for (const record of validRecords) {
       if (record.decision === "PICK") pickGames += 1;
       else passGames += 1;
 
@@ -15724,7 +15797,8 @@ export default function Home() {
 
     const settled = hits + misses;
     return {
-      games: liveTrackerRecords.length,
+      games: validRecords.length,
+      voidGames,
       pickGames,
       passGames,
       picks,
@@ -15738,7 +15812,7 @@ export default function Home() {
 
   const venueShadowReadySummary = useMemo(() => {
     const ready = liveTrackerRecords.filter(
-      (record) => record.venueShadow?.stage === "READY"
+      (record) => record.verificationStatus !== "VOID" && record.venueShadow?.stage === "READY"
     );
     const verified = ready.filter(
       (record) => record.verificationStatus === "VERIFIED" && record.venueShadowResult
@@ -15759,7 +15833,7 @@ export default function Home() {
 
   const venueShadowValidationSummary = useMemo(() => {
     const rows = liveTrackerRecords.filter(
-      (record) => record.venueShadow?.stage === "READY" && record.venueShadowResult
+      (record) => record.verificationStatus === "VERIFIED" && record.venueShadow?.stage === "READY" && record.venueShadowResult
     );
     const avg = (key: keyof VenueShadowValidationResult) =>
       rows.length
@@ -15795,6 +15869,7 @@ export default function Home() {
   const baseballChallengerSummary = useMemo(() => {
     const locked = liveTrackerRecords.filter(
       (record) =>
+        record.verificationStatus !== "VOID" &&
         record.sport === "야구" &&
         ["V13.8.74", "V13.8.78", "V13.8.82", "V13.8.83", "V13.8.84", "V13.8.85"].includes(
           String(record.baseballChallenger?.version ?? "")
@@ -15999,7 +16074,7 @@ export default function Home() {
 
   const footballLineupValidationSummary = useMemo(() => {
     const footballPre = liveTrackerRecords.filter(
-      (record) => record.sport === "축구" && record.footballPre?.stage === "PRE"
+      (record) => record.verificationStatus !== "VOID" && record.sport === "축구" && record.footballPre?.stage === "PRE"
     );
     const lineupReady = footballPre.filter((record) => record.footballLineup?.stage === "LINEUP_READY");
     const verified = footballPre.filter(
@@ -16242,7 +16317,7 @@ export default function Home() {
     // V13.8.73 FORWARD POLICY SHADOW VALIDATOR
     // Freeze candidate policies before observing future outcomes. Diagnostic only: no MODEL/GATE/PICK mutation.
     const forwardPolicyStartMs = Date.parse("2026-09-12T09:05:00+09:00");
-    const forwardRecords = liveTrackerRecords.filter((record) => record.sport === "야구" && Number(record.capturedAt) >= forwardPolicyStartMs);
+    const forwardRecords = liveTrackerRecords.filter((record) => record.verificationStatus !== "VOID" && record.sport === "야구" && Number(record.capturedAt) >= forwardPolicyStartMs);
     const forwardVerifiedIds = new Set(
       forwardRecords.filter((record) => record.verificationStatus === "VERIFIED").map((record) => record.id)
     );
@@ -16410,7 +16485,9 @@ export default function Home() {
       ? (record.startMs - lineupCapturedAt) / 60000
       : null;
     const due = record.verificationStatus === "PENDING" && record.startMs < Date.now() - 2 * 60 * 60 * 1000;
-    const stage = record.verificationStatus === "VERIFIED"
+    const stage = record.verificationStatus === "VOID"
+      ? "VOID"
+      : record.verificationStatus === "VERIFIED"
       ? "VERIFIED"
       : due
         ? "VERIFY_DUE"
@@ -16790,8 +16867,28 @@ export default function Home() {
     actualMarketPicks,
   ]);
 
+  function naverVerifyVoidReasonFromPayload(payload: any): string | null {
+    const game = payload?.game ?? {};
+    const statusText = [
+      payload?.voidReason,
+      game?.statusCode,
+      game?.statusInfo,
+      game?.gameStatus,
+      game?.status,
+      game?.note,
+      game?.remark,
+    ].map((v) => String(v ?? "").toLowerCase()).join(" ");
+    if (payload?.cancelled === true || game?.postponed === true || game?.cancelled === true || game?.canceled === true) {
+      return String(payload?.voidReason ?? statusText ?? "취소/연기").trim() || "취소/연기";
+    }
+    if (/cancel|cancell|postpon|suspend|abandon|no[\s-]?game|void|취소|연기|중단|노게임|무효/.test(statusText)) {
+      return statusText || "취소/연기/중단/노게임";
+    }
+    return null;
+  }
+
   function naverVerifyFinalFromPayload(payload: any): { home: number; away: number; audit: string } | null {
-    if (!payload?.ok) return null;
+    if (!payload?.ok || naverVerifyVoidReasonFromPayload(payload)) return null;
     const game = payload?.game ?? {};
     const score = payload?.finalScore ?? game?.finalScore ?? null;
     const homeRaw = score?.home ?? game?.homeScore ?? game?.homeTeamScore ?? game?.hScore ?? null;
@@ -16810,7 +16907,7 @@ export default function Home() {
     };
   }
 
-  async function verifyNaverFinal(record: LiveTrackerRecord): Promise<{ truth: BacktestValidationResult | null; audit: string }> {
+  async function verifyNaverFinal(record: LiveTrackerRecord): Promise<{ truth: BacktestValidationResult | null; audit: string; voidReason: string | null }> {
     try {
       const params = new URLSearchParams({
         date: new Date(record.startMs).toISOString(),
@@ -16822,7 +16919,16 @@ export default function Home() {
       const response = await fetch(`/api/naver/lineup?${params.toString()}`, { cache: "no-store" });
       const payload = await readApiResponse(response, `Naver VERIFY · ${record.home} vs ${record.away}`);
       if (!response.ok || !payload?.ok) {
-        return { truth: null, audit: `HTTP ${response.status} · ${String(payload?.error ?? "Naver resolve 실패")}` };
+        return { truth: null, audit: `HTTP ${response.status} · ${String(payload?.error ?? "Naver resolve 실패")}`, voidReason: null };
+      }
+      const voidReason = naverVerifyVoidReasonFromPayload(payload);
+      if (voidReason) {
+        const game = payload?.game ?? {};
+        return {
+          truth: null,
+          audit: `gameId ${String(payload?.gameId ?? "-")} · status ${String(game?.statusCode ?? game?.statusInfo ?? "-")} · VOID ${voidReason}`,
+          voidReason,
+        };
       }
       const parsed = naverVerifyFinalFromPayload(payload);
       if (!parsed) {
@@ -16830,6 +16936,7 @@ export default function Home() {
         return {
           truth: null,
           audit: `gameId ${String(payload?.gameId ?? "-")} · status ${String(game?.statusCode ?? game?.statusInfo ?? "-")} · final score 미확정`,
+          voidReason: null,
         };
       }
       return {
@@ -16841,9 +16948,10 @@ export default function Home() {
           sourceLabel: `Naver 종료점수 · gameId ${String(payload?.gameId ?? "-")} · 실전 PRE 잠금 후 검증`,
         },
         audit: parsed.audit,
+        voidReason: null,
       };
     } catch (error) {
-      return { truth: null, audit: error instanceof Error ? error.message : String(error) };
+      return { truth: null, audit: error instanceof Error ? error.message : String(error), voidReason: null };
     }
   }
 
@@ -16859,17 +16967,31 @@ export default function Home() {
           record.startMs < Date.now()
       )
       .slice(0, 10);
+    // FIX9 migration: old Naver VERIFY could misread cancelled games as 0:0 RESULT.
+    // Recheck only legacy Naver 0:0 VERIFIED rows once; genuine 0:0 finals remain VERIFIED.
+    const legacyVoidRepairCandidates = liveTrackerRecords
+      .filter((record) =>
+        record.verificationStatus === "VERIFIED" &&
+        record.verifyResultSource === "NAVER" &&
+        koreanSport(record.sport) === "야구" &&
+        Number(record.result?.homeScore) === 0 &&
+        Number(record.result?.awayScore) === 0 &&
+        !record.verifyVoidCheckedAt
+      )
+      .slice(0, 10);
 
-    if (!candidates.length) {
-      setStatus("실전 추적 · 지금 확인할 시작 경기 PENDING 기록이 없습니다.");
+    if (!candidates.length && !legacyVoidRepairCandidates.length) {
+      setStatus("실전 추적 · 지금 확인할 PENDING/VOID 재검사 기록이 없습니다.");
       return;
     }
 
     setValidationLoading(true);
-    setStatus(`실전 추적 · PENDING ${candidates.length}건 Betman FINAL 우선 확인 중…`);
+    setStatus(`실전 추적 · PENDING ${candidates.length}건 · legacy 0:0 재검사 ${legacyVoidRepairCandidates.length}건 확인 중…`);
 
     let next = [...liveTrackerRecords];
     let verified = 0;
+    let voided = 0;
+    let repairedChecked = 0;
     let unavailable = 0;
 
     try {
@@ -16907,6 +17029,34 @@ export default function Home() {
         });
       }
 
+      for (const record of legacyVoidRepairCandidates) {
+        try {
+          const recheck = await verifyNaverFinal(record);
+          const checkedAt = Date.now();
+          if (recheck.voidReason) {
+            next = next.map((candidate) =>
+              candidate.id === record.id
+                ? {
+                    ...liveTrackerMarkVoid(candidate, recheck.voidReason!, recheck.audit),
+                    verifyVoidCheckedAt: checkedAt,
+                    verifyResultSource: "NAVER",
+                  }
+                : candidate
+            );
+            voided += 1;
+          } else {
+            next = next.map((candidate) =>
+              candidate.id === record.id
+                ? { ...candidate, verifyVoidCheckedAt: checkedAt, verifyNaverAudit: recheck.audit || candidate.verifyNaverAudit }
+                : candidate
+            );
+          }
+          repairedChecked += 1;
+        } catch {
+          unavailable += 1;
+        }
+      }
+
       for (const record of candidates) {
         try {
           let truth: BacktestValidationResult | null = null;
@@ -16914,8 +17064,23 @@ export default function Home() {
           const betmanResolved = matchBetmanFinishedGame(record, betmanFinishedGames);
           const betmanMatch = betmanResolved.game;
           const betmanScore = betmanMatch ? fixtureFinalScore(betmanMatch) : null;
+          const betmanVoid = betmanMatch ? betmanVoidReason(betmanMatch) : null;
           const fallbackEligible = record.startMs < Date.now() - 2 * 60 * 60 * 1000;
           let waitReason: LiveTrackerRecord["verifyWaitReason"] = null;
+
+          if (betmanVoid) {
+            next = next.map((candidate) =>
+              candidate.id === record.id
+                ? {
+                    ...liveTrackerMarkVoid(candidate, betmanVoid, candidate.verifyNaverAudit ?? null),
+                    verifyMatchMethod: betmanResolved.method,
+                    verifyMatchAudit: betmanResolved.audit,
+                  }
+                : candidate
+            );
+            voided += 1;
+            continue;
+          }
 
           if (betmanScore) {
             truth = {
@@ -16937,6 +17102,21 @@ export default function Home() {
           if (!truth) {
             const naverResolved = await verifyNaverFinal(record);
             naverVerifyAudit = naverResolved.audit;
+            if (naverResolved.voidReason) {
+              next = next.map((candidate) =>
+                candidate.id === record.id
+                  ? {
+                      ...liveTrackerMarkVoid(candidate, naverResolved.voidReason!, naverResolved.audit),
+                      verifyVoidCheckedAt: Date.now(),
+                      verifyMatchMethod: betmanResolved.method,
+                      verifyMatchAudit: betmanResolved.audit,
+                      verifyResultSource: "NAVER",
+                    }
+                  : candidate
+              );
+              voided += 1;
+              continue;
+            }
             if (naverResolved.truth) {
               truth = naverResolved.truth;
               waitReason = null;
@@ -17085,7 +17265,7 @@ export default function Home() {
       }, {});
       const waitLabel = Object.entries(waitCounts).map(([key, count]) => `${key} ${count}`).join(" · ");
       setStatus(
-        `실전 추적 결과 확인 완료 · 검증 ${verified}경기 · 아직 결과 없음 ${unavailable}경기${waitLabel ? ` · ${waitLabel}` : ""}`
+        `실전 추적 결과 확인 완료 · 검증 ${verified}경기 · VOID ${voided}경기 · legacy 재검사 ${repairedChecked}경기 · 아직 결과 없음 ${unavailable}경기${waitLabel ? ` · ${waitLabel}` : ""}`
       );
     } finally {
       setValidationLoading(false);
@@ -21507,7 +21687,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.88 FIX8 · MODEL STRENGTH 70% STRONG GATE</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.8.89 FIX9 · VERIFY VOID FILTER + FIX8 GATES</div>
         </div>
         <div className="bar">
           <button
@@ -22698,6 +22878,7 @@ export default function Home() {
             ? "-"
             : `${liveTrackerSummary.hitRate.toFixed(1)}%`}
           {" · "}PASS {liveTrackerSummary.passGames}경기
+          {liveTrackerSummary.voidGames > 0 ? <> · VOID {liveTrackerSummary.voidGames}경기</> : null}
         </summary>
 
         <div
@@ -22746,6 +22927,7 @@ export default function Home() {
             PRE 자동 잠금 {liveTrackerSummary.games}경기
             {" · "}추천경기 {liveTrackerSummary.pickGames}
             {" · "}PASS {liveTrackerSummary.passGames}
+            {" · "}VOID {liveTrackerSummary.voidGames}
             {" · "}미결 추천 {liveTrackerSummary.pending}픽
             {" · "}PENDING은 최근 경기 목록과 무관하게 localStorage에 유지
             {" · "}Gate V2 고정
@@ -22791,7 +22973,7 @@ export default function Home() {
             </button>
           </div>
           <div className="small" style={{ marginTop: 5, whiteSpace: "normal" }}>
-            보호 규칙 · state 변경 시 main tracker 즉시 동기화 · PRE/READY/LINEUP/VERIFIED 단계별 append-only 1회 보존 · 전체 이동 백업은 records+append-only+source origin 포함 · 구버전 JSON도 가져오기 호환 · 가져오기는 기존 기록과 병합 · 유효 tracker 빈 배열 덮어쓰기 금지 · fixtureId=null Naver 독립 PRE도 복원 허용
+            보호 규칙 · state 변경 시 main tracker 즉시 동기화 · PRE/READY/LINEUP/VERIFIED/VOID 단계별 append-only 1회 보존 · 전체 이동 백업은 records+append-only+source origin 포함 · 구버전 JSON도 가져오기 호환 · 가져오기는 기존 기록과 병합 · 유효 tracker 빈 배열 덮어쓰기 금지 · fixtureId=null Naver 독립 PRE도 복원 허용
           </div>
         </div>
 
@@ -22812,12 +22994,13 @@ export default function Home() {
 
         <div style={{ padding: "8px 12px", borderTop: "1px solid #e2e8f0", background: "#f6fff8" }}>
           <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-            V13.8.70 NAVER FINAL SCORE VERIFY FALLBACK · VERIFY ONLY · MODEL/PRE 변경 없음
+            V13.8.89 NAVER FINAL SCORE VERIFY + VOID FILTER · MODEL/PRE 변경 없음
           </div>
           <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.7 }}>
             Naver VERIFY 성공 {liveTrackerRecords.filter((r) => r.verificationStatus === "VERIFIED" && r.verifyResultSource === "NAVER").length}경기
-            {liveTrackerRecords.filter((r) => r.verifyNaverAudit).slice(-3).map((r) => (
-              <span key={`naver-verify-${r.id}`}> · {r.home} vs {r.away}: {r.verifyNaverAudit}</span>
+            {" · "}VOID {liveTrackerRecords.filter((r) => r.verificationStatus === "VOID").length}경기
+            {liveTrackerRecords.filter((r) => r.verifyNaverAudit || r.voidReason).slice(-3).map((r) => (
+              <span key={`naver-verify-${r.id}`}> · {r.home} vs {r.away}: {r.verificationStatus === "VOID" ? `VOID · ${r.voidReason ?? r.verifyNaverAudit ?? "취소/연기"}` : r.verifyNaverAudit}</span>
             ))}
           </div>
         </div>
@@ -23010,7 +23193,7 @@ export default function Home() {
 
           <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid #bfdbfe", background: "#f8fbff" }}>
             <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-              V13.8.88 FIX8 BASEBALL VALUE ENGINE · MODEL STRENGTH 70% STRONG GATE
+              V13.8.89 FIX9 BASEBALL VALUE ENGINE · VERIFY VOID FILTER · MODEL STRENGTH 70% STRONG GATE
             </div>
             <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.65, marginBottom: 8 }}>
               시작점 2026-09-15 10:00 KST · 이후 READY 야구 PRE만 신규 OOS 저장 · 잠금 {baseballChallengerSummary.locked}경기 · VERIFY {baseballChallengerSummary.verified}경기 · 결과대기 {baseballChallengerSummary.pending}경기
@@ -23024,7 +23207,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.8.88 MLB/NPB B/C/D + MODEL STRENGTH GATE · 3/3 + 강도 70%↑ STRONG · 강도 70%↓ 최대 VALUE · 0~1/3 최대 WATCH</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.8.89 MLB/NPB B/C/D + MODEL STRENGTH GATE + VERIFY VOID FILTER · 3/3 + 강도 70%↑ STRONG · 강도 70%↓ 최대 VALUE · 0~1/3 최대 WATCH</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 2026-09-16 10:55 KST 이후 새 READY MLB snapshot부터 B는 MLB_PERSON_GAMELOG, C/D는 MLB StatsAPI 공식 boxscore를 우선 사용합니다. 항목별 공식 데이터가 없을 때만 Naver workload로 fallback합니다. CONTROL·실전 추천·Gate·기존 λ는 변경하지 않고 Challenger shadow만 계산합니다. 기존 잠금 snapshot은 다시 쓰지 않습니다.
               </div>
@@ -24767,7 +24950,7 @@ export default function Home() {
                               <div className="small">
                                 schedule link {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.scheduleLinks ?? 0)} · box {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.boxScores ?? 0)}
                                 {matched?.naverTodayLineup?.npbOfficial?.schedule?.currentGameUrl ? " · 현재경기 resolve ✓" : " · 현재경기 resolve 대기"}
-                                <br />V13.8.88 · NPB 공식 C/D 실전 λ 연결 · 공식 불펜 1+ boxscore D 허용 · STRONG은 모델 강도 70% 이상 · 취소/연기 표본 제외
+                                <br />V13.8.89 · NPB 공식 C/D 실전 λ 연결 · 공식 불펜 1+ boxscore D 허용 · STRONG은 모델 강도 70% 이상 · 취소/연기 표본 제외
                               </div>
                             </div>
                             <div className="card">
