@@ -1175,11 +1175,30 @@ function summarizeFootballScheduleTeam(rows: AnyObj[], teamName: string, adapter
   };
 }
 
+function naverVerifyGameVoidReason(game: AnyObj): string | null {
+  const statusText = [
+    game?.statusCode,
+    game?.statusInfo,
+    game?.gameStatus,
+    game?.status,
+    game?.note,
+    game?.remark,
+  ].map((v) => String(v ?? "").toLowerCase()).join(" ");
+  if (game?.postponed === true || game?.cancelled === true || game?.canceled === true) {
+    return statusText || "postponed/cancelled";
+  }
+  if (/cancel|cancell|postpon|suspend|abandon|no[\s-]?game|void|취소|연기|중단|노게임|무효/.test(statusText)) {
+    return statusText || "취소/연기/중단/노게임";
+  }
+  return null;
+}
+
 function naverVerifyGameCompleted(game: AnyObj) {
   const statusText = [game?.statusCode, game?.statusInfo, game?.gameStatus, game?.status]
     .map((v) => String(v ?? "").toLowerCase())
     .join(" ");
-  if (/cancel|postpon|suspend|scheduled|before|live|진행|예정|취소|연기|중단/.test(statusText)) return false;
+  if (naverVerifyGameVoidReason(game)) return false;
+  if (/scheduled|before|live|진행|예정/.test(statusText)) return false;
   if (/final|finish|finished|ended|end|result|종료|경기종료/.test(statusText)) return true;
   return false;
 }
@@ -3443,7 +3462,7 @@ async function collectMlbStatsApiAudit(args: {
       recentBattingPlayers: Number(battingHome.playersMatched) + Number(battingAway.playersMatched),
       currentLineupPlayers,
     },
-    note: "V13.8.86 · MLB StatsAPI 공개 피드 · C/D source 명시 + B/C/D 공식 coverage 통과 시 실전 recent blend 사용",
+    note: "V13.8.89 · MLB StatsAPI 공개 피드 · C/D source 명시 + VERIFY 취소/연기 VOID 필터",
   };
 }
 
@@ -3845,7 +3864,9 @@ export async function GET(request: Request) {
       : null;
 
     const verifyFinalScore = naverScheduleFinalScore(game);
-    const verifyCompleted = naverVerifyGameCompleted(game);
+    const verifyVoidReason = naverVerifyGameVoidReason(game);
+    const verifyCancelled = Boolean(verifyVoidReason);
+    const verifyCompleted = !verifyCancelled && naverVerifyGameCompleted(game);
 
     return Response.json({
       ok: true,
@@ -3860,11 +3881,16 @@ export async function GET(request: Request) {
       gameId,
       finalScore: verifyFinalScore,
       completed: verifyCompleted,
+      cancelled: verifyCancelled,
+      voidReason: verifyVoidReason,
       game: {
         gameDateTime: game?.gameDateTime ?? null,
         stadium: game?.stadium ?? null,
         statusCode: game?.statusCode ?? null,
         statusInfo: game?.statusInfo ?? null,
+        gameStatus: game?.gameStatus ?? game?.status ?? null,
+        postponed: game?.postponed ?? null,
+        cancelled: game?.cancelled ?? game?.canceled ?? null,
         homeScore: verifyFinalScore?.home ?? null,
         awayScore: verifyFinalScore?.away ?? null,
         finalScore: verifyFinalScore,
