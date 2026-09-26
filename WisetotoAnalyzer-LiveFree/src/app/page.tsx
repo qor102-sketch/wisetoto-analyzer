@@ -1,5 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
-// V13.9.02 HIT-FIRST: sticky READY + daily slate TOP2; EV/odds remain informational
+// V13.9.03 HIT-FIRST: sticky READY + weighted data-quality slate TOP2; EV/odds remain informational
 // V13.8.89 FIX9: cancelled/postponed/suspended/no-game VERIFY is VOID and excluded from HIT/MISS/ROI/MAE/Brier
 // V13.8.88 FIX8: STRONG VALUE requires baseball model strength >= 70%; lower strength is capped at VALUE
 // DEPLOY_MARKER_V13_8_32_POST_START_30MIN_VISIBILITY_20260903
@@ -668,7 +668,7 @@ type VenueShadowValidationResult = {
   shadowMarginAbsError: number;
 };
 
-/* V13.9.02: once a baseball fixture reaches READY, keep the pregame READY state monotonic. */
+/* V13.9.03: once a baseball fixture reaches READY, keep the pregame READY state monotonic. */
 type BaseballReadyHoldSnapshot = {
   stage: "READY";
   capturedAt: number;
@@ -7931,6 +7931,14 @@ type MarketPick = {
   precisionConsensusSpread?: number | null;
   precisionConsensusCount?: number | null;
 
+  /* V13.9.03: B/C/D를 0/1로 자르지 않고 데이터 품질을 연속값으로 저장. */
+  hitFirstDataQuality?: number | null;
+  hitFirstStarterQuality?: number | null;
+  hitFirstBattingQuality?: number | null;
+  hitFirstBullpenQuality?: number | null;
+  hitFirstModelStrength?: number | null;
+  hitFirstCoverageLabel?: string | null;
+
   detail: string;
 };
 
@@ -9819,6 +9827,117 @@ function applyBaseballRecentCoverageGradeCap(
   };
 }
 
+type BaseballHitFirstDataQuality = {
+  overall: number;
+  starter: number;
+  batting: number;
+  bullpen: number;
+  lineup: number;
+  model: number;
+  label: string;
+};
+
+/*
+ * V13.9.03 WEIGHTED DATA QUALITY
+ * B/C/D를 단순 3/3 여부로 자르지 않는다. 최근 선발 표본이 부족해도
+ * 선발 신원+시즌 수치가 확보되고 C/D/라인업/모델이 강하면 감점 후 후보로 남긴다.
+ * 반대로 B/C/D 개수만 많고 실제 표본 품질이 낮으면 자동 우대하지 않는다.
+ */
+function baseballHitFirstDataQuality(
+  factors: AnalysisFactors,
+  challenger: BaseballChallengerSnapshot | null | undefined,
+  decision: BaseballDecisionLambda | null | undefined,
+): BaseballHitFirstDataQuality {
+  if (factors.baseballAnalysisStage !== "READY" || !challenger?.featureAudit) {
+    return { overall: 0, starter: 0, batting: 0, bullpen: 0, lineup: 0, model: 0, label: "READY 전" };
+  }
+
+  const audit = challenger.featureAudit;
+  const homeStarts = Math.max(0, Number(audit.starterRecentHomeStarts ?? 0));
+  const awayStarts = Math.max(0, Number(audit.starterRecentAwayStarts ?? 0));
+  const minStarts = Math.min(homeStarts, awayStarts);
+  const totalStarts = homeStarts + awayStarts;
+  const starterIdentityReady =
+    factors.baseballStarterCount >= 2 &&
+    Boolean(String(factors.homeStarterName ?? "").trim()) &&
+    Boolean(String(factors.awayStarterName ?? "").trim());
+  const seasonEraPair =
+    challengerFinite(factors.homeStarterEra) !== null &&
+    challengerFinite(factors.awayStarterEra) !== null;
+
+  let starter = 0;
+  if (decision?.starterUsed) starter = 1;
+  else if (starterIdentityReady && seasonEraPair) {
+    starter = minStarts >= 1 ? 0.78 : totalStarts >= 2 ? 0.62 : totalStarts >= 1 ? 0.52 : 0.42;
+  } else if (starterIdentityReady) {
+    starter = totalStarts >= 2 ? 0.48 : totalStarts >= 1 ? 0.38 : 0.28;
+  } else if (totalStarts > 0) {
+    starter = 0.24;
+  }
+
+  const battingPlayers = Math.min(
+    Math.max(0, Number(audit.battingHomePlayers ?? 0)),
+    Math.max(0, Number(audit.battingAwayPlayers ?? 0)),
+  );
+  const battingGames = Math.min(
+    Math.max(0, Number(audit.battingHomeGamesWithData ?? 0)),
+    Math.max(0, Number(audit.battingAwayGamesWithData ?? 0)),
+  );
+  const battingAtBats = Math.min(
+    Math.max(0, Number(audit.battingHomeAtBats ?? 0)),
+    Math.max(0, Number(audit.battingAwayAtBats ?? 0)),
+  );
+  let batting = clamp(
+    clamp(battingPlayers / 9, 0, 1) * 0.45 +
+      clamp(battingGames / 5, 0, 1) * 0.35 +
+      clamp(battingAtBats / 100, 0, 1) * 0.20,
+    0,
+    1,
+  );
+  if (decision?.battingUsed) batting = Math.max(batting, 0.76);
+
+  const bullpenHomeSource = String(audit.bullpenHomeSource ?? "");
+  const bullpenAwaySource = String(audit.bullpenAwaySource ?? "");
+  const officialBullpen =
+    (bullpenHomeSource.startsWith("MLB_") && bullpenAwaySource.startsWith("MLB_")) ||
+    (bullpenHomeSource.startsWith("NPB_") && bullpenAwaySource.startsWith("NPB_"));
+  const bullpenGames = Math.min(
+    Math.max(0, Number(audit.bullpenHomeGames ?? 0)),
+    Math.max(0, Number(audit.bullpenAwayGames ?? 0)),
+  );
+  let bullpen = bullpenGames > 0
+    ? clamp((officialBullpen ? 0.66 : 0.46) + bullpenGames * (officialBullpen ? 0.14 : 0.12), 0, officialBullpen ? 0.96 : 0.88)
+    : 0;
+  if (decision?.bullpenUsed) bullpen = Math.max(bullpen, officialBullpen ? 0.82 : 0.72);
+
+  const lineup = clamp(
+    Math.min(
+      clamp(Number(factors.lineupStatsCoverage ?? 0), 0, 1),
+      clamp(Number(factors.baseballLineupPlayerCount ?? 0) / 18, 0, 1),
+    ),
+    0,
+    1,
+  );
+  const model = clamp(Number(factors.scoreShrinkage ?? 0), 0, 1);
+
+  const overall = clamp(
+    (starter * 0.22 + batting * 0.28 + bullpen * 0.20 + lineup * 0.18 + model * 0.12) * 100,
+    0,
+    100,
+  );
+
+  const pct = (value: number) => Math.round(value * 100);
+  return {
+    overall: Number(overall.toFixed(1)),
+    starter: Number(starter.toFixed(3)),
+    batting: Number(batting.toFixed(3)),
+    bullpen: Number(bullpen.toFixed(3)),
+    lineup: Number(lineup.toFixed(3)),
+    model: Number(model.toFixed(3)),
+    label: `품질 ${overall.toFixed(1)} · B ${pct(starter)} / C ${pct(batting)} / D ${pct(bullpen)} / L ${pct(lineup)} / M ${pct(model)}`,
+  };
+}
+
 function applyBaseballHitFirstGate(
   valueGrade: {
     grade: ValueGrade;
@@ -9838,6 +9957,10 @@ function applyBaseballHitFirstGate(
     recentFeatureCount: number;
     starterUsed: boolean;
     modelStrength: number | null | undefined;
+    dataQuality: number | null | undefined;
+    starterQuality: number | null | undefined;
+    battingQuality: number | null | undefined;
+    bullpenQuality: number | null | undefined;
     isWin1Lose: boolean;
     isTotalMarket: boolean;
     isSumMarket: boolean;
@@ -9851,7 +9974,7 @@ function applyBaseballHitFirstGate(
   }
 ) {
   /*
-   * V13.9.01 HIT-FIRST ENSEMBLE
+   * V13.9.03 HIT-FIRST ENSEMBLE + WEIGHTED QUALITY
    * 목표는 ROI가 아니라 "실제 적중률 최대화"다.
    * 따라서 기존 EV/Edge VALUE 판정을 참고값으로만 두고, 야구 실전 승격은 아래가 결정한다.
    *
@@ -9861,6 +9984,7 @@ function applyBaseballHitFirstGate(
    * - 시장확률은 저배당 자동선택용이 아니라 외부 합의/괴리 검사에만 사용
    * - EV/Edge/배당구간은 승격조건에서 제거
    * - 3-way 승1패, SUM, F5는 고적중 목표와 구조적으로 맞지 않아 WATCH
+   * - B/C/D는 3/3 이진 Gate 대신 최근표본·시즌선발·라인업·공식 source를 가중 품질로 평가
    * - U/O는 과거 적중이 약해 훨씬 더 엄격한 consensus 기준 적용
    */
   const strength = Number(input.modelStrength);
@@ -9871,6 +9995,10 @@ function applyBaseballHitFirstGate(
   const pScore = Number(input.precisionScore);
   const raw = Number(input.rawProbability);
   const calibrated = Number(input.calibratedProbability);
+  const dataQuality = Number(input.dataQuality);
+  const starterQuality = Number(input.starterQuality);
+  const battingQuality = Number(input.battingQuality);
+  const bullpenQuality = Number(input.bullpenQuality);
 
   const watch = (reason: string) => ({
     ...valueGrade,
@@ -9889,8 +10017,11 @@ function applyBaseballHitFirstGate(
   }
 
   const dataReady =
-    input.recentFeatureCount >= 3 &&
-    input.starterUsed &&
+    Number.isFinite(dataQuality) &&
+    dataQuality >= 80 &&
+    Number.isFinite(starterQuality) && starterQuality >= 0.35 &&
+    Number.isFinite(battingQuality) && battingQuality >= 0.68 &&
+    Number.isFinite(bullpenQuality) && bullpenQuality >= 0.50 &&
     Number.isFinite(strength) &&
     strength >= 0.75 &&
     input.confidence >= 72 &&
@@ -9898,12 +10029,14 @@ function applyBaseballHitFirstGate(
 
   if (!dataReady) {
     const reasons: string[] = [];
-    if (input.recentFeatureCount < 3) reasons.push(`B/C/D ${input.recentFeatureCount}/3`);
-    if (!input.starterUsed) reasons.push("선발 B 미적용");
+    if (!Number.isFinite(dataQuality) || dataQuality < 80) reasons.push(`데이터품질 ${Number.isFinite(dataQuality) ? dataQuality.toFixed(1) : "-"} < 80`);
+    if (!Number.isFinite(starterQuality) || starterQuality < 0.35) reasons.push(`선발품질 ${Number.isFinite(starterQuality) ? Math.round(starterQuality * 100) : "-"}% < 35%`);
+    if (!Number.isFinite(battingQuality) || battingQuality < 0.68) reasons.push(`타선품질 ${Number.isFinite(battingQuality) ? Math.round(battingQuality * 100) : "-"}% < 68%`);
+    if (!Number.isFinite(bullpenQuality) || bullpenQuality < 0.50) reasons.push(`불펜품질 ${Number.isFinite(bullpenQuality) ? Math.round(bullpenQuality * 100) : "-"}% < 50%`);
     if (!Number.isFinite(strength) || strength < 0.75) reasons.push(`모델강도 ${Number.isFinite(strength) ? Math.round(strength * 100) : "-"}% < 75%`);
     if (input.confidence < 72) reasons.push(`신뢰도 ${input.confidence.toFixed(0)} < 72`);
     if (input.decisionRiskScore >= 15) reasons.push(`위험 ${input.decisionRiskScore.toFixed(0)} >= 15`);
-    return watch(reasons.join(" · ") || "데이터 확정 조건 미달");
+    return watch(reasons.join(" · ") || "가중 데이터 품질 조건 미달");
   }
 
   if (
@@ -10268,11 +10401,11 @@ function pickValueStatus(pick: MarketPick) {
 }
 
 /*
- * V13.9.02 SLATE TOP2 fallback.
- * Absolute 90%-style gates can legitimately return zero picks.  For hit-rate-first
- * operation we therefore keep a second, relative selector: only READY + B/C/D 3/3
- * candidates enter the slate pool, then at most two games per KST date are promoted.
- * EV and odds are not ranking inputs.
+ * V13.9.03 WEIGHTED QUALITY SLATE TOP2 fallback.
+ * B/C/D 3/3을 하드 자격으로 사용하지 않는다. READY 상태에서 선발 시즌정보,
+ * 최근 B 표본, C 타선, D 불펜, 라인업 coverage, 모델강도를 연속 품질로 평가하고
+ * ensemble 방향 일치(하한/평균/분산)와 시장 방향 동의까지 통과한 후보만 하루 TOP2로 뽑는다.
+ * EV/배당 자체는 순위 입력이 아니다.
  */
 function baseballRecentCoverageCountFromPick(pick: MarketPick) {
   const text = String(pick.baseballRecentCoverage ?? "");
@@ -10289,8 +10422,8 @@ function isBaseballHitFirstSlateMarket(pick: MarketPick) {
 
 function baseballHitFirstSlateScore(pick: MarketPick): number | null {
   if (!isBaseballHitFirstSlateMarket(pick)) return null;
-  if (baseballRecentCoverageCountFromPick(pick) < 3) return null;
 
+  const coverageCount = baseballRecentCoverageCountFromPick(pick);
   const floor = Number(pick.precisionConsensusFloor);
   const mean = Number(pick.precisionConsensusMean);
   const spread = Number(pick.precisionConsensusSpread);
@@ -10300,25 +10433,44 @@ function baseballHitFirstSlateScore(pick: MarketPick): number | null {
   const confidence = Number(pick.confidenceScore);
   const risk = Number(pick.decisionRiskScore);
   const market = Number(pick.marketProbability);
+  const dataQuality = Number.isFinite(Number(pick.hitFirstDataQuality))
+    ? Number(pick.hitFirstDataQuality)
+    : coverageCount / 3 * 100;
+  const starterQuality = Number.isFinite(Number(pick.hitFirstStarterQuality))
+    ? Number(pick.hitFirstStarterQuality)
+    : (/선발최근/.test(String(pick.baseballRecentCoverage ?? "")) ? 1 : 0);
+  const battingQuality = Number.isFinite(Number(pick.hitFirstBattingQuality))
+    ? Number(pick.hitFirstBattingQuality)
+    : (/타선/.test(String(pick.baseballRecentCoverage ?? "")) ? 1 : 0);
+  const bullpenQuality = Number.isFinite(Number(pick.hitFirstBullpenQuality))
+    ? Number(pick.hitFirstBullpenQuality)
+    : (/불펜/.test(String(pick.baseballRecentCoverage ?? "")) ? 1 : 0);
+  const modelStrength = Number(pick.hitFirstModelStrength);
 
-  if (![floor, mean, spread, count, precision, probability, confidence, risk].every(Number.isFinite)) return null;
+  if (![floor, mean, spread, count, precision, probability, confidence, risk, dataQuality].every(Number.isFinite)) return null;
   if (count < 4 || confidence < 68 || risk >= 20) return null;
+  if (dataQuality < 70 || starterQuality < 0.35 || battingQuality < 0.65 || bullpenQuality < 0.48) return null;
+  if (Number.isFinite(modelStrength) && modelStrength < 0.70) return null;
 
   const isTotal = /U\/O|오버|언더|OVER|UNDER/i.test(`${pick.market} ${pick.pick}`);
   const minReady = isTotal
-    ? floor >= 68 && mean >= 72 && probability >= 70 && precision >= 68 && spread <= 9
-    : floor >= 62 && mean >= 67 && probability >= 68 && precision >= 64 && spread <= 12;
+    ? dataQuality >= 80 && floor >= 74 && mean >= 78 && probability >= 74 && precision >= 72 && spread <= 8
+    : floor >= 70 && mean >= 75 && probability >= 78 && precision >= 72 && spread <= 10;
   if (!minReady) return null;
 
-  if (Number.isFinite(market) && Math.abs(probability - market) > 20) return null;
+  // 적중률 우선에서는 시장이 선택 반대편을 우세하게 보는 픽을 TOP 후보에서 제외한다.
+  if (!Number.isFinite(market) || market < (isTotal ? 50 : 55)) return null;
+  if (Math.abs(probability - market) > 20) return null;
 
   return Number((
-    precision * 0.42 +
-    floor * 0.28 +
-    mean * 0.16 +
-    probability * 0.14 -
+    precision * 0.30 +
+    floor * 0.24 +
+    mean * 0.13 +
+    probability * 0.13 +
+    dataQuality * 0.12 +
+    market * 0.08 -
     spread * 0.55 -
-    risk * 0.18
+    risk * 0.20
   ).toFixed(2));
 }
 
@@ -10329,6 +10481,7 @@ function bestBaseballHitFirstSlateCandidate(picks: MarketPick[]) {
     .sort((a, b) =>
       b.slateScore - a.slateScore ||
       Number(b.pick.precisionConsensusFloor ?? -999) - Number(a.pick.precisionConsensusFloor ?? -999) ||
+      Number(b.pick.hitFirstDataQuality ?? -999) - Number(a.pick.hitFirstDataQuality ?? -999) ||
       Number(b.pick.precisionConsensusMean ?? -999) - Number(a.pick.precisionConsensusMean ?? -999) ||
       b.pick.probability - a.pick.probability
     )[0] ?? null;
@@ -10336,14 +10489,15 @@ function bestBaseballHitFirstSlateCandidate(picks: MarketPick[]) {
 
 function promoteBaseballSlateTopPick(pick: MarketPick, rank: number, slateScore: number): MarketPick {
   if (pick.valueGrade === "STRONG VALUE" || pick.valueGrade === "VALUE") return pick;
+  const quality = Number(pick.hitFirstDataQuality);
   return {
     ...pick,
     valueGrade: "VALUE",
     valueGradeScore: Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1))),
-    valueGradeReason: `HIT-FIRST SLATE TOP ${rank}/2 · READY+B/C/D 3/3 상대선별 · 점수 ${slateScore.toFixed(1)}`,
+    valueGradeReason: `HIT-FIRST SLATE TOP ${rank}/2 · 가중 데이터품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"} · 합의하한 ${pick.precisionConsensusFloor?.toFixed(1) ?? "-"}% · 점수 ${slateScore.toFixed(1)}`,
     stageGradeLabel: `SLATE TOP${rank} VALUE`,
     recommendationScore: Math.max(pick.recommendationScore, Number(slateScore.toFixed(1))),
-    detail: `${pick.detail} · SLATE TOP${rank}/2`,
+    detail: `${pick.detail} · SLATE TOP${rank}/2 · WEIGHTED QUALITY`,
   };
 }
 
@@ -10479,6 +10633,11 @@ function buildActualMarketPicks(
   const baseballLambda =
     sport === "야구"
       ? baseballDecisionLambda(factors, baseballChallenger)
+      : null;
+
+  const hitFirstDataQuality =
+    sport === "야구"
+      ? baseballHitFirstDataQuality(factors, baseballChallenger, baseballLambda)
       : null;
 
   const expectedHome =
@@ -10995,6 +11154,10 @@ function buildActualMarketPicks(
                 recentFeatureCount,
                 starterUsed: Boolean(baseballLambda?.starterUsed),
                 modelStrength: factors.scoreShrinkage,
+                dataQuality: hitFirstDataQuality?.overall ?? null,
+                starterQuality: hitFirstDataQuality?.starter ?? null,
+                battingQuality: hitFirstDataQuality?.batting ?? null,
+                bullpenQuality: hitFirstDataQuality?.bullpen ?? null,
                 isWin1Lose,
                 isTotalMarket,
                 isSumMarket,
@@ -11142,6 +11305,12 @@ function buildActualMarketPicks(
           precisionConsensusMean: best.precisionConsensus.mean,
           precisionConsensusSpread: best.precisionConsensus.spread,
           precisionConsensusCount: best.precisionConsensus.count,
+          hitFirstDataQuality: hitFirstDataQuality?.overall ?? null,
+          hitFirstStarterQuality: hitFirstDataQuality?.starter ?? null,
+          hitFirstBattingQuality: hitFirstDataQuality?.batting ?? null,
+          hitFirstBullpenQuality: hitFirstDataQuality?.bullpen ?? null,
+          hitFirstModelStrength: hitFirstDataQuality?.model ?? null,
+          hitFirstCoverageLabel: hitFirstDataQuality?.label ?? null,
           baseballLambdaSource:
             baseballLambda?.source ?? "CONTROL",
           baseballRecentBlendWeight:
@@ -11150,7 +11319,7 @@ function buildActualMarketPicks(
             baseballLambda?.coverage ?? null,
           decidedProbability:
             Number(decidedProbability.toFixed(4)),
-          detail: `${periodText}${lineText}${ruleText}${pushText}${lambdaText}${best.precisionConsensus.floor === null ? "" : ` · HIT합의 하한 ${best.precisionConsensus.floor.toFixed(1)}% · 평균 ${best.precisionConsensus.mean?.toFixed(1) ?? "-"}% · 분산 ${best.precisionConsensus.spread?.toFixed(1) ?? "-"}%p`}`,
+          detail: `${periodText}${lineText}${ruleText}${pushText}${lambdaText}${best.precisionConsensus.floor === null ? "" : ` · HIT합의 하한 ${best.precisionConsensus.floor.toFixed(1)}% · 평균 ${best.precisionConsensus.mean?.toFixed(1) ?? "-"}% · 분산 ${best.precisionConsensus.spread?.toFixed(1) ?? "-"}%p`}${hitFirstDataQuality ? ` · 데이터품질 ${hitFirstDataQuality.overall.toFixed(1)}` : ""}`,
         });
 
         continue;
@@ -15621,7 +15790,7 @@ export default function Home() {
   const heldVenue = selectedBaseballTrackerRecord?.venueShadow ?? null;
 
   /*
-   * V13.9.02 STICKY READY
+   * V13.9.03 STICKY READY
    * Same fixture only: once READY was captured pregame, a transient API miss may not
    * regress the decision screen to PRE.  We keep the locked READY score/stage and
    * exact locked market snapshots.  No other fixture/date data is borrowed.
@@ -15692,6 +15861,11 @@ export default function Home() {
         Number(currentBaseballDecisionCoverage.battingUsed) +
         Number(currentBaseballDecisionCoverage.bullpenUsed)
       : 0;
+
+  const currentBaseballHitFirstQuality =
+    currentSport === "야구"
+      ? baseballHitFirstDataQuality(analysisFactors, currentBaseballChallenger, currentBaseballDecisionCoverage)
+      : null;
 
   const currentBaseballEffectiveCompleteness =
     currentSport === "야구"
@@ -15775,6 +15949,7 @@ export default function Home() {
     .sort((a, b) =>
       b.slateScore - a.slateScore ||
       Number(b.pick.precisionConsensusFloor ?? -999) - Number(a.pick.precisionConsensusFloor ?? -999) ||
+      Number(b.pick.hitFirstDataQuality ?? -999) - Number(a.pick.hitFirstDataQuality ?? -999) ||
       Number(b.pick.precisionConsensusMean ?? -999) - Number(a.pick.precisionConsensusMean ?? -999)
     )
     .slice(0, 2);
@@ -17091,7 +17266,7 @@ export default function Home() {
     const precision90Records = liveTrackerRecords.filter(
       (record) =>
         record.sport === "야구" &&
-        record.recommendationEngineVersion === "V13.9.02_STICKY_READY_SLATE_TOP2" &&
+        record.recommendationEngineVersion === "V13.9.03_WEIGHTED_QUALITY_SLATE_TOP2" &&
         record.verificationStatus === "VERIFIED"
     );
     const precision90Ids = new Set(precision90Records.map((record) => record.id));
@@ -17458,7 +17633,7 @@ export default function Home() {
             ? Date.now()
             : null,
         gateVersion: "FALLBACK_GATE_V2",
-        recommendationEngineVersion: currentSport === "야구" ? "V13.9.02_STICKY_READY_SLATE_TOP2" : undefined,
+        recommendationEngineVersion: currentSport === "야구" ? "V13.9.03_WEIGHTED_QUALITY_SLATE_TOP2" : undefined,
         decision: trackerPicks.length ? "PICK" : "PASS",
         picks: trackerPicks,
         marketResults: trackerMarketResults,
@@ -17571,7 +17746,7 @@ export default function Home() {
   ]);
 
   /*
-   * V13.9.02 daily slate rebalance.
+   * V13.9.03 weighted-quality daily slate rebalance.
    * Every READY/PENDING baseball record keeps all marketResults.  As more games are
    * analysed, re-rank the best candidate per game and keep at most two PICK records
    * per KST date.  This prevents an early analysed game from remaining selected after
@@ -17658,14 +17833,14 @@ export default function Home() {
       });
       const afterSig = JSON.stringify({
         decision: nextDecision,
-        engine: "V13.9.02_STICKY_READY_SLATE_TOP2",
+        engine: "V13.9.03_WEIGHTED_QUALITY_SLATE_TOP2",
         picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
       });
       if (beforeSig === afterSig) return record;
       changed = true;
       return {
         ...record,
-        recommendationEngineVersion: "V13.9.02_STICKY_READY_SLATE_TOP2",
+        recommendationEngineVersion: "V13.9.03_WEIGHTED_QUALITY_SLATE_TOP2",
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -22497,7 +22672,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.9.02 · STICKY READY + SLATE TOP2</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.9.03 · WEIGHTED QUALITY + SLATE TOP2</div>
         </div>
         <div className="bar">
           <button
@@ -23804,7 +23979,7 @@ export default function Home() {
 
         <div style={{ padding: "8px 12px", borderTop: "1px solid #e2e8f0", background: "#f6fff8" }}>
           <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-            V13.9.02 VERIFY VOID 유지 · STICKY READY + HIT-FIRST SLATE TOP2 활성
+            V13.9.03 VERIFY VOID 유지 · STICKY READY + WEIGHTED QUALITY SLATE TOP2 활성
           </div>
           <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.7 }}>
             Naver VERIFY 성공 {liveTrackerRecords.filter((r) => r.verificationStatus === "VERIFIED" && r.verifyResultSource === "NAVER").length}경기
@@ -23853,7 +24028,7 @@ export default function Home() {
             <div className="card">전체 ROI<b>{performanceBreakdown.overall.roi === null ? "-" : `${performanceBreakdown.overall.roi >= 0 ? "+" : ""}${performanceBreakdown.overall.roi.toFixed(1)}%`}</b><div className="small">배당 확인 {performanceBreakdown.overall.roiSamples}픽</div></div>
             <div className="card">BASELINE ROI<b>{performanceBreakdown.baseline.roi === null ? "-" : `${performanceBreakdown.baseline.roi >= 0 ? "+" : ""}${performanceBreakdown.baseline.roi.toFixed(1)}%`}</b><div className="small">첫 READY VERIFY {performanceBreakdown.baseline.games}경기 · {performanceBreakdown.baseline.picks}픽</div></div>
             <div className="card">POST-BASELINE ROI<b>{performanceBreakdown.postBaseline.roi === null ? "-" : `${performanceBreakdown.postBaseline.roi >= 0 ? "+" : ""}${performanceBreakdown.postBaseline.roi.toFixed(1)}%`}</b><div className="small">새 표본 {performanceBreakdown.postBaseline.games}경기 · {performanceBreakdown.postBaseline.picks}픽</div></div>
-            <div className="card">V13.9.02 HIT-FIRST 성과<b>{performanceBreakdown.precision90.hitRate === null ? "-" : `${performanceBreakdown.precision90.hitRate.toFixed(1)}%`}</b><div className="small">배포 후 VERIFIED {performanceBreakdown.precision90.games}경기 · 추천 {performanceBreakdown.precision90.picks}픽 · ROI {performanceBreakdown.precision90.roi === null ? "-" : `${performanceBreakdown.precision90.roi >= 0 ? "+" : ""}${performanceBreakdown.precision90.roi.toFixed(1)}%`}</div></div>
+            <div className="card">V13.9.03 HIT-FIRST 성과<b>{performanceBreakdown.precision90.hitRate === null ? "-" : `${performanceBreakdown.precision90.hitRate.toFixed(1)}%`}</b><div className="small">배포 후 VERIFIED {performanceBreakdown.precision90.games}경기 · 추천 {performanceBreakdown.precision90.picks}픽 · ROI {performanceBreakdown.precision90.roi === null ? "-" : `${performanceBreakdown.precision90.roi >= 0 ? "+" : ""}${performanceBreakdown.precision90.roi.toFixed(1)}%`}</div></div>
           </div>
 
           {([
@@ -24004,7 +24179,7 @@ export default function Home() {
 
           <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid #bfdbfe", background: "#f8fbff" }}>
             <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-              V13.9.02 BASEBALL HIT-FIRST ENGINE · STICKY READY + SLATE TOP2
+              V13.9.03 BASEBALL HIT-FIRST ENGINE · WEIGHTED QUALITY + SLATE TOP2
             </div>
             <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.65, marginBottom: 8 }}>
               시작점 2026-09-15 10:00 KST · 이후 READY 야구 PRE만 신규 OOS 저장 · 잠금 {baseballChallengerSummary.locked}경기 · VERIFY {baseballChallengerSummary.verified}경기 · 결과대기 {baseballChallengerSummary.pending}경기
@@ -24018,7 +24193,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.9.02 HIT-FIRST · READY 후퇴 방지 · 절대합의 우선 · 없으면 READY+B/C/D 3/3 후보 중 하루 TOP2만 VALUE · EV/배당은 순위 미사용</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.9.03 HIT-FIRST · READY 후퇴 방지 · B/C/D 이진 Gate 대신 가중 데이터품질 + 합의하한/평균/분산 + 시장방향으로 하루 TOP2 · EV/배당은 순위 미사용</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 2026-09-16 10:55 KST 이후 새 READY MLB snapshot부터 B는 MLB_PERSON_GAMELOG, C/D는 MLB StatsAPI 공식 boxscore를 우선 사용합니다. 항목별 공식 데이터가 없을 때만 Naver workload로 fallback합니다. CONTROL·실전 추천·Gate·기존 λ는 변경하지 않고 Challenger shadow만 계산합니다. 기존 잠금 snapshot은 다시 쓰지 않습니다.
               </div>
@@ -24749,6 +24924,15 @@ export default function Home() {
                         합의하한 {bestActualPick.precisionConsensusFloor.toFixed(1)}%
                         {" · "}평균 {bestActualPick.precisionConsensusMean === null || bestActualPick.precisionConsensusMean === undefined ? "-" : `${bestActualPick.precisionConsensusMean.toFixed(1)}%`}
                         {" · "}분산 {bestActualPick.precisionConsensusSpread === null || bestActualPick.precisionConsensusSpread === undefined ? "-" : `${bestActualPick.precisionConsensusSpread.toFixed(1)}%p`}
+                      </>
+                    ) : null}
+                    {bestActualPick.hitFirstDataQuality !== undefined && bestActualPick.hitFirstDataQuality !== null ? (
+                      <>
+                        <br />
+                        데이터품질 {bestActualPick.hitFirstDataQuality.toFixed(1)}
+                        {" · "}B {bestActualPick.hitFirstStarterQuality === null || bestActualPick.hitFirstStarterQuality === undefined ? "-" : `${Math.round(bestActualPick.hitFirstStarterQuality * 100)}%`}
+                        {" / "}C {bestActualPick.hitFirstBattingQuality === null || bestActualPick.hitFirstBattingQuality === undefined ? "-" : `${Math.round(bestActualPick.hitFirstBattingQuality * 100)}%`}
+                        {" / "}D {bestActualPick.hitFirstBullpenQuality === null || bestActualPick.hitFirstBullpenQuality === undefined ? "-" : `${Math.round(bestActualPick.hitFirstBullpenQuality * 100)}%`}
                       </>
                     ) : null}
                     <br />
@@ -25769,7 +25953,7 @@ export default function Home() {
                               <div className="small">
                                 schedule link {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.scheduleLinks ?? 0)} · box {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.boxScores ?? 0)}
                                 {matched?.naverTodayLineup?.npbOfficial?.schedule?.currentGameUrl ? " · 현재경기 resolve ✓" : " · 현재경기 resolve 대기"}
-                                <br />V13.9.02 · NPB 공식 C/D 실전 λ 유지 · STICKY READY + SLATE TOP2 · 취소/연기 표본 제외
+                                <br />V13.9.03 · NPB 공식 C/D 실전 λ 유지 · WEIGHTED QUALITY + SLATE TOP2 · 취소/연기 표본 제외
                               </div>
                             </div>
                             <div className="card">
@@ -25901,6 +26085,7 @@ export default function Home() {
                             선발 {analysisFactors.baseballStarterCount}/2
                             {" · "}라인업 {analysisFactors.baseballLineupPlayerCount}명
                             {" · "}B/C/D {currentBaseballRecentFeatureCount}/3
+                            {currentBaseballHitFirstQuality ? ` · 가중품질 ${currentBaseballHitFirstQuality.overall.toFixed(1)}` : ""}
                           </div>
                         </div>
 
@@ -25909,25 +26094,16 @@ export default function Home() {
                           <b>
                             {analysisFactors.baseballAnalysisStage !== "READY"
                               ? "PRECISION 대기"
-                              : currentBaseballRecentFeatureCount >= 3 &&
-                                  currentBaseballDecisionCoverage?.starterUsed &&
-                                  Number.isFinite(Number(analysisFactors.scoreShrinkage)) &&
-                                  Number(analysisFactors.scoreShrinkage) >= 0.75
-                                ? "HIT-FIRST Gate 활성"
+                              : currentBaseballHitFirstQuality && currentBaseballHitFirstQuality.overall >= 70
+                                ? "가중 HIT-FIRST 활성"
                                 : "최대 WATCH"}
                           </b>
                           <div className="small">
                             {analysisFactors.baseballAnalysisStage !== "READY"
                               ? "READY 전에는 실전 VALUE 승격 안 함"
-                              : !currentBaseballDecisionCoverage?.starterUsed
-                                ? "선발 최근 B 양팀 coverage 필요"
-                                : currentBaseballRecentFeatureCount < 3
-                                  ? "B/C/D 3/3 필요"
-                                  : !Number.isFinite(Number(analysisFactors.scoreShrinkage))
-                                    ? "모델 강도 미확인 · WATCH"
-                                    : Number(analysisFactors.scoreShrinkage) < 0.75
-                                      ? `모델 강도 ${Math.round(Number(analysisFactors.scoreShrinkage) * 100)}% · HIT-FIRST 기준 75% 미달`
-                                      : "최종 승격은 다중 λ 합의하한·평균·분산 + 시장합의 + 위험 조건 확인"}
+                              : currentBaseballHitFirstQuality
+                                ? `${currentBaseballHitFirstQuality.label} · B 하나 미달만으로 자동 탈락시키지 않고 최종 승격은 다중 λ 합의 + 시장방향 + 위험 조건 확인`
+                                : "가중 데이터품질 계산 대기"}
                           </div>
                         </div>
                       </div>
@@ -27199,7 +27375,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.9.02 HIT-FIRST는 적중률 우선 모드입니다. 같은 경기에서 READY를 한 번 확보하면 일시적인 API 누락으로 PRE로 후퇴시키지 않습니다. 먼저 기존 ensemble 절대합의 Gate를 적용하고, 통과 픽이 없을 때는 READY+B/C/D 3/3 최소품질을 통과한 후보 중 같은 KST 날짜의 상위 2경기만 SLATE TOP VALUE로 승격합니다. EV와 배당은 순위에 사용하지 않습니다. 목표는 적중률을 최대한 높이는 것이며 결과를 보장하지는 않습니다.
+                    V13.9.03 HIT-FIRST는 적중률 우선 모드입니다. 같은 경기에서 READY를 한 번 확보하면 일시적인 API 누락으로 PRE로 후퇴시키지 않습니다. B/C/D를 3/3 하드 Gate로 자르지 않고 최근 선발표본·시즌 선발정보·타선·불펜·라인업·모델강도를 가중 데이터품질로 평가합니다. ensemble 합의하한/평균/분산과 시장 방향까지 통과한 후보 중 같은 KST 날짜의 상위 2경기만 SLATE TOP VALUE로 승격하며 EV와 배당 자체는 순위에 사용하지 않습니다. 목표는 적중률을 최대한 높이는 것이며 결과를 보장하지는 않습니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
