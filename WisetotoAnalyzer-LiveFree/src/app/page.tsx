@@ -1,5 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
-// V13.9.01 HIT-FIRST ENSEMBLE: accuracy-first selection; EV/odds are informational, multi-model consensus drives VALUE
+// V13.9.02 HIT-FIRST: sticky READY + daily slate TOP2; EV/odds remain informational
 // V13.8.89 FIX9: cancelled/postponed/suspended/no-game VERIFY is VOID and excluded from HIT/MISS/ROI/MAE/Brier
 // V13.8.88 FIX8: STRONG VALUE requires baseball model strength >= 70%; lower strength is capped at VALUE
 // DEPLOY_MARKER_V13_8_32_POST_START_30MIN_VISIBILITY_20260903
@@ -668,6 +668,22 @@ type VenueShadowValidationResult = {
   shadowMarginAbsError: number;
 };
 
+/* V13.9.02: once a baseball fixture reaches READY, keep the pregame READY state monotonic. */
+type BaseballReadyHoldSnapshot = {
+  stage: "READY";
+  capturedAt: number;
+  expectedHomeScore: number;
+  expectedAwayScore: number;
+  scoreShrinkage: number | null;
+  homeRecentSample: number;
+  awayRecentSample: number;
+  homeVenueSample: number;
+  awayVenueSample: number;
+  starterCount: number;
+  lineupPlayerCount: number;
+  dataCompleteness: number;
+};
+
 const BASEBALL_CHALLENGER_START_MS = new Date("2026-09-15T10:00:00+09:00").getTime();
 const BASEBALL_MLB_OFFICIAL_BCD_START_MS = new Date("2026-09-16T10:55:00+09:00").getTime();
 const BASEBALL_NPB_OFFICIAL_BCD_START_MS = new Date("2026-09-19T10:24:00+09:00").getTime();
@@ -821,6 +837,7 @@ type LiveTrackerRecord = {
   result: BacktestValidationResult | null;
   venueShadow?: VenueShadowValidationSnapshot | null;
   venueShadowResult?: VenueShadowValidationResult | null;
+  baseballReadyHold?: BaseballReadyHoldSnapshot | null;
   baseballChallenger?: BaseballChallengerSnapshot | null;
   footballLineup?: FootballLineupSnapshot | null;
   footballPre?: FootballPreValidationSnapshot | null;
@@ -10250,6 +10267,97 @@ function pickValueStatus(pick: MarketPick) {
   };
 }
 
+/*
+ * V13.9.02 SLATE TOP2 fallback.
+ * Absolute 90%-style gates can legitimately return zero picks.  For hit-rate-first
+ * operation we therefore keep a second, relative selector: only READY + B/C/D 3/3
+ * candidates enter the slate pool, then at most two games per KST date are promoted.
+ * EV and odds are not ranking inputs.
+ */
+function baseballRecentCoverageCountFromPick(pick: MarketPick) {
+  const text = String(pick.baseballRecentCoverage ?? "");
+  return Number(/선발최근/.test(text)) +
+    Number(/타선/.test(text)) +
+    Number(/불펜/.test(text));
+}
+
+function isBaseballHitFirstSlateMarket(pick: MarketPick) {
+  const label = `${pick.market} ${pick.pick}`;
+  if (/승1패|SUM|홀짝|전반|1st\s*half|first\s*half/i.test(label)) return false;
+  return /승패|핸디|H\s*[+-]?\d|U\/O|오버|언더|OVER|UNDER/i.test(label);
+}
+
+function baseballHitFirstSlateScore(pick: MarketPick): number | null {
+  if (!isBaseballHitFirstSlateMarket(pick)) return null;
+  if (baseballRecentCoverageCountFromPick(pick) < 3) return null;
+
+  const floor = Number(pick.precisionConsensusFloor);
+  const mean = Number(pick.precisionConsensusMean);
+  const spread = Number(pick.precisionConsensusSpread);
+  const count = Number(pick.precisionConsensusCount);
+  const precision = Number(pick.precisionScore ?? pick.recommendationScore);
+  const probability = Number(pick.probability);
+  const confidence = Number(pick.confidenceScore);
+  const risk = Number(pick.decisionRiskScore);
+  const market = Number(pick.marketProbability);
+
+  if (![floor, mean, spread, count, precision, probability, confidence, risk].every(Number.isFinite)) return null;
+  if (count < 4 || confidence < 68 || risk >= 20) return null;
+
+  const isTotal = /U\/O|오버|언더|OVER|UNDER/i.test(`${pick.market} ${pick.pick}`);
+  const minReady = isTotal
+    ? floor >= 68 && mean >= 72 && probability >= 70 && precision >= 68 && spread <= 9
+    : floor >= 62 && mean >= 67 && probability >= 68 && precision >= 64 && spread <= 12;
+  if (!minReady) return null;
+
+  if (Number.isFinite(market) && Math.abs(probability - market) > 20) return null;
+
+  return Number((
+    precision * 0.42 +
+    floor * 0.28 +
+    mean * 0.16 +
+    probability * 0.14 -
+    spread * 0.55 -
+    risk * 0.18
+  ).toFixed(2));
+}
+
+function bestBaseballHitFirstSlateCandidate(picks: MarketPick[]) {
+  return picks
+    .map((pick) => ({ pick, slateScore: baseballHitFirstSlateScore(pick) }))
+    .filter((row): row is { pick: MarketPick; slateScore: number } => row.slateScore !== null)
+    .sort((a, b) =>
+      b.slateScore - a.slateScore ||
+      Number(b.pick.precisionConsensusFloor ?? -999) - Number(a.pick.precisionConsensusFloor ?? -999) ||
+      Number(b.pick.precisionConsensusMean ?? -999) - Number(a.pick.precisionConsensusMean ?? -999) ||
+      b.pick.probability - a.pick.probability
+    )[0] ?? null;
+}
+
+function promoteBaseballSlateTopPick(pick: MarketPick, rank: number, slateScore: number): MarketPick {
+  if (pick.valueGrade === "STRONG VALUE" || pick.valueGrade === "VALUE") return pick;
+  return {
+    ...pick,
+    valueGrade: "VALUE",
+    valueGradeScore: Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1))),
+    valueGradeReason: `HIT-FIRST SLATE TOP ${rank}/2 · READY+B/C/D 3/3 상대선별 · 점수 ${slateScore.toFixed(1)}`,
+    stageGradeLabel: `SLATE TOP${rank} VALUE`,
+    recommendationScore: Math.max(pick.recommendationScore, Number(slateScore.toFixed(1))),
+    detail: `${pick.detail} · SLATE TOP${rank}/2`,
+  };
+}
+
+function kstDateKeyFromMs(ms: number) {
+  if (!Number.isFinite(ms)) return "";
+  return new Date(ms + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function trackerMarketPickSnapshots(record: LiveTrackerRecord): MarketPick[] {
+  return (record.marketResults ?? [])
+    .map((row) => row?.modelSnapshot as MarketPick | null)
+    .filter((pick): pick is MarketPick => Boolean(pick && typeof pick.key === "string"));
+}
+
 type HandicapOutcome = "home" | "draw" | "away";
 
 /**
@@ -15486,12 +15594,79 @@ export default function Home() {
     betman.matched,
     matched
   );
-  const analysisFactors = analysis.factors;
+  const liveAnalysisFactors = analysis.factors;
 
-  const currentBaseballChallenger: BaseballChallengerSnapshot | null =
+  const selectedBaseballTrackerIdentity =
+    currentSport === "야구" && selectedBetman
+      ? actualGameIdentity(selectedBetman)
+      : "";
+  const selectedBaseballTrackerRecord =
+    currentSport === "야구" && selectedBaseballTrackerIdentity
+      ? liveTrackerRecords.find(
+          (record) =>
+            record.sport === "야구" &&
+            record.betmanIdentity === selectedBaseballTrackerIdentity &&
+            record.verificationStatus !== "VOID"
+        ) ?? null
+      : null;
+
+  const stickyReadyActive = Boolean(
+    currentSport === "야구" &&
+    liveAnalysisFactors.baseballAnalysisStage !== "READY" &&
+    selectedBaseballTrackerRecord?.venueShadow?.stage === "READY" &&
+    (selectedBaseballTrackerRecord.marketResults?.length ?? 0) > 0
+  );
+
+  const heldReady = selectedBaseballTrackerRecord?.baseballReadyHold ?? null;
+  const heldVenue = selectedBaseballTrackerRecord?.venueShadow ?? null;
+
+  /*
+   * V13.9.02 STICKY READY
+   * Same fixture only: once READY was captured pregame, a transient API miss may not
+   * regress the decision screen to PRE.  We keep the locked READY score/stage and
+   * exact locked market snapshots.  No other fixture/date data is borrowed.
+   */
+  const analysisFactors: AnalysisFactors = stickyReadyActive
+    ? {
+        ...liveAnalysisFactors,
+        hasRealData: true,
+        expectedHomeScore:
+          heldReady?.expectedHomeScore ?? heldVenue?.rawHome ?? liveAnalysisFactors.expectedHomeScore,
+        expectedAwayScore:
+          heldReady?.expectedAwayScore ?? heldVenue?.rawAway ?? liveAnalysisFactors.expectedAwayScore,
+        expectedTotal:
+          (heldReady?.expectedHomeScore ?? heldVenue?.rawHome ?? liveAnalysisFactors.expectedHomeScore) !== null &&
+          (heldReady?.expectedAwayScore ?? heldVenue?.rawAway ?? liveAnalysisFactors.expectedAwayScore) !== null
+            ? Number((
+                Number(heldReady?.expectedHomeScore ?? heldVenue?.rawHome ?? liveAnalysisFactors.expectedHomeScore) +
+                Number(heldReady?.expectedAwayScore ?? heldVenue?.rawAway ?? liveAnalysisFactors.expectedAwayScore)
+              ).toFixed(2))
+            : liveAnalysisFactors.expectedTotal,
+        expectedMargin:
+          (heldReady?.expectedHomeScore ?? heldVenue?.rawHome ?? liveAnalysisFactors.expectedHomeScore) !== null &&
+          (heldReady?.expectedAwayScore ?? heldVenue?.rawAway ?? liveAnalysisFactors.expectedAwayScore) !== null
+            ? Number((
+                Number(heldReady?.expectedHomeScore ?? heldVenue?.rawHome ?? liveAnalysisFactors.expectedHomeScore) -
+                Number(heldReady?.expectedAwayScore ?? heldVenue?.rawAway ?? liveAnalysisFactors.expectedAwayScore)
+              ).toFixed(2))
+            : liveAnalysisFactors.expectedMargin,
+        scoreShrinkage: heldReady?.scoreShrinkage ?? liveAnalysisFactors.scoreShrinkage,
+        homeRecentSample: heldReady?.homeRecentSample ?? liveAnalysisFactors.homeRecentSample,
+        awayRecentSample: heldReady?.awayRecentSample ?? liveAnalysisFactors.awayRecentSample,
+        homeVenueSample: heldReady?.homeVenueSample ?? liveAnalysisFactors.homeVenueSample,
+        awayVenueSample: heldReady?.awayVenueSample ?? liveAnalysisFactors.awayVenueSample,
+        baseballAnalysisStage: "READY",
+        baseballAnalysisStageLabel: "READY 유지 · 이전 확정 스냅샷",
+        baseballLineupPlayerCount: heldReady?.lineupPlayerCount ?? 18,
+        baseballStarterCount: heldReady?.starterCount ?? 2,
+        baseballDataCompleteness: heldReady?.dataCompleteness ?? 100,
+      }
+    : liveAnalysisFactors;
+
+  const liveBaseballChallenger: BaseballChallengerSnapshot | null =
     currentSport === "야구" && Date.now() >= BASEBALL_CHALLENGER_START_MS
       ? buildBaseballChallengerSnapshot(
-          analysisFactors,
+          liveAnalysisFactors,
           matched,
           matched?.naverTodayLineup?.league ??
             matched?.selectedFixture?.league ??
@@ -15500,6 +15675,11 @@ export default function Home() {
           Date.now(),
         )
       : null;
+
+  const currentBaseballChallenger: BaseballChallengerSnapshot | null =
+    stickyReadyActive
+      ? selectedBaseballTrackerRecord?.baseballChallenger ?? liveBaseballChallenger
+      : liveBaseballChallenger;
 
   const currentBaseballDecisionCoverage =
     currentSport === "야구"
@@ -15532,18 +15712,88 @@ export default function Home() {
   const actualMarketPicksRaw = buildActualMarketPicks(
     betman.matched,
     currentSport,
-    analysisFactors,
+    liveAnalysisFactors,
     recentSummary,
     h2h,
-    currentBaseballChallenger
+    liveBaseballChallenger
   );
 
-  const actualMarketPicks =
+  const liveActualMarketPicks =
     applyLineupStatsCoverageGate(
       actualMarketPicksRaw,
       currentSport,
-      analysisFactors
+      liveAnalysisFactors
     );
+
+  const stickyReadyMarketPicks = stickyReadyActive && selectedBaseballTrackerRecord
+    ? trackerMarketPickSnapshots(selectedBaseballTrackerRecord)
+    : [];
+
+  const actualMarketPicksBase =
+    stickyReadyActive && stickyReadyMarketPicks.length
+      ? stickyReadyMarketPicks
+      : liveActualMarketPicks;
+
+  const selectedStartMs = selectedBetman ? gameTimeMs(selectedBetman) : NaN;
+  const selectedSlateDate = kstDateKeyFromMs(selectedStartMs);
+  const currentSlateCandidate =
+    currentSport === "야구" && analysisFactors.baseballAnalysisStage === "READY"
+      ? bestBaseballHitFirstSlateCandidate(actualMarketPicksBase)
+      : null;
+
+  const otherSlateCandidates =
+    currentSport === "야구" && selectedSlateDate
+      ? liveTrackerRecords
+          .filter((record) =>
+            record.sport === "야구" &&
+            record.verificationStatus === "PENDING" &&
+            record.venueShadow?.stage === "READY" &&
+            record.betmanIdentity !== selectedBaseballTrackerIdentity &&
+            kstDateKeyFromMs(record.startMs) === selectedSlateDate &&
+            record.startMs >= Date.now() - 30 * 60 * 1000
+          )
+          .map((record) => {
+            const candidate = bestBaseballHitFirstSlateCandidate(trackerMarketPickSnapshots(record));
+            return candidate
+              ? { id: record.id, identity: record.betmanIdentity ?? record.id, ...candidate }
+              : null;
+          })
+          .filter((row): row is NonNullable<typeof row> => row !== null)
+      : [];
+
+  const currentSlateIdentity = selectedBaseballTrackerIdentity || `current:${selectedStartMs}`;
+  const slateTopRows = [
+    ...otherSlateCandidates,
+    ...(currentSlateCandidate
+      ? [{
+          id: `current:${currentSlateIdentity}`,
+          identity: currentSlateIdentity,
+          ...currentSlateCandidate,
+        }]
+      : []),
+  ]
+    .sort((a, b) =>
+      b.slateScore - a.slateScore ||
+      Number(b.pick.precisionConsensusFloor ?? -999) - Number(a.pick.precisionConsensusFloor ?? -999) ||
+      Number(b.pick.precisionConsensusMean ?? -999) - Number(a.pick.precisionConsensusMean ?? -999)
+    )
+    .slice(0, 2);
+
+  const currentSlateRankIndex = slateTopRows.findIndex((row) => row.identity === currentSlateIdentity);
+  const currentSlatePromotion =
+    currentSlateCandidate && currentSlateRankIndex >= 0
+      ? promoteBaseballSlateTopPick(
+          currentSlateCandidate.pick,
+          currentSlateRankIndex + 1,
+          currentSlateCandidate.slateScore
+        )
+      : null;
+
+  const actualMarketPicks = currentSlatePromotion
+    ? actualMarketPicksBase.map((pick) =>
+        pick.key === currentSlatePromotion.key ? currentSlatePromotion : pick
+      )
+    : actualMarketPicksBase;
 
   const marketConnectionDiagnostics =
     buildMarketConnectionDiagnostics(
@@ -16004,6 +16254,14 @@ export default function Home() {
           previous[
             baseballSnapshotKey
           ] ?? [];
+
+        const highestExistingStageRank = existing.reduce(
+          (maxRank, item) => Math.max(maxRank, stageRank(item.stage)),
+          -1
+        );
+        if (highestExistingStageRank >= stageRank("READY") && stageRank(snapshot.stage) < stageRank("READY")) {
+          return previous;
+        }
 
         const sameStage =
           existing.find(
@@ -16833,7 +17091,7 @@ export default function Home() {
     const precision90Records = liveTrackerRecords.filter(
       (record) =>
         record.sport === "야구" &&
-        record.recommendationEngineVersion === "V13.9.01_HIT_FIRST_ENSEMBLE" &&
+        record.recommendationEngineVersion === "V13.9.02_STICKY_READY_SLATE_TOP2" &&
         record.verificationStatus === "VERIFIED"
     );
     const precision90Ids = new Set(precision90Records.map((record) => record.id));
@@ -17200,7 +17458,7 @@ export default function Home() {
             ? Date.now()
             : null,
         gateVersion: "FALLBACK_GATE_V2",
-        recommendationEngineVersion: currentSport === "야구" ? "V13.9.01_HIT_FIRST_ENSEMBLE" : undefined,
+        recommendationEngineVersion: currentSport === "야구" ? "V13.9.02_STICKY_READY_SLATE_TOP2" : undefined,
         decision: trackerPicks.length ? "PICK" : "PASS",
         picks: trackerPicks,
         marketResults: trackerMarketResults,
@@ -17226,6 +17484,26 @@ export default function Home() {
               }
             : null,
         venueShadowResult: null,
+        baseballReadyHold:
+          currentSport === "야구" &&
+          analysisFactors.baseballAnalysisStage === "READY" &&
+          analysisFactors.expectedHomeScore !== null &&
+          analysisFactors.expectedAwayScore !== null
+            ? {
+                stage: "READY",
+                capturedAt: Date.now(),
+                expectedHomeScore: analysisFactors.expectedHomeScore,
+                expectedAwayScore: analysisFactors.expectedAwayScore,
+                scoreShrinkage: analysisFactors.scoreShrinkage,
+                homeRecentSample: analysisFactors.homeRecentSample,
+                awayRecentSample: analysisFactors.awayRecentSample,
+                homeVenueSample: analysisFactors.homeVenueSample,
+                awayVenueSample: analysisFactors.awayVenueSample,
+                starterCount: analysisFactors.baseballStarterCount,
+                lineupPlayerCount: analysisFactors.baseballLineupPlayerCount,
+                dataCompleteness: analysisFactors.baseballDataCompleteness,
+              }
+            : null,
         baseballChallenger: baseballChallengerSnapshot,
         footballLineup: footballLineupSnapshot,
         footballPre: footballPreSnapshot,
@@ -17253,6 +17531,7 @@ export default function Home() {
                     capturedAt: existingRecord.capturedAt,
                     readyCapturedAt: Date.now(),
                     venueShadow: nextRecord.venueShadow ?? existingRecord.venueShadow ?? null,
+                    baseballReadyHold: nextRecord.baseballReadyHold ?? existingRecord.baseballReadyHold ?? null,
                     baseballChallenger: nextRecord.baseballChallenger ?? existingRecord.baseballChallenger ?? null,
                     footballLineup: nextRecord.footballLineup ?? existingRecord.footballLineup ?? null,
                     /* V13.8.61: 축구 LINEUP 승격은 최초 PRE 예측/시장 스냅샷을 절대 덮어쓰지 않는다. */
@@ -17290,6 +17569,113 @@ export default function Home() {
     eligibleMarketPicks,
     actualMarketPicks,
   ]);
+
+  /*
+   * V13.9.02 daily slate rebalance.
+   * Every READY/PENDING baseball record keeps all marketResults.  As more games are
+   * analysed, re-rank the best candidate per game and keep at most two PICK records
+   * per KST date.  This prevents an early analysed game from remaining selected after
+   * a clearly stronger later game enters the slate.
+   */
+  useEffect(() => {
+    if (backtestMode || !liveTrackerRecords.length) return;
+
+    const now = Date.now();
+    const groups = new Map<string, LiveTrackerRecord[]>();
+    for (const record of liveTrackerRecords) {
+      if (
+        record.sport !== "야구" ||
+        record.verificationStatus !== "PENDING" ||
+        record.venueShadow?.stage !== "READY" ||
+        record.startMs < now - 30 * 60 * 1000
+      ) continue;
+      const dateKey = kstDateKeyFromMs(record.startMs);
+      if (!dateKey) continue;
+      const rows = groups.get(dateKey) ?? [];
+      rows.push(record);
+      groups.set(dateKey, rows);
+    }
+
+    const desired = new Map<string, LiveTrackerPick | null>();
+    for (const records of groups.values()) {
+      const ranked = records
+        .map((record) => {
+          const candidate = bestBaseballHitFirstSlateCandidate(trackerMarketPickSnapshots(record));
+          return candidate ? { record, ...candidate } : null;
+        })
+        .filter((row): row is NonNullable<typeof row> => row !== null)
+        .sort((a, b) =>
+          b.slateScore - a.slateScore ||
+          Number(b.pick.precisionConsensusFloor ?? -999) - Number(a.pick.precisionConsensusFloor ?? -999) ||
+          Number(b.pick.precisionConsensusMean ?? -999) - Number(a.pick.precisionConsensusMean ?? -999)
+        );
+
+      const rankById = new Map(ranked.slice(0, 2).map((row, index) => [row.record.id, index + 1]));
+      const candidateById = new Map(ranked.map((row) => [row.record.id, row]));
+
+      for (const record of records) {
+        const rank = rankById.get(record.id);
+        const candidate = candidateById.get(record.id);
+        if (!rank || !candidate) {
+          desired.set(record.id, null);
+          continue;
+        }
+
+        const source = (record.marketResults ?? []).find((pick) => pick.key === candidate.pick.key) ?? null;
+        if (!source) {
+          desired.set(record.id, null);
+          continue;
+        }
+        const promoted = promoteBaseballSlateTopPick(candidate.pick, rank, candidate.slateScore);
+        desired.set(record.id, {
+          ...source,
+          probability: promoted.probability,
+          odds: promoted.odds,
+          marketProbability: promoted.marketProbability,
+          edge: promoted.edge,
+          expectedValue: promoted.expectedValue,
+          grade: promoted.valueGrade,
+          confidenceGrade: promoted.confidenceGrade,
+          recommendationScore: promoted.recommendationScore,
+          modelSnapshot: promoted,
+          resultStatus: source.resultStatus ?? "PENDING",
+          actualLabel: source.actualLabel ?? null,
+          resultNote: source.resultNote ?? null,
+        });
+      }
+    }
+
+    let changed = false;
+    const next = liveTrackerRecords.map((record) => {
+      if (!desired.has(record.id)) return record;
+      const target = desired.get(record.id) ?? null;
+      const nextDecision = target ? "PICK" as const : "PASS" as const;
+      const nextPicks = target ? [target] : [];
+      const beforeSig = JSON.stringify({
+        decision: record.decision,
+        engine: record.recommendationEngineVersion,
+        picks: (record.picks ?? []).map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
+      });
+      const afterSig = JSON.stringify({
+        decision: nextDecision,
+        engine: "V13.9.02_STICKY_READY_SLATE_TOP2",
+        picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
+      });
+      if (beforeSig === afterSig) return record;
+      changed = true;
+      return {
+        ...record,
+        recommendationEngineVersion: "V13.9.02_STICKY_READY_SLATE_TOP2",
+        decision: nextDecision,
+        picks: nextPicks,
+      };
+    });
+
+    if (changed) {
+      saveLiveTrackerRecords(next);
+      setLiveTrackerRecords(next);
+    }
+  }, [backtestMode, liveTrackerRecords]);
 
   function naverVerifyVoidReasonFromPayload(payload: any): string | null {
     const game = payload?.game ?? {};
@@ -22111,7 +22497,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.9.01 · HIT-FIRST ENSEMBLE GATE</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.9.02 · STICKY READY + SLATE TOP2</div>
         </div>
         <div className="bar">
           <button
@@ -23418,7 +23804,7 @@ export default function Home() {
 
         <div style={{ padding: "8px 12px", borderTop: "1px solid #e2e8f0", background: "#f6fff8" }}>
           <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-            V13.9.01 VERIFY VOID FILTER 유지 · HIT-FIRST ENSEMBLE 추천 Gate 활성
+            V13.9.02 VERIFY VOID 유지 · STICKY READY + HIT-FIRST SLATE TOP2 활성
           </div>
           <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.7 }}>
             Naver VERIFY 성공 {liveTrackerRecords.filter((r) => r.verificationStatus === "VERIFIED" && r.verifyResultSource === "NAVER").length}경기
@@ -23467,7 +23853,7 @@ export default function Home() {
             <div className="card">전체 ROI<b>{performanceBreakdown.overall.roi === null ? "-" : `${performanceBreakdown.overall.roi >= 0 ? "+" : ""}${performanceBreakdown.overall.roi.toFixed(1)}%`}</b><div className="small">배당 확인 {performanceBreakdown.overall.roiSamples}픽</div></div>
             <div className="card">BASELINE ROI<b>{performanceBreakdown.baseline.roi === null ? "-" : `${performanceBreakdown.baseline.roi >= 0 ? "+" : ""}${performanceBreakdown.baseline.roi.toFixed(1)}%`}</b><div className="small">첫 READY VERIFY {performanceBreakdown.baseline.games}경기 · {performanceBreakdown.baseline.picks}픽</div></div>
             <div className="card">POST-BASELINE ROI<b>{performanceBreakdown.postBaseline.roi === null ? "-" : `${performanceBreakdown.postBaseline.roi >= 0 ? "+" : ""}${performanceBreakdown.postBaseline.roi.toFixed(1)}%`}</b><div className="small">새 표본 {performanceBreakdown.postBaseline.games}경기 · {performanceBreakdown.postBaseline.picks}픽</div></div>
-            <div className="card">V13.9.01 HIT-FIRST 성과<b>{performanceBreakdown.precision90.hitRate === null ? "-" : `${performanceBreakdown.precision90.hitRate.toFixed(1)}%`}</b><div className="small">배포 후 VERIFIED {performanceBreakdown.precision90.games}경기 · 추천 {performanceBreakdown.precision90.picks}픽 · ROI {performanceBreakdown.precision90.roi === null ? "-" : `${performanceBreakdown.precision90.roi >= 0 ? "+" : ""}${performanceBreakdown.precision90.roi.toFixed(1)}%`}</div></div>
+            <div className="card">V13.9.02 HIT-FIRST 성과<b>{performanceBreakdown.precision90.hitRate === null ? "-" : `${performanceBreakdown.precision90.hitRate.toFixed(1)}%`}</b><div className="small">배포 후 VERIFIED {performanceBreakdown.precision90.games}경기 · 추천 {performanceBreakdown.precision90.picks}픽 · ROI {performanceBreakdown.precision90.roi === null ? "-" : `${performanceBreakdown.precision90.roi >= 0 ? "+" : ""}${performanceBreakdown.precision90.roi.toFixed(1)}%`}</div></div>
           </div>
 
           {([
@@ -23618,7 +24004,7 @@ export default function Home() {
 
           <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid #bfdbfe", background: "#f8fbff" }}>
             <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-              V13.9.01 BASEBALL HIT-FIRST ENGINE · ENSEMBLE CONSENSUS GATE
+              V13.9.02 BASEBALL HIT-FIRST ENGINE · STICKY READY + SLATE TOP2
             </div>
             <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.65, marginBottom: 8 }}>
               시작점 2026-09-15 10:00 KST · 이후 READY 야구 PRE만 신규 OOS 저장 · 잠금 {baseballChallengerSummary.locked}경기 · VERIFY {baseballChallengerSummary.verified}경기 · 결과대기 {baseballChallengerSummary.pending}경기
@@ -23632,7 +24018,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.9.01 HIT-FIRST · EV/배당 대신 ensemble 하한·평균·분산 우선 · B/C/D 3/3 · 모델강도 75%↑ · 승1패/SUM/F5 제외 · U/O 초엄격</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.9.02 HIT-FIRST · READY 후퇴 방지 · 절대합의 우선 · 없으면 READY+B/C/D 3/3 후보 중 하루 TOP2만 VALUE · EV/배당은 순위 미사용</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 2026-09-16 10:55 KST 이후 새 READY MLB snapshot부터 B는 MLB_PERSON_GAMELOG, C/D는 MLB StatsAPI 공식 boxscore를 우선 사용합니다. 항목별 공식 데이터가 없을 때만 Naver workload로 fallback합니다. CONTROL·실전 추천·Gate·기존 λ는 변경하지 않고 Challenger shadow만 계산합니다. 기존 잠금 snapshot은 다시 쓰지 않습니다.
               </div>
@@ -25383,7 +25769,7 @@ export default function Home() {
                               <div className="small">
                                 schedule link {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.scheduleLinks ?? 0)} · box {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.boxScores ?? 0)}
                                 {matched?.naverTodayLineup?.npbOfficial?.schedule?.currentGameUrl ? " · 현재경기 resolve ✓" : " · 현재경기 resolve 대기"}
-                                <br />V13.9.01 · NPB 공식 C/D 실전 λ 유지 · HIT-FIRST ENSEMBLE Gate · 취소/연기 표본 제외
+                                <br />V13.9.02 · NPB 공식 C/D 실전 λ 유지 · STICKY READY + SLATE TOP2 · 취소/연기 표본 제외
                               </div>
                             </div>
                             <div className="card">
@@ -26813,7 +27199,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.9.01 HIT-FIRST는 적중률 우선 모드입니다. 야구 추천은 EV·배당구간으로 고르지 않고 RECENT_BLEND + CONTROL + 적용된 A/B/C/D/E의 같은 선택 확률을 다시 계산해 합의하한과 모델분산을 우선합니다. B/C/D 3/3, 모델강도 75% 이상, 신뢰도/위험 조건을 통과해야 하며 승1패·SUM·F5는 추천에서 제외하고 U/O는 더 엄격하게 제한합니다. 목표는 90% 이상 적중률에 최대한 접근하는 것이며 결과를 보장하지는 않습니다.
+                    V13.9.02 HIT-FIRST는 적중률 우선 모드입니다. 같은 경기에서 READY를 한 번 확보하면 일시적인 API 누락으로 PRE로 후퇴시키지 않습니다. 먼저 기존 ensemble 절대합의 Gate를 적용하고, 통과 픽이 없을 때는 READY+B/C/D 3/3 최소품질을 통과한 후보 중 같은 KST 날짜의 상위 2경기만 SLATE TOP VALUE로 승격합니다. EV와 배당은 순위에 사용하지 않습니다. 목표는 적중률을 최대한 높이는 것이며 결과를 보장하지는 않습니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
