@@ -1,5 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
-// V13.9.00 PRECISION: hit-rate-first gate; only ultra-high-probability full-game ML/handicap can be VALUE
+// V13.9.01 HIT-FIRST ENSEMBLE: accuracy-first selection; EV/odds are informational, multi-model consensus drives VALUE
 // V13.8.89 FIX9: cancelled/postponed/suspended/no-game VERIFY is VOID and excluded from HIT/MISS/ROI/MAE/Brier
 // V13.8.88 FIX8: STRONG VALUE requires baseball model strength >= 70%; lower strength is capped at VALUE
 // DEPLOY_MARKER_V13_8_32_POST_START_30MIN_VISIBILITY_20260903
@@ -7907,6 +7907,13 @@ type MarketPick = {
   baseballRecentCoverage?: string | null;
   decidedProbability?: number | null;
 
+  /* V13.9.01: 적중률 우선 ensemble 진단. */
+  precisionScore?: number | null;
+  precisionConsensusFloor?: number | null;
+  precisionConsensusMean?: number | null;
+  precisionConsensusSpread?: number | null;
+  precisionConsensusCount?: number | null;
+
   detail: string;
 };
 
@@ -8232,6 +8239,196 @@ function baseballHomeWinProbability(homeLambda: number, awayLambda: number): num
   }
   const denom = homeWin + awayWin;
   return denom > 0 ? homeWin / denom : null;
+}
+
+
+function baseballSelectionProbabilityFromLambda(input: {
+  homeLambda: number;
+  awayLambda: number;
+  identity: string;
+  line: number | null;
+  isFirstHalf: boolean;
+  isWin1Lose: boolean;
+  isSumMarket: boolean;
+  isTotalMarket: boolean;
+  isHandicapMarket: boolean;
+  hasDrawSelection: boolean;
+}) {
+  const {
+    identity,
+    line,
+    isFirstHalf,
+    isWin1Lose,
+    isSumMarket,
+    isTotalMarket,
+    isHandicapMarket,
+    hasDrawSelection,
+  } = input;
+
+  if (!identity) return null;
+
+  const periodFactor = isFirstHalf ? 5 / 9 : 1;
+  const homeLambda = Math.max(0.1, Number(input.homeLambda) * periodFactor);
+  const awayLambda = Math.max(0.1, Number(input.awayLambda) * periodFactor);
+  if (!Number.isFinite(homeLambda) || !Number.isFinite(awayLambda)) return null;
+
+  const grid = baseballScoreGrid(homeLambda, awayLambda);
+  let home = 0, draw = 0, away = 0;
+  let homeWide = 0, closeOne = 0, awayWide = 0;
+  let over = 0, under = 0, push = 0;
+  let odd = 0, even = 0;
+  let handicapHome = 0, handicapDraw = 0, handicapAway = 0;
+
+  for (const row of grid) {
+    const margin = row.home - row.away;
+    const outcome = settleBetmanMoneyline(row.home, row.away);
+    if (outcome === "home") home += row.p;
+    else if (outcome === "away") away += row.p;
+    else draw += row.p;
+
+    if (margin >= 2) homeWide += row.p;
+    else if (margin <= -2) awayWide += row.p;
+    else closeOne += row.p;
+
+    if (isHandicapMarket && line !== null) {
+      const handicapOutcome = settleBetmanHomeHandicap(row.home, row.away, line);
+      if (handicapOutcome === "home") handicapHome += row.p;
+      else if (handicapOutcome === "away") handicapAway += row.p;
+      else handicapDraw += row.p;
+    }
+
+    if (isTotalMarket && line !== null) {
+      const total = row.home + row.away;
+      if (total > line) over += row.p;
+      else if (total < line) under += row.p;
+      else push += row.p;
+    }
+
+    if ((row.home + row.away) % 2 === 0) even += row.p;
+    else odd += row.p;
+  }
+
+  let probs: Record<string, number> = {};
+  if (isHandicapMarket) {
+    if (hasDrawSelection) {
+      probs = {
+        home: handicapHome * 100,
+        draw: handicapDraw * 100,
+        away: handicapAway * 100,
+      };
+    } else {
+      const decided = handicapHome + handicapAway;
+      probs = {
+        home: decided > 0 ? (handicapHome / decided) * 100 : 50,
+        away: decided > 0 ? (handicapAway / decided) * 100 : 50,
+      };
+    }
+  } else if (isTotalMarket) {
+    const decided = over + under;
+    probs = {
+      over: decided > 0 ? (over / decided) * 100 : 50,
+      under: decided > 0 ? (under / decided) * 100 : 50,
+    };
+  } else if (isSumMarket) {
+    probs = { odd: odd * 100, even: even * 100 };
+  } else if (isWin1Lose) {
+    probs = {
+      home: homeWide * 100,
+      draw: closeOne * 100,
+      away: awayWide * 100,
+    };
+  } else if (isFirstHalf) {
+    probs = { home: home * 100, draw: draw * 100, away: away * 100 };
+  } else {
+    const decided = home + away;
+    probs = {
+      home: decided > 0 ? (home / decided) * 100 : 50,
+      away: decided > 0 ? (away / decided) * 100 : 50,
+    };
+  }
+
+  const probability = Number(probs[identity]);
+  return Number.isFinite(probability) ? Number(probability.toFixed(1)) : null;
+}
+
+function baseballHitFirstConsensus(input: {
+  currentRawProbability: number;
+  calibratedProbability: number;
+  marketProbability: number | null;
+  challenger: BaseballChallengerSnapshot | null;
+  identity: string;
+  line: number | null;
+  isFirstHalf: boolean;
+  isWin1Lose: boolean;
+  isSumMarket: boolean;
+  isTotalMarket: boolean;
+  isHandicapMarket: boolean;
+  hasDrawSelection: boolean;
+}) {
+  const rows: Array<{ key: string; probability: number }> = [];
+  const current = Number(input.currentRawProbability);
+  if (Number.isFinite(current)) rows.push({ key: "RECENT_BLEND", probability: current });
+
+  for (const variant of input.challenger?.variants ?? []) {
+    // 실제 조정값이 0이어도 하나의 안정성 시나리오로 포함한다.
+    // 같은 선택이 CONTROL/A/B/C/D/E에서 모두 유지되는지가 적중률 우선 판단의 핵심이다.
+    const probability = baseballSelectionProbabilityFromLambda({
+      homeLambda: variant.home,
+      awayLambda: variant.away,
+      identity: input.identity,
+      line: input.line,
+      isFirstHalf: input.isFirstHalf,
+      isWin1Lose: input.isWin1Lose,
+      isSumMarket: input.isSumMarket,
+      isTotalMarket: input.isTotalMarket,
+      isHandicapMarket: input.isHandicapMarket,
+      hasDrawSelection: input.hasDrawSelection,
+    });
+    if (probability !== null) rows.push({ key: variant.key, probability });
+  }
+
+  const deduped = Array.from(new Map(rows.map((row) => [row.key, row])).values());
+  const values = deduped.map((row) => row.probability).filter(Number.isFinite);
+  if (!values.length) {
+    return {
+      floor: null as number | null,
+      mean: null as number | null,
+      spread: null as number | null,
+      count: 0,
+      score: null as number | null,
+      rows: deduped,
+    };
+  }
+
+  const floor = Math.min(...values);
+  const ceiling = Math.max(...values);
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const spread = ceiling - floor;
+  const market = Number(input.marketProbability);
+  const marketTerm = Number.isFinite(market) ? market : mean;
+  const calibrated = Number(input.calibratedProbability);
+  const calibratedTerm = Number.isFinite(calibrated) ? calibrated : mean;
+
+  // EV가 아니라 "가장 약한 모델도 얼마나 확신하는가"를 가장 크게 본다.
+  const score = clamp(
+    floor * 0.46 +
+      mean * 0.26 +
+      calibratedTerm * 0.12 +
+      marketTerm * 0.08 +
+      current * 0.08 -
+      spread * 0.75,
+    0,
+    100
+  );
+
+  return {
+    floor: Number(floor.toFixed(1)),
+    mean: Number(mean.toFixed(1)),
+    spread: Number(spread.toFixed(1)),
+    count: values.length,
+    score: Number(score.toFixed(1)),
+    rows: deduped,
+  };
 }
 
 function buildBaseballChallengerSnapshot(
@@ -9605,7 +9802,7 @@ function applyBaseballRecentCoverageGradeCap(
   };
 }
 
-function applyBaseballPrecision90Gate(
+function applyBaseballHitFirstGate(
   valueGrade: {
     grade: ValueGrade;
     score: number;
@@ -9613,6 +9810,7 @@ function applyBaseballPrecision90Gate(
     stageGradeLabel?: string | null;
   },
   input: {
+    stage: BaseballAnalysisStage;
     calibratedProbability: number;
     rawProbability: number;
     marketProbability: number | null;
@@ -9620,7 +9818,6 @@ function applyBaseballPrecision90Gate(
     edge: number | null;
     confidence: number;
     decisionRiskScore: number;
-    odds: number;
     recentFeatureCount: number;
     starterUsed: boolean;
     modelStrength: number | null | undefined;
@@ -9628,117 +9825,134 @@ function applyBaseballPrecision90Gate(
     isTotalMarket: boolean;
     isSumMarket: boolean;
     isFirstHalf: boolean;
+    isHandicapMarket: boolean;
+    consensusFloor: number | null;
+    consensusMean: number | null;
+    consensusSpread: number | null;
+    consensusCount: number;
+    precisionScore: number | null;
   }
 ) {
-  if (valueGrade.grade === "PASS" || valueGrade.grade === "WATCH") {
-    return valueGrade;
-  }
-
   /*
-   * V13.9.00 PRECISION-90 TARGET
-   * 30 READY baseline에서 기존 VALUE/STRONG의 적중률이 90%와 거리가 멀었기 때문에
-   * 확률을 억지로 올리지 않고, 추천 빈도를 크게 줄이는 방식으로 적중률을 우선한다.
-   * - 승1패/UO/SUM/F5는 실전 VALUE 비활성
-   * - 전체경기 승패/핸디만 허용
-   * - B/C/D 3/3 + 선발 B + 모델강도 75% 이상
-   * - 보정확률 90% 이상 + 원모델 92% 이상 + 시장 70% 이상
-   * - EV/Edge 양수이되 과도한 괴리는 제외
-   * - 조건 미달은 전부 WATCH
-   * 이 Gate는 90% 적중을 보장하지 않으며, '90% 목표'를 위해 추천 수를 희생한다.
+   * V13.9.01 HIT-FIRST ENSEMBLE
+   * 목표는 ROI가 아니라 "실제 적중률 최대화"다.
+   * 따라서 기존 EV/Edge VALUE 판정을 참고값으로만 두고, 야구 실전 승격은 아래가 결정한다.
+   *
+   * 핵심:
+   * - 같은 선택을 RECENT_BLEND + CONTROL + 실제 적용된 A/B/C/D/E λ로 재계산
+   * - 평균보다 '가장 낮은 확률(floor)'과 모델간 spread를 우선
+   * - 시장확률은 저배당 자동선택용이 아니라 외부 합의/괴리 검사에만 사용
+   * - EV/Edge/배당구간은 승격조건에서 제거
+   * - 3-way 승1패, SUM, F5는 고적중 목표와 구조적으로 맞지 않아 WATCH
+   * - U/O는 과거 적중이 약해 훨씬 더 엄격한 consensus 기준 적용
    */
   const strength = Number(input.modelStrength);
   const marketP = Number(input.marketProbability);
-  const ev = Number(input.expectedValue);
-  const edge = Number(input.edge);
+  const floor = Number(input.consensusFloor);
+  const mean = Number(input.consensusMean);
+  const spread = Number(input.consensusSpread);
+  const pScore = Number(input.precisionScore);
+  const raw = Number(input.rawProbability);
+  const calibrated = Number(input.calibratedProbability);
 
-  const fullGamePrecisionMarket =
-    !input.isWin1Lose &&
-    !input.isTotalMarket &&
-    !input.isSumMarket &&
-    !input.isFirstHalf;
+  const watch = (reason: string) => ({
+    ...valueGrade,
+    grade: "WATCH" as ValueGrade,
+    score: Math.min(Number.isFinite(pScore) ? pScore : valueGrade.score, 67.9),
+    reason: `HIT-FIRST: ${reason}`,
+    stageGradeLabel: "HIT-FIRST WATCH",
+  });
+
+  if (input.stage !== "READY") {
+    return watch("READY 단계 전 · 선발/라인업 확정 후만 실전 추천");
+  }
+
+  if (input.isWin1Lose || input.isSumMarket || input.isFirstHalf) {
+    return watch("승1패/SUM/F5는 90% 목표 실전 추천에서 제외");
+  }
 
   const dataReady =
     input.recentFeatureCount >= 3 &&
     input.starterUsed &&
     Number.isFinite(strength) &&
-    strength >= 0.75;
-
-  const probabilityReady =
-    Number.isFinite(input.calibratedProbability) &&
-    input.calibratedProbability >= 90 &&
-    Number.isFinite(input.rawProbability) &&
-    input.rawProbability >= 92 &&
-    Number.isFinite(marketP) &&
-    marketP >= 70;
-
-  const valueReady =
-    Number.isFinite(ev) &&
-    ev >= 2 &&
-    Number.isFinite(edge) &&
-    edge >= 2 &&
-    edge < 10;
-
-  const riskReady =
-    input.confidence >= 74 &&
-    input.decisionRiskScore < 15 &&
-    input.odds >= 1.25 &&
-    input.odds <= 1.55;
-
-  if (!fullGamePrecisionMarket) {
-    return {
-      ...valueGrade,
-      grade: "WATCH" as ValueGrade,
-      score: Math.min(valueGrade.score, 57.9),
-      reason: `${valueGrade.reason} · PRECISION-90: 승1패/UO/SUM/F5 실전 VALUE 비활성`,
-    };
-  }
+    strength >= 0.75 &&
+    input.confidence >= 72 &&
+    input.decisionRiskScore < 15;
 
   if (!dataReady) {
-    return {
-      ...valueGrade,
-      grade: "WATCH" as ValueGrade,
-      score: Math.min(valueGrade.score, 57.9),
-      reason: `${valueGrade.reason} · PRECISION-90: B/C/D 3/3 + 선발 B + 모델강도 75% 필요`,
-    };
+    const reasons: string[] = [];
+    if (input.recentFeatureCount < 3) reasons.push(`B/C/D ${input.recentFeatureCount}/3`);
+    if (!input.starterUsed) reasons.push("선발 B 미적용");
+    if (!Number.isFinite(strength) || strength < 0.75) reasons.push(`모델강도 ${Number.isFinite(strength) ? Math.round(strength * 100) : "-"}% < 75%`);
+    if (input.confidence < 72) reasons.push(`신뢰도 ${input.confidence.toFixed(0)} < 72`);
+    if (input.decisionRiskScore >= 15) reasons.push(`위험 ${input.decisionRiskScore.toFixed(0)} >= 15`);
+    return watch(reasons.join(" · ") || "데이터 확정 조건 미달");
   }
 
-  if (!probabilityReady || !valueReady || !riskReady) {
-    const reasons: string[] = [];
-    if (input.calibratedProbability < 90) reasons.push(`보정확률 ${input.calibratedProbability.toFixed(1)}% < 90%`);
-    if (input.rawProbability < 92) reasons.push(`원모델 ${input.rawProbability.toFixed(1)}% < 92%`);
-    if (!Number.isFinite(marketP) || marketP < 70) reasons.push(`시장확률 ${Number.isFinite(marketP) ? marketP.toFixed(1) : "-"}% < 70%`);
-    if (!Number.isFinite(ev) || ev < 2) reasons.push(`EV ${Number.isFinite(ev) ? ev.toFixed(1) : "-"}% < 2%`);
-    if (!Number.isFinite(edge) || edge < 2 || edge >= 10) reasons.push(`Edge ${Number.isFinite(edge) ? edge.toFixed(1) : "-"}%p 허용범위 2~10 미만 아님`);
-    if (input.confidence < 74) reasons.push(`신뢰도 ${input.confidence.toFixed(0)} < 74`);
-    if (input.decisionRiskScore >= 15) reasons.push(`위험 ${input.decisionRiskScore.toFixed(0)} >= 15`);
-    if (input.odds < 1.25 || input.odds > 1.55) reasons.push(`배당 ${input.odds.toFixed(2)} 범위 1.25~1.55 이탈`);
+  if (
+    input.consensusCount < 4 ||
+    !Number.isFinite(floor) ||
+    !Number.isFinite(mean) ||
+    !Number.isFinite(spread) ||
+    !Number.isFinite(pScore) ||
+    !Number.isFinite(raw) ||
+    !Number.isFinite(calibrated) ||
+    !Number.isFinite(marketP)
+  ) {
+    return watch(`ensemble 표본 부족 · 합의모델 ${input.consensusCount}개`);
+  }
 
-    return {
-      ...valueGrade,
-      grade: "WATCH" as ValueGrade,
-      score: Math.min(valueGrade.score, 57.9),
-      reason: `${valueGrade.reason} · PRECISION-90: ${reasons.join(" · ") || "승격 조건 미달"}`,
-    };
+  // U/O는 현재 저장 표본에서 적중 안정성이 가장 약했으므로 별도 초엄격 기준.
+  const totalThreshold = input.isTotalMarket;
+  const threshold = totalThreshold
+    ? { floor: 90, mean: 92, raw: 92, calibrated: 88, market: 75, spread: 4, score: 86 }
+    : { floor: 82, mean: 86, raw: 86, calibrated: 83, market: 68, spread: 7, score: 80 };
+
+  const modelMarketGap = Math.abs(raw - marketP);
+  const consensusReady =
+    floor >= threshold.floor &&
+    mean >= threshold.mean &&
+    raw >= threshold.raw &&
+    calibrated >= threshold.calibrated &&
+    marketP >= threshold.market &&
+    spread <= threshold.spread &&
+    pScore >= threshold.score &&
+    modelMarketGap <= 18;
+
+  if (!consensusReady) {
+    const reasons: string[] = [];
+    if (floor < threshold.floor) reasons.push(`합의하한 ${floor.toFixed(1)}% < ${threshold.floor}%`);
+    if (mean < threshold.mean) reasons.push(`합의평균 ${mean.toFixed(1)}% < ${threshold.mean}%`);
+    if (raw < threshold.raw) reasons.push(`결정모델 ${raw.toFixed(1)}% < ${threshold.raw}%`);
+    if (calibrated < threshold.calibrated) reasons.push(`보정확률 ${calibrated.toFixed(1)}% < ${threshold.calibrated}%`);
+    if (marketP < threshold.market) reasons.push(`시장합의 ${marketP.toFixed(1)}% < ${threshold.market}%`);
+    if (spread > threshold.spread) reasons.push(`모델분산 ${spread.toFixed(1)}%p > ${threshold.spread}%p`);
+    if (pScore < threshold.score) reasons.push(`정확도점수 ${pScore.toFixed(1)} < ${threshold.score}`);
+    if (modelMarketGap > 18) reasons.push(`모델-시장 괴리 ${modelMarketGap.toFixed(1)}%p > 18%p`);
+    return watch(reasons.join(" · ") || "ensemble 합의 부족");
   }
 
   const ultraStrong =
-    input.calibratedProbability >= 93 &&
-    input.rawProbability >= 95 &&
+    !input.isTotalMarket &&
+    floor >= 88 &&
+    mean >= 91 &&
+    raw >= 92 &&
+    calibrated >= 88 &&
     marketP >= 75 &&
-    ev >= 4 &&
-    edge >= 3 &&
-    edge < 8 &&
-    input.confidence >= 78 &&
+    spread <= 4 &&
+    pScore >= 86 &&
     strength >= 0.80 &&
-    input.odds <= 1.45;
+    input.confidence >= 78 &&
+    input.decisionRiskScore < 10;
 
   return {
     ...valueGrade,
     grade: ultraStrong ? "STRONG VALUE" as ValueGrade : "VALUE" as ValueGrade,
-    score: Math.max(valueGrade.score, ultraStrong ? 78 : 68),
+    score: Math.max(valueGrade.score, Number(pScore.toFixed(1))),
     reason: ultraStrong
-      ? "PRECISION-90 초고신뢰 조건 통과 · 보정확률 93%↑"
-      : "PRECISION-90 조건 통과 · 보정확률 90%↑",
+      ? `HIT-FIRST 초강합의 · 하한 ${floor.toFixed(1)}% · 평균 ${mean.toFixed(1)}% · 분산 ${spread.toFixed(1)}%p`
+      : `HIT-FIRST 합의 통과 · 하한 ${floor.toFixed(1)}% · 평균 ${mean.toFixed(1)}% · 분산 ${spread.toFixed(1)}%p`,
+    stageGradeLabel: ultraStrong ? "HIT-FIRST STRONG" : "HIT-FIRST VALUE",
   };
 }
 
@@ -10407,6 +10621,10 @@ function buildActualMarketPicks(
       const isHandicapMarket =
         type === "handicap" ||
         /핸디|handicap/i.test(combinedName);
+      const hasDrawSelection =
+        selections.some(
+          (selection: any) => selectionIdentity(selection) === "draw"
+        );
 
       // 공식 야구 전반 = 5이닝 종료.
       const periodHome =
@@ -10564,9 +10782,9 @@ function buildActualMarketPicks(
         );
 
       /*
-       * V13.8.82
-       * "가장 맞을 확률이 높은 선택지"가 아니라 각 선택지의 배당까지 포함한
-       * "가장 가치가 높은 선택지"를 고른다. 3-way 승1패에서 특히 중요하다.
+       * V13.9.01 HIT-FIRST
+       * ROI/EV가 아니라 실제 적중 가능성을 최대화한다.
+       * 각 선택지를 전부 계산한 뒤 ensemble 하한/평균/분산으로 가장 안정적인 선택을 고른다.
        */
       const valueCandidates = selections
         .flatMap((selection: any) => {
@@ -10638,10 +10856,27 @@ function buildActualMarketPicks(
               factors.scoreShrinkage
             );
 
+          const precisionConsensus =
+            baseballHitFirstConsensus({
+              currentRawProbability: rawProbability,
+              calibratedProbability,
+              marketProbability,
+              challenger: baseballChallenger,
+              identity,
+              line,
+              isFirstHalf,
+              isWin1Lose,
+              isSumMarket,
+              isTotalMarket,
+              isHandicapMarket,
+              hasDrawSelection,
+            });
+
           const precisionGatedValueGrade =
-            applyBaseballPrecision90Gate(
+            applyBaseballHitFirstGate(
               coverageGatedValueGrade,
               {
+                stage: factors.baseballAnalysisStage,
                 calibratedProbability,
                 rawProbability,
                 marketProbability,
@@ -10649,7 +10884,6 @@ function buildActualMarketPicks(
                 edge,
                 confidence,
                 decisionRiskScore: decisionRisk.score,
-                odds,
                 recentFeatureCount,
                 starterUsed: Boolean(baseballLambda?.starterUsed),
                 modelStrength: factors.scoreShrinkage,
@@ -10657,6 +10891,12 @@ function buildActualMarketPicks(
                 isTotalMarket,
                 isSumMarket,
                 isFirstHalf,
+                isHandicapMarket,
+                consensusFloor: precisionConsensus.floor,
+                consensusMean: precisionConsensus.mean,
+                consensusSpread: precisionConsensus.spread,
+                consensusCount: precisionConsensus.count,
+                precisionScore: precisionConsensus.score,
               }
             );
 
@@ -10697,6 +10937,7 @@ function buildActualMarketPicks(
             valueGrade,
             calibrated,
             recScore,
+            precisionConsensus,
           }];
         });
 
@@ -10715,14 +10956,16 @@ function buildActualMarketPicks(
               (a, b) =>
                 gradeRank(b.valueGrade.grade) -
                   gradeRank(a.valueGrade.grade) ||
-                (b.ev.expectedValue ?? -999) -
-                  (a.ev.expectedValue ?? -999) ||
-                b.valueGrade.score -
-                  a.valueGrade.score ||
-                (b.edge ?? -999) -
-                  (a.edge ?? -999) ||
+                (b.precisionConsensus.score ?? -999) -
+                  (a.precisionConsensus.score ?? -999) ||
+                (b.precisionConsensus.floor ?? -999) -
+                  (a.precisionConsensus.floor ?? -999) ||
+                (b.precisionConsensus.mean ?? -999) -
+                  (a.precisionConsensus.mean ?? -999) ||
                 b.calibratedProbability -
-                  a.calibratedProbability
+                  a.calibratedProbability ||
+                (b.marketProbability ?? -999) -
+                  (a.marketProbability ?? -999)
             )[0]
           : null;
 
@@ -10785,7 +11028,12 @@ function buildActualMarketPicks(
           decisionRiskReason: decisionRisk.reason,
           confidenceScore: Number(confidence.toFixed(1)),
           confidenceGrade: confidenceGrade(confidence),
-          recommendationScore: Number(best.recScore.toFixed(1)),
+          recommendationScore: Number((best.precisionConsensus.score ?? best.recScore).toFixed(1)),
+          precisionScore: best.precisionConsensus.score,
+          precisionConsensusFloor: best.precisionConsensus.floor,
+          precisionConsensusMean: best.precisionConsensus.mean,
+          precisionConsensusSpread: best.precisionConsensus.spread,
+          precisionConsensusCount: best.precisionConsensus.count,
           baseballLambdaSource:
             baseballLambda?.source ?? "CONTROL",
           baseballRecentBlendWeight:
@@ -10794,7 +11042,7 @@ function buildActualMarketPicks(
             baseballLambda?.coverage ?? null,
           decidedProbability:
             Number(decidedProbability.toFixed(4)),
-          detail: `${periodText}${lineText}${ruleText}${pushText}${lambdaText}`,
+          detail: `${periodText}${lineText}${ruleText}${pushText}${lambdaText}${best.precisionConsensus.floor === null ? "" : ` · HIT합의 하한 ${best.precisionConsensus.floor.toFixed(1)}% · 평균 ${best.precisionConsensus.mean?.toFixed(1) ?? "-"}% · 분산 ${best.precisionConsensus.spread?.toFixed(1) ?? "-"}%p`}`,
         });
 
         continue;
@@ -15908,14 +16156,18 @@ export default function Home() {
         (a, b) =>
           valueGradeRank(b.valueGrade) -
             valueGradeRank(a.valueGrade) ||
-          (b.expectedValue ?? -999) -
-            (a.expectedValue ?? -999) ||
-          b.valueGradeScore -
-            a.valueGradeScore ||
-          (b.edge ?? -999) -
-            (a.edge ?? -999) ||
+          (b.precisionScore ?? -999) -
+            (a.precisionScore ?? -999) ||
+          (b.precisionConsensusFloor ?? -999) -
+            (a.precisionConsensusFloor ?? -999) ||
+          b.probability -
+            a.probability ||
+          b.confidenceScore -
+            a.confidenceScore ||
           b.recommendationScore -
-            a.recommendationScore
+            a.recommendationScore ||
+          (b.expectedValue ?? -999) -
+            (a.expectedValue ?? -999)
       )[0]
     : null;
 
@@ -16581,7 +16833,7 @@ export default function Home() {
     const precision90Records = liveTrackerRecords.filter(
       (record) =>
         record.sport === "야구" &&
-        record.recommendationEngineVersion === "V13.9.00_PRECISION90" &&
+        record.recommendationEngineVersion === "V13.9.01_HIT_FIRST_ENSEMBLE" &&
         record.verificationStatus === "VERIFIED"
     );
     const precision90Ids = new Set(precision90Records.map((record) => record.id));
@@ -16948,7 +17200,7 @@ export default function Home() {
             ? Date.now()
             : null,
         gateVersion: "FALLBACK_GATE_V2",
-        recommendationEngineVersion: currentSport === "야구" ? "V13.9.00_PRECISION90" : undefined,
+        recommendationEngineVersion: currentSport === "야구" ? "V13.9.01_HIT_FIRST_ENSEMBLE" : undefined,
         decision: trackerPicks.length ? "PICK" : "PASS",
         picks: trackerPicks,
         marketResults: trackerMarketResults,
@@ -21859,7 +22111,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.9.00 · PRECISION-90 TARGET GATE</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.9.01 · HIT-FIRST ENSEMBLE GATE</div>
         </div>
         <div className="bar">
           <button
@@ -23166,7 +23418,7 @@ export default function Home() {
 
         <div style={{ padding: "8px 12px", borderTop: "1px solid #e2e8f0", background: "#f6fff8" }}>
           <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-            V13.9.00 VERIFY VOID FILTER 유지 · PRECISION-90 추천 Gate 활성
+            V13.9.01 VERIFY VOID FILTER 유지 · HIT-FIRST ENSEMBLE 추천 Gate 활성
           </div>
           <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.7 }}>
             Naver VERIFY 성공 {liveTrackerRecords.filter((r) => r.verificationStatus === "VERIFIED" && r.verifyResultSource === "NAVER").length}경기
@@ -23215,7 +23467,7 @@ export default function Home() {
             <div className="card">전체 ROI<b>{performanceBreakdown.overall.roi === null ? "-" : `${performanceBreakdown.overall.roi >= 0 ? "+" : ""}${performanceBreakdown.overall.roi.toFixed(1)}%`}</b><div className="small">배당 확인 {performanceBreakdown.overall.roiSamples}픽</div></div>
             <div className="card">BASELINE ROI<b>{performanceBreakdown.baseline.roi === null ? "-" : `${performanceBreakdown.baseline.roi >= 0 ? "+" : ""}${performanceBreakdown.baseline.roi.toFixed(1)}%`}</b><div className="small">첫 READY VERIFY {performanceBreakdown.baseline.games}경기 · {performanceBreakdown.baseline.picks}픽</div></div>
             <div className="card">POST-BASELINE ROI<b>{performanceBreakdown.postBaseline.roi === null ? "-" : `${performanceBreakdown.postBaseline.roi >= 0 ? "+" : ""}${performanceBreakdown.postBaseline.roi.toFixed(1)}%`}</b><div className="small">새 표본 {performanceBreakdown.postBaseline.games}경기 · {performanceBreakdown.postBaseline.picks}픽</div></div>
-            <div className="card">V13.9 PRECISION 성과<b>{performanceBreakdown.precision90.hitRate === null ? "-" : `${performanceBreakdown.precision90.hitRate.toFixed(1)}%`}</b><div className="small">배포 후 VERIFIED {performanceBreakdown.precision90.games}경기 · 추천 {performanceBreakdown.precision90.picks}픽 · ROI {performanceBreakdown.precision90.roi === null ? "-" : `${performanceBreakdown.precision90.roi >= 0 ? "+" : ""}${performanceBreakdown.precision90.roi.toFixed(1)}%`}</div></div>
+            <div className="card">V13.9.01 HIT-FIRST 성과<b>{performanceBreakdown.precision90.hitRate === null ? "-" : `${performanceBreakdown.precision90.hitRate.toFixed(1)}%`}</b><div className="small">배포 후 VERIFIED {performanceBreakdown.precision90.games}경기 · 추천 {performanceBreakdown.precision90.picks}픽 · ROI {performanceBreakdown.precision90.roi === null ? "-" : `${performanceBreakdown.precision90.roi >= 0 ? "+" : ""}${performanceBreakdown.precision90.roi.toFixed(1)}%`}</div></div>
           </div>
 
           {([
@@ -23366,7 +23618,7 @@ export default function Home() {
 
           <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid #bfdbfe", background: "#f8fbff" }}>
             <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-              V13.9.00 BASEBALL PRECISION ENGINE · 90% TARGET GATE
+              V13.9.01 BASEBALL HIT-FIRST ENGINE · ENSEMBLE CONSENSUS GATE
             </div>
             <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.65, marginBottom: 8 }}>
               시작점 2026-09-15 10:00 KST · 이후 READY 야구 PRE만 신규 OOS 저장 · 잠금 {baseballChallengerSummary.locked}경기 · VERIFY {baseballChallengerSummary.verified}경기 · 결과대기 {baseballChallengerSummary.pending}경기
@@ -23380,7 +23632,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.9.00 PRECISION-90 · 승패/핸디만 VALUE 후보 · 보정확률 90%↑ · B/C/D 3/3 · 모델강도 75%↑ · U/O/승1패 최대 WATCH</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.9.01 HIT-FIRST · EV/배당 대신 ensemble 하한·평균·분산 우선 · B/C/D 3/3 · 모델강도 75%↑ · 승1패/SUM/F5 제외 · U/O 초엄격</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 2026-09-16 10:55 KST 이후 새 READY MLB snapshot부터 B는 MLB_PERSON_GAMELOG, C/D는 MLB StatsAPI 공식 boxscore를 우선 사용합니다. 항목별 공식 데이터가 없을 때만 Naver workload로 fallback합니다. CONTROL·실전 추천·Gate·기존 λ는 변경하지 않고 Challenger shadow만 계산합니다. 기존 잠금 snapshot은 다시 쓰지 않습니다.
               </div>
@@ -24089,14 +24341,14 @@ export default function Home() {
 
               <div className="bestBox">
                 <div className="label">
-                  현재 최고 가치픽
+                  현재 최고 적중우선픽
                   {bestActualPick
                     ? ` · ${bestActualPick.valueGrade}`
                     : ""}
                 </div>
                 <div className="pickName">
                   {analysisFactors.hasRealData
-                    ? (bestActualPick ? `${backtestMarketGroup(bestActualPick.market)} · ${compactBetmanPickLabel(bestActualPick.market, bestActualPick.pick)}` : actualMarketPicks.length ? "가치픽 없음" : bestPick?.[1])
+                    ? (bestActualPick ? `${backtestMarketGroup(bestActualPick.market)} · ${compactBetmanPickLabel(bestActualPick.market, bestActualPick.pick)}` : actualMarketPicks.length ? "적중우선픽 없음" : bestPick?.[1])
                     : "분석 대기"}
                 </div>
                 <div className="pickPct">
@@ -24104,7 +24356,15 @@ export default function Home() {
                 </div>
                 {bestActualPick && (
                   <div className="pickMeta">
-                    추천점수 {bestActualPick.recommendationScore.toFixed(1)}
+                    정확도점수 {bestActualPick.recommendationScore.toFixed(1)}
+                    {bestActualPick.precisionConsensusFloor !== undefined && bestActualPick.precisionConsensusFloor !== null ? (
+                      <>
+                        <br />
+                        합의하한 {bestActualPick.precisionConsensusFloor.toFixed(1)}%
+                        {" · "}평균 {bestActualPick.precisionConsensusMean === null || bestActualPick.precisionConsensusMean === undefined ? "-" : `${bestActualPick.precisionConsensusMean.toFixed(1)}%`}
+                        {" · "}분산 {bestActualPick.precisionConsensusSpread === null || bestActualPick.precisionConsensusSpread === undefined ? "-" : `${bestActualPick.precisionConsensusSpread.toFixed(1)}%p`}
+                      </>
+                    ) : null}
                     <br />
                     엣지 {bestActualPick.edge === null ? "-" : `${bestActualPick.edge >= 0 ? "+" : ""}${bestActualPick.edge.toFixed(1)}%p`}
                     {" · "}EV {bestActualPick.expectedValue === null ? "-" : `${bestActualPick.expectedValue >= 0 ? "+" : ""}${bestActualPick.expectedValue.toFixed(1)}%`}
@@ -25123,7 +25383,7 @@ export default function Home() {
                               <div className="small">
                                 schedule link {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.scheduleLinks ?? 0)} · box {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.boxScores ?? 0)}
                                 {matched?.naverTodayLineup?.npbOfficial?.schedule?.currentGameUrl ? " · 현재경기 resolve ✓" : " · 현재경기 resolve 대기"}
-                                <br />V13.9.00 · NPB 공식 C/D 실전 λ 유지 · PRECISION-90 Gate · 취소/연기 표본 제외
+                                <br />V13.9.01 · NPB 공식 C/D 실전 λ 유지 · HIT-FIRST ENSEMBLE Gate · 취소/연기 표본 제외
                               </div>
                             </div>
                             <div className="card">
@@ -25267,7 +25527,7 @@ export default function Home() {
                                   currentBaseballDecisionCoverage?.starterUsed &&
                                   Number.isFinite(Number(analysisFactors.scoreShrinkage)) &&
                                   Number(analysisFactors.scoreShrinkage) >= 0.75
-                                ? "PRECISION-90 Gate 활성"
+                                ? "HIT-FIRST Gate 활성"
                                 : "최대 WATCH"}
                           </b>
                           <div className="small">
@@ -25280,8 +25540,8 @@ export default function Home() {
                                   : !Number.isFinite(Number(analysisFactors.scoreShrinkage))
                                     ? "모델 강도 미확인 · WATCH"
                                     : Number(analysisFactors.scoreShrinkage) < 0.75
-                                      ? `모델 강도 ${Math.round(Number(analysisFactors.scoreShrinkage) * 100)}% · PRECISION 기준 75% 미달`
-                                      : "최종 승격은 보정확률 90%↑ + 승패/핸디 + 시장/EV/Edge 조건까지 모두 확인"}
+                                      ? `모델 강도 ${Math.round(Number(analysisFactors.scoreShrinkage) * 100)}% · HIT-FIRST 기준 75% 미달`
+                                      : "최종 승격은 다중 λ 합의하한·평균·분산 + 시장합의 + 위험 조건 확인"}
                           </div>
                         </div>
                       </div>
@@ -26553,7 +26813,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.9.00 PRECISION-90은 적중률 우선 모드입니다. 실전 VALUE는 전체경기 승패/핸디 중 보정확률 90% 이상, 원모델 92% 이상, 시장확률 70% 이상, B/C/D 3/3, 모델 강도 75% 이상, 신뢰도 74 이상, 위험 15 미만, 배당 1.25~1.55 및 양수 EV/Edge 조건을 모두 만족할 때만 허용합니다. 90% 적중을 보장하는 규칙은 아닙니다.
+                    V13.9.01 HIT-FIRST는 적중률 우선 모드입니다. 야구 추천은 EV·배당구간으로 고르지 않고 RECENT_BLEND + CONTROL + 적용된 A/B/C/D/E의 같은 선택 확률을 다시 계산해 합의하한과 모델분산을 우선합니다. B/C/D 3/3, 모델강도 75% 이상, 신뢰도/위험 조건을 통과해야 하며 승1패·SUM·F5는 추천에서 제외하고 U/O는 더 엄격하게 제한합니다. 목표는 90% 이상 적중률에 최대한 접근하는 것이며 결과를 보장하지는 않습니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
