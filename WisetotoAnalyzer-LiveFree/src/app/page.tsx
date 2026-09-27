@@ -22608,6 +22608,7 @@ export default function Home() {
         .livePickChip.value.red{background:#d90404;color:#fff;border:1px solid #b91c1c}
         .livePickChip.value.gray{background:#666;color:#fff;border:1px solid #4b5563}
         .livePickChip.value.green{background:#07884a;color:#fff;border:1px solid #04743f}
+        .livePickChip.watch{background:#fff7e6;color:#9a6200;border:1px solid #f4c96b}
         .livePickChip.pass{background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1}
         .livePickChip.fail{background:#fee2e2;color:#b42318;border:1px solid #fecaca}
         .livePickMeta{display:block;font-size:8px;color:#64748b;margin-top:2px;font-weight:800}
@@ -22685,7 +22686,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.9.04 · SOFT MODEL STRENGTH + SLATE TOP2</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.9.05 · LIST GRADE SYNC + SOFT STRENGTH</div>
         </div>
         <div className="bar">
           <button
@@ -23992,7 +23993,7 @@ export default function Home() {
 
         <div style={{ padding: "8px 12px", borderTop: "1px solid #e2e8f0", background: "#f6fff8" }}>
           <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-            V13.9.04 VERIFY VOID 유지 · STICKY READY + SOFT MODEL STRENGTH SLATE TOP2 활성
+            V13.9.05 VERIFY VOID 유지 · LIST GRADE SYNC + STICKY READY + SOFT MODEL STRENGTH 활성
           </div>
           <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.7 }}>
             Naver VERIFY 성공 {liveTrackerRecords.filter((r) => r.verificationStatus === "VERIFIED" && r.verifyResultSource === "NAVER").length}경기
@@ -24041,7 +24042,7 @@ export default function Home() {
             <div className="card">전체 ROI<b>{performanceBreakdown.overall.roi === null ? "-" : `${performanceBreakdown.overall.roi >= 0 ? "+" : ""}${performanceBreakdown.overall.roi.toFixed(1)}%`}</b><div className="small">배당 확인 {performanceBreakdown.overall.roiSamples}픽</div></div>
             <div className="card">BASELINE ROI<b>{performanceBreakdown.baseline.roi === null ? "-" : `${performanceBreakdown.baseline.roi >= 0 ? "+" : ""}${performanceBreakdown.baseline.roi.toFixed(1)}%`}</b><div className="small">첫 READY VERIFY {performanceBreakdown.baseline.games}경기 · {performanceBreakdown.baseline.picks}픽</div></div>
             <div className="card">POST-BASELINE ROI<b>{performanceBreakdown.postBaseline.roi === null ? "-" : `${performanceBreakdown.postBaseline.roi >= 0 ? "+" : ""}${performanceBreakdown.postBaseline.roi.toFixed(1)}%`}</b><div className="small">새 표본 {performanceBreakdown.postBaseline.games}경기 · {performanceBreakdown.postBaseline.picks}픽</div></div>
-            <div className="card">V13.9.04 HIT-FIRST 성과<b>{performanceBreakdown.precision90.hitRate === null ? "-" : `${performanceBreakdown.precision90.hitRate.toFixed(1)}%`}</b><div className="small">배포 후 VERIFIED {performanceBreakdown.precision90.games}경기 · 추천 {performanceBreakdown.precision90.picks}픽 · ROI {performanceBreakdown.precision90.roi === null ? "-" : `${performanceBreakdown.precision90.roi >= 0 ? "+" : ""}${performanceBreakdown.precision90.roi.toFixed(1)}%`}</div></div>
+            <div className="card">V13.9.04/05 HIT-FIRST 성과<b>{performanceBreakdown.precision90.hitRate === null ? "-" : `${performanceBreakdown.precision90.hitRate.toFixed(1)}%`}</b><div className="small">배포 후 VERIFIED {performanceBreakdown.precision90.games}경기 · 추천 {performanceBreakdown.precision90.picks}픽 · ROI {performanceBreakdown.precision90.roi === null ? "-" : `${performanceBreakdown.precision90.roi >= 0 ? "+" : ""}${performanceBreakdown.precision90.roi.toFixed(1)}%`}</div></div>
           </div>
 
           {([
@@ -24192,7 +24193,7 @@ export default function Home() {
 
           <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid #bfdbfe", background: "#f8fbff" }}>
             <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-              V13.9.04 BASEBALL HIT-FIRST ENGINE · SOFT MODEL STRENGTH + SLATE TOP2
+              V13.9.05 BASEBALL HIT-FIRST ENGINE · LIST GRADE SYNC + SOFT STRENGTH
             </div>
             <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.65, marginBottom: 8 }}>
               시작점 2026-09-15 10:00 KST · 이후 READY 야구 PRE만 신규 OOS 저장 · 잠금 {baseballChallengerSummary.locked}경기 · VERIFY {baseballChallengerSummary.verified}경기 · 결과대기 {baseballChallengerSummary.pending}경기
@@ -24206,7 +24207,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.9.04 HIT-FIRST · READY 후퇴 방지 · B/C/D 이진 Gate 대신 가중 데이터품질 + 합의하한/평균/분산 + 시장방향 + 모델강도 soft 감점으로 하루 TOP2 · EV/배당은 순위 미사용</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.9.05 HIT-FIRST · LIST GRADE SYNC · READY 후퇴 방지 · B/C/D 이진 Gate 대신 가중 데이터품질 + 합의하한/평균/분산 + 시장방향 + 모델강도 soft 감점으로 하루 TOP2 · EV/배당은 순위 미사용</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 2026-09-16 10:55 KST 이후 새 READY MLB snapshot부터 B는 MLB_PERSON_GAMELOG, C/D는 MLB StatsAPI 공식 boxscore를 우선 사용합니다. 항목별 공식 데이터가 없을 때만 Naver workload로 fallback합니다. CONTROL·실전 추천·Gate·기존 λ는 변경하지 않고 Challenger shadow만 계산합니다. 기존 잠금 snapshot은 다시 쓰지 않습니다.
               </div>
@@ -24668,6 +24669,25 @@ export default function Home() {
                           batchOutcome?.recommendedKeys?.includes(marketKey)
                         );
 
+                    // V13.9.05: 좌측 Betman 발매행도 상세 분석의 VALUE/WATCH/PASS를 그대로 표시한다.
+                    // 이전에는 `recommended === false`를 전부 PASS로 표시해 HIT-FIRST WATCH까지 PASS처럼 보였다.
+                    const marketResultStageLabel = marketResult
+                      ? String((marketResult as any)?.stageGradeLabel ?? "")
+                      : "";
+                    const marketResultGradeBucket = calibrationGradeBucket(
+                      marketResultStageLabel || String(marketResultGrade ?? "")
+                    );
+                    const rowStatusLabel = recommended
+                      ? (marketResultStageLabel || "VALUE")
+                      : marketResultGradeBucket === "WATCH"
+                        ? "WATCH"
+                        : "PASS";
+                    const rowStatusTone = recommended
+                      ? "value"
+                      : marketResultGradeBucket === "WATCH"
+                        ? "watch"
+                        : "pass";
+
                     const marketNo =
                       market?.matchSeq ??
                       market?.gameNo ??
@@ -24826,7 +24846,7 @@ export default function Home() {
                                 className={`livePickChip ${
                                   recommended
                                     ? `value ${rowTone}`
-                                    : "pass"
+                                    : rowStatusTone
                                 }`}
                                 title={`${friendlyMarketPickLabel(
                                   marketResult.market,
@@ -24843,19 +24863,21 @@ export default function Home() {
                                 )}
                               </span>
 
-                              {!recommended && (
-                                <span
-                                  style={{
-                                    display: "block",
-                                    marginTop: 1,
-                                    fontSize: 8,
-                                    color: "#94a3b8",
-                                    fontWeight: 850,
-                                  }}
-                                >
-                                  PASS
-                                </span>
-                              )}
+                              <span
+                                style={{
+                                  display: "block",
+                                  marginTop: 1,
+                                  fontSize: 8,
+                                  color: recommended
+                                    ? "#087a39"
+                                    : marketResultGradeBucket === "WATCH"
+                                      ? "#9a6200"
+                                      : "#94a3b8",
+                                  fontWeight: 900,
+                                }}
+                              >
+                                {rowStatusLabel}
+                              </span>
                             </>
                           ) : trackerRecord ? (
                             <span className="livePickChip pass">
@@ -25966,7 +25988,7 @@ export default function Home() {
                               <div className="small">
                                 schedule link {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.scheduleLinks ?? 0)} · box {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.boxScores ?? 0)}
                                 {matched?.naverTodayLineup?.npbOfficial?.schedule?.currentGameUrl ? " · 현재경기 resolve ✓" : " · 현재경기 resolve 대기"}
-                                <br />V13.9.04 · NPB 공식 C/D 실전 λ 유지 · SOFT MODEL STRENGTH + SLATE TOP2 · 취소/연기 표본 제외
+                                <br />V13.9.05 · NPB 공식 C/D 실전 λ 유지 · LIST GRADE SYNC + SOFT STRENGTH · 취소/연기 표본 제외
                               </div>
                             </div>
                             <div className="card">
@@ -27388,7 +27410,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.9.04 HIT-FIRST는 적중률 우선 모드입니다. 같은 경기에서 READY를 한 번 확보하면 일시적인 API 누락으로 PRE로 후퇴시키지 않습니다. B/C/D와 모델강도를 하드 Gate로 자르지 않고 최근 선발표본·시즌 선발정보·타선·불펜·라인업·모델강도를 연속 가중점수로 평가합니다. 모델강도는 70/75% 컷 대신 부족분만 soft 감점하고, ensemble 합의하한/평균/분산과 시장 방향까지 통과한 후보 중 같은 KST 날짜의 상위 2경기만 SLATE TOP VALUE로 승격하며 EV와 배당 자체는 순위에 사용하지 않습니다. 목표는 적중률을 최대한 높이는 것이며 결과를 보장하지는 않습니다.
+                    V13.9.05 HIT-FIRST는 적중률 우선 모드입니다. 같은 경기에서 READY를 한 번 확보하면 일시적인 API 누락으로 PRE로 후퇴시키지 않습니다. B/C/D와 모델강도를 하드 Gate로 자르지 않고 최근 선발표본·시즌 선발정보·타선·불펜·라인업·모델강도를 연속 가중점수로 평가합니다. 모델강도는 70/75% 컷 대신 부족분만 soft 감점하고, ensemble 합의하한/평균/분산과 시장 방향까지 통과한 후보 중 같은 KST 날짜의 상위 2경기만 SLATE TOP VALUE로 승격하며 EV와 배당 자체는 순위에 사용하지 않습니다. 목표는 적중률을 최대한 높이는 것이며 결과를 보장하지는 않습니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
