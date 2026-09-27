@@ -1,5 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
-// V13.9.03 HIT-FIRST: sticky READY + weighted data-quality slate TOP2; EV/odds remain informational
+// V13.9.04 HIT-FIRST: sticky READY + soft model-strength weighted-quality slate TOP2; EV/odds remain informational
 // V13.8.89 FIX9: cancelled/postponed/suspended/no-game VERIFY is VOID and excluded from HIT/MISS/ROI/MAE/Brier
 // V13.8.88 FIX8: STRONG VALUE requires baseball model strength >= 70%; lower strength is capped at VALUE
 // DEPLOY_MARKER_V13_8_32_POST_START_30MIN_VISIBILITY_20260903
@@ -668,7 +668,7 @@ type VenueShadowValidationResult = {
   shadowMarginAbsError: number;
 };
 
-/* V13.9.03: once a baseball fixture reaches READY, keep the pregame READY state monotonic. */
+/* V13.9.04: once a baseball fixture reaches READY, keep the pregame READY state monotonic. */
 type BaseballReadyHoldSnapshot = {
   stage: "READY";
   capturedAt: number;
@@ -7931,7 +7931,7 @@ type MarketPick = {
   precisionConsensusSpread?: number | null;
   precisionConsensusCount?: number | null;
 
-  /* V13.9.03: B/C/D를 0/1로 자르지 않고 데이터 품질을 연속값으로 저장. */
+  /* V13.9.04: B/C/D를 0/1로 자르지 않고 데이터 품질을 연속값으로 저장. */
   hitFirstDataQuality?: number | null;
   hitFirstStarterQuality?: number | null;
   hitFirstBattingQuality?: number | null;
@@ -9838,7 +9838,7 @@ type BaseballHitFirstDataQuality = {
 };
 
 /*
- * V13.9.03 WEIGHTED DATA QUALITY
+ * V13.9.04 WEIGHTED DATA QUALITY
  * B/C/D를 단순 3/3 여부로 자르지 않는다. 최근 선발 표본이 부족해도
  * 선발 신원+시즌 수치가 확보되고 C/D/라인업/모델이 강하면 감점 후 후보로 남긴다.
  * 반대로 B/C/D 개수만 많고 실제 표본 품질이 낮으면 자동 우대하지 않는다.
@@ -9974,7 +9974,7 @@ function applyBaseballHitFirstGate(
   }
 ) {
   /*
-   * V13.9.03 HIT-FIRST ENSEMBLE + WEIGHTED QUALITY
+   * V13.9.04 HIT-FIRST ENSEMBLE + WEIGHTED QUALITY
    * 목표는 ROI가 아니라 "실제 적중률 최대화"다.
    * 따라서 기존 EV/Edge VALUE 판정을 참고값으로만 두고, 야구 실전 승격은 아래가 결정한다.
    *
@@ -10016,14 +10016,22 @@ function applyBaseballHitFirstGate(
     return watch("승1패/SUM/F5는 90% 목표 실전 추천에서 제외");
   }
 
+  /*
+   * V13.9.04: modelStrength is no longer a binary eligibility gate.
+   * It already contributes to weighted dataQuality and is also applied below as a
+   * small continuous precision penalty.  A 64% model can therefore compete with a
+   * stronger model when lineup/C/D/consensus are materially better.
+   */
+  const strengthPct = Number.isFinite(strength) ? clamp(strength * 100, 0, 100) : 50;
+  const strengthPenalty = Math.max(0, 75 - strengthPct) * 0.18;
+  const effectivePrecisionScore = Number.isFinite(pScore) ? pScore - strengthPenalty : pScore;
+
   const dataReady =
     Number.isFinite(dataQuality) &&
     dataQuality >= 80 &&
     Number.isFinite(starterQuality) && starterQuality >= 0.35 &&
     Number.isFinite(battingQuality) && battingQuality >= 0.68 &&
     Number.isFinite(bullpenQuality) && bullpenQuality >= 0.50 &&
-    Number.isFinite(strength) &&
-    strength >= 0.75 &&
     input.confidence >= 72 &&
     input.decisionRiskScore < 15;
 
@@ -10033,7 +10041,6 @@ function applyBaseballHitFirstGate(
     if (!Number.isFinite(starterQuality) || starterQuality < 0.35) reasons.push(`선발품질 ${Number.isFinite(starterQuality) ? Math.round(starterQuality * 100) : "-"}% < 35%`);
     if (!Number.isFinite(battingQuality) || battingQuality < 0.68) reasons.push(`타선품질 ${Number.isFinite(battingQuality) ? Math.round(battingQuality * 100) : "-"}% < 68%`);
     if (!Number.isFinite(bullpenQuality) || bullpenQuality < 0.50) reasons.push(`불펜품질 ${Number.isFinite(bullpenQuality) ? Math.round(bullpenQuality * 100) : "-"}% < 50%`);
-    if (!Number.isFinite(strength) || strength < 0.75) reasons.push(`모델강도 ${Number.isFinite(strength) ? Math.round(strength * 100) : "-"}% < 75%`);
     if (input.confidence < 72) reasons.push(`신뢰도 ${input.confidence.toFixed(0)} < 72`);
     if (input.decisionRiskScore >= 15) reasons.push(`위험 ${input.decisionRiskScore.toFixed(0)} >= 15`);
     return watch(reasons.join(" · ") || "가중 데이터 품질 조건 미달");
@@ -10066,7 +10073,7 @@ function applyBaseballHitFirstGate(
     calibrated >= threshold.calibrated &&
     marketP >= threshold.market &&
     spread <= threshold.spread &&
-    pScore >= threshold.score &&
+    effectivePrecisionScore >= threshold.score &&
     modelMarketGap <= 18;
 
   if (!consensusReady) {
@@ -10077,7 +10084,7 @@ function applyBaseballHitFirstGate(
     if (calibrated < threshold.calibrated) reasons.push(`보정확률 ${calibrated.toFixed(1)}% < ${threshold.calibrated}%`);
     if (marketP < threshold.market) reasons.push(`시장합의 ${marketP.toFixed(1)}% < ${threshold.market}%`);
     if (spread > threshold.spread) reasons.push(`모델분산 ${spread.toFixed(1)}%p > ${threshold.spread}%p`);
-    if (pScore < threshold.score) reasons.push(`정확도점수 ${pScore.toFixed(1)} < ${threshold.score}`);
+    if (effectivePrecisionScore < threshold.score) reasons.push(`강도보정 정확도점수 ${effectivePrecisionScore.toFixed(1)} < ${threshold.score} (모델강도 ${strengthPct.toFixed(0)}%, 감점 ${strengthPenalty.toFixed(1)})`);
     if (modelMarketGap > 18) reasons.push(`모델-시장 괴리 ${modelMarketGap.toFixed(1)}%p > 18%p`);
     return watch(reasons.join(" · ") || "ensemble 합의 부족");
   }
@@ -10090,18 +10097,17 @@ function applyBaseballHitFirstGate(
     calibrated >= 88 &&
     marketP >= 75 &&
     spread <= 4 &&
-    pScore >= 86 &&
-    strength >= 0.80 &&
+    effectivePrecisionScore >= 86 &&
     input.confidence >= 78 &&
     input.decisionRiskScore < 10;
 
   return {
     ...valueGrade,
     grade: ultraStrong ? "STRONG VALUE" as ValueGrade : "VALUE" as ValueGrade,
-    score: Math.max(valueGrade.score, Number(pScore.toFixed(1))),
+    score: Math.max(valueGrade.score, Number(effectivePrecisionScore.toFixed(1))),
     reason: ultraStrong
-      ? `HIT-FIRST 초강합의 · 하한 ${floor.toFixed(1)}% · 평균 ${mean.toFixed(1)}% · 분산 ${spread.toFixed(1)}%p`
-      : `HIT-FIRST 합의 통과 · 하한 ${floor.toFixed(1)}% · 평균 ${mean.toFixed(1)}% · 분산 ${spread.toFixed(1)}%p`,
+      ? `HIT-FIRST 초강합의 · 하한 ${floor.toFixed(1)}% · 평균 ${mean.toFixed(1)}% · 분산 ${spread.toFixed(1)}%p · 모델강도 ${strengthPct.toFixed(0)}% soft 감점 ${strengthPenalty.toFixed(1)}`
+      : `HIT-FIRST 합의 통과 · 하한 ${floor.toFixed(1)}% · 평균 ${mean.toFixed(1)}% · 분산 ${spread.toFixed(1)}%p · 모델강도 ${strengthPct.toFixed(0)}% soft 감점 ${strengthPenalty.toFixed(1)}`,
     stageGradeLabel: ultraStrong ? "HIT-FIRST STRONG" : "HIT-FIRST VALUE",
   };
 }
@@ -10401,7 +10407,7 @@ function pickValueStatus(pick: MarketPick) {
 }
 
 /*
- * V13.9.03 WEIGHTED QUALITY SLATE TOP2 fallback.
+ * V13.9.04 WEIGHTED QUALITY SLATE TOP2 fallback.
  * B/C/D 3/3을 하드 자격으로 사용하지 않는다. READY 상태에서 선발 시즌정보,
  * 최근 B 표본, C 타선, D 불펜, 라인업 coverage, 모델강도를 연속 품질로 평가하고
  * ensemble 방향 일치(하한/평균/분산)와 시장 방향 동의까지 통과한 후보만 하루 TOP2로 뽑는다.
@@ -10450,7 +10456,10 @@ function baseballHitFirstSlateScore(pick: MarketPick): number | null {
   if (![floor, mean, spread, count, precision, probability, confidence, risk, dataQuality].every(Number.isFinite)) return null;
   if (count < 4 || confidence < 68 || risk >= 20) return null;
   if (dataQuality < 70 || starterQuality < 0.35 || battingQuality < 0.65 || bullpenQuality < 0.48) return null;
-  if (Number.isFinite(modelStrength) && modelStrength < 0.70) return null;
+
+  // V13.9.04: model strength is a soft score penalty, never a binary slate exclusion.
+  const modelStrengthPct = Number.isFinite(modelStrength) ? clamp(modelStrength * 100, 0, 100) : 50;
+  const modelStrengthPenalty = Math.max(0, 75 - modelStrengthPct) * 0.18;
 
   const isTotal = /U\/O|오버|언더|OVER|UNDER/i.test(`${pick.market} ${pick.pick}`);
   const minReady = isTotal
@@ -10470,7 +10479,8 @@ function baseballHitFirstSlateScore(pick: MarketPick): number | null {
     dataQuality * 0.12 +
     market * 0.08 -
     spread * 0.55 -
-    risk * 0.20
+    risk * 0.20 -
+    modelStrengthPenalty
   ).toFixed(2));
 }
 
@@ -10490,11 +10500,14 @@ function bestBaseballHitFirstSlateCandidate(picks: MarketPick[]) {
 function promoteBaseballSlateTopPick(pick: MarketPick, rank: number, slateScore: number): MarketPick {
   if (pick.valueGrade === "STRONG VALUE" || pick.valueGrade === "VALUE") return pick;
   const quality = Number(pick.hitFirstDataQuality);
+  const modelStrength = Number(pick.hitFirstModelStrength);
+  const modelStrengthPct = Number.isFinite(modelStrength) ? clamp(modelStrength * 100, 0, 100) : 50;
+  const modelStrengthPenalty = Math.max(0, 75 - modelStrengthPct) * 0.18;
   return {
     ...pick,
     valueGrade: "VALUE",
     valueGradeScore: Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1))),
-    valueGradeReason: `HIT-FIRST SLATE TOP ${rank}/2 · 가중 데이터품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"} · 합의하한 ${pick.precisionConsensusFloor?.toFixed(1) ?? "-"}% · 점수 ${slateScore.toFixed(1)}`,
+    valueGradeReason: `HIT-FIRST SLATE TOP ${rank}/2 · 가중 데이터품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"} · 합의하한 ${pick.precisionConsensusFloor?.toFixed(1) ?? "-"}% · 모델강도 ${modelStrengthPct.toFixed(0)}% soft 감점 ${modelStrengthPenalty.toFixed(1)} · 점수 ${slateScore.toFixed(1)}`,
     stageGradeLabel: `SLATE TOP${rank} VALUE`,
     recommendationScore: Math.max(pick.recommendationScore, Number(slateScore.toFixed(1))),
     detail: `${pick.detail} · SLATE TOP${rank}/2 · WEIGHTED QUALITY`,
@@ -15790,7 +15803,7 @@ export default function Home() {
   const heldVenue = selectedBaseballTrackerRecord?.venueShadow ?? null;
 
   /*
-   * V13.9.03 STICKY READY
+   * V13.9.04 STICKY READY
    * Same fixture only: once READY was captured pregame, a transient API miss may not
    * regress the decision screen to PRE.  We keep the locked READY score/stage and
    * exact locked market snapshots.  No other fixture/date data is borrowed.
@@ -17266,7 +17279,7 @@ export default function Home() {
     const precision90Records = liveTrackerRecords.filter(
       (record) =>
         record.sport === "야구" &&
-        record.recommendationEngineVersion === "V13.9.03_WEIGHTED_QUALITY_SLATE_TOP2" &&
+        record.recommendationEngineVersion === "V13.9.04_SOFT_STRENGTH_SLATE_TOP2" &&
         record.verificationStatus === "VERIFIED"
     );
     const precision90Ids = new Set(precision90Records.map((record) => record.id));
@@ -17633,7 +17646,7 @@ export default function Home() {
             ? Date.now()
             : null,
         gateVersion: "FALLBACK_GATE_V2",
-        recommendationEngineVersion: currentSport === "야구" ? "V13.9.03_WEIGHTED_QUALITY_SLATE_TOP2" : undefined,
+        recommendationEngineVersion: currentSport === "야구" ? "V13.9.04_SOFT_STRENGTH_SLATE_TOP2" : undefined,
         decision: trackerPicks.length ? "PICK" : "PASS",
         picks: trackerPicks,
         marketResults: trackerMarketResults,
@@ -17746,7 +17759,7 @@ export default function Home() {
   ]);
 
   /*
-   * V13.9.03 weighted-quality daily slate rebalance.
+   * V13.9.04 weighted-quality daily slate rebalance.
    * Every READY/PENDING baseball record keeps all marketResults.  As more games are
    * analysed, re-rank the best candidate per game and keep at most two PICK records
    * per KST date.  This prevents an early analysed game from remaining selected after
@@ -17833,14 +17846,14 @@ export default function Home() {
       });
       const afterSig = JSON.stringify({
         decision: nextDecision,
-        engine: "V13.9.03_WEIGHTED_QUALITY_SLATE_TOP2",
+        engine: "V13.9.04_SOFT_STRENGTH_SLATE_TOP2",
         picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
       });
       if (beforeSig === afterSig) return record;
       changed = true;
       return {
         ...record,
-        recommendationEngineVersion: "V13.9.03_WEIGHTED_QUALITY_SLATE_TOP2",
+        recommendationEngineVersion: "V13.9.04_SOFT_STRENGTH_SLATE_TOP2",
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -22672,7 +22685,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.9.03 · WEIGHTED QUALITY + SLATE TOP2</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.9.04 · SOFT MODEL STRENGTH + SLATE TOP2</div>
         </div>
         <div className="bar">
           <button
@@ -23979,7 +23992,7 @@ export default function Home() {
 
         <div style={{ padding: "8px 12px", borderTop: "1px solid #e2e8f0", background: "#f6fff8" }}>
           <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-            V13.9.03 VERIFY VOID 유지 · STICKY READY + WEIGHTED QUALITY SLATE TOP2 활성
+            V13.9.04 VERIFY VOID 유지 · STICKY READY + SOFT MODEL STRENGTH SLATE TOP2 활성
           </div>
           <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.7 }}>
             Naver VERIFY 성공 {liveTrackerRecords.filter((r) => r.verificationStatus === "VERIFIED" && r.verifyResultSource === "NAVER").length}경기
@@ -24028,7 +24041,7 @@ export default function Home() {
             <div className="card">전체 ROI<b>{performanceBreakdown.overall.roi === null ? "-" : `${performanceBreakdown.overall.roi >= 0 ? "+" : ""}${performanceBreakdown.overall.roi.toFixed(1)}%`}</b><div className="small">배당 확인 {performanceBreakdown.overall.roiSamples}픽</div></div>
             <div className="card">BASELINE ROI<b>{performanceBreakdown.baseline.roi === null ? "-" : `${performanceBreakdown.baseline.roi >= 0 ? "+" : ""}${performanceBreakdown.baseline.roi.toFixed(1)}%`}</b><div className="small">첫 READY VERIFY {performanceBreakdown.baseline.games}경기 · {performanceBreakdown.baseline.picks}픽</div></div>
             <div className="card">POST-BASELINE ROI<b>{performanceBreakdown.postBaseline.roi === null ? "-" : `${performanceBreakdown.postBaseline.roi >= 0 ? "+" : ""}${performanceBreakdown.postBaseline.roi.toFixed(1)}%`}</b><div className="small">새 표본 {performanceBreakdown.postBaseline.games}경기 · {performanceBreakdown.postBaseline.picks}픽</div></div>
-            <div className="card">V13.9.03 HIT-FIRST 성과<b>{performanceBreakdown.precision90.hitRate === null ? "-" : `${performanceBreakdown.precision90.hitRate.toFixed(1)}%`}</b><div className="small">배포 후 VERIFIED {performanceBreakdown.precision90.games}경기 · 추천 {performanceBreakdown.precision90.picks}픽 · ROI {performanceBreakdown.precision90.roi === null ? "-" : `${performanceBreakdown.precision90.roi >= 0 ? "+" : ""}${performanceBreakdown.precision90.roi.toFixed(1)}%`}</div></div>
+            <div className="card">V13.9.04 HIT-FIRST 성과<b>{performanceBreakdown.precision90.hitRate === null ? "-" : `${performanceBreakdown.precision90.hitRate.toFixed(1)}%`}</b><div className="small">배포 후 VERIFIED {performanceBreakdown.precision90.games}경기 · 추천 {performanceBreakdown.precision90.picks}픽 · ROI {performanceBreakdown.precision90.roi === null ? "-" : `${performanceBreakdown.precision90.roi >= 0 ? "+" : ""}${performanceBreakdown.precision90.roi.toFixed(1)}%`}</div></div>
           </div>
 
           {([
@@ -24179,7 +24192,7 @@ export default function Home() {
 
           <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid #bfdbfe", background: "#f8fbff" }}>
             <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-              V13.9.03 BASEBALL HIT-FIRST ENGINE · WEIGHTED QUALITY + SLATE TOP2
+              V13.9.04 BASEBALL HIT-FIRST ENGINE · SOFT MODEL STRENGTH + SLATE TOP2
             </div>
             <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.65, marginBottom: 8 }}>
               시작점 2026-09-15 10:00 KST · 이후 READY 야구 PRE만 신규 OOS 저장 · 잠금 {baseballChallengerSummary.locked}경기 · VERIFY {baseballChallengerSummary.verified}경기 · 결과대기 {baseballChallengerSummary.pending}경기
@@ -24193,7 +24206,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.9.03 HIT-FIRST · READY 후퇴 방지 · B/C/D 이진 Gate 대신 가중 데이터품질 + 합의하한/평균/분산 + 시장방향으로 하루 TOP2 · EV/배당은 순위 미사용</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.9.04 HIT-FIRST · READY 후퇴 방지 · B/C/D 이진 Gate 대신 가중 데이터품질 + 합의하한/평균/분산 + 시장방향 + 모델강도 soft 감점으로 하루 TOP2 · EV/배당은 순위 미사용</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 2026-09-16 10:55 KST 이후 새 READY MLB snapshot부터 B는 MLB_PERSON_GAMELOG, C/D는 MLB StatsAPI 공식 boxscore를 우선 사용합니다. 항목별 공식 데이터가 없을 때만 Naver workload로 fallback합니다. CONTROL·실전 추천·Gate·기존 λ는 변경하지 않고 Challenger shadow만 계산합니다. 기존 잠금 snapshot은 다시 쓰지 않습니다.
               </div>
@@ -25953,7 +25966,7 @@ export default function Home() {
                               <div className="small">
                                 schedule link {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.scheduleLinks ?? 0)} · box {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.boxScores ?? 0)}
                                 {matched?.naverTodayLineup?.npbOfficial?.schedule?.currentGameUrl ? " · 현재경기 resolve ✓" : " · 현재경기 resolve 대기"}
-                                <br />V13.9.03 · NPB 공식 C/D 실전 λ 유지 · WEIGHTED QUALITY + SLATE TOP2 · 취소/연기 표본 제외
+                                <br />V13.9.04 · NPB 공식 C/D 실전 λ 유지 · SOFT MODEL STRENGTH + SLATE TOP2 · 취소/연기 표본 제외
                               </div>
                             </div>
                             <div className="card">
@@ -27375,7 +27388,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.9.03 HIT-FIRST는 적중률 우선 모드입니다. 같은 경기에서 READY를 한 번 확보하면 일시적인 API 누락으로 PRE로 후퇴시키지 않습니다. B/C/D를 3/3 하드 Gate로 자르지 않고 최근 선발표본·시즌 선발정보·타선·불펜·라인업·모델강도를 가중 데이터품질로 평가합니다. ensemble 합의하한/평균/분산과 시장 방향까지 통과한 후보 중 같은 KST 날짜의 상위 2경기만 SLATE TOP VALUE로 승격하며 EV와 배당 자체는 순위에 사용하지 않습니다. 목표는 적중률을 최대한 높이는 것이며 결과를 보장하지는 않습니다.
+                    V13.9.04 HIT-FIRST는 적중률 우선 모드입니다. 같은 경기에서 READY를 한 번 확보하면 일시적인 API 누락으로 PRE로 후퇴시키지 않습니다. B/C/D와 모델강도를 하드 Gate로 자르지 않고 최근 선발표본·시즌 선발정보·타선·불펜·라인업·모델강도를 연속 가중점수로 평가합니다. 모델강도는 70/75% 컷 대신 부족분만 soft 감점하고, ensemble 합의하한/평균/분산과 시장 방향까지 통과한 후보 중 같은 KST 날짜의 상위 2경기만 SLATE TOP VALUE로 승격하며 EV와 배당 자체는 순위에 사용하지 않습니다. 목표는 적중률을 최대한 높이는 것이며 결과를 보장하지는 않습니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
