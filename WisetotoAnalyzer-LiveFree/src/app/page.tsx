@@ -1,5 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
-// V13.9.08 HIT-FIRST: V13.9.07 + venue-sample confidence guard; EV/odds remain informational
+// V13.9.09 FINAL-SEASON LOCK: one daily TOP1 + independently-supported +2.5 safe-handicap lane; EV/odds remain informational
 // V13.8.89 FIX9: cancelled/postponed/suspended/no-game VERIFY is VOID and excluded from HIT/MISS/ROI/MAE/Brier
 // V13.8.88 FIX8: STRONG VALUE requires baseball model strength >= 70%; lower strength is capped at VALUE
 // DEPLOY_MARKER_V13_8_32_POST_START_30MIN_VISIBILITY_20260903
@@ -10512,11 +10512,11 @@ function pickValueStatus(pick: MarketPick) {
 }
 
 /*
- * V13.9.06 CORRELATION-GUARDED SLATE TOP2 fallback.
+ * V13.9.09 FINAL-SEASON LOCK · CORRELATION-GUARDED DAILY TOP1 fallback.
  * B/C/D 3/3을 하드 자격으로 사용하지 않는다. READY 상태에서 선발 시즌정보,
  * 최근 B 표본, C 타선, D 불펜, 라인업 coverage, 모델강도를 연속 품질로 평가한다.
  * CONTROL/A/B/C/D/E는 상관된 시나리오이므로 합의 초과분을 50% 수축하고,
- * 최종 slate 점수 82점 이상인 후보만 최대 2개 승격한다. EV/배당 자체는 순위 입력이 아니다.
+ * 최종 slate 점수 82점 이상인 후보만 하루 최대 1개 승격한다. +2.5는 시장 72%+고품질 READY 독립지지 lane을 별도로 허용하되 역시 TOP1 경쟁을 통과해야 한다. EV/배당 자체는 순위 입력이 아니다.
  */
 function baseballRecentCoverageCountFromPick(pick: MarketPick) {
   const text = String(pick.baseballRecentCoverage ?? "");
@@ -10529,6 +10529,32 @@ function isBaseballHitFirstSlateMarket(pick: MarketPick) {
   const label = `${pick.market} ${pick.pick}`;
   if (/승1패|SUM|홀짝|전반|1st\s*half|first\s*half/i.test(label)) return false;
   return /승패|핸디|H\s*[+-]?\d|U\/O|오버|언더|OVER|UNDER/i.test(label);
+}
+
+/*
+ * V13.9.09 FINAL-SEASON LOCK
+ * 반복 관측된 +2.5 안전측을 무조건 추천하지는 않는다. 다만 시즌 종료 전
+ * 실전성이 필요하므로, 시장 자체도 72% 이상 지지하고 READY 데이터가 매우
+ * 완전한 경우에만 별도의 독립지지 lane으로 slate TOP1 경쟁에 참여시킨다.
+ * - H -2.5의 핸디패/원정 +2.5
+ * - H +2.5의 핸디승/홈 +2.5
+ * 이 lane도 하루 1픽 제한을 통과해야 실제 VALUE가 된다.
+ */
+function isBaseballProtectedPlus25Handicap(pick: MarketPick) {
+  const marketText = String(pick.market ?? "");
+  const pickText = String(pick.pick ?? "");
+  const match = marketText.match(/H\s*([+-]?\d+(?:\.\d+)?)/i);
+  if (!match) return false;
+  const line = Number(match[1]);
+  if (!Number.isFinite(line) || Math.abs(Math.abs(line) - 2.5) > 0.01) return false;
+
+  if (line < 0) {
+    return /핸디패|원정\s*\+?2\.5|away/i.test(pickText);
+  }
+  if (line > 0) {
+    return /핸디승|홈\s*\+?2\.5|home/i.test(pickText);
+  }
+  return false;
 }
 
 function baseballHitFirstSlateScore(pick: MarketPick): number | null {
@@ -10569,6 +10595,43 @@ function baseballHitFirstSlateScore(pick: MarketPick): number | null {
   // V13.9.06: model strength is a soft score penalty, never a binary slate exclusion.
   const modelStrengthPct = Number.isFinite(modelStrength) ? clamp(modelStrength * 100, 0, 100) : 50;
   const modelStrengthPenalty = Math.max(0, 75 - modelStrengthPct) * 0.24;
+
+  /*
+   * V13.9.09 FINAL-SEASON SAFE +2.5 lane.
+   * 상관된 ensemble 수치만으로 승격하지 않고, 시장 내재확률 + 고품질 READY
+   * 데이터가 동시에 지지할 때만 TOP1 후보로 허용한다. 확률을 90%로
+   * 둔갑시키지 않으며, 하루 1픽 slate 제한은 그대로 적용된다.
+   */
+  const protectedPlus25 = isBaseballProtectedPlus25Handicap(pick);
+  const safePlus25Lane =
+    protectedPlus25 &&
+    dataQuality >= 90 &&
+    starterQuality >= 0.75 &&
+    battingQuality >= 0.85 &&
+    bullpenQuality >= 0.75 &&
+    probability >= 78 &&
+    Number.isFinite(market) && market >= 72 &&
+    confidence >= 72 &&
+    risk <= 8 &&
+    Math.abs(probability - market) <= 8 &&
+    spread <= 8 &&
+    adjustedPrecision >= 76;
+
+  if (safePlus25Lane) {
+    const safeScore = clamp(
+      82 +
+        Math.max(0, dataQuality - 90) * 0.10 +
+        Math.max(0, probability - 78) * 0.15 +
+        Math.max(0, market - 72) * 0.12 +
+        Math.max(0, adjustedPrecision - 76) * 0.08 -
+        spread * 0.08 -
+        risk * 0.10 -
+        modelStrengthPenalty * 0.35,
+      82,
+      89.9
+    );
+    return Number(safeScore.toFixed(2));
+  }
 
   const isTotal = /U\/O|오버|언더|OVER|UNDER/i.test(`${pick.market} ${pick.pick}`);
   const minReady = isTotal
@@ -10625,10 +10688,10 @@ function promoteBaseballSlateTopPick(pick: MarketPick, rank: number, slateScore:
     ...pick,
     valueGrade: "VALUE",
     valueGradeScore: Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1))),
-    valueGradeReason: `HIT-FIRST SLATE TOP ${rank}/2 · 최소점수 82 통과 · 가중 데이터품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"} · 상관보정 하한 ${Number.isFinite(correlatedConsensus.floor) ? correlatedConsensus.floor.toFixed(1) : "-"}%/원 ${pick.precisionConsensusFloor?.toFixed(1) ?? "-"}% · 모델강도 ${modelStrengthPct.toFixed(0)}% soft 감점 ${modelStrengthPenalty.toFixed(1)} · 점수 ${slateScore.toFixed(1)}`,
-    stageGradeLabel: `SLATE TOP${rank} VALUE`,
+    valueGradeReason: `FINAL-SEASON TOP ${rank}/1 · 최소점수 82 통과 · 가중 데이터품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"} · 상관보정 하한 ${Number.isFinite(correlatedConsensus.floor) ? correlatedConsensus.floor.toFixed(1) : "-"}%/원 ${pick.precisionConsensusFloor?.toFixed(1) ?? "-"}% · 모델강도 ${modelStrengthPct.toFixed(0)}% soft 감점 ${modelStrengthPenalty.toFixed(1)} · 점수 ${slateScore.toFixed(1)}`,
+    stageGradeLabel: `FINAL TOP${rank} VALUE`,
     recommendationScore: Math.max(pick.recommendationScore, Number(slateScore.toFixed(1))),
-    detail: `${pick.detail} · SLATE TOP${rank}/2 · CORRELATION GUARD · MIN SCORE 82`,
+    detail: `${pick.detail} · FINAL-SEASON TOP${rank}/1 · CORRELATION GUARD · SAFE +2.5 LANE · MIN SCORE 82`,
   };
 }
 
@@ -16128,7 +16191,7 @@ export default function Home() {
       Number(b.pick.hitFirstDataQuality ?? -999) - Number(a.pick.hitFirstDataQuality ?? -999) ||
       Number(b.pick.precisionConsensusMean ?? -999) - Number(a.pick.precisionConsensusMean ?? -999)
     )
-    .slice(0, 2);
+    .slice(0, 1);
 
   const currentSlateRankIndex = slateTopRows.findIndex((row) => row.identity === currentSlateIdentity);
   const currentSlatePromotion =
@@ -16140,11 +16203,24 @@ export default function Home() {
         )
       : null;
 
-  const actualMarketPicks = currentSlatePromotion
-    ? actualMarketPicksBase.map((pick) =>
-        pick.key === currentSlatePromotion.key ? currentSlatePromotion : pick
-      )
-    : actualMarketPicksBase;
+  const actualMarketPicks =
+    currentSport === "야구" && analysisFactors.baseballAnalysisStage === "READY"
+      ? actualMarketPicksBase.map((pick) => {
+          if (currentSlatePromotion && pick.key === currentSlatePromotion.key) {
+            return currentSlatePromotion;
+          }
+          if (pick.valueGrade === "VALUE" || pick.valueGrade === "STRONG VALUE") {
+            return {
+              ...pick,
+              valueGrade: "WATCH" as ValueGrade,
+              valueGradeScore: Math.min(pick.valueGradeScore, 67.9),
+              valueGradeReason: `FINAL-SEASON: 하루 TOP1 미선정 · ${pick.valueGradeReason}`,
+              stageGradeLabel: "FINAL-SEASON WATCH",
+            };
+          }
+          return pick;
+        })
+      : actualMarketPicksBase;
 
   const marketConnectionDiagnostics =
     buildMarketConnectionDiagnostics(
@@ -17442,7 +17518,7 @@ export default function Home() {
     const precision90Records = liveTrackerRecords.filter(
       (record) =>
         record.sport === "야구" &&
-        ["V13.9.04_SOFT_STRENGTH_SLATE_TOP2", "V13.9.06_CORRELATION_SAMPLE_GUARD", "V13.9.07_STICKY_READY_QUALITY_AUDIT", "V13.9.08_VENUE_SAMPLE_CONFIDENCE_GUARD"].includes(String(record.recommendationEngineVersion ?? "")) &&
+        ["V13.9.04_SOFT_STRENGTH_SLATE_TOP2", "V13.9.06_CORRELATION_SAMPLE_GUARD", "V13.9.07_STICKY_READY_QUALITY_AUDIT", "V13.9.08_VENUE_SAMPLE_CONFIDENCE_GUARD", "V13.9.09_FINAL_SEASON_TOP1_LOCK"].includes(String(record.recommendationEngineVersion ?? "")) &&
         record.verificationStatus === "VERIFIED"
     );
     const precision90Ids = new Set(precision90Records.map((record) => record.id));
@@ -17809,7 +17885,7 @@ export default function Home() {
             ? Date.now()
             : null,
         gateVersion: "FALLBACK_GATE_V2",
-        recommendationEngineVersion: currentSport === "야구" ? "V13.9.08_VENUE_SAMPLE_CONFIDENCE_GUARD" : undefined,
+        recommendationEngineVersion: currentSport === "야구" ? "V13.9.09_FINAL_SEASON_TOP1_LOCK" : undefined,
         decision: trackerPicks.length ? "PICK" : "PASS",
         picks: trackerPicks,
         marketResults: trackerMarketResults,
@@ -17922,9 +17998,9 @@ export default function Home() {
   ]);
 
   /*
-   * V13.9.08 correlation-guarded daily slate rebalance (V13.9.07 + venue-sample confidence guard).
+   * V13.9.09 final-season daily TOP1 rebalance (V13.9.08 + independently-supported +2.5 safe lane).
    * Every READY/PENDING baseball record keeps all marketResults.  As more games are
-   * analysed, re-rank the best candidate per game and keep at most two PICK records
+   * analysed, re-rank the best candidate per game and keep at most one PICK record
    * per KST date.  This prevents an early analysed game from remaining selected after
    * a clearly stronger later game enters the slate.
    */
@@ -17961,7 +18037,7 @@ export default function Home() {
           Number(b.pick.precisionConsensusMean ?? -999) - Number(a.pick.precisionConsensusMean ?? -999)
         );
 
-      const rankById = new Map(ranked.slice(0, 2).map((row, index) => [row.record.id, index + 1]));
+      const rankById = new Map(ranked.slice(0, 1).map((row, index) => [row.record.id, index + 1]));
       const candidateById = new Map(ranked.map((row) => [row.record.id, row]));
 
       for (const record of records) {
@@ -18009,14 +18085,14 @@ export default function Home() {
       });
       const afterSig = JSON.stringify({
         decision: nextDecision,
-        engine: "V13.9.08_VENUE_SAMPLE_CONFIDENCE_GUARD",
+        engine: "V13.9.09_FINAL_SEASON_TOP1_LOCK",
         picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
       });
       if (beforeSig === afterSig) return record;
       changed = true;
       return {
         ...record,
-        recommendationEngineVersion: "V13.9.08_VENUE_SAMPLE_CONFIDENCE_GUARD",
+        recommendationEngineVersion: "V13.9.09_FINAL_SEASON_TOP1_LOCK",
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -22849,7 +22925,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.9.08 · VENUE SAMPLE CONFIDENCE GUARD</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.9.09 · FINAL-SEASON TOP1 LOCK</div>
         </div>
         <div className="bar">
           <button
@@ -24370,7 +24446,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.9.08 HIT-FIRST · READY 후퇴 방지 · 추천 READY 품질 분리 · 상관합의 50% 수축 · 야구 장소표본 confidence는 5경기 기준 · slate 82 이상 최대 TOP2</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.9.09 FINAL-SEASON · READY 고정 · 상관합의 50% 수축 · 장소표본 5경기 기준 · +2.5 독립지지 lane · slate 82 이상 하루 TOP1만</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 2026-09-16 10:55 KST 이후 새 READY MLB snapshot부터 B는 MLB_PERSON_GAMELOG, C/D는 MLB StatsAPI 공식 boxscore를 우선 사용합니다. 항목별 공식 데이터가 없을 때만 Naver workload로 fallback합니다. CONTROL·실전 추천·Gate·기존 λ는 변경하지 않고 Challenger shadow만 계산합니다. 기존 잠금 snapshot은 다시 쓰지 않습니다.
               </div>
@@ -27592,7 +27668,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.9.08 HIT-FIRST는 적중률 우선 모드입니다. 같은 경기에서 READY를 한 번 확보하면 일시적인 API 누락으로 PRE로 후퇴시키지 않습니다. CONTROL/A/B/C/D/E는 같은 기본 λ를 공유하는 상관된 시나리오이므로 합의 초과분을 50% 수축해 과신을 줄입니다. 장소표본이 매우 적거나 시장과 모델 방향이 약하게 반대면 soft 위험을 추가하고, slate 최종점수 82점 이상인 후보만 같은 KST 날짜에서 최대 2경기까지 VALUE로 승격합니다. EV와 배당 자체는 순위에 사용하지 않습니다. 목표는 적중률을 최대한 높이는 것이며 결과를 보장하지는 않습니다.
+                    V13.9.09 FINAL-SEASON은 적중률 우선 모드입니다. READY를 고정하고 CONTROL/A/B/C/D/E의 상관합의를 수축합니다. +2.5 안전측은 데이터품질 90+, B/C/D 고품질, 모델 78%+, 시장 72%+, 저위험이 동시에 충족될 때만 독립지지 lane으로 TOP1 경쟁에 참여합니다. slate 82점 이상 후보 중 같은 KST 날짜 하루 1경기만 VALUE로 승격하며 EV와 배당 자체는 순위에 사용하지 않습니다. 목표는 적중률을 최대한 높이는 것이며 결과를 보장하지는 않습니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
