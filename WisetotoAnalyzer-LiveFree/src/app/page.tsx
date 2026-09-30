@@ -1,5 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
-// V13.9.07 HIT-FIRST: V13.9.06 selection rules + sticky READY quality audit separation; EV/odds remain informational
+// V13.9.08 HIT-FIRST: V13.9.07 + venue-sample confidence guard; EV/odds remain informational
 // V13.8.89 FIX9: cancelled/postponed/suspended/no-game VERIFY is VOID and excluded from HIT/MISS/ROI/MAE/Brier
 // V13.8.88 FIX8: STRONG VALUE requires baseball model strength >= 70%; lower strength is capped at VALUE
 // DEPLOY_MARKER_V13_8_32_POST_START_30MIN_VISIBILITY_20260903
@@ -9640,6 +9640,17 @@ function marketDecisionRisk(
     reasons.push(
       `장소표본 적음 ${factors.homeVenueSample}/${factors.awayVenueSample}`
     );
+  } else if (
+    isDirectional &&
+    sport === "야구" &&
+    Math.min(factors.homeVenueSample, factors.awayVenueSample) < 4
+  ) {
+    // V13.9.08: 야구 3경기 장소표본을 '충분'으로 취급하지 않는다.
+    // 3/3은 방향성 시장에서 작은 표본이므로 soft 위험만 추가하고 hard block은 하지 않는다.
+    score += 2;
+    reasons.push(
+      `야구 장소표본 3경기 soft 위험 ${factors.homeVenueSample}/${factors.awayVenueSample}`
+    );
   }
 
   if (
@@ -9710,11 +9721,14 @@ function marketConfidence(
   // 실제 최근 득점/실점이 모두 확보됐을 때만 점수모델 가점.
   const scoringCoverage = factors.scoringUsed ? 16 : 0;
 
+  // V13.9.08: 야구는 실제 최근/장소 목표가 5경기인데 기존 confidence는 3/3을 100% coverage로 봤다.
+  // 3경기 표본의 분산을 과소평가하지 않도록 야구만 5/5를 full venue coverage로 사용한다.
+  const venueCoverageTarget = sport === "야구" ? 5 : 3;
   const venueCoverage =
     (
-      Math.min(factors.homeVenueSample, 3) +
-      Math.min(factors.awayVenueSample, 3)
-    ) / 6 * 8;
+      Math.min(factors.homeVenueSample, venueCoverageTarget) +
+      Math.min(factors.awayVenueSample, venueCoverageTarget)
+    ) / (venueCoverageTarget * 2) * 8;
 
   // 배당시장이 정상 형성됐는지. 오버라운드가 클수록 감점.
   const marketQuality =
@@ -17428,7 +17442,7 @@ export default function Home() {
     const precision90Records = liveTrackerRecords.filter(
       (record) =>
         record.sport === "야구" &&
-        ["V13.9.04_SOFT_STRENGTH_SLATE_TOP2", "V13.9.06_CORRELATION_SAMPLE_GUARD", "V13.9.07_STICKY_READY_QUALITY_AUDIT"].includes(String(record.recommendationEngineVersion ?? "")) &&
+        ["V13.9.04_SOFT_STRENGTH_SLATE_TOP2", "V13.9.06_CORRELATION_SAMPLE_GUARD", "V13.9.07_STICKY_READY_QUALITY_AUDIT", "V13.9.08_VENUE_SAMPLE_CONFIDENCE_GUARD"].includes(String(record.recommendationEngineVersion ?? "")) &&
         record.verificationStatus === "VERIFIED"
     );
     const precision90Ids = new Set(precision90Records.map((record) => record.id));
@@ -17795,7 +17809,7 @@ export default function Home() {
             ? Date.now()
             : null,
         gateVersion: "FALLBACK_GATE_V2",
-        recommendationEngineVersion: currentSport === "야구" ? "V13.9.07_STICKY_READY_QUALITY_AUDIT" : undefined,
+        recommendationEngineVersion: currentSport === "야구" ? "V13.9.08_VENUE_SAMPLE_CONFIDENCE_GUARD" : undefined,
         decision: trackerPicks.length ? "PICK" : "PASS",
         picks: trackerPicks,
         marketResults: trackerMarketResults,
@@ -17908,7 +17922,7 @@ export default function Home() {
   ]);
 
   /*
-   * V13.9.07 correlation-guarded daily slate rebalance (selection rule unchanged from V13.9.06).
+   * V13.9.08 correlation-guarded daily slate rebalance (V13.9.07 + venue-sample confidence guard).
    * Every READY/PENDING baseball record keeps all marketResults.  As more games are
    * analysed, re-rank the best candidate per game and keep at most two PICK records
    * per KST date.  This prevents an early analysed game from remaining selected after
@@ -17995,14 +18009,14 @@ export default function Home() {
       });
       const afterSig = JSON.stringify({
         decision: nextDecision,
-        engine: "V13.9.07_STICKY_READY_QUALITY_AUDIT",
+        engine: "V13.9.08_VENUE_SAMPLE_CONFIDENCE_GUARD",
         picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
       });
       if (beforeSig === afterSig) return record;
       changed = true;
       return {
         ...record,
-        recommendationEngineVersion: "V13.9.07_STICKY_READY_QUALITY_AUDIT",
+        recommendationEngineVersion: "V13.9.08_VENUE_SAMPLE_CONFIDENCE_GUARD",
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -22835,7 +22849,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.9.07 · STICKY READY QUALITY AUDIT</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.9.08 · VENUE SAMPLE CONFIDENCE GUARD</div>
         </div>
         <div className="bar">
           <button
@@ -24142,7 +24156,7 @@ export default function Home() {
 
         <div style={{ padding: "8px 12px", borderTop: "1px solid #e2e8f0", background: "#f6fff8" }}>
           <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-            V13.9.07 · VERIFY VOID 유지 · STICKY READY 추천품질/현재수신 분리 + 상관합의/표본 GUARD 유지
+            V13.9.08 · VERIFY VOID/STICKY READY 유지 · 야구 장소표본 5경기 confidence 목표 + 3경기 soft 위험
           </div>
           <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.7 }}>
             Naver VERIFY 성공 {liveTrackerRecords.filter((r) => r.verificationStatus === "VERIFIED" && r.verifyResultSource === "NAVER").length}경기
@@ -24342,7 +24356,7 @@ export default function Home() {
 
           <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid #bfdbfe", background: "#f8fbff" }}>
             <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-              V13.9.07 BASEBALL HIT-FIRST ENGINE · STICKY READY QUALITY AUDIT
+              V13.9.08 BASEBALL HIT-FIRST ENGINE · VENUE SAMPLE CONFIDENCE GUARD
             </div>
             <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.65, marginBottom: 8 }}>
               시작점 2026-09-15 10:00 KST · 이후 READY 야구 PRE만 신규 OOS 저장 · 잠금 {baseballChallengerSummary.locked}경기 · VERIFY {baseballChallengerSummary.verified}경기 · 결과대기 {baseballChallengerSummary.pending}경기
@@ -24356,7 +24370,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.9.07 HIT-FIRST · READY 후퇴 방지 · 추천 당시 READY 품질과 현재 재수신 품질을 분리 표시 · 상관된 λ 합의 50% 수축 · slate 점수 82 이상만 최대 TOP2</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.9.08 HIT-FIRST · READY 후퇴 방지 · 추천 READY 품질 분리 · 상관합의 50% 수축 · 야구 장소표본 confidence는 5경기 기준 · slate 82 이상 최대 TOP2</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 2026-09-16 10:55 KST 이후 새 READY MLB snapshot부터 B는 MLB_PERSON_GAMELOG, C/D는 MLB StatsAPI 공식 boxscore를 우선 사용합니다. 항목별 공식 데이터가 없을 때만 Naver workload로 fallback합니다. CONTROL·실전 추천·Gate·기존 λ는 변경하지 않고 Challenger shadow만 계산합니다. 기존 잠금 snapshot은 다시 쓰지 않습니다.
               </div>
@@ -26151,7 +26165,7 @@ export default function Home() {
                               <div className="small">
                                 schedule link {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.scheduleLinks ?? 0)} · box {Number(matched?.naverTodayLineup?.npbOfficial?.coverage?.boxScores ?? 0)}
                                 {matched?.naverTodayLineup?.npbOfficial?.schedule?.currentGameUrl ? " · 현재경기 resolve ✓" : " · 현재경기 resolve 대기"}
-                                <br />V13.9.07 · NPB 공식 C/D 실전 λ 유지 · STICKY READY QUALITY AUDIT · 취소/연기 표본 제외
+                                <br />V13.9.08 · NPB 공식 C/D 실전 λ 유지 · STICKY READY QUALITY AUDIT 유지 · 장소표본 confidence 보수화 · 취소/연기 표본 제외
                               </div>
                             </div>
                             <div className="card">
@@ -27578,7 +27592,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.9.07 HIT-FIRST는 적중률 우선 모드입니다. 같은 경기에서 READY를 한 번 확보하면 일시적인 API 누락으로 PRE로 후퇴시키지 않습니다. CONTROL/A/B/C/D/E는 같은 기본 λ를 공유하는 상관된 시나리오이므로 합의 초과분을 50% 수축해 과신을 줄입니다. 장소표본이 매우 적거나 시장과 모델 방향이 약하게 반대면 soft 위험을 추가하고, slate 최종점수 82점 이상인 후보만 같은 KST 날짜에서 최대 2경기까지 VALUE로 승격합니다. EV와 배당 자체는 순위에 사용하지 않습니다. 목표는 적중률을 최대한 높이는 것이며 결과를 보장하지는 않습니다.
+                    V13.9.08 HIT-FIRST는 적중률 우선 모드입니다. 같은 경기에서 READY를 한 번 확보하면 일시적인 API 누락으로 PRE로 후퇴시키지 않습니다. CONTROL/A/B/C/D/E는 같은 기본 λ를 공유하는 상관된 시나리오이므로 합의 초과분을 50% 수축해 과신을 줄입니다. 장소표본이 매우 적거나 시장과 모델 방향이 약하게 반대면 soft 위험을 추가하고, slate 최종점수 82점 이상인 후보만 같은 KST 날짜에서 최대 2경기까지 VALUE로 승격합니다. EV와 배당 자체는 순위에 사용하지 않습니다. 목표는 적중률을 최대한 높이는 것이며 결과를 보장하지는 않습니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
