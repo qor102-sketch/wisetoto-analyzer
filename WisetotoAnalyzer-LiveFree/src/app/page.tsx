@@ -1,4 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
+// V13.11.00 FOOTBALL WORLD TOP1: K League/J League + major overseas football leagues/cups, league scoring priors, soft data-quality ranking, continuous full-game TOP1
 // V13.10.00 COURT SPORTS TOP1: KBL/WKBL/NBA + KOVO basketball/volleyball full-game market models, continuous TOP1, league priors and soft data-quality ranking
 // V13.9.10 FINAL-SEASON CONTINUOUS TOP1: always rank one full-game candidate; quality/risk are soft penalties; only high-score TOP1 becomes official VALUE
 // V13.8.89 FIX9: cancelled/postponed/suspended/no-game VERIFY is VOID and excluded from HIT/MISS/ROI/MAE/Brier
@@ -3319,6 +3320,120 @@ const SPORTS_API_TEAM_ALIASES: Record<string, string> = {
   "애리조나다이아몬드백스": "Arizona Diamondbacks",
   "콜로라도로키스": "Colorado Rockies",
 
+  // V13.11.00 · 프로축구/해외축구 주요 리그 Betman 한글명 -> SportsAPI 영문 팀명
+  "울산hd": "Ulsan HD FC",
+  "울산현대": "Ulsan HD FC",
+  "전북현대모터스": "Jeonbuk Hyundai Motors",
+  "전북현대": "Jeonbuk Hyundai Motors",
+  "포항스틸러스": "Pohang Steelers",
+  "fc서울": "FC Seoul",
+  "서울fc": "FC Seoul",
+  "대전하나시티즌": "Daejeon Hana Citizen",
+  "광주fc": "Gwangju FC",
+  "강원fc": "Gangwon FC",
+  "수원fc": "Suwon FC",
+  "김천상무": "Gimcheon Sangmu",
+  "제주sk": "Jeju SK FC",
+  "제주유나이티드": "Jeju SK FC",
+  "대구fc": "Daegu FC",
+  "인천유나이티드": "Incheon United",
+  "수원삼성블루윙즈": "Suwon Samsung Bluewings",
+  "부산아이파크": "Busan IPark",
+  "서울이랜드": "Seoul E-Land FC",
+  "성남fc": "Seongnam FC",
+  "부천fc1995": "Bucheon FC 1995",
+  "전남드래곤즈": "Jeonnam Dragons",
+  "경남fc": "Gyeongnam FC",
+  "충남아산": "Chungnam Asan FC",
+  "충북청주": "Chungbuk Cheongju FC",
+  "안산그리너스": "Ansan Greeners",
+  "천안시티": "Cheonan City FC",
+  "김포fc": "Gimpo FC",
+  "화성fc": "Hwaseong FC",
+
+  "아스널": "Arsenal",
+  "아스날": "Arsenal",
+  "맨체스터시티": "Manchester City",
+  "맨시티": "Manchester City",
+  "맨체스터유나이티드": "Manchester United",
+  "맨유": "Manchester United",
+  "리버풀": "Liverpool",
+  "첼시": "Chelsea",
+  "토트넘홋스퍼": "Tottenham Hotspur",
+  "토트넘": "Tottenham Hotspur",
+  "뉴캐슬유나이티드": "Newcastle United",
+  "애스턴빌라": "Aston Villa",
+  "브라이턴": "Brighton & Hove Albion",
+  "브라이튼": "Brighton & Hove Albion",
+  "웨스트햄": "West Ham United",
+  "에버턴": "Everton",
+  "에버튼": "Everton",
+  "크리스털팰리스": "Crystal Palace",
+  "크리스탈팰리스": "Crystal Palace",
+  "풀럼": "Fulham",
+  "브렌트퍼드": "Brentford",
+  "브렌트포드": "Brentford",
+  "울버햄프턴": "Wolverhampton Wanderers",
+  "울버햄튼": "Wolverhampton Wanderers",
+  "본머스": "AFC Bournemouth",
+  "노팅엄포리스트": "Nottingham Forest",
+  "리즈유나이티드": "Leeds United",
+  "번리": "Burnley",
+  "선덜랜드": "Sunderland",
+
+  "레알마드리드": "Real Madrid",
+  "바르셀로나": "Barcelona",
+  "아틀레티코마드리드": "Atletico Madrid",
+  "아틀레틱빌바오": "Athletic Club",
+  "레알소시에다드": "Real Sociedad",
+  "비야레알": "Villarreal",
+  "세비야": "Sevilla",
+  "레알베티스": "Real Betis",
+  "발렌시아": "Valencia",
+  "지로나": "Girona",
+
+  "인터밀란": "Inter Milan",
+  "인테르": "Inter Milan",
+  "ac밀란": "AC Milan",
+  "유벤투스": "Juventus",
+  "나폴리": "Napoli",
+  "아탈란타": "Atalanta",
+  "로마": "AS Roma",
+  "라치오": "Lazio",
+  "피오렌티나": "Fiorentina",
+  "볼로냐": "Bologna",
+
+  "바이에른뮌헨": "Bayern Munich",
+  "도르트문트": "Borussia Dortmund",
+  "바이어레버쿠젠": "Bayer Leverkusen",
+  "라이프치히": "RB Leipzig",
+  "프랑크푸르트": "Eintracht Frankfurt",
+  "슈투트가르트": "VfB Stuttgart",
+
+  "파리생제르맹": "Paris Saint-Germain",
+  "psg": "Paris Saint-Germain",
+  "마르세유": "Marseille",
+  "모나코": "AS Monaco",
+  "릴": "Lille",
+  "리옹": "Lyon",
+  "니스": "Nice",
+
+  "아약스": "Ajax",
+  "psv에인트호번": "PSV Eindhoven",
+  "페예노르트": "Feyenoord",
+  "벤피카": "Benfica",
+  "포르투": "FC Porto",
+  "스포르팅cp": "Sporting CP",
+  "셀틱": "Celtic",
+  "레인저스": "Rangers",
+  "갈라타사라이": "Galatasaray",
+  "페네르바체": "Fenerbahce",
+  "알힐랄": "Al Hilal",
+  "알나스르": "Al Nassr",
+  "인터마이애미": "Inter Miami CF",
+  "la갤럭시": "LA Galaxy",
+  "시애틀사운더스": "Seattle Sounders FC",
+
   // V13.8.2 soccer fast aliases
   "미토홀리호크": "Mito HollyHock",
   "fc마치다젤비아": "Machida Zelvia",
@@ -3482,6 +3597,105 @@ const SPORTS_TEAM_ALIAS_GROUPS: string[][] = [
   ["샌프란시스코 자이언츠","San Francisco Giants"],
   ["애리조나 다이아몬드백스","Arizona Diamondbacks","Diamondbacks"],
   ["콜로라도 로키스","Colorado Rockies","Rockies"],
+
+  // V13.11.00 · K리그 + 해외 프로축구 주요 클럽 aliases
+  ["울산 HD","울산HD","울산 현대","Ulsan HD FC","Ulsan Hyundai"],
+  ["전북 현대 모터스","전북 현대","전북현대","Jeonbuk Hyundai Motors","Jeonbuk Motors"],
+  ["포항 스틸러스","포항","Pohang Steelers"],
+  ["FC 서울","서울FC","FC Seoul"],
+  ["대전 하나 시티즌","대전하나","Daejeon Hana Citizen"],
+  ["광주 FC","광주FC","Gwangju FC"],
+  ["강원 FC","강원FC","Gangwon FC"],
+  ["수원 FC","수원FC","Suwon FC"],
+  ["김천 상무","김천상무","Gimcheon Sangmu"],
+  ["제주 SK","제주 유나이티드","Jeju SK FC","Jeju United"],
+  ["대구 FC","대구FC","Daegu FC"],
+  ["인천 유나이티드","인천Utd","Incheon United"],
+  ["수원 삼성 블루윙즈","수원삼성","Suwon Samsung Bluewings"],
+  ["부산 아이파크","부산IPark","Busan IPark"],
+  ["서울 이랜드","Seoul E-Land FC"],
+  ["성남 FC","성남FC","Seongnam FC"],
+  ["부천 FC 1995","부천FC","Bucheon FC 1995"],
+  ["전남 드래곤즈","전남","Jeonnam Dragons"],
+  ["경남 FC","경남FC","Gyeongnam FC"],
+  ["충남 아산","Chungnam Asan FC"],
+  ["충북 청주","Chungbuk Cheongju FC"],
+  ["안산 그리너스","Ansan Greeners"],
+  ["천안 시티","Cheonan City FC"],
+  ["김포 FC","Gimpo FC"],
+  ["화성 FC","Hwaseong FC"],
+
+  ["아스널","아스날","Arsenal","Arsenal FC"],
+  ["맨체스터 시티","맨시티","Manchester City","Man City"],
+  ["맨체스터 유나이티드","맨유","Manchester United","Man United","Man Utd"],
+  ["리버풀","Liverpool","Liverpool FC"],
+  ["첼시","Chelsea","Chelsea FC"],
+  ["토트넘 홋스퍼","토트넘","Tottenham Hotspur","Spurs"],
+  ["뉴캐슬 유나이티드","Newcastle United","Newcastle"],
+  ["애스턴 빌라","Aston Villa"],
+  ["브라이턴 앤 호브 알비온","브라이턴","브라이튼","Brighton & Hove Albion","Brighton"],
+  ["웨스트햄 유나이티드","웨스트햄","West Ham United","West Ham"],
+  ["에버턴","에버튼","Everton"],
+  ["크리스털 팰리스","크리스탈 팰리스","Crystal Palace"],
+  ["풀럼","Fulham"],
+  ["브렌트퍼드","브렌트포드","Brentford"],
+  ["울버햄프턴 원더러스","울버햄튼","Wolverhampton Wanderers","Wolves"],
+  ["본머스","AFC Bournemouth","Bournemouth"],
+  ["노팅엄 포리스트","Nottingham Forest"],
+  ["리즈 유나이티드","Leeds United"],
+  ["번리","Burnley"],
+  ["선덜랜드","Sunderland"],
+
+  ["레알 마드리드","Real Madrid"],
+  ["바르셀로나","FC Barcelona","Barcelona"],
+  ["아틀레티코 마드리드","Atletico Madrid","Atlético Madrid"],
+  ["아틀레틱 빌바오","Athletic Club","Athletic Bilbao"],
+  ["레알 소시에다드","Real Sociedad"],
+  ["비야레알","Villarreal"],
+  ["세비야","Sevilla","Sevilla FC"],
+  ["레알 베티스","Real Betis"],
+  ["발렌시아","Valencia","Valencia CF"],
+  ["지로나","Girona","Girona FC"],
+
+  ["인터 밀란","인테르","Inter Milan","Internazionale","Inter"],
+  ["AC 밀란","AC Milan","Milan"],
+  ["유벤투스","Juventus"],
+  ["나폴리","Napoli"],
+  ["아탈란타","Atalanta"],
+  ["AS 로마","로마","AS Roma","Roma"],
+  ["라치오","Lazio"],
+  ["피오렌티나","Fiorentina"],
+  ["볼로냐","Bologna"],
+
+  ["바이에른 뮌헨","Bayern Munich","Bayern München"],
+  ["보루시아 도르트문트","도르트문트","Borussia Dortmund","Dortmund"],
+  ["바이어 레버쿠젠","레버쿠젠","Bayer Leverkusen"],
+  ["RB 라이프치히","라이프치히","RB Leipzig"],
+  ["아인트라흐트 프랑크푸르트","프랑크푸르트","Eintracht Frankfurt"],
+  ["VfB 슈투트가르트","슈투트가르트","VfB Stuttgart"],
+
+  ["파리 생제르맹","PSG","Paris Saint-Germain","Paris SG"],
+  ["마르세유","Marseille","Olympique Marseille"],
+  ["AS 모나코","모나코","AS Monaco","Monaco"],
+  ["릴","Lille","Lille OSC"],
+  ["리옹","Lyon","Olympique Lyonnais"],
+  ["니스","Nice","OGC Nice"],
+
+  ["아약스","Ajax"],
+  ["PSV 에인트호번","PSV Eindhoven","PSV"],
+  ["페예노르트","Feyenoord"],
+  ["벤피카","Benfica","SL Benfica"],
+  ["FC 포르투","포르투","FC Porto","Porto"],
+  ["스포르팅 CP","Sporting CP","Sporting Lisbon"],
+  ["셀틱","Celtic","Celtic FC"],
+  ["레인저스","Rangers","Rangers FC"],
+  ["갈라타사라이","Galatasaray"],
+  ["페네르바체","Fenerbahce","Fenerbahçe"],
+  ["알 힐랄","Al Hilal"],
+  ["알 나스르","Al Nassr"],
+  ["인터 마이애미","Inter Miami CF","Inter Miami"],
+  ["LA 갤럭시","LA Galaxy"],
+  ["시애틀 사운더스","Seattle Sounders FC","Seattle Sounders"],
 
   // V13.8.2 · 일본 축구 J1/J2 Betman 한글명 -> SportsAPI 영문 팀명
   ["미토 홀리호크","미토홀리호크","Mito HollyHock","Mito Hollyhock"],
@@ -4558,6 +4772,51 @@ function neutralScorePrior(
   if (sport === "야구") return 4.5;
   if (sport === "농구") return 108;
   return 1.5;
+}
+
+type SoccerLeagueGroup =
+  | "KLEAGUE"
+  | "JLEAGUE"
+  | "EPL"
+  | "LALIGA"
+  | "SERIEA"
+  | "BUNDESLIGA"
+  | "LIGUE1"
+  | "UEFA"
+  | "MLS"
+  | "OTHER";
+
+type SoccerLeagueProfile = {
+  group: SoccerLeagueGroup;
+  label: string;
+  neutralTeamScore: number;
+  homeEdge: number;
+};
+
+function soccerLeagueProfile(leagueRaw: unknown, teamsRaw: unknown = ""): SoccerLeagueProfile {
+  const text = `${String(leagueRaw ?? "")} ${String(teamsRaw ?? "")}`
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]/g, "");
+
+  if (/kleague|k리그|대한민국프로축구|울산hd|전북현대|포항스틸러스|fc서울|대전하나|광주fc|강원fc|수원fc|김천상무|제주sk|대구fc|인천유나이티드/.test(text))
+    return { group: "KLEAGUE", label: "K LEAGUE", neutralTeamScore: 1.33, homeEdge: 0.10 };
+  if (/j1|j2|jleague|j리그|가시마|우라와|가와사키|비셀고베|산프레체|마치다젤비아|요코하마f/.test(text))
+    return { group: "JLEAGUE", label: "J LEAGUE", neutralTeamScore: 1.40, homeEdge: 0.09 };
+  if (/premierleague|epl|잉글랜드프리미어|아스널|맨체스터시티|맨체스터유나이티드|리버풀|첼시|토트넘/.test(text))
+    return { group: "EPL", label: "EPL", neutralTeamScore: 1.52, homeEdge: 0.10 };
+  if (/laliga|라리가|스페인1부|레알마드리드|바르셀로나|아틀레티코마드리드/.test(text))
+    return { group: "LALIGA", label: "LaLiga", neutralTeamScore: 1.40, homeEdge: 0.10 };
+  if (/seriea|세리에a|이탈리아1부|인터밀란|ac밀란|유벤투스|나폴리|아탈란타/.test(text))
+    return { group: "SERIEA", label: "Serie A", neutralTeamScore: 1.41, homeEdge: 0.09 };
+  if (/bundesliga|분데스리가|독일1부|바이에른뮌헨|도르트문트|레버쿠젠|라이프치히/.test(text))
+    return { group: "BUNDESLIGA", label: "Bundesliga", neutralTeamScore: 1.55, homeEdge: 0.09 };
+  if (/ligue1|리그1|프랑스1부|파리생제르맹|psg|마르세유|모나코/.test(text))
+    return { group: "LIGUE1", label: "Ligue 1", neutralTeamScore: 1.46, homeEdge: 0.09 };
+  if (/championsleague|챔피언스리그|ucl|europaleague|유로파리그|uel|conferenceleague|컨퍼런스리그|uecl|uefa/.test(text))
+    return { group: "UEFA", label: "UEFA CUP", neutralTeamScore: 1.48, homeEdge: 0.07 };
+  if (/mls|메이저리그사커|인터마이애미|lagalaxy|seattlesounders/.test(text))
+    return { group: "MLS", label: "MLS", neutralTeamScore: 1.55, homeEdge: 0.10 };
+  return { group: "OTHER", label: "FOOTBALL", neutralTeamScore: 1.38, homeEdge: 0.08 };
 }
 
 type CourtLeagueGroup = "NBA" | "KBL" | "WKBL" | "KOVO" | "OTHER";
@@ -6459,6 +6718,23 @@ function buildAnalysis(
       betmanMatch
     );
 
+  const soccerLeagueRaw =
+    sportsDetail?.selectedFixture?.league ??
+    sportsDetail?.fixture?.league ??
+    (betmanMatch as any)?.league ??
+    (betmanMatch as any)?.leagueName ??
+    null;
+
+  const soccerProfile =
+    sport === "축구"
+      ? soccerLeagueProfile(
+          soccerLeagueRaw,
+          `${String((betmanMatch as any)?.home ?? "")} ${String((betmanMatch as any)?.away ?? "")}`
+        )
+      : null;
+
+  const soccerScorePrior = soccerProfile?.neutralTeamScore ?? null;
+
   const baseballLeagueRaw =
     sportsDetail?.naverTodayLineup?.league ??
     sportsDetail?.selectedFixture?.league ??
@@ -6522,28 +6798,28 @@ function buildAnalysis(
     played: homeWeighted.played,
     venuePlayed: homeWeighted.venuePlayed,
     sport,
-    priorOverride: baseballRunPrior ?? courtScorePrior,
+    priorOverride: baseballRunPrior ?? courtScorePrior ?? soccerScorePrior,
   }).value;
   const homeVenueShadowRobustConceded = robustRecentMetric({
     value: homeVenueShadow.conceded,
     played: homeWeighted.played,
     venuePlayed: homeWeighted.venuePlayed,
     sport,
-    priorOverride: baseballRunPrior ?? courtScorePrior,
+    priorOverride: baseballRunPrior ?? courtScorePrior ?? soccerScorePrior,
   }).value;
   const awayVenueShadowRobustScored = robustRecentMetric({
     value: awayVenueShadow.scored,
     played: awayWeighted.played,
     venuePlayed: awayWeighted.venuePlayed,
     sport,
-    priorOverride: baseballRunPrior ?? courtScorePrior,
+    priorOverride: baseballRunPrior ?? courtScorePrior ?? soccerScorePrior,
   }).value;
   const awayVenueShadowRobustConceded = robustRecentMetric({
     value: awayVenueShadow.conceded,
     played: awayWeighted.played,
     venuePlayed: awayWeighted.venuePlayed,
     sport,
-    priorOverride: baseballRunPrior ?? courtScorePrior,
+    priorOverride: baseballRunPrior ?? courtScorePrior ?? soccerScorePrior,
   }).value;
 
   const venueShadowRawHomeScore =
@@ -6564,7 +6840,7 @@ function buildAnalysis(
       venuePlayed:
         homeWeighted.venuePlayed,
       sport,
-      priorOverride: baseballRunPrior ?? courtScorePrior,
+      priorOverride: baseballRunPrior ?? courtScorePrior ?? soccerScorePrior,
     });
 
   const homeRobustConceded =
@@ -6576,7 +6852,7 @@ function buildAnalysis(
       venuePlayed:
         homeWeighted.venuePlayed,
       sport,
-      priorOverride: baseballRunPrior ?? courtScorePrior,
+      priorOverride: baseballRunPrior ?? courtScorePrior ?? soccerScorePrior,
     });
 
   const awayRobustScored =
@@ -6588,7 +6864,7 @@ function buildAnalysis(
       venuePlayed:
         awayWeighted.venuePlayed,
       sport,
-      priorOverride: baseballRunPrior ?? courtScorePrior,
+      priorOverride: baseballRunPrior ?? courtScorePrior ?? soccerScorePrior,
     });
 
   const awayRobustConceded =
@@ -6600,7 +6876,7 @@ function buildAnalysis(
       venuePlayed:
         awayWeighted.venuePlayed,
       sport,
-      priorOverride: baseballRunPrior ?? courtScorePrior,
+      priorOverride: baseballRunPrior ?? courtScorePrior ?? soccerScorePrior,
     });
 
   const homeAvgScored =
@@ -7037,7 +7313,9 @@ function buildAnalysis(
         ? baseballRunPrior
         : courtScorePrior !== null
           ? courtScorePrior
-          : neutralScorePrior(sport);
+          : soccerScorePrior !== null
+            ? soccerScorePrior
+            : neutralScorePrior(sport);
 
     scorePrior =
       prior;
@@ -7059,7 +7337,7 @@ function buildAnalysis(
       );
 
     // 아주 약한 홈 이점만 마지막에 부여.
-    if (sport === "축구") expectedHomeScore += 0.08;
+    if (sport === "축구") expectedHomeScore += soccerProfile?.homeEdge ?? 0.08;
     if (sport === "야구") expectedHomeScore += 0.10;
     if ((sport === "농구" || sport === "배구") && courtProfile) expectedHomeScore += courtProfile.homeEdge;
 
@@ -8205,6 +8483,18 @@ type MarketPick = {
   hitFirstBullpenQuality?: number | null;
   hitFirstModelStrength?: number | null;
   hitFirstCoverageLabel?: string | null;
+
+  /* V13.11.00: 프로축구/해외축구 적중우선 TOP1 진단. */
+  soccerLeagueGroup?: SoccerLeagueGroup | null;
+  soccerDataQuality?: number | null;
+  soccerRecentQuality?: number | null;
+  soccerVenueQuality?: number | null;
+  soccerScoringQuality?: number | null;
+  soccerLineupQuality?: number | null;
+  soccerMarketQuality?: number | null;
+  soccerModelQuality?: number | null;
+  soccerH2hQuality?: number | null;
+  soccerCoverageLabel?: string | null;
 
   /* V13.10.00: 농구/NBA/배구 court-sports 적중우선 진단. */
   courtLeagueGroup?: CourtLeagueGroup | null;
@@ -10939,6 +11229,171 @@ function promoteBaseballSlateTopPick(pick: MarketPick, rank: number, slateScore:
   };
 }
 
+type SoccerDataQuality = {
+  overall: number;
+  recent: number;
+  venue: number;
+  scoring: number;
+  lineup: number;
+  market: number;
+  model: number;
+  h2h: number;
+  label: string;
+};
+
+function soccerSportsDataQuality(
+  game: BetmanMatch | null | undefined,
+  factors: AnalysisFactors,
+  lineupReady: boolean
+): SoccerDataQuality {
+  const recent = clamp(
+    Math.min(Math.max(0, Number(factors.homeRecentSample ?? 0)), Math.max(0, Number(factors.awayRecentSample ?? 0))) / 5,
+    0,
+    1
+  );
+  const venue = clamp(
+    Math.min(Math.max(0, Number(factors.homeVenueSample ?? 0)), Math.max(0, Number(factors.awayVenueSample ?? 0))) / 5,
+    0,
+    1
+  );
+  const scoring = factors.scoringUsed ? 1 : factors.hasRealData ? 0.38 : 0;
+  const lineup = lineupReady ? 1 : 0.45;
+  const model = clamp(Number(factors.scoreShrinkage ?? 0), 0, 1);
+  const h2h = clamp(Math.max(0, Number(factors.h2hSample ?? 0)) / 5, 0, 1);
+
+  const relevantMarkets = (Array.isArray(game?.markets) ? game!.markets! : []).filter((market: any) => {
+    const name = `${String(market?.betName ?? "")} ${String(market?.betTypeName ?? "")}`;
+    if (/전반|1st\s*half|first\s*half|SUM|홀짝/i.test(name)) return false;
+    const type = String(market?.type ?? "").toLowerCase();
+    return type === "moneyline" || type === "handicap" || type === "total" || /승무패|승패|핸디|U\/O|오버|언더/i.test(name);
+  });
+  const fairRows = relevantMarkets.map((market: any) => fairMarketProbabilities(market));
+  const usable = fairRows.filter((row) => row.usableCount >= 2);
+  const coverage = clamp(usable.length / 3, 0, 1);
+  const avgOverround = usable.length
+    ? usable.reduce((sum, row) => sum + (Number.isFinite(row.overround) ? row.overround : 1.2), 0) / usable.length
+    : 1.25;
+  const priceQuality = clamp(1 - Math.max(0, avgOverround - 1) * 2.6, 0.35, 1);
+  const market = clamp(coverage * 0.65 + priceQuality * 0.35, 0, 1);
+
+  const overall = clamp(
+    (recent * 0.22 + venue * 0.14 + scoring * 0.20 + lineup * 0.12 + market * 0.14 + model * 0.12 + h2h * 0.06) * 100,
+    0,
+    100
+  );
+  const pct = (v: number) => Math.round(v * 100);
+  return {
+    overall: Number(overall.toFixed(1)),
+    recent: Number(recent.toFixed(3)),
+    venue: Number(venue.toFixed(3)),
+    scoring: Number(scoring.toFixed(3)),
+    lineup: Number(lineup.toFixed(3)),
+    market: Number(market.toFixed(3)),
+    model: Number(model.toFixed(3)),
+    h2h: Number(h2h.toFixed(3)),
+    label: `품질 ${overall.toFixed(1)} · R ${pct(recent)} / V ${pct(venue)} / S ${pct(scoring)} / XI ${pct(lineup)} / MKT ${pct(market)} / G ${pct(model)} / H2H ${pct(h2h)}`,
+  };
+}
+
+function soccerConsensus(rawProbability: number, calibratedProbability: number, marketProbability: number | null) {
+  const values = [rawProbability, calibratedProbability];
+  if (marketProbability !== null && Number.isFinite(marketProbability)) values.push(marketProbability);
+  const clean = values.filter(Number.isFinite).map((v) => clamp(Number(v), 0, 100));
+  const floor = clean.length ? Math.min(...clean) : null;
+  const mean = clean.length ? clean.reduce((a, b) => a + b, 0) / clean.length : null;
+  const spread = clean.length >= 2 ? Math.max(...clean) - Math.min(...clean) : null;
+  const score = mean === null || floor === null
+    ? null
+    : clamp(floor * 0.58 + mean * 0.42 - (spread ?? 0) * 0.22, 0, 100);
+  return {
+    floor: floor === null ? null : Number(floor.toFixed(1)),
+    mean: mean === null ? null : Number(mean.toFixed(1)),
+    spread: spread === null ? null : Number(spread.toFixed(1)),
+    count: clean.length,
+    score: score === null ? null : Number(score.toFixed(1)),
+  };
+}
+
+function isSoccerSlateMarket(pick: MarketPick) {
+  const label = `${pick.market} ${pick.pick}`;
+  if (/SUM|홀짝|전반|1st\s*half|first\s*half/i.test(label)) return false;
+  return /승무패|승패|핸디|H\s*[+-]?\d|U\/O|오버|언더|OVER|UNDER/i.test(label);
+}
+
+function soccerContinuousTopTier(score: number): BaseballContinuousTopTier {
+  if (score >= 78) return "실전 추천";
+  if (score >= 72) return "약추천";
+  return "관망";
+}
+
+function soccerSlateScore(pick: MarketPick): number | null {
+  if (!isSoccerSlateMarket(pick)) return null;
+  const p = Number(pick.probability);
+  if (!Number.isFinite(p)) return null;
+  const marketRaw = Number(pick.marketProbability);
+  const market = Number.isFinite(marketRaw) ? clamp(marketRaw, 0, 100) : 50;
+  const qualityRaw = Number(pick.soccerDataQuality);
+  const quality = Number.isFinite(qualityRaw) ? clamp(qualityRaw, 0, 100) : 45;
+  const confidence = clamp(Number(pick.confidenceScore ?? 50), 0, 100);
+  const risk = clamp(Number(pick.decisionRiskScore ?? 25), 0, 100);
+  const floor = Number.isFinite(Number(pick.precisionConsensusFloor)) ? clamp(Number(pick.precisionConsensusFloor), 0, 100) : Math.min(p, market);
+  const mean = Number.isFinite(Number(pick.precisionConsensusMean)) ? clamp(Number(pick.precisionConsensusMean), 0, 100) : (p + market) / 2;
+  const spread = Number.isFinite(Number(pick.precisionConsensusSpread)) ? clamp(Number(pick.precisionConsensusSpread), 0, 40) : Math.abs(p - market);
+  const model = Number.isFinite(Number(pick.soccerModelQuality)) ? clamp(Number(pick.soccerModelQuality) * 100, 0, 100) : 50;
+  const venue = Number.isFinite(Number(pick.soccerVenueQuality)) ? clamp(Number(pick.soccerVenueQuality) * 100, 0, 100) : 50;
+  const lineup = Number.isFinite(Number(pick.soccerLineupQuality)) ? clamp(Number(pick.soccerLineupQuality) * 100, 0, 100) : 45;
+  const isTotal = /U\/O|오버|언더|OVER|UNDER/i.test(`${pick.market} ${pick.pick}`);
+  const isThreeWay = /승무패/i.test(`${pick.market}`) && !/핸디/i.test(`${pick.market}`);
+  const totalPenalty = isTotal ? 1.2 : 0;
+  const threeWayPenalty = isThreeWay ? 0.8 : 0;
+  const marketGapPenalty = Math.max(0, Math.abs(p - market) - 12) * 0.10;
+  const score =
+    p * 0.28 +
+    market * 0.18 +
+    floor * 0.14 +
+    mean * 0.08 +
+    quality * 0.16 +
+    confidence * 0.07 +
+    model * 0.04 +
+    venue * 0.02 +
+    lineup * 0.03 -
+    spread * 0.20 -
+    risk * 0.14 -
+    marketGapPenalty -
+    totalPenalty -
+    threeWayPenalty;
+  return Number(clamp(score, 0, 100).toFixed(2));
+}
+
+function bestSoccerSlateCandidate(picks: MarketPick[]) {
+  return picks
+    .map((pick) => ({ pick, slateScore: soccerSlateScore(pick) }))
+    .filter((row): row is { pick: MarketPick; slateScore: number } => row.slateScore !== null)
+    .sort((a, b) =>
+      b.slateScore - a.slateScore ||
+      Number(b.pick.precisionConsensusFloor ?? -999) - Number(a.pick.precisionConsensusFloor ?? -999) ||
+      b.pick.probability - a.pick.probability ||
+      Number(b.pick.soccerDataQuality ?? -999) - Number(a.pick.soccerDataQuality ?? -999)
+    )[0] ?? null;
+}
+
+function promoteSoccerSlateTopPick(pick: MarketPick, rank: number, slateScore: number): MarketPick {
+  const tier = soccerContinuousTopTier(slateScore);
+  const promote = tier === "실전 추천";
+  const quality = Number(pick.soccerDataQuality);
+  return {
+    ...pick,
+    valueGrade: promote ? "VALUE" : "WATCH",
+    valueGradeScore: promote
+      ? Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))
+      : Math.min(77.9, Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))),
+    valueGradeReason: `FOOTBALL TOP${rank} · ${tier} · TOP1점수 ${slateScore.toFixed(1)} · ${String(pick.soccerLeagueGroup ?? "FOOTBALL")} · 모델 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
+    stageGradeLabel: `FOOTBALL TOP${rank} ${tier}`,
+    recommendationScore: Number(slateScore.toFixed(1)),
+    detail: `${pick.detail} · V13.11.00 FOOTBALL TOP${rank} · ${tier} · CONTINUOUS QUALITY/RISK SCORE`,
+  };
+}
+
 type CourtDataQuality = {
   overall: number;
   recent: number;
@@ -11264,7 +11719,8 @@ function buildActualMarketPicks(
   factors: AnalysisFactors,
   recentSummary: RecentSummary | null | undefined,
   h2h: any,
-  baseballChallenger: BaseballChallengerSnapshot | null = null
+  baseballChallenger: BaseballChallengerSnapshot | null = null,
+  footballLineupReady = false
 ): MarketPick[] {
   if (!game || !Array.isArray(game?.markets) || !factors.hasRealData) return [];
 
@@ -11276,6 +11732,19 @@ function buildActualMarketPicks(
   const hitFirstDataQuality =
     sport === "야구"
       ? baseballHitFirstDataQuality(factors, baseballChallenger, baseballLambda)
+      : null;
+
+  const soccerProfile =
+    sport === "축구"
+      ? soccerLeagueProfile(
+          `${String((game as any)?.league ?? (game as any)?.leagueName ?? (game as any)?.sportName ?? "")}`,
+          `${String(game?.home ?? game?.homeTeam ?? "")} ${String(game?.away ?? game?.awayTeam ?? "")}`
+        )
+      : null;
+
+  const soccerDataQuality =
+    sport === "축구"
+      ? soccerSportsDataQuality(game, factors, footballLineupReady)
       : null;
 
   const courtProfile =
@@ -11469,6 +11938,11 @@ function buildActualMarketPicks(
           edge,
           confidence
         );
+        const soccerAgreement = soccerConsensus(
+          best.probability,
+          calibratedProbability,
+          marketProbability
+        );
 
         const periodText = isFirstHalf ? "전반 예상득점 근사" : "전체 예상득점";
         const lineText =
@@ -11519,7 +11993,22 @@ function buildActualMarketPicks(
           confidenceScore: Number(confidence.toFixed(1)),
           confidenceGrade: confidenceGrade(confidence),
           recommendationScore: Number(recScore.toFixed(1)),
-          detail: `${periodText}${lineText}${pushText}`,
+          precisionScore: soccerAgreement.score,
+          precisionConsensusFloor: soccerAgreement.floor,
+          precisionConsensusMean: soccerAgreement.mean,
+          precisionConsensusSpread: soccerAgreement.spread,
+          precisionConsensusCount: soccerAgreement.count,
+          soccerLeagueGroup: soccerProfile?.group ?? "OTHER",
+          soccerDataQuality: soccerDataQuality?.overall ?? null,
+          soccerRecentQuality: soccerDataQuality?.recent ?? null,
+          soccerVenueQuality: soccerDataQuality?.venue ?? null,
+          soccerScoringQuality: soccerDataQuality?.scoring ?? null,
+          soccerLineupQuality: soccerDataQuality?.lineup ?? null,
+          soccerMarketQuality: soccerDataQuality?.market ?? null,
+          soccerModelQuality: soccerDataQuality?.model ?? null,
+          soccerH2hQuality: soccerDataQuality?.h2h ?? null,
+          soccerCoverageLabel: soccerDataQuality?.label ?? null,
+          detail: `${periodText}${lineText}${pushText} · ${soccerProfile?.label ?? "FOOTBALL"}`,
         });
         continue;
       }
@@ -16587,6 +17076,20 @@ export default function Home() {
         ) ?? null
       : null;
 
+  const selectedSoccerTrackerIdentity =
+    currentSport === "축구" && selectedBetman
+      ? actualGameIdentity(selectedBetman)
+      : "";
+  const selectedSoccerTrackerRecord =
+    currentSport === "축구" && selectedSoccerTrackerIdentity
+      ? liveTrackerRecords.find(
+          (record) =>
+            record.sport === "축구" &&
+            record.betmanIdentity === selectedSoccerTrackerIdentity &&
+            record.verificationStatus !== "VOID"
+        ) ?? null
+      : null;
+
   const stickyReadyActive = Boolean(
     currentSport === "야구" &&
     liveAnalysisFactors.baseballAnalysisStage !== "READY" &&
@@ -16708,13 +17211,26 @@ export default function Home() {
 
   const betmanHandicap = chooseBetmanHandicap(betman.matched);
   const betmanTotal = chooseBetmanTotal(betman.matched);
+  const currentFootballLineupReady =
+    currentSport === "축구" &&
+    (
+      (
+        matched?.naverTodayLineup?.league === "FOOTBALL" &&
+        Array.isArray(matched?.naverTodayLineup?.home) &&
+        Array.isArray(matched?.naverTodayLineup?.away) &&
+        matched.naverTodayLineup.home.length >= 11 &&
+        matched.naverTodayLineup.away.length >= 11
+      ) ||
+      selectedSoccerTrackerRecord?.footballLineup?.stage === "LINEUP_READY"
+    );
   const actualMarketPicksRaw = buildActualMarketPicks(
     betman.matched,
     currentSport,
     liveAnalysisFactors,
     recentSummary,
     h2h,
-    liveBaseballChallenger
+    liveBaseballChallenger,
+    currentFootballLineupReady
   );
 
   const liveActualMarketPicks =
@@ -16789,6 +17305,47 @@ export default function Home() {
         )
       : null;
 
+  const isSoccerSport = currentSport === "축구";
+  const currentSoccerCandidate =
+    isSoccerSport && analysisFactors.hasRealData
+      ? bestSoccerSlateCandidate(actualMarketPicksBase)
+      : null;
+  const otherSoccerCandidates =
+    isSoccerSport && selectedSlateDate
+      ? liveTrackerRecords
+          .filter((record) =>
+            record.sport === "축구" &&
+            record.verificationStatus === "PENDING" &&
+            record.betmanIdentity !== selectedSoccerTrackerIdentity &&
+            kstDateKeyFromMs(record.startMs) === selectedSlateDate &&
+            record.startMs >= Date.now() - 30 * 60 * 1000 &&
+            (record.marketResults?.length ?? 0) > 0
+          )
+          .map((record) => {
+            const candidate = bestSoccerSlateCandidate(trackerMarketPickSnapshots(record));
+            return candidate ? { id: record.id, identity: record.betmanIdentity ?? record.id, ...candidate } : null;
+          })
+          .filter((row): row is NonNullable<typeof row> => row !== null)
+      : [];
+  const currentSoccerIdentity = selectedSoccerTrackerIdentity || `soccer:${selectedStartMs}`;
+  const soccerTopRows = [
+    ...otherSoccerCandidates,
+    ...(currentSoccerCandidate
+      ? [{ id: `current:${currentSoccerIdentity}`, identity: currentSoccerIdentity, ...currentSoccerCandidate }]
+      : []),
+  ]
+    .sort((a, b) =>
+      b.slateScore - a.slateScore ||
+      Number(b.pick.precisionConsensusFloor ?? -999) - Number(a.pick.precisionConsensusFloor ?? -999) ||
+      Number(b.pick.soccerDataQuality ?? -999) - Number(a.pick.soccerDataQuality ?? -999)
+    )
+    .slice(0, 1);
+  const currentSoccerRankIndex = soccerTopRows.findIndex((row) => row.identity === currentSoccerIdentity);
+  const currentSoccerPromotion =
+    currentSoccerCandidate && currentSoccerRankIndex >= 0
+      ? promoteSoccerSlateTopPick(currentSoccerCandidate.pick, currentSoccerRankIndex + 1, currentSoccerCandidate.slateScore)
+      : null;
+
   const isCourtSport = currentSport === "농구" || currentSport === "배구";
   const selectedCourtTrackerIdentity =
     isCourtSport && selectedBetman
@@ -16853,7 +17410,23 @@ export default function Home() {
           }
           return pick;
         })
-      : isCourtSport
+      : isSoccerSport
+        ? actualMarketPicksBase.map((pick) => {
+            if (currentSoccerPromotion && pick.key === currentSoccerPromotion.key) {
+              return currentSoccerPromotion;
+            }
+            if (pick.valueGrade === "VALUE" || pick.valueGrade === "STRONG VALUE") {
+              return {
+                ...pick,
+                valueGrade: "WATCH" as ValueGrade,
+                valueGradeScore: Math.min(pick.valueGradeScore, 77.9),
+                valueGradeReason: `FOOTBALL TOP1: 오늘 1위 후보 미선정 · ${pick.valueGradeReason}`,
+                stageGradeLabel: "FOOTBALL WATCH",
+              };
+            }
+            return pick;
+          })
+        : isCourtSport
         ? actualMarketPicksBase.map((pick) => {
             if (currentCourtPromotion && pick.key === currentCourtPromotion.key) {
               return currentCourtPromotion;
@@ -17454,6 +18027,18 @@ export default function Home() {
       currentSport
     );
 
+  const currentSoccerProfile =
+    isSoccerSport
+      ? soccerLeagueProfile(
+          `${String(currentMatch.league ?? "")}`,
+          `${String(currentMatch.home ?? "")} ${String(currentMatch.away ?? "")}`
+        )
+      : null;
+  const currentSoccerQuality =
+    isSoccerSport
+      ? soccerSportsDataQuality(betman.matched, analysisFactors, currentFootballLineupReady)
+      : null;
+
   const currentCourtProfile =
     isCourtSport
       ? courtLeagueProfile(currentSport, currentMatch.league)
@@ -17514,31 +18099,39 @@ export default function Home() {
       )[0]
     : null;
 
-  /* V13.10.00: 야구뿐 아니라 농구/NBA/배구도 공식 VALUE가 없어도 경기 TOP1 후보를 항상 보여준다. */
+  /* V13.11.00: 야구/축구/농구/NBA/배구 모두 공식 VALUE가 없어도 경기 TOP1 후보를 항상 보여준다. */
   const currentContinuousTopPick =
     currentSport === "야구" && currentSlateCandidate
       ? actualMarketPicks.find((pick) => pick.key === currentSlateCandidate.pick.key) ?? currentSlateCandidate.pick
-      : isCourtSport && currentCourtCandidate
-        ? actualMarketPicks.find((pick) => pick.key === currentCourtCandidate.pick.key) ?? currentCourtCandidate.pick
-        : null;
+      : isSoccerSport && currentSoccerCandidate
+        ? actualMarketPicks.find((pick) => pick.key === currentSoccerCandidate.pick.key) ?? currentSoccerCandidate.pick
+        : isCourtSport && currentCourtCandidate
+          ? actualMarketPicks.find((pick) => pick.key === currentCourtCandidate.pick.key) ?? currentCourtCandidate.pick
+          : null;
   const currentContinuousTopTier =
     currentSport === "야구" && currentSlateCandidate
       ? baseballContinuousTopTier(currentSlateCandidate.slateScore)
-      : isCourtSport && currentCourtCandidate
-        ? courtContinuousTopTier(currentCourtCandidate.slateScore)
-        : null;
+      : isSoccerSport && currentSoccerCandidate
+        ? soccerContinuousTopTier(currentSoccerCandidate.slateScore)
+        : isCourtSport && currentCourtCandidate
+          ? courtContinuousTopTier(currentCourtCandidate.slateScore)
+          : null;
   const currentContinuousIsDailyTop1 =
     currentSport === "야구"
       ? Boolean(currentSlateCandidate && currentSlateRankIndex >= 0)
-      : isCourtSport
-        ? Boolean(currentCourtCandidate && currentCourtRankIndex >= 0)
-        : false;
+      : isSoccerSport
+        ? Boolean(currentSoccerCandidate && currentSoccerRankIndex >= 0)
+        : isCourtSport
+          ? Boolean(currentCourtCandidate && currentCourtRankIndex >= 0)
+          : false;
   const currentContinuousTopScore =
     currentSport === "야구" && currentSlateCandidate
       ? currentSlateCandidate.slateScore
-      : isCourtSport && currentCourtCandidate
-        ? currentCourtCandidate.slateScore
-        : null;
+      : isSoccerSport && currentSoccerCandidate
+        ? currentSoccerCandidate.slateScore
+        : isCourtSport && currentCourtCandidate
+          ? currentCourtCandidate.slateScore
+          : null;
   const bestDisplayPick = bestActualPick ?? currentContinuousTopPick;
 
   const best = bestDisplayPick
@@ -18437,6 +19030,13 @@ export default function Home() {
         !existingRecord.baseballChallenger &&
         baseballChallengerSnapshot
       );
+      const canRefreshFootball = Boolean(
+        existingRecord &&
+        existingRecord.verificationStatus === "PENDING" &&
+        currentSport === "축구" &&
+        startMs >= Date.now() - 30 * 60 * 1000 &&
+        actualMarketPicks.length > 0
+      );
       const canRefreshCourt = Boolean(
         existingRecord &&
         existingRecord.verificationStatus === "PENDING" &&
@@ -18445,7 +19045,7 @@ export default function Home() {
         actualMarketPicks.length > 0
       );
 
-      if (existingRecord && !canPromoteBaseballReady && !canPromoteFootballLineup && !canAttachBaseballChallenger && !canRefreshCourt) {
+      if (existingRecord && !canPromoteBaseballReady && !canPromoteFootballLineup && !canAttachBaseballChallenger && !canRefreshFootball && !canRefreshCourt) {
         return previous;
       }
 
@@ -18573,16 +19173,18 @@ export default function Home() {
         startMs,
         capturedAt: Date.now(),
         readyCapturedAt:
-          (currentSport === "야구" && analysisFactors.baseballAnalysisStage === "READY") || footballLineupSnapshot || currentSport === "농구" || currentSport === "배구"
+          (currentSport === "야구" && analysisFactors.baseballAnalysisStage === "READY") || currentSport === "축구" || currentSport === "농구" || currentSport === "배구"
             ? Date.now()
             : null,
         gateVersion: "FALLBACK_GATE_V2",
         recommendationEngineVersion:
           currentSport === "야구"
             ? "V13.9.10_CONTINUOUS_TOP1"
-            : currentSport === "농구" || currentSport === "배구"
-              ? "V13.10.00_COURT_SPORTS_TOP1"
-              : undefined,
+            : currentSport === "축구"
+              ? "V13.11.00_FOOTBALL_WORLD_TOP1"
+              : currentSport === "농구" || currentSport === "배구"
+                ? "V13.10.00_COURT_SPORTS_TOP1"
+                : undefined,
         decision: trackerPicks.length ? "PICK" : "PASS",
         picks: trackerPicks,
         marketResults: trackerMarketResults,
@@ -18658,10 +19260,10 @@ export default function Home() {
                     baseballReadyHold: nextRecord.baseballReadyHold ?? existingRecord.baseballReadyHold ?? null,
                     baseballChallenger: nextRecord.baseballChallenger ?? existingRecord.baseballChallenger ?? null,
                     footballLineup: nextRecord.footballLineup ?? existingRecord.footballLineup ?? null,
-                    /* V13.8.61: 축구 LINEUP 승격은 최초 PRE 예측/시장 스냅샷을 절대 덮어쓰지 않는다. */
-                    decision: canPromoteFootballLineup ? existingRecord.decision : nextRecord.decision,
-                    picks: canPromoteFootballLineup ? existingRecord.picks : nextRecord.picks,
-                    marketResults: canPromoteFootballLineup ? (existingRecord.marketResults ?? []) : nextRecord.marketResults,
+                    /* V13.11.00: 최초 footballPre는 보존하되, 경기 전 재분석/LINEUP READY에서는 TOP1 추천 스냅샷을 최신 상태로 갱신한다. */
+                    decision: nextRecord.decision,
+                    picks: nextRecord.picks,
+                    marketResults: nextRecord.marketResults,
                     footballPre: existingRecord.footballPre ?? nextRecord.footballPre ?? null,
                     footballPreResult: null,
                     verificationStatus: "PENDING" as const,
@@ -18794,6 +19396,105 @@ export default function Home() {
       return {
         ...record,
         recommendationEngineVersion: "V13.9.10_CONTINUOUS_TOP1",
+        decision: nextDecision,
+        picks: nextPicks,
+      };
+    });
+
+    if (changed) {
+      saveLiveTrackerRecords(next);
+      setLiveTrackerRecords(next);
+    }
+  }, [backtestMode, liveTrackerRecords]);
+
+  /* V13.11.00: 축구도 같은 KST 날짜에서 전체 프로/해외축구 중 하루 TOP1만 공식 PICK으로 유지한다. */
+  useEffect(() => {
+    if (backtestMode || !liveTrackerRecords.length) return;
+    const now = Date.now();
+    const groups = new Map<string, LiveTrackerRecord[]>();
+    for (const record of liveTrackerRecords) {
+      if (
+        record.sport !== "축구" ||
+        record.verificationStatus !== "PENDING" ||
+        record.startMs < now - 30 * 60 * 1000 ||
+        !(record.marketResults?.length)
+      ) continue;
+      const dateKey = kstDateKeyFromMs(record.startMs);
+      if (!dateKey) continue;
+      const rows = groups.get(dateKey) ?? [];
+      rows.push(record);
+      groups.set(dateKey, rows);
+    }
+
+    const desired = new Map<string, LiveTrackerPick | null>();
+    for (const records of groups.values()) {
+      const ranked = records
+        .map((record) => {
+          const candidate = bestSoccerSlateCandidate(trackerMarketPickSnapshots(record));
+          return candidate ? { record, ...candidate } : null;
+        })
+        .filter((row): row is NonNullable<typeof row> => row !== null)
+        .sort((a, b) =>
+          b.slateScore - a.slateScore ||
+          Number(b.pick.precisionConsensusFloor ?? -999) - Number(a.pick.precisionConsensusFloor ?? -999) ||
+          Number(b.pick.soccerDataQuality ?? -999) - Number(a.pick.soccerDataQuality ?? -999)
+        );
+
+      const leader = ranked[0] ?? null;
+      for (const record of records) {
+        if (!leader || leader.record.id !== record.id) {
+          desired.set(record.id, null);
+          continue;
+        }
+        const source = (record.marketResults ?? []).find((pick) => pick.key === leader.pick.key) ?? null;
+        if (!source) {
+          desired.set(record.id, null);
+          continue;
+        }
+        const promoted = promoteSoccerSlateTopPick(leader.pick, 1, leader.slateScore);
+        if (promoted.valueGrade !== "VALUE" && promoted.valueGrade !== "STRONG VALUE") {
+          desired.set(record.id, null);
+          continue;
+        }
+        desired.set(record.id, {
+          ...source,
+          probability: promoted.probability,
+          odds: promoted.odds,
+          marketProbability: promoted.marketProbability,
+          edge: promoted.edge,
+          expectedValue: promoted.expectedValue,
+          grade: promoted.valueGrade,
+          confidenceGrade: promoted.confidenceGrade,
+          recommendationScore: promoted.recommendationScore,
+          modelSnapshot: promoted,
+          resultStatus: source.resultStatus ?? "PENDING",
+          actualLabel: source.actualLabel ?? null,
+          resultNote: source.resultNote ?? null,
+        });
+      }
+    }
+
+    let changed = false;
+    const next = liveTrackerRecords.map((record) => {
+      if (!desired.has(record.id)) return record;
+      const target = desired.get(record.id) ?? null;
+      const nextDecision = target ? "PICK" as const : "PASS" as const;
+      const nextPicks = target ? [target] : [];
+      const beforeSig = JSON.stringify({
+        decision: record.decision,
+        engine: record.recommendationEngineVersion,
+        picks: (record.picks ?? []).map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
+      });
+      const afterSig = JSON.stringify({
+        decision: nextDecision,
+        engine: "V13.11.00_FOOTBALL_WORLD_TOP1",
+        picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
+      });
+      if (beforeSig === afterSig) return record;
+      changed = true;
+      return {
+        ...record,
+        recommendationEngineVersion: "V13.11.00_FOOTBALL_WORLD_TOP1",
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -23727,7 +24428,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.10.00 · COURT SPORTS TOP1</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.11.00 · FOOTBALL WORLD TOP1</div>
         </div>
         <div className="bar">
           <button
@@ -25228,7 +25929,7 @@ export default function Home() {
               </table>
             </div>
             <div className="small" style={{ marginTop: 6, whiteSpace: "normal", lineHeight: 1.55 }}>
-              판정 보류: 최소 30 VERIFY 경기와 충분한 정책별 정산 픽이 쌓이기 전 V13.9 Gate 후보를 선택하지 않습니다. Football은 별도 검증 유지.
+              판정 보류: 최소 30 VERIFY 경기와 충분한 정책별 정산 픽이 쌓이기 전 야구 Gate 후보를 추가 튜닝하지 않습니다. Football은 V13.11.00 TOP1 성적을 별도 누적합니다.
             </div>
           </div>
 
@@ -25248,9 +25949,9 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.10.00 COURT SPORTS TOP1 · 야구 CONTINUOUS TOP1 유지 · KBL/WKBL/NBA 승패·핸디·U/O + KOVO 승패·세트핸디 분석 · 품질/시장/최근표본은 연속 감점 · 종목별 하루 TOP1</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.11.00 FOOTBALL WORLD TOP1 · 야구/COURT TOP1 유지 · K리그/J리그/유럽5대리그/UEFA/MLS 등 축구 승무패·핸디·U/O 연속 TOP1 · 리그 prior + 품질/시장/라인업 soft score</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
-                2026-09-16 10:55 KST 이후 새 READY MLB snapshot부터 B는 MLB_PERSON_GAMELOG, C/D는 MLB StatsAPI 공식 boxscore를 우선 사용합니다. 항목별 공식 데이터가 없을 때만 Naver workload로 fallback합니다. CONTROL·실전 추천·Gate·기존 λ는 변경하지 않고 Challenger shadow만 계산합니다. 기존 잠금 snapshot은 다시 쓰지 않습니다.
+                축구는 SportsAPI/Naver에서 최근 득실과 홈·원정 장소표본을 확보한 경기를 공통 Poisson 기반으로 계산하고, K리그/J리그·유럽 5대리그·UEFA 대회·MLS는 리그별 중립 득점 prior를 적용합니다. 선발 11+11은 λ를 임의 변경하지 않고 데이터품질에 soft 반영하며, alias가 없는 기타 리그도 동일경기 매칭이 되면 OTHER 프로필로 분석합니다.
               </div>
             </div>
 
@@ -26028,6 +26729,16 @@ export default function Home() {
                         {" / "}C {bestDisplayPick.hitFirstBattingQuality === null || bestDisplayPick.hitFirstBattingQuality === undefined ? "-" : `${Math.round(bestDisplayPick.hitFirstBattingQuality * 100)}%`}
                         {" / "}D {bestDisplayPick.hitFirstBullpenQuality === null || bestDisplayPick.hitFirstBullpenQuality === undefined ? "-" : `${Math.round(bestDisplayPick.hitFirstBullpenQuality * 100)}%`}
                       </>
+                    ) : bestDisplayPick.soccerDataQuality !== undefined && bestDisplayPick.soccerDataQuality !== null ? (
+                      <>
+                        <br />
+                        FOOTBALL 품질 {bestDisplayPick.soccerDataQuality.toFixed(1)}
+                        {" · "}R {bestDisplayPick.soccerRecentQuality === null || bestDisplayPick.soccerRecentQuality === undefined ? "-" : `${Math.round(bestDisplayPick.soccerRecentQuality * 100)}%`}
+                        {" / "}V {bestDisplayPick.soccerVenueQuality === null || bestDisplayPick.soccerVenueQuality === undefined ? "-" : `${Math.round(bestDisplayPick.soccerVenueQuality * 100)}%`}
+                        {" / "}S {bestDisplayPick.soccerScoringQuality === null || bestDisplayPick.soccerScoringQuality === undefined ? "-" : `${Math.round(bestDisplayPick.soccerScoringQuality * 100)}%`}
+                        {" / "}XI {bestDisplayPick.soccerLineupQuality === null || bestDisplayPick.soccerLineupQuality === undefined ? "-" : `${Math.round(bestDisplayPick.soccerLineupQuality * 100)}%`}
+                        {" / "}MKT {bestDisplayPick.soccerMarketQuality === null || bestDisplayPick.soccerMarketQuality === undefined ? "-" : `${Math.round(bestDisplayPick.soccerMarketQuality * 100)}%`}
+                      </>
                     ) : bestDisplayPick.courtDataQuality !== undefined && bestDisplayPick.courtDataQuality !== null ? (
                       <>
                         <br />
@@ -26092,6 +26803,47 @@ export default function Home() {
               {" · "}진한 색 = 실제 가치 추천
               {" · "}회색 PASS = 분석했지만 베팅 기준 미달
             </div>
+
+            {isSoccerSport && currentSoccerProfile && (
+              <div className="section" style={{ marginTop: 0, marginBottom: 8 }}>
+                <h3>V13.11.00 FOOTBALL WORLD · {currentSoccerProfile.label}</h3>
+                <div className="cards">
+                  <div className="card">
+                    리그 prior
+                    <b>{currentSoccerProfile.neutralTeamScore.toFixed(2)}</b>
+                    <div className="small">팀당 중립 기대득점</div>
+                  </div>
+                  <div className="card">
+                    최근 표본
+                    <b>{analysisFactors.homeRecentSample} / {analysisFactors.awayRecentSample}</b>
+                    <div className="small">최근 5경기 시간가중</div>
+                  </div>
+                  <div className="card">
+                    장소 표본
+                    <b>{analysisFactors.homeVenueSample} / {analysisFactors.awayVenueSample}</b>
+                    <div className="small">5/5를 full coverage로 평가</div>
+                  </div>
+                  <div className="card">
+                    선발 XI
+                    <b>{currentFootballLineupReady ? "11+11" : "대기"}</b>
+                    <div className="small">없어도 하드 탈락하지 않고 soft 감점</div>
+                  </div>
+                  <div className="card">
+                    FOOTBALL 품질
+                    <b>{currentSoccerQuality ? currentSoccerQuality.overall.toFixed(1) : "-"}</b>
+                    <div className="small">{currentSoccerQuality?.label ?? "분석 대기"}</div>
+                  </div>
+                  <div className="card">
+                    예상 득점
+                    <b>{analysisFactors.expectedHomeScore?.toFixed(2) ?? "-"} : {analysisFactors.expectedAwayScore?.toFixed(2) ?? "-"}</b>
+                    <div className="small">Poisson · 모델강도 {analysisFactors.scoreShrinkage === null ? "-" : `${Math.round(analysisFactors.scoreShrinkage * 100)}%`}</div>
+                  </div>
+                </div>
+                <div className="notice" style={{ margin: "8px 0 0" }}>
+                  K리그/J리그와 EPL·LaLiga·Serie A·Bundesliga·Ligue 1·UEFA 대회·MLS를 리그별 득점 prior로 구분하고, 최근 득실·홈/원정 장소표본·시장확률·선발 XI 확보·모델강도를 연속 점수로 반영합니다. full-game 승무패/핸디/U/O에서 항상 경기 TOP1을 만들고 같은 KST 날짜 축구 전체에서 하루 TOP1을 따로 선정합니다. TOP1점수 78 이상만 공식 VALUE, 72~77.9는 약추천, 그 미만은 관망입니다.
+                </div>
+              </div>
+            )}
 
             {isCourtSport && currentCourtProfile && (
               <div className="section" style={{ marginTop: 0, marginBottom: 8 }}>
@@ -26844,11 +27596,11 @@ export default function Home() {
                                 ? "엄격 PRE 규칙 유지: 경기 시작 후 새 PRE 레코드를 만들지 않습니다."
                                 : "경기 시작 전 분석 완료 시 PRE 레코드를 최초 1회 잠급니다."}
                           </div>
-                          <div className="small" style={{ marginTop: 4 }}>LINEUP 승격 시 최초 PRE λ·추천·시장 스냅샷은 보존하고 선수 22명과 확보 시각만 같은 레코드에 추가합니다. MODEL OFF 유지.</div>
+                          <div className="small" style={{ marginTop: 4 }}>LINEUP 승격 시 최초 PRE λ는 보존하고 선수 22명/확보 시각을 저장합니다. V13.11.00부터 선발 XI는 λ를 직접 바꾸지 않고 TOP1 데이터품질에 soft 반영하며, 경기 전 재분석 시 추천/시장 스냅샷은 최신 상태로 갱신합니다.</div>
                         </div>
                       )}
                       <div className="notice" style={{ margin: "8px 0" }}>
-                        <b>V13.8.61 축구 LINEUP SNAPSHOT / AUDIT · MODEL OFF</b> · 실제 Naver statistics players 응답의 <b>substitute:false</b> 11+11만 LINEUP READY로 인정합니다.
+                        <b>V13.11.00 축구 LINEUP SNAPSHOT / TOP1 QUALITY</b> · 실제 Naver statistics players 응답의 <b>substitute:false</b> 11+11만 LINEUP READY로 인정하며, XI 확보는 확률을 임의 생성하지 않고 품질 점수에만 반영합니다.
                         22명 명단은 실전 추적 PRE 레코드에 스냅샷으로 저장하되 축구 λ/Poisson에는 아직 반영하지 않습니다.
                       </div>
                       <div className="cards">
@@ -28462,7 +29214,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.10.00 COURT SPORTS TOP1은 야구 V13.9.10 연속 TOP1 구조를 유지하면서 프로농구(KBL/WKBL), NBA, 프로배구(KOVO)에도 full-game TOP1을 확장합니다. 농구는 리그별 득점 prior와 최근 득실·장소표본을 수축해 승패/핸디/UO를 정규분포로 계산하고, 배구는 최근 세트 스코어 기반 5세트제 분포로 승패와 세트핸디를 계산합니다. TOP1점수 80 이상만 공식 VALUE, 74~79.9는 약추천, 그 미만은 관망입니다. 배구의 100점대 U/O나 큰 포인트 핸디는 세트 모델로 억지 계산하지 않고 제외합니다.
+                    V13.11.00 FOOTBALL WORLD TOP1은 기존 야구/COURT 연속 TOP1을 유지하면서 프로축구·해외축구에도 full-game TOP1을 확장합니다. 축구는 리그별 득점 prior와 최근 득실·장소표본·시장확률·선발 XI·모델강도를 soft score로 합쳐 승무패/핸디/UO를 비교하며, TOP1점수 78 이상만 공식 VALUE, 72~77.9는 약추천, 그 미만은 관망입니다. 농구/배구는 V13.10.00 기준을 유지합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
