@@ -1,4 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
+// V13.10.00 COURT SPORTS TOP1: KBL/WKBL/NBA + KOVO basketball/volleyball full-game market models, continuous TOP1, league priors and soft data-quality ranking
 // V13.9.10 FINAL-SEASON CONTINUOUS TOP1: always rank one full-game candidate; quality/risk are soft penalties; only high-score TOP1 becomes official VALUE
 // V13.8.89 FIX9: cancelled/postponed/suspended/no-game VERIFY is VOID and excluded from HIT/MISS/ROI/MAE/Brier
 // V13.8.88 FIX8: STRONG VALUE requires baseball model strength >= 70%; lower strength is capped at VALUE
@@ -3205,6 +3206,84 @@ const SPORTS_API_TEAM_ALIASES: Record<string, string> = {
   "삼성": "Samsung Lions",
   "samsung": "Samsung Lions",
 
+  // V13.10.00 · 프로농구 KBL/WKBL + NBA Betman 한글명 -> SportsAPI 영문 팀명
+  "서울sk나이츠": "Seoul SK Knights",
+  "sk나이츠": "Seoul SK Knights",
+  "창원lg세이커스": "Changwon LG Sakers",
+  "lg세이커스": "Changwon LG Sakers",
+  "수원kt소닉붐": "Suwon KT Sonicboom",
+  "kt소닉붐": "Suwon KT Sonicboom",
+  "울산현대모비스피버스": "Ulsan Hyundai Mobis Phoebus",
+  "현대모비스피버스": "Ulsan Hyundai Mobis Phoebus",
+  "부산kcc이지스": "Busan KCC Egis",
+  "kcc이지스": "Busan KCC Egis",
+  "대구한국가스공사페가수스": "Daegu KOGAS Pegasus",
+  "한국가스공사페가수스": "Daegu KOGAS Pegasus",
+  "원주db프로미": "Wonju DB Promy",
+  "db프로미": "Wonju DB Promy",
+  "안양정관장레드부스터스": "Anyang Jung Kwan Jang Red Boosters",
+  "정관장레드부스터스": "Anyang Jung Kwan Jang Red Boosters",
+  "고양소노스카이거너스": "Goyang Sono Skygunners",
+  "소노스카이거너스": "Goyang Sono Skygunners",
+  "서울삼성썬더스": "Seoul Samsung Thunders",
+  "삼성썬더스": "Seoul Samsung Thunders",
+  "아산우리은행우리won": "Asan Woori Bank Wibee",
+  "청주kb스타즈": "Cheongju KB Stars",
+  "용인삼성생명블루밍스": "Yongin Samsung Life Blueminx",
+  "인천신한은행에스버드": "Incheon Shinhan Bank S-Birds",
+  "부천하나은행": "Bucheon Hana 1Q",
+  "부산bnk썸": "Busan BNK Sum",
+
+  "애틀랜타호크스": "Atlanta Hawks",
+  "보스턴셀틱스": "Boston Celtics",
+  "브루클린네츠": "Brooklyn Nets",
+  "샬럿호네츠": "Charlotte Hornets",
+  "시카고불스": "Chicago Bulls",
+  "클리블랜드캐벌리어스": "Cleveland Cavaliers",
+  "댈러스매버릭스": "Dallas Mavericks",
+  "덴버너기츠": "Denver Nuggets",
+  "디트로이트피스톤스": "Detroit Pistons",
+  "골든스테이트워리어스": "Golden State Warriors",
+  "휴스턴로키츠": "Houston Rockets",
+  "인디애나페이서스": "Indiana Pacers",
+  "la클리퍼스": "LA Clippers",
+  "로스앤젤레스클리퍼스": "LA Clippers",
+  "la레이커스": "Los Angeles Lakers",
+  "로스앤젤레스레이커스": "Los Angeles Lakers",
+  "멤피스그리즐리스": "Memphis Grizzlies",
+  "마이애미히트": "Miami Heat",
+  "밀워키벅스": "Milwaukee Bucks",
+  "미네소타팀버울브스": "Minnesota Timberwolves",
+  "뉴올리언스펠리컨스": "New Orleans Pelicans",
+  "뉴욕닉스": "New York Knicks",
+  "오클라호마시티썬더": "Oklahoma City Thunder",
+  "올랜도매직": "Orlando Magic",
+  "필라델피아세븐티식서스": "Philadelphia 76ers",
+  "피닉스선즈": "Phoenix Suns",
+  "포틀랜드트레일블레이저스": "Portland Trail Blazers",
+  "새크라멘토킹스": "Sacramento Kings",
+  "샌안토니오스퍼스": "San Antonio Spurs",
+  "토론토랩터스": "Toronto Raptors",
+  "유타재즈": "Utah Jazz",
+  "워싱턴위저즈": "Washington Wizards",
+
+  // V13.10.00 · KOVO V-리그 남/여 팀 alias
+  "대한항공점보스": "Korean Air Jumbos",
+  "현대캐피탈스카이워커스": "Hyundai Capital Skywalkers",
+  "kb손해보험스타즈": "KB Insurance Stars",
+  "우리카드우리won": "Woori Card Wibee",
+  "한국전력빅스톰": "KEPCO Vixtorm",
+  "삼성화재블루팡스": "Samsung Fire Bluefangs",
+  "ok저축은행읏맨": "OK Savings Bank Rush & Cash",
+  "ok읏맨": "OK Savings Bank Rush & Cash",
+  "흥국생명핑크스파이더스": "Heungkuk Life Pink Spiders",
+  "현대건설힐스테이트": "Hyundai E&C Hillstate",
+  "정관장레드스파크스": "Jung Kwan Jang Red Sparks",
+  "ibk기업은행알토스": "IBK Altos",
+  "gs칼텍스서울kixx": "GS Caltex Seoul KIXX",
+  "한국도로공사하이패스": "Korea Expressway Hi-Pass",
+  "페퍼저축은행ai페퍼스": "AI Peppers",
+
   // V13.8.19 · MLB 30구단 Betman 한글명 -> SportsAPI 영문 팀명
   "뉴욕양키스": "New York Yankees",
   "보스턴레드삭스": "Boston Red Sox",
@@ -3306,6 +3385,71 @@ const SPORTS_TEAM_ALIAS_GROUPS: string[][] = [
   ["야쿠르트 스왈로즈","도쿄 야쿠르트 스왈로즈","Yakult Swallows","Tokyo Yakult Swallows"],
   ["히로시마 도요 카프","히로시마 카프","Hiroshima Toyo Carp","Hiroshima Carp"],
   ["요코하마 DeNA 베이스타스","요코하마 베이스타스","Yokohama DeNA BayStars","DeNA BayStars"],
+
+  // V13.10.00 · KBL/WKBL/NBA aliases
+  ["서울 SK 나이츠","서울SK","SK 나이츠","Seoul SK Knights","SK Knights"],
+  ["창원 LG 세이커스","창원LG","LG 세이커스","Changwon LG Sakers","LG Sakers"],
+  ["수원 KT 소닉붐","수원KT","KT 소닉붐","Suwon KT Sonicboom","KT Sonicboom"],
+  ["울산 현대모비스 피버스","현대모비스","Ulsan Hyundai Mobis Phoebus","Hyundai Mobis Phoebus"],
+  ["부산 KCC 이지스","부산KCC","KCC 이지스","Busan KCC Egis","KCC Egis"],
+  ["대구 한국가스공사 페가수스","한국가스공사","Daegu KOGAS Pegasus","KOGAS Pegasus"],
+  ["원주 DB 프로미","원주DB","DB 프로미","Wonju DB Promy","DB Promy"],
+  ["안양 정관장 레드부스터스","정관장","Anyang Jung Kwan Jang Red Boosters","Red Boosters"],
+  ["고양 소노 스카이거너스","고양소노","소노","Goyang Sono Skygunners","Sono Skygunners"],
+  ["서울 삼성 썬더스","서울삼성","Samsung Thunders","Seoul Samsung Thunders"],
+  ["아산 우리은행 우리WON","우리은행","Asan Woori Bank Wibee"],
+  ["청주 KB 스타즈","KB 스타즈","Cheongju KB Stars"],
+  ["용인 삼성생명 블루밍스","삼성생명","Yongin Samsung Life Blueminx"],
+  ["인천 신한은행 에스버드","신한은행","Incheon Shinhan Bank S-Birds"],
+  ["부천 하나은행","하나은행","Bucheon Hana 1Q"],
+  ["부산 BNK 썸","BNK 썸","Busan BNK Sum"],
+
+  ["애틀랜타 호크스","Atlanta Hawks","Hawks"],
+  ["보스턴 셀틱스","Boston Celtics","Celtics"],
+  ["브루클린 네츠","Brooklyn Nets","Nets"],
+  ["샬럿 호네츠","Charlotte Hornets","Hornets"],
+  ["시카고 불스","Chicago Bulls","Bulls"],
+  ["클리블랜드 캐벌리어스","Cleveland Cavaliers","Cavaliers"],
+  ["댈러스 매버릭스","Dallas Mavericks","Mavericks"],
+  ["덴버 너기츠","Denver Nuggets","Nuggets"],
+  ["디트로이트 피스톤스","Detroit Pistons","Pistons"],
+  ["골든스테이트 워리어스","Golden State Warriors","Warriors"],
+  ["휴스턴 로키츠","Houston Rockets","Rockets"],
+  ["인디애나 페이서스","Indiana Pacers","Pacers"],
+  ["LA 클리퍼스","로스앤젤레스 클리퍼스","LA Clippers","Los Angeles Clippers","Clippers"],
+  ["LA 레이커스","로스앤젤레스 레이커스","Los Angeles Lakers","Lakers"],
+  ["멤피스 그리즐리스","Memphis Grizzlies","Grizzlies"],
+  ["마이애미 히트","Miami Heat","Heat"],
+  ["밀워키 벅스","Milwaukee Bucks","Bucks"],
+  ["미네소타 팀버울브스","Minnesota Timberwolves","Timberwolves"],
+  ["뉴올리언스 펠리컨스","New Orleans Pelicans","Pelicans"],
+  ["뉴욕 닉스","New York Knicks","Knicks"],
+  ["오클라호마시티 썬더","Oklahoma City Thunder","Thunder"],
+  ["올랜도 매직","Orlando Magic","Magic"],
+  ["필라델피아 세븐티식서스","필라델피아 76ers","Philadelphia 76ers","76ers"],
+  ["피닉스 선즈","Phoenix Suns","Suns"],
+  ["포틀랜드 트레일블레이저스","Portland Trail Blazers","Trail Blazers"],
+  ["새크라멘토 킹스","Sacramento Kings","Kings"],
+  ["샌안토니오 스퍼스","San Antonio Spurs","Spurs"],
+  ["토론토 랩터스","Toronto Raptors","Raptors"],
+  ["유타 재즈","Utah Jazz","Jazz"],
+  ["워싱턴 위저즈","Washington Wizards","Wizards"],
+
+  // V13.10.00 · KOVO aliases
+  ["대한항공 점보스","대한항공","Korean Air Jumbos"],
+  ["현대캐피탈 스카이워커스","현대캐피탈","Hyundai Capital Skywalkers"],
+  ["KB손해보험 스타즈","KB손해보험","KB Insurance Stars"],
+  ["우리카드 우리WON","우리카드","Woori Card Wibee","Woori Card"],
+  ["한국전력 빅스톰","한국전력","KEPCO Vixtorm","Korea Electric Power"],
+  ["삼성화재 블루팡스","삼성화재","Samsung Fire Bluefangs"],
+  ["OK저축은행 읏맨","OK 읏맨","OK저축은행","OK Savings Bank Rush & Cash","OK Financial Group"],
+  ["흥국생명 핑크스파이더스","흥국생명","Heungkuk Life Pink Spiders"],
+  ["현대건설 힐스테이트","현대건설","Hyundai E&C Hillstate"],
+  ["정관장 레드스파크스","정관장","Jung Kwan Jang Red Sparks"],
+  ["IBK기업은행 알토스","IBK기업은행","IBK Altos"],
+  ["GS칼텍스 서울 KIXX","GS칼텍스","GS Caltex Seoul KIXX"],
+  ["한국도로공사 하이패스","한국도로공사","Korea Expressway Hi-Pass"],
+  ["페퍼저축은행 AI 페퍼스","페퍼저축은행","AI Peppers"],
 
   // V13.8.19 · MLB aliases
   ["뉴욕 양키스","뉴욕양키스","New York Yankees","Yankees"],
@@ -4416,6 +4560,81 @@ function neutralScorePrior(
   return 1.5;
 }
 
+type CourtLeagueGroup = "NBA" | "KBL" | "WKBL" | "KOVO" | "OTHER";
+type CourtScoreUnit = "POINTS" | "SETS";
+
+type CourtLeagueProfile = {
+  group: CourtLeagueGroup;
+  label: string;
+  unit: CourtScoreUnit;
+  neutralTeamScore: number;
+  homeEdge: number;
+  marginSd: number;
+  totalSd: number;
+  marketMarginMax: number;
+};
+
+function courtLeagueProfile(
+  sport: Exclude<Sport, "전체">,
+  leagueRaw: unknown
+): CourtLeagueProfile | null {
+  if (sport !== "농구" && sport !== "배구") return null;
+  const text = String(leagueRaw ?? "").toLowerCase().replace(/[^a-z0-9가-힣]/g, "");
+
+  // Betman league 필드가 비어 있는 경우가 있어 팀명 자체로도 리그를 식별한다.
+  // 팀명 식별은 prior/분산 선택용일 뿐 경기 방향을 강제로 만들지는 않는다.
+  const nbaTeam = /(애틀랜타호크스|보스턴셀틱스|브루클린네츠|샬럿호네츠|시카고불스|클리블랜드캐벌리어스|댈러스매버릭스|덴버너기츠|디트로이트피스톤스|골든스테이트워리어스|휴스턴로키츠|인디애나페이서스|la클리퍼스|로스앤젤레스클리퍼스|la레이커스|로스앤젤레스레이커스|멤피스그리즐리스|마이애미히트|밀워키벅스|미네소타팀버울브스|뉴올리언스펠리컨스|뉴욕닉스|오클라호마시티썬더|올랜도매직|필라델피아세븐티식서스|피닉스선즈|포틀랜드트레일블레이저스|새크라멘토킹스|샌안토니오스퍼스|토론토랩터스|유타재즈|워싱턴위저즈|atlantahawks|bostonceltics|brooklynnets|charlottehornets|chicagobulls|clevelandcavaliers|dallasmavericks|denvernuggets|detroitpistons|goldenstatewarriors|houstonrockets|indianapacers|laclippers|losangeleslakers|memphisgrizzlies|miamiheat|milwaukeebucks|minnesotatimberwolves|neworleanspelicans|newyorkknicks|oklahomacitythunder|orlandomagic|philadelphia76ers|phoenixsuns|portlandtrailblazers|sacramentokings|sanantoniospurs|torontoraptors|utahjazz|washingtonwizards)/.test(text);
+  const wkblTeam = /(우리은행우리won|kb스타즈|삼성생명블루밍스|신한은행에스버드|부천하나은행|bnk썸|wooribank|kbstars|samsunglifeblueminx|shinhanbank|hana1q|bnksum)/.test(text);
+  const kblTeam = /(서울sk나이츠|sk나이츠|창원lg세이커스|lg세이커스|수원kt소닉붐|kt소닉붐|울산현대모비스피버스|현대모비스피버스|부산kcc이지스|kcc이지스|한국가스공사페가수스|원주db프로미|db프로미|정관장레드부스터스|소노스카이거너스|서울삼성썬더스|seoulskknights|changwonlgsakers|suwonktsonicboom|hyundaimobis|busankccegis|kogaspegasus|wonjudbpromy|redboosters|sonoskygunners|samsungthunders)/.test(text);
+  const kovoTeam = /(대한항공점보스|현대캐피탈스카이워커스|kb손해보험스타즈|우리카드우리won|한국전력빅스톰|삼성화재블루팡스|ok저축은행읏맨|ok읏맨|흥국생명핑크스파이더스|현대건설힐스테이트|정관장레드스파크스|ibk기업은행알토스|gs칼텍스서울kixx|한국도로공사하이패스|페퍼저축은행ai페퍼스|koreanairjumbos|hyundaicapitalskywalkers|kbinsurancestars|wooricard|kepcovixtorm|samsungfirebluefangs|heungkuklife|hillstate|redsparks|ibkaltos|gscaltex|expresswayhipass|aipeppers)/.test(text);
+
+  if (sport === "농구") {
+    if (/nba|미국프로농구/.test(text) || nbaTeam) {
+      return { group: "NBA", label: "NBA", unit: "POINTS", neutralTeamScore: 113.5, homeEdge: 2.2, marginSd: 12.4, totalSd: 17.0, marketMarginMax: 9.0 };
+    }
+    if (/wkbl|여자프로농구/.test(text) || wkblTeam) {
+      return { group: "WKBL", label: "WKBL", unit: "POINTS", neutralTeamScore: 67.5, homeEdge: 1.5, marginSd: 9.8, totalSd: 13.5, marketMarginMax: 7.0 };
+    }
+    if (/kbl|남자프로농구|프로농구/.test(text) || kblTeam) {
+      return { group: "KBL", label: "KBL", unit: "POINTS", neutralTeamScore: 80.5, homeEdge: 1.8, marginSd: 10.7, totalSd: 14.8, marketMarginMax: 7.5 };
+    }
+    return { group: "OTHER", label: "BASKETBALL", unit: "POINTS", neutralTeamScore: 84.0, homeEdge: 1.6, marginSd: 11.5, totalSd: 15.5, marketMarginMax: 8.0 };
+  }
+
+  const isKovo = /kovo|v리그|vleague|프로배구/.test(text) || kovoTeam;
+  return { group: isKovo ? "KOVO" : "OTHER", label: isKovo ? "KOVO V-리그" : "VOLLEYBALL", unit: "SETS", neutralTeamScore: 1.55, homeEdge: 0.08, marginSd: 1.05, totalSd: 0.78, marketMarginMax: 0.95 };
+}
+
+function normalCdf(value: number) {
+  const z = Number(value);
+  if (!Number.isFinite(z)) return 0.5;
+  const x = Math.abs(z);
+  const t = 1 / (1 + 0.2316419 * x);
+  const density = 0.3989422804014327 * Math.exp(-0.5 * x * x);
+  const poly = t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+  const cdf = 1 - density * poly;
+  return z >= 0 ? cdf : 1 - cdf;
+}
+
+function logistic(value: number) {
+  const x = clamp(Number(value), -12, 12);
+  return 1 / (1 + Math.exp(-x));
+}
+
+type VolleyballScoreRow = { home: number; away: number; p: number };
+function volleyballBestOfFiveGrid(setHomeProbability: number): VolleyballScoreRow[] {
+  const p = clamp(setHomeProbability, 0.12, 0.88);
+  const q = 1 - p;
+  return [
+    { home: 3, away: 0, p: p ** 3 },
+    { home: 3, away: 1, p: 3 * p ** 3 * q },
+    { home: 3, away: 2, p: 6 * p ** 3 * q ** 2 },
+    { home: 0, away: 3, p: q ** 3 },
+    { home: 1, away: 3, p: 3 * q ** 3 * p },
+    { home: 2, away: 3, p: 6 * q ** 3 * p ** 2 },
+  ];
+}
+
 function shrinkExpectedScore(
   raw: number,
   prior: number,
@@ -4429,8 +4648,8 @@ function shrinkExpectedScore(
 
   if (sport === "축구") value = clamp(value, 0.45, 2.75);
   if (sport === "야구") value = clamp(value, 2.0, 7.5);
-  if (sport === "농구") value = clamp(value, 80, 140);
-  if (sport === "배구") value = clamp(value, 0.7, 2.4);
+  if (sport === "농구") value = clamp(value, Math.max(45, prior - 45), prior + 45);
+  if (sport === "배구") value = clamp(value, 0.35, 3.0);
 
   return value;
 }
@@ -4651,11 +4870,11 @@ function robustRecentMetric(input: {
     lower = 1.5;
     upper = 7.5;
   } else if (sport === "농구") {
-    lower = 75;
-    upper = 140;
+    lower = Math.max(45, prior - 45);
+    upper = prior + 45;
   } else {
-    lower = 0.5;
-    upper = 2.8;
+    lower = 0.35;
+    upper = 3.0;
   }
 
   // 1) 최근 극단값 winsorization
@@ -6252,6 +6471,21 @@ function buildAnalysis(
       ? baseballLeagueRunPrior(baseballLeagueRaw)
       : null;
 
+  const courtLeagueRaw =
+    sportsDetail?.selectedFixture?.league ??
+    sportsDetail?.fixture?.league ??
+    (betmanMatch as any)?.league ??
+    (betmanMatch as any)?.sportName ??
+    null;
+
+  const courtProfile =
+    sport === "농구" || sport === "배구"
+      ? courtLeagueProfile(sport, courtLeagueRaw)
+      : null;
+
+  const courtScorePrior =
+    courtProfile?.neutralTeamScore ?? null;
+
   const baseballTeamStrength =
     sport === "야구"
       ? baseballOfficialTeamStrength(sportsDetail, baseballLeagueRaw)
@@ -6288,28 +6522,28 @@ function buildAnalysis(
     played: homeWeighted.played,
     venuePlayed: homeWeighted.venuePlayed,
     sport,
-    priorOverride: baseballRunPrior,
+    priorOverride: baseballRunPrior ?? courtScorePrior,
   }).value;
   const homeVenueShadowRobustConceded = robustRecentMetric({
     value: homeVenueShadow.conceded,
     played: homeWeighted.played,
     venuePlayed: homeWeighted.venuePlayed,
     sport,
-    priorOverride: baseballRunPrior,
+    priorOverride: baseballRunPrior ?? courtScorePrior,
   }).value;
   const awayVenueShadowRobustScored = robustRecentMetric({
     value: awayVenueShadow.scored,
     played: awayWeighted.played,
     venuePlayed: awayWeighted.venuePlayed,
     sport,
-    priorOverride: baseballRunPrior,
+    priorOverride: baseballRunPrior ?? courtScorePrior,
   }).value;
   const awayVenueShadowRobustConceded = robustRecentMetric({
     value: awayVenueShadow.conceded,
     played: awayWeighted.played,
     venuePlayed: awayWeighted.venuePlayed,
     sport,
-    priorOverride: baseballRunPrior,
+    priorOverride: baseballRunPrior ?? courtScorePrior,
   }).value;
 
   const venueShadowRawHomeScore =
@@ -6330,7 +6564,7 @@ function buildAnalysis(
       venuePlayed:
         homeWeighted.venuePlayed,
       sport,
-      priorOverride: baseballRunPrior,
+      priorOverride: baseballRunPrior ?? courtScorePrior,
     });
 
   const homeRobustConceded =
@@ -6342,7 +6576,7 @@ function buildAnalysis(
       venuePlayed:
         homeWeighted.venuePlayed,
       sport,
-      priorOverride: baseballRunPrior,
+      priorOverride: baseballRunPrior ?? courtScorePrior,
     });
 
   const awayRobustScored =
@@ -6354,7 +6588,7 @@ function buildAnalysis(
       venuePlayed:
         awayWeighted.venuePlayed,
       sport,
-      priorOverride: baseballRunPrior,
+      priorOverride: baseballRunPrior ?? courtScorePrior,
     });
 
   const awayRobustConceded =
@@ -6366,7 +6600,7 @@ function buildAnalysis(
       venuePlayed:
         awayWeighted.venuePlayed,
       sport,
-      priorOverride: baseballRunPrior,
+      priorOverride: baseballRunPrior ?? courtScorePrior,
     });
 
   const homeAvgScored =
@@ -6634,7 +6868,13 @@ function buildAnalysis(
     !scoringUsed &&
     baseballRunPrior !== null;
 
-  if (scoringUsed || baseballPriorFallback) {
+  const courtPriorFallback =
+    (sport === "농구" || sport === "배구") &&
+    !scoringUsed &&
+    courtProfile !== null &&
+    (moneylineFair.home !== null || moneylineFair.away !== null || chooseBetmanTotal(betmanMatch) !== null);
+
+  if (scoringUsed || baseballPriorFallback || courtPriorFallback) {
     let rawHome: number;
     let rawAway: number;
 
@@ -6665,10 +6905,32 @@ function buildAnalysis(
       baseballTeamStrengthSource = "BETMAN_DIRECTION_GUARD";
       baseballTeamStrengthRawHome = rawHome;
       baseballTeamStrengthRawAway = rawAway;
+    } else if (courtPriorFallback && courtProfile) {
+      const totalMarket = chooseBetmanTotal(betmanMatch);
+      const totalLine = Number(totalMarket?.line);
+      let base = courtProfile.neutralTeamScore;
+      if (sport === "농구" && Number.isFinite(totalLine) && totalLine >= 100 && totalLine <= 300) {
+        base = clamp(totalLine / 2, courtProfile.neutralTeamScore - 18, courtProfile.neutralTeamScore + 18);
+      }
+      const fairDiff =
+        moneylineFair.home !== null && moneylineFair.away !== null
+          ? moneylineFair.home - moneylineFair.away
+          : 0;
+      const marketMargin = clamp(
+        (fairDiff / 100) * courtProfile.marketMarginMax * 2,
+        -courtProfile.marketMarginMax,
+        courtProfile.marketMarginMax
+      );
+      rawHome = base + marketMargin / 2;
+      rawAway = base - marketMargin / 2;
+      scoreGuardApplied = true;
+      scoreGuardStrength = 0.18;
+      marketPriorWeight = 0.18;
+      marketMarginPrior = marketMargin;
     } else {
-      rawHome = baseballRunPrior!;
-      rawAway = baseballRunPrior!;
-      baseballTeamStrengthSource = "LEAGUE_NEUTRAL_ONLY";
+      rawHome = baseballRunPrior ?? courtProfile?.neutralTeamScore ?? neutralScorePrior(sport);
+      rawAway = rawHome;
+      if (sport === "야구") baseballTeamStrengthSource = "LEAGUE_NEUTRAL_ONLY";
     }
 
     rawExpectedHomeScore = rawHome;
@@ -6722,6 +6984,12 @@ function buildAnalysis(
       }
     }
 
+    if (courtPriorFallback) {
+      // 최근 스코어가 없을 때는 Betman total/moneyline을 약한 방향 prior로만 사용한다.
+      // 완전한 실데이터 모델처럼 보이지 않도록 강도를 42%로 고정한다.
+      sampleStrength = 0.42;
+    }
+
     /*
      * 야구 PRE에서는 선발/라인업 미확정 리스크를 별도로 반영.
      * 작은 최근표본이 λ를 과하게 흔들지 않게 더 강하게 prior로 수축.
@@ -6765,12 +7033,11 @@ function buildAnalysis(
       sampleStrength;
 
     const prior =
-      sport === "야구" &&
-      baseballRunPrior !== null
+      sport === "야구" && baseballRunPrior !== null
         ? baseballRunPrior
-        : neutralScorePrior(
-            sport
-          );
+        : courtScorePrior !== null
+          ? courtScorePrior
+          : neutralScorePrior(sport);
 
     scorePrior =
       prior;
@@ -6794,8 +7061,7 @@ function buildAnalysis(
     // 아주 약한 홈 이점만 마지막에 부여.
     if (sport === "축구") expectedHomeScore += 0.08;
     if (sport === "야구") expectedHomeScore += 0.10;
-    if (sport === "농구") expectedHomeScore += 1.0;
-    if (sport === "배구") expectedHomeScore += 0.03;
+    if ((sport === "농구" || sport === "배구") && courtProfile) expectedHomeScore += courtProfile.homeEdge;
 
     postShrinkHomeScore = expectedHomeScore;
     postShrinkAwayScore = expectedAwayScore;
@@ -7089,7 +7355,8 @@ function buildAnalysis(
     formUsed ||
     h2hUsed ||
     scoringUsed ||
-    baseballPriorFallback;
+    baseballPriorFallback ||
+    courtPriorFallback;
 
   let homeProbability =
     50;
@@ -7938,6 +8205,17 @@ type MarketPick = {
   hitFirstBullpenQuality?: number | null;
   hitFirstModelStrength?: number | null;
   hitFirstCoverageLabel?: string | null;
+
+  /* V13.10.00: 농구/NBA/배구 court-sports 적중우선 진단. */
+  courtLeagueGroup?: CourtLeagueGroup | null;
+  courtScoreUnit?: CourtScoreUnit | null;
+  courtDataQuality?: number | null;
+  courtRecentQuality?: number | null;
+  courtVenueQuality?: number | null;
+  courtScoringQuality?: number | null;
+  courtMarketQuality?: number | null;
+  courtModelQuality?: number | null;
+  courtCoverageLabel?: string | null;
 
   detail: string;
 };
@@ -8975,6 +9253,7 @@ function fairMarketProbabilities(market: any) {
   return {
     probabilities,
     overround: rawTotal,
+    usableCount: usable.length,
   };
 }
 
@@ -9723,7 +10002,7 @@ function marketConfidence(
 
   // V13.9.08: 야구는 실제 최근/장소 목표가 5경기인데 기존 confidence는 3/3을 100% coverage로 봤다.
   // 3경기 표본의 분산을 과소평가하지 않도록 야구만 5/5를 full venue coverage로 사용한다.
-  const venueCoverageTarget = sport === "야구" ? 5 : 3;
+  const venueCoverageTarget = sport === "야구" || sport === "농구" || sport === "배구" ? 5 : 3;
   const venueCoverage =
     (
       Math.min(factors.homeVenueSample, venueCoverageTarget) +
@@ -10660,6 +10939,179 @@ function promoteBaseballSlateTopPick(pick: MarketPick, rank: number, slateScore:
   };
 }
 
+type CourtDataQuality = {
+  overall: number;
+  recent: number;
+  venue: number;
+  scoring: number;
+  market: number;
+  model: number;
+  label: string;
+};
+
+function courtSportsDataQuality(
+  game: BetmanMatch | null | undefined,
+  factors: AnalysisFactors,
+  sport: Exclude<Sport, "전체">
+): CourtDataQuality | null {
+  if (sport !== "농구" && sport !== "배구") return null;
+
+  const recent = clamp(
+    Math.min(
+      Math.max(0, Number(factors.homeRecentSample ?? 0)),
+      Math.max(0, Number(factors.awayRecentSample ?? 0))
+    ) / 5,
+    0,
+    1
+  );
+  const venue = clamp(
+    Math.min(
+      Math.max(0, Number(factors.homeVenueSample ?? 0)),
+      Math.max(0, Number(factors.awayVenueSample ?? 0))
+    ) / 5,
+    0,
+    1
+  );
+  const scoring = factors.scoringUsed ? 1 : factors.hasRealData ? 0.42 : 0;
+  const model = clamp(Number(factors.scoreShrinkage ?? 0), 0, 1);
+
+  const relevantMarkets = (Array.isArray(game?.markets) ? game!.markets! : []).filter((market: any) => {
+    const name = `${String(market?.betName ?? "")} ${String(market?.betTypeName ?? "")}`;
+    if (/전반|1st\s*half|first\s*half|SUM|홀짝/i.test(name)) return false;
+    const type = String(market?.type ?? "").toLowerCase();
+    return type === "moneyline" || type === "handicap" || type === "total" || /승패|핸디|U\/O|오버|언더/i.test(name);
+  });
+  const marketRows = relevantMarkets.map((market: any) => fairMarketProbabilities(market));
+  const usable = marketRows.filter((row) => row.usableCount >= 2);
+  const coverage = clamp(usable.length / 3, 0, 1);
+  const avgOverround = usable.length
+    ? usable.reduce((sum, row) => sum + (Number.isFinite(row.overround) ? row.overround : 1.2), 0) / usable.length
+    : 1.25;
+  const priceQuality = clamp(1 - Math.max(0, avgOverround - 1) * 2.8, 0.35, 1);
+  const market = clamp(coverage * 0.65 + priceQuality * 0.35, 0, 1);
+
+  const overall = clamp(
+    (recent * 0.30 + venue * 0.18 + scoring * 0.22 + market * 0.15 + model * 0.15) * 100,
+    0,
+    100
+  );
+
+  const pct = (v: number) => Math.round(v * 100);
+  return {
+    overall: Number(overall.toFixed(1)),
+    recent: Number(recent.toFixed(3)),
+    venue: Number(venue.toFixed(3)),
+    scoring: Number(scoring.toFixed(3)),
+    market: Number(market.toFixed(3)),
+    model: Number(model.toFixed(3)),
+    label: `품질 ${overall.toFixed(1)} · R ${pct(recent)} / V ${pct(venue)} / S ${pct(scoring)} / MKT ${pct(market)} / G ${pct(model)}`,
+  };
+}
+
+function courtConsensus(
+  rawProbability: number,
+  calibratedProbability: number,
+  marketProbability: number | null
+) {
+  const values = [rawProbability, calibratedProbability];
+  if (marketProbability !== null && Number.isFinite(marketProbability)) values.push(marketProbability);
+  const clean = values.filter(Number.isFinite).map((v) => clamp(Number(v), 0, 100));
+  const floor = clean.length ? Math.min(...clean) : null;
+  const mean = clean.length ? clean.reduce((a, b) => a + b, 0) / clean.length : null;
+  const spread = clean.length >= 2 ? Math.max(...clean) - Math.min(...clean) : null;
+  const score = mean === null || floor === null
+    ? null
+    : clamp(floor * 0.60 + mean * 0.40 - (spread ?? 0) * 0.25, 0, 100);
+  return {
+    floor: floor === null ? null : Number(floor.toFixed(1)),
+    mean: mean === null ? null : Number(mean.toFixed(1)),
+    spread: spread === null ? null : Number(spread.toFixed(1)),
+    count: clean.length,
+    score: score === null ? null : Number(score.toFixed(1)),
+  };
+}
+
+function isCourtSlateMarket(pick: MarketPick) {
+  const label = `${pick.market} ${pick.pick}`;
+  if (/SUM|홀짝|전반|1st\s*half|first\s*half/i.test(label)) return false;
+  return /승패|핸디|H\s*[+-]?\d|U\/O|오버|언더|OVER|UNDER/i.test(label);
+}
+
+function courtContinuousTopTier(score: number): BaseballContinuousTopTier {
+  if (score >= 80) return "실전 추천";
+  if (score >= 74) return "약추천";
+  return "관망";
+}
+
+function courtSlateScore(pick: MarketPick): number | null {
+  if (!isCourtSlateMarket(pick)) return null;
+  const p = Number(pick.probability);
+  if (!Number.isFinite(p)) return null;
+
+  const marketRaw = Number(pick.marketProbability);
+  const market = Number.isFinite(marketRaw) ? clamp(marketRaw, 0, 100) : 50;
+  const qualityRaw = Number(pick.courtDataQuality);
+  const quality = Number.isFinite(qualityRaw) ? clamp(qualityRaw, 0, 100) : 45;
+  const confidence = clamp(Number(pick.confidenceScore ?? 50), 0, 100);
+  const risk = clamp(Number(pick.decisionRiskScore ?? 25), 0, 100);
+  const floor = Number.isFinite(Number(pick.precisionConsensusFloor)) ? clamp(Number(pick.precisionConsensusFloor), 0, 100) : Math.min(p, market);
+  const mean = Number.isFinite(Number(pick.precisionConsensusMean)) ? clamp(Number(pick.precisionConsensusMean), 0, 100) : (p + market) / 2;
+  const spread = Number.isFinite(Number(pick.precisionConsensusSpread)) ? clamp(Number(pick.precisionConsensusSpread), 0, 40) : Math.abs(p - market);
+  const modelStrength = Number.isFinite(Number(pick.courtModelQuality)) ? clamp(Number(pick.courtModelQuality) * 100, 0, 100) : 50;
+  const recentQuality = Number.isFinite(Number(pick.courtRecentQuality)) ? clamp(Number(pick.courtRecentQuality) * 100, 0, 100) : 50;
+  const venueQuality = Number.isFinite(Number(pick.courtVenueQuality)) ? clamp(Number(pick.courtVenueQuality) * 100, 0, 100) : 50;
+
+  const isTotal = /U\/O|오버|언더|OVER|UNDER/i.test(`${pick.market} ${pick.pick}`);
+  const totalPenalty = isTotal ? 1.8 : 0;
+  const marketGapPenalty = Math.max(0, Math.abs(p - market) - 10) * 0.10;
+  const score =
+    p * 0.30 +
+    market * 0.16 +
+    floor * 0.12 +
+    mean * 0.07 +
+    quality * 0.16 +
+    confidence * 0.08 +
+    modelStrength * 0.05 +
+    recentQuality * 0.04 +
+    venueQuality * 0.02 -
+    spread * 0.18 -
+    risk * 0.13 -
+    marketGapPenalty -
+    totalPenalty;
+
+  return Number(clamp(score, 0, 100).toFixed(2));
+}
+
+function bestCourtSlateCandidate(picks: MarketPick[]) {
+  return picks
+    .map((pick) => ({ pick, slateScore: courtSlateScore(pick) }))
+    .filter((row): row is { pick: MarketPick; slateScore: number } => row.slateScore !== null)
+    .sort((a, b) =>
+      b.slateScore - a.slateScore ||
+      Number(b.pick.precisionConsensusFloor ?? -999) - Number(a.pick.precisionConsensusFloor ?? -999) ||
+      b.pick.probability - a.pick.probability ||
+      Number(b.pick.courtDataQuality ?? -999) - Number(a.pick.courtDataQuality ?? -999)
+    )[0] ?? null;
+}
+
+function promoteCourtSlateTopPick(pick: MarketPick, rank: number, slateScore: number): MarketPick {
+  const tier = courtContinuousTopTier(slateScore);
+  const promote = tier === "실전 추천";
+  const quality = Number(pick.courtDataQuality);
+  const profile = String(pick.courtLeagueGroup ?? "COURT");
+  return {
+    ...pick,
+    valueGrade: promote ? "VALUE" : "WATCH",
+    valueGradeScore: promote
+      ? Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))
+      : Math.min(79.9, Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))),
+    valueGradeReason: `COURT TOP${rank} · ${tier} · TOP1점수 ${slateScore.toFixed(1)} · ${profile} · 모델 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
+    stageGradeLabel: `COURT TOP${rank} ${tier}`,
+    recommendationScore: Number(slateScore.toFixed(1)),
+    detail: `${pick.detail} · V13.10.00 COURT TOP${rank} · ${tier} · CONTINUOUS QUALITY/RISK SCORE`,
+  };
+}
+
 function kstDateKeyFromMs(ms: number) {
   if (!Number.isFinite(ms)) return "";
   return new Date(ms + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -10824,6 +11276,19 @@ function buildActualMarketPicks(
   const hitFirstDataQuality =
     sport === "야구"
       ? baseballHitFirstDataQuality(factors, baseballChallenger, baseballLambda)
+      : null;
+
+  const courtProfile =
+    sport === "농구" || sport === "배구"
+      ? courtLeagueProfile(
+          sport,
+          `${String((game as any)?.league ?? (game as any)?.leagueName ?? (game as any)?.sportName ?? "")} ${String(game?.home ?? game?.homeTeam ?? "")} ${String(game?.away ?? game?.awayTeam ?? "")}`
+        )
+      : null;
+
+  const courtDataQuality =
+    sport === "농구" || sport === "배구"
+      ? courtSportsDataQuality(game, factors, sport)
       : null;
 
   const expectedHome =
@@ -11057,6 +11522,162 @@ function buildActualMarketPicks(
           detail: `${periodText}${lineText}${pushText}`,
         });
         continue;
+      }
+    }
+
+
+    if ((sport === "농구" || sport === "배구") && canScoreModel && courtProfile) {
+      const combinedName = `${betName} ${String(market?.betTypeName ?? "")}`;
+      const isSumMarket = /sum|홀짝|홀\/짝|odd|even/i.test(combinedName);
+      const isTotalMarket = type === "total" || /u\/o|언더|오버|under|over/i.test(combinedName);
+      const isHandicapMarket = type === "handicap" || /핸디|handicap/i.test(combinedName);
+      const isMoneylineMarket = !isSumMarket && !isTotalMarket && !isHandicapMarket && /승패|moneyline|winner|승무패/i.test(combinedName);
+
+      // 배구 Betman U/O가 100점대이면 세트 수가 아니라 총 득점 포인트 시장이다.
+      // 현재 recentSummary가 세트 스코어를 제공하므로 포인트 U/O를 억지 계산하지 않는다.
+      if (sport === "배구" && isTotalMarket && line !== null && Math.abs(line) > 6.5) {
+        continue;
+      }
+      // 배구 핸디가 ±2.5를 넘으면 세트 핸디가 아니라 득점 포인트 핸디일 가능성이 높다.
+      // 세트 스코어 모델로 포인트 핸디를 계산하면 가짜 확률이 되므로 제외한다.
+      if (sport === "배구" && isHandicapMarket && line !== null && Math.abs(line) > 2.5) {
+        continue;
+      }
+
+      let probs: Record<string, number> | null = null;
+      let modelNote = "";
+
+      if (sport === "농구") {
+        const periodFactor = isFirstHalf ? 0.5 : 1;
+        const periodHome = expectedHome! * periodFactor;
+        const periodAway = expectedAway! * periodFactor;
+        const periodMargin = periodHome - periodAway;
+        const periodTotal = periodHome + periodAway;
+        const uncertaintyBoost = 1 + Math.max(0, 0.68 - Number(factors.scoreShrinkage ?? 0.42)) * 0.55;
+        const marginSd = Math.max(5, courtProfile.marginSd * Math.sqrt(periodFactor) * uncertaintyBoost);
+        const totalSd = Math.max(7, courtProfile.totalSd * Math.sqrt(periodFactor) * uncertaintyBoost);
+
+        if (isHandicapMarket && line !== null) {
+          const homeP = normalCdf((periodMargin + line) / marginSd) * 100;
+          probs = { home: homeP, away: 100 - homeP };
+          modelNote = `정규분포 마진 · μ ${periodMargin.toFixed(1)} · σ ${marginSd.toFixed(1)}`;
+        } else if (isTotalMarket && line !== null) {
+          const overP = normalCdf((periodTotal - line) / totalSd) * 100;
+          probs = { over: overP, under: 100 - overP };
+          modelNote = `정규분포 총점 · μ ${periodTotal.toFixed(1)} · σ ${totalSd.toFixed(1)}`;
+        } else if (isMoneylineMarket) {
+          const homeP = normalCdf(periodMargin / marginSd) * 100;
+          probs = { home: homeP, away: 100 - homeP };
+          modelNote = `정규분포 승패 · μ마진 ${periodMargin.toFixed(1)} · σ ${marginSd.toFixed(1)}`;
+        } else if (isSumMarket) {
+          probs = { odd: 50, even: 50 };
+          modelNote = "홀짝은 구조적으로 50% 근사";
+        }
+      } else {
+        if (isFirstHalf) continue;
+        const setHomeP = clamp(logistic((expectedHome! - expectedAway!) * 0.95), 0.18, 0.82);
+        const grid = volleyballBestOfFiveGrid(setHomeP);
+        let home = 0, away = 0, homeH = 0, awayH = 0, over = 0, under = 0, odd = 0, even = 0;
+        for (const row of grid) {
+          if (row.home > row.away) home += row.p;
+          else away += row.p;
+          if (isHandicapMarket && line !== null) {
+            const outcome = settleBetmanHomeHandicap(row.home, row.away, line);
+            if (outcome === "home") homeH += row.p;
+            else if (outcome === "away") awayH += row.p;
+          }
+          if (isTotalMarket && line !== null) {
+            const totalSets = row.home + row.away;
+            if (totalSets > line) over += row.p;
+            else if (totalSets < line) under += row.p;
+          }
+          if ((row.home + row.away) % 2 === 0) even += row.p; else odd += row.p;
+        }
+        if (isHandicapMarket && line !== null) probs = { home: homeH * 100, away: awayH * 100 };
+        else if (isTotalMarket && line !== null) probs = { over: over * 100, under: under * 100 };
+        else if (isMoneylineMarket) probs = { home: home * 100, away: away * 100 };
+        else if (isSumMarket) probs = { odd: odd * 100, even: even * 100 };
+        modelNote = `5세트제 세트분포 · 세트 홈승 ${ (setHomeP * 100).toFixed(1) }%`;
+      }
+
+      if (probs) {
+        const best = bestSelection(market, probs);
+        if (best) {
+          const odds = Number(best.selection?.odds);
+          const safeOdds = Number.isFinite(odds) && odds > 1 ? odds : null;
+          const fair = marketFair.probabilities[best.identity];
+          const marketProbability = Number.isFinite(fair) ? Number(fair.toFixed(1)) : null;
+          const baseConfidence = marketConfidence(
+            factors,
+            recentSummary,
+            h2h,
+            market,
+            marketFair.overround,
+            {
+              ...signalConflict,
+              score: decisionRisk.score,
+              confidencePenalty: Number(clamp(decisionRisk.score * 0.28, 0, 24).toFixed(1)),
+              label: decisionRisk.reason,
+            },
+            sport
+          );
+          const confidence = Math.min(baseConfidence, factors.scoringUsed ? 82 : 64);
+          const calibrated = calibrateModelProbability(best.probability, marketProbability, confidence);
+          const calibratedProbability = Number(calibrated.probability.toFixed(1));
+          const edge = marketProbability === null ? null : Number((calibratedProbability - marketProbability).toFixed(1));
+          const ev = betExpectedValue(calibratedProbability, safeOdds);
+          const consensus = courtConsensus(best.probability, calibratedProbability, marketProbability);
+          const recScore = recommendationScore(calibratedProbability, edge, confidence);
+          const passOnly = isSumMarket || isFirstHalf;
+          const baseReason = passOnly
+            ? isSumMarket ? "COURT SUM은 검증용 · TOP1 제외" : "COURT 전반은 검증용 · TOP1 제외"
+            : "COURT CONTINUOUS TOP1 pool";
+
+          result.push({
+            key,
+            market: label,
+            pick: isHandicapMarket
+              ? (best.identity === "home" ? `홈 ${homeHandicapLineText(line ?? 0)}` : `원정 ${oppositeHandicapLine(line ?? 0)}`)
+              : isTotalMarket
+                ? (best.identity === "over" ? "OVER" : "UNDER")
+                : best.label,
+            rawProbability: Number(best.probability.toFixed(1)),
+            probability: calibratedProbability,
+            odds: safeOdds,
+            marketProbability,
+            edge,
+            breakEvenProbability: ev.breakEvenProbability,
+            expectedValue: ev.expectedValue,
+            valueGrade: passOnly ? "PASS" : "WATCH",
+            valueGradeScore: passOnly ? 0 : Number((consensus.score ?? recScore).toFixed(1)),
+            valueGradeReason: baseReason,
+            stageGradeLabel: passOnly ? null : "COURT TOP1 후보",
+            calibrationWeight: calibrated.modelWeight === null ? null : Number(calibrated.modelWeight.toFixed(2)),
+            signalConflictScore: signalConflict.score,
+            signalConflictLabel: signalConflict.label,
+            decisionRiskScore: decisionRisk.score,
+            decisionRiskReason: decisionRisk.reason,
+            confidenceScore: Number(confidence.toFixed(1)),
+            confidenceGrade: confidenceGrade(confidence),
+            recommendationScore: Number((consensus.score ?? recScore).toFixed(1)),
+            precisionScore: consensus.score,
+            precisionConsensusFloor: consensus.floor,
+            precisionConsensusMean: consensus.mean,
+            precisionConsensusSpread: consensus.spread,
+            precisionConsensusCount: consensus.count,
+            courtLeagueGroup: courtProfile.group,
+            courtScoreUnit: courtProfile.unit,
+            courtDataQuality: courtDataQuality?.overall ?? null,
+            courtRecentQuality: courtDataQuality?.recent ?? null,
+            courtVenueQuality: courtDataQuality?.venue ?? null,
+            courtScoringQuality: courtDataQuality?.scoring ?? null,
+            courtMarketQuality: courtDataQuality?.market ?? null,
+            courtModelQuality: courtDataQuality?.model ?? null,
+            courtCoverageLabel: courtDataQuality?.label ?? null,
+            detail: `${courtProfile.label} · ${modelNote} · ${factors.scoringUsed ? "최근 득실 모델" : "시장 prior fallback"} · 합의 하한 ${consensus.floor?.toFixed(1) ?? "-"}%`,
+          });
+          continue;
+        }
       }
     }
 
@@ -16168,6 +16789,53 @@ export default function Home() {
         )
       : null;
 
+  const isCourtSport = currentSport === "농구" || currentSport === "배구";
+  const selectedCourtTrackerIdentity =
+    isCourtSport && selectedBetman
+      ? actualGameIdentity(selectedBetman)
+      : "";
+  const currentCourtCandidate =
+    isCourtSport && analysisFactors.hasRealData
+      ? bestCourtSlateCandidate(actualMarketPicksBase)
+      : null;
+  const otherCourtCandidates =
+    isCourtSport && selectedSlateDate
+      ? liveTrackerRecords
+          .filter((record) =>
+            record.sport === currentSport &&
+            record.verificationStatus === "PENDING" &&
+            record.betmanIdentity !== selectedCourtTrackerIdentity &&
+            kstDateKeyFromMs(record.startMs) === selectedSlateDate &&
+            record.startMs >= Date.now() - 30 * 60 * 1000 &&
+            (record.marketResults?.length ?? 0) > 0
+          )
+          .map((record) => {
+            const candidate = bestCourtSlateCandidate(trackerMarketPickSnapshots(record));
+            return candidate
+              ? { id: record.id, identity: record.betmanIdentity ?? record.id, ...candidate }
+              : null;
+          })
+          .filter((row): row is NonNullable<typeof row> => row !== null)
+      : [];
+  const currentCourtIdentity = selectedCourtTrackerIdentity || `court:${selectedStartMs}`;
+  const courtTopRows = [
+    ...otherCourtCandidates,
+    ...(currentCourtCandidate
+      ? [{ id: `current:${currentCourtIdentity}`, identity: currentCourtIdentity, ...currentCourtCandidate }]
+      : []),
+  ]
+    .sort((a, b) =>
+      b.slateScore - a.slateScore ||
+      Number(b.pick.precisionConsensusFloor ?? -999) - Number(a.pick.precisionConsensusFloor ?? -999) ||
+      Number(b.pick.courtDataQuality ?? -999) - Number(a.pick.courtDataQuality ?? -999)
+    )
+    .slice(0, 1);
+  const currentCourtRankIndex = courtTopRows.findIndex((row) => row.identity === currentCourtIdentity);
+  const currentCourtPromotion =
+    currentCourtCandidate && currentCourtRankIndex >= 0
+      ? promoteCourtSlateTopPick(currentCourtCandidate.pick, currentCourtRankIndex + 1, currentCourtCandidate.slateScore)
+      : null;
+
   const actualMarketPicks =
     currentSport === "야구" && analysisFactors.baseballAnalysisStage === "READY"
       ? actualMarketPicksBase.map((pick) => {
@@ -16185,7 +16853,23 @@ export default function Home() {
           }
           return pick;
         })
-      : actualMarketPicksBase;
+      : isCourtSport
+        ? actualMarketPicksBase.map((pick) => {
+            if (currentCourtPromotion && pick.key === currentCourtPromotion.key) {
+              return currentCourtPromotion;
+            }
+            if (pick.valueGrade === "VALUE" || pick.valueGrade === "STRONG VALUE") {
+              return {
+                ...pick,
+                valueGrade: "WATCH" as ValueGrade,
+                valueGradeScore: Math.min(pick.valueGradeScore, 79.9),
+                valueGradeReason: `COURT TOP1: 오늘 1위 후보 미선정 · ${pick.valueGradeReason}`,
+                stageGradeLabel: "COURT WATCH",
+              };
+            }
+            return pick;
+          })
+        : actualMarketPicksBase;
 
   const marketConnectionDiagnostics =
     buildMarketConnectionDiagnostics(
@@ -16770,6 +17454,15 @@ export default function Home() {
       currentSport
     );
 
+  const currentCourtProfile =
+    isCourtSport
+      ? courtLeagueProfile(currentSport, currentMatch.league)
+      : null;
+  const currentCourtQuality =
+    isCourtSport
+      ? courtSportsDataQuality(betman.matched, analysisFactors, currentSport)
+      : null;
+
   const displayPicks: Pick[] = actualMarketPicks.length
     ? actualMarketPicks.map((pick) => [
         pick.market,
@@ -16821,17 +17514,31 @@ export default function Home() {
       )[0]
     : null;
 
-  /* V13.9.10: 공식 VALUE가 없어도 READY 야구는 현재 경기 TOP1 후보를 항상 화면에 보여준다. */
+  /* V13.10.00: 야구뿐 아니라 농구/NBA/배구도 공식 VALUE가 없어도 경기 TOP1 후보를 항상 보여준다. */
   const currentContinuousTopPick =
     currentSport === "야구" && currentSlateCandidate
       ? actualMarketPicks.find((pick) => pick.key === currentSlateCandidate.pick.key) ?? currentSlateCandidate.pick
-      : null;
+      : isCourtSport && currentCourtCandidate
+        ? actualMarketPicks.find((pick) => pick.key === currentCourtCandidate.pick.key) ?? currentCourtCandidate.pick
+        : null;
   const currentContinuousTopTier =
     currentSport === "야구" && currentSlateCandidate
       ? baseballContinuousTopTier(currentSlateCandidate.slateScore)
-      : null;
+      : isCourtSport && currentCourtCandidate
+        ? courtContinuousTopTier(currentCourtCandidate.slateScore)
+        : null;
   const currentContinuousIsDailyTop1 =
-    currentSport === "야구" && currentSlateCandidate && currentSlateRankIndex >= 0;
+    currentSport === "야구"
+      ? Boolean(currentSlateCandidate && currentSlateRankIndex >= 0)
+      : isCourtSport
+        ? Boolean(currentCourtCandidate && currentCourtRankIndex >= 0)
+        : false;
+  const currentContinuousTopScore =
+    currentSport === "야구" && currentSlateCandidate
+      ? currentSlateCandidate.slateScore
+      : isCourtSport && currentCourtCandidate
+        ? currentCourtCandidate.slateScore
+        : null;
   const bestDisplayPick = bestActualPick ?? currentContinuousTopPick;
 
   const best = bestDisplayPick
@@ -17730,8 +18437,15 @@ export default function Home() {
         !existingRecord.baseballChallenger &&
         baseballChallengerSnapshot
       );
+      const canRefreshCourt = Boolean(
+        existingRecord &&
+        existingRecord.verificationStatus === "PENDING" &&
+        (currentSport === "농구" || currentSport === "배구") &&
+        startMs >= Date.now() - 30 * 60 * 1000 &&
+        actualMarketPicks.length > 0
+      );
 
-      if (existingRecord && !canPromoteBaseballReady && !canPromoteFootballLineup && !canAttachBaseballChallenger) {
+      if (existingRecord && !canPromoteBaseballReady && !canPromoteFootballLineup && !canAttachBaseballChallenger && !canRefreshCourt) {
         return previous;
       }
 
@@ -17859,11 +18573,16 @@ export default function Home() {
         startMs,
         capturedAt: Date.now(),
         readyCapturedAt:
-          (currentSport === "야구" && analysisFactors.baseballAnalysisStage === "READY") || footballLineupSnapshot
+          (currentSport === "야구" && analysisFactors.baseballAnalysisStage === "READY") || footballLineupSnapshot || currentSport === "농구" || currentSport === "배구"
             ? Date.now()
             : null,
         gateVersion: "FALLBACK_GATE_V2",
-        recommendationEngineVersion: currentSport === "야구" ? "V13.9.10_CONTINUOUS_TOP1" : undefined,
+        recommendationEngineVersion:
+          currentSport === "야구"
+            ? "V13.9.10_CONTINUOUS_TOP1"
+            : currentSport === "농구" || currentSport === "배구"
+              ? "V13.10.00_COURT_SPORTS_TOP1"
+              : undefined,
         decision: trackerPicks.length ? "PICK" : "PASS",
         picks: trackerPicks,
         marketResults: trackerMarketResults,
@@ -18075,6 +18794,107 @@ export default function Home() {
       return {
         ...record,
         recommendationEngineVersion: "V13.9.10_CONTINUOUS_TOP1",
+        decision: nextDecision,
+        picks: nextPicks,
+      };
+    });
+
+    if (changed) {
+      saveLiveTrackerRecords(next);
+      setLiveTrackerRecords(next);
+    }
+  }, [backtestMode, liveTrackerRecords]);
+
+  /* V13.10.00: 농구/NBA/배구도 같은 날짜·같은 종목에서 하루 TOP1만 공식 PICK으로 유지한다. */
+  useEffect(() => {
+    if (backtestMode || !liveTrackerRecords.length) return;
+
+    const now = Date.now();
+    const groups = new Map<string, LiveTrackerRecord[]>();
+    for (const record of liveTrackerRecords) {
+      if (
+        (record.sport !== "농구" && record.sport !== "배구") ||
+        record.verificationStatus !== "PENDING" ||
+        record.startMs < now - 30 * 60 * 1000 ||
+        !(record.marketResults?.length)
+      ) continue;
+      const dateKey = kstDateKeyFromMs(record.startMs);
+      if (!dateKey) continue;
+      const groupKey = `${dateKey}|${record.sport}`;
+      const rows = groups.get(groupKey) ?? [];
+      rows.push(record);
+      groups.set(groupKey, rows);
+    }
+
+    const desired = new Map<string, LiveTrackerPick | null>();
+    for (const records of groups.values()) {
+      const ranked = records
+        .map((record) => {
+          const candidate = bestCourtSlateCandidate(trackerMarketPickSnapshots(record));
+          return candidate ? { record, ...candidate } : null;
+        })
+        .filter((row): row is NonNullable<typeof row> => row !== null)
+        .sort((a, b) =>
+          b.slateScore - a.slateScore ||
+          Number(b.pick.precisionConsensusFloor ?? -999) - Number(a.pick.precisionConsensusFloor ?? -999) ||
+          Number(b.pick.courtDataQuality ?? -999) - Number(a.pick.courtDataQuality ?? -999)
+        );
+
+      const leader = ranked[0] ?? null;
+      for (const record of records) {
+        if (!leader || leader.record.id !== record.id) {
+          desired.set(record.id, null);
+          continue;
+        }
+        const source = (record.marketResults ?? []).find((pick) => pick.key === leader.pick.key) ?? null;
+        if (!source) {
+          desired.set(record.id, null);
+          continue;
+        }
+        const promoted = promoteCourtSlateTopPick(leader.pick, 1, leader.slateScore);
+        if (promoted.valueGrade !== "VALUE" && promoted.valueGrade !== "STRONG VALUE") {
+          desired.set(record.id, null);
+          continue;
+        }
+        desired.set(record.id, {
+          ...source,
+          probability: promoted.probability,
+          odds: promoted.odds,
+          marketProbability: promoted.marketProbability,
+          edge: promoted.edge,
+          expectedValue: promoted.expectedValue,
+          grade: promoted.valueGrade,
+          confidenceGrade: promoted.confidenceGrade,
+          recommendationScore: promoted.recommendationScore,
+          modelSnapshot: promoted,
+          resultStatus: source.resultStatus ?? "PENDING",
+          actualLabel: source.actualLabel ?? null,
+          resultNote: source.resultNote ?? null,
+        });
+      }
+    }
+
+    let changed = false;
+    const next = liveTrackerRecords.map((record) => {
+      if (!desired.has(record.id)) return record;
+      const target = desired.get(record.id) ?? null;
+      const nextDecision = target ? "PICK" as const : "PASS" as const;
+      const nextPicks = target ? [target] : [];
+      const beforeSig = JSON.stringify({
+        decision: record.decision,
+        engine: record.recommendationEngineVersion,
+        picks: (record.picks ?? []).map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
+      });
+      const afterSig = JSON.stringify({
+        decision: nextDecision,
+        engine: "V13.10.00_COURT_SPORTS_TOP1",
+        picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
+      });
+      if (beforeSig === afterSig) return record;
+      changed = true;
+      return {
+        ...record,
+        recommendationEngineVersion: "V13.10.00_COURT_SPORTS_TOP1",
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -22907,7 +23727,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.9.10 · CONTINUOUS TOP1</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.10.00 · COURT SPORTS TOP1</div>
         </div>
         <div className="bar">
           <button
@@ -24428,7 +25248,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.9.10 CONTINUOUS TOP1 · READY 고정 · 품질/B/C/D/시장충돌/장소표본/모델강도는 연속 감점 · full-game 후보는 항상 TOP1 산출 · 점수 80+만 공식 VALUE</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.10.00 COURT SPORTS TOP1 · 야구 CONTINUOUS TOP1 유지 · KBL/WKBL/NBA 승패·핸디·U/O + KOVO 승패·세트핸디 분석 · 품질/시장/최근표본은 연속 감점 · 종목별 하루 TOP1</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 2026-09-16 10:55 KST 이후 새 READY MLB snapshot부터 B는 MLB_PERSON_GAMELOG, C/D는 MLB StatsAPI 공식 boxscore를 우선 사용합니다. 항목별 공식 데이터가 없을 때만 Naver workload로 fallback합니다. CONTROL·실전 추천·Gate·기존 λ는 변경하지 않고 Challenger shadow만 계산합니다. 기존 잠금 snapshot은 다시 쓰지 않습니다.
               </div>
@@ -25175,8 +25995,8 @@ export default function Home() {
                 </div>
                 {bestDisplayPick && (
                   <div className="pickMeta">
-                    {currentSport === "야구" && currentSlateCandidate
-                      ? `TOP1점수 ${currentSlateCandidate.slateScore.toFixed(1)} · ${currentContinuousTopTier}`
+                    {currentContinuousTopScore !== null && currentContinuousTopTier
+                      ? `TOP1점수 ${currentContinuousTopScore.toFixed(1)} · ${currentContinuousTopTier}`
                       : `정확도점수 ${bestDisplayPick.recommendationScore.toFixed(1)}`}
                     {bestDisplayPick.precisionConsensusFloor !== undefined && bestDisplayPick.precisionConsensusFloor !== null ? (
                       <>
@@ -25184,7 +26004,7 @@ export default function Home() {
                         합의하한 {bestDisplayPick.precisionConsensusFloor.toFixed(1)}%
                         {" · "}평균 {bestDisplayPick.precisionConsensusMean === null || bestDisplayPick.precisionConsensusMean === undefined ? "-" : `${bestDisplayPick.precisionConsensusMean.toFixed(1)}%`}
                         {" · "}분산 {bestDisplayPick.precisionConsensusSpread === null || bestDisplayPick.precisionConsensusSpread === undefined ? "-" : `${bestDisplayPick.precisionConsensusSpread.toFixed(1)}%p`}
-                        {(() => {
+                        {currentSport === "야구" ? (() => {
                           const adjusted = baseballCorrelationAdjustedConsensus(
                             Number(bestDisplayPick.precisionConsensusFloor),
                             Number(bestDisplayPick.precisionConsensusMean),
@@ -25197,7 +26017,7 @@ export default function Home() {
                               {" · "}평균 {adjusted.mean.toFixed(1)}%
                             </>
                           ) : null;
-                        })()}
+                        })() : null}
                       </>
                     ) : null}
                     {bestDisplayPick.hitFirstDataQuality !== undefined && bestDisplayPick.hitFirstDataQuality !== null ? (
@@ -25208,6 +26028,16 @@ export default function Home() {
                         {" / "}C {bestDisplayPick.hitFirstBattingQuality === null || bestDisplayPick.hitFirstBattingQuality === undefined ? "-" : `${Math.round(bestDisplayPick.hitFirstBattingQuality * 100)}%`}
                         {" / "}D {bestDisplayPick.hitFirstBullpenQuality === null || bestDisplayPick.hitFirstBullpenQuality === undefined ? "-" : `${Math.round(bestDisplayPick.hitFirstBullpenQuality * 100)}%`}
                       </>
+                    ) : bestDisplayPick.courtDataQuality !== undefined && bestDisplayPick.courtDataQuality !== null ? (
+                      <>
+                        <br />
+                        COURT 품질 {bestDisplayPick.courtDataQuality.toFixed(1)}
+                        {" · "}R {bestDisplayPick.courtRecentQuality === null || bestDisplayPick.courtRecentQuality === undefined ? "-" : `${Math.round(bestDisplayPick.courtRecentQuality * 100)}%`}
+                        {" / "}V {bestDisplayPick.courtVenueQuality === null || bestDisplayPick.courtVenueQuality === undefined ? "-" : `${Math.round(bestDisplayPick.courtVenueQuality * 100)}%`}
+                        {" / "}S {bestDisplayPick.courtScoringQuality === null || bestDisplayPick.courtScoringQuality === undefined ? "-" : `${Math.round(bestDisplayPick.courtScoringQuality * 100)}%`}
+                        {" / "}MKT {bestDisplayPick.courtMarketQuality === null || bestDisplayPick.courtMarketQuality === undefined ? "-" : `${Math.round(bestDisplayPick.courtMarketQuality * 100)}%`}
+                        {" / "}G {bestDisplayPick.courtModelQuality === null || bestDisplayPick.courtModelQuality === undefined ? "-" : `${Math.round(bestDisplayPick.courtModelQuality * 100)}%`}
+                      </>
                     ) : null}
                     <br />
                     엣지 {bestDisplayPick.edge === null ? "-" : `${bestDisplayPick.edge >= 0 ? "+" : ""}${bestDisplayPick.edge.toFixed(1)}%p`}
@@ -25216,7 +26046,7 @@ export default function Home() {
                     배당 {bestDisplayPick.odds === null ? "-" : bestDisplayPick.odds.toFixed(2)}
                     {" · "}손익분기 {bestDisplayPick.breakEvenProbability === null ? "-" : `${bestDisplayPick.breakEvenProbability.toFixed(1)}%`}
                     {" · "}신뢰 {bestDisplayPick.confidenceGrade}
-                    {currentSport === "야구" && currentContinuousTopTier && currentContinuousTopTier !== "실전 추천" ? (
+                    {(currentSport === "야구" || isCourtSport) && currentContinuousTopTier && currentContinuousTopTier !== "실전 추천" ? (
                       <>
                         <br />
                         공식 VALUE 미승격 · TOP1 후보는 유지
@@ -25262,6 +26092,50 @@ export default function Home() {
               {" · "}진한 색 = 실제 가치 추천
               {" · "}회색 PASS = 분석했지만 베팅 기준 미달
             </div>
+
+            {isCourtSport && currentCourtProfile && (
+              <div className="section" style={{ marginTop: 0, marginBottom: 8 }}>
+                <h3>V13.10.00 COURT SPORTS · {currentCourtProfile.label}</h3>
+                <div className="cards">
+                  <div className="card">
+                    모델 단위
+                    <b>{currentCourtProfile.unit === "POINTS" ? "득점" : "세트"}</b>
+                    <div className="small">리그 prior {currentCourtProfile.neutralTeamScore.toFixed(2)}</div>
+                  </div>
+                  <div className="card">
+                    최근 표본
+                    <b>{analysisFactors.homeRecentSample} / {analysisFactors.awayRecentSample}</b>
+                    <div className="small">최근 5경기 시간가중</div>
+                  </div>
+                  <div className="card">
+                    장소 표본
+                    <b>{analysisFactors.homeVenueSample} / {analysisFactors.awayVenueSample}</b>
+                    <div className="small">5/5를 full coverage로 평가</div>
+                  </div>
+                  <div className="card">
+                    COURT 품질
+                    <b>{currentCourtQuality ? currentCourtQuality.overall.toFixed(1) : "-"}</b>
+                    <div className="small">{currentCourtQuality?.label ?? "분석 대기"}</div>
+                  </div>
+                  <div className="card">
+                    예상 스코어
+                    <b>{analysisFactors.expectedHomeScore?.toFixed(currentSport === "배구" ? 2 : 1) ?? "-"} : {analysisFactors.expectedAwayScore?.toFixed(currentSport === "배구" ? 2 : 1) ?? "-"}</b>
+                    <div className="small">모델강도 {analysisFactors.scoreShrinkage === null ? "-" : `${Math.round(analysisFactors.scoreShrinkage * 100)}%`}</div>
+                  </div>
+                  <div className="card">
+                    분포 모델
+                    <b>{currentSport === "농구" ? "정규분포" : "5세트제 분포"}</b>
+                    <div className="small">승패·핸디·U/O 독립 계산</div>
+                  </div>
+                </div>
+                <div className="notice" style={{ margin: "8px 0 0" }}>
+                  농구(KBL/WKBL/NBA)는 리그별 득점 prior와 최근 득실·장소표본을 수축한 뒤 승패/핸디/U/O를 점수분포로 계산합니다.
+                  배구(KOVO)는 최근 세트 스코어에서 세트승률을 만들고 3-0/3-1/3-2 분포로 승패와 세트핸디를 계산합니다.
+                  {currentSport === "배구" ? " Betman U/O 기준이 6.5를 넘으면 세트 U/O가 아니라 총 포인트 시장으로 보고 현재 TOP1 대상에서 제외합니다." : ""}
+                  {" "}선수 부상·출장시간·로테이션은 아직 독립 court 모델 입력으로 사용하지 않으므로 데이터품질 점수에도 포함하지 않습니다.
+                </div>
+              </div>
+            )}
 
             <div className="analysisTitleRow">
               <h3>게임유형별 분석 요약</h3>
@@ -27588,7 +28462,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.9.10 CONTINUOUS TOP1은 적중률 우선 모드입니다. READY를 고정하고 CONTROL/A/B/C/D/E 상관합의를 수축하며, 데이터품질·B/C/D·시장충돌·장소표본·모델강도를 하드컷 대신 연속 감점으로 반영합니다. full-game 승패/핸디/UO 후보에서는 항상 TOP1을 계산하고, TOP1점수 80 이상만 공식 VALUE, 74~79.9는 약추천, 그 미만은 관망으로 표시합니다. +2.5 전용 우대 lane은 없으며 EV와 배당 자체는 순위 입력으로 사용하지 않습니다.
+                    V13.10.00 COURT SPORTS TOP1은 야구 V13.9.10 연속 TOP1 구조를 유지하면서 프로농구(KBL/WKBL), NBA, 프로배구(KOVO)에도 full-game TOP1을 확장합니다. 농구는 리그별 득점 prior와 최근 득실·장소표본을 수축해 승패/핸디/UO를 정규분포로 계산하고, 배구는 최근 세트 스코어 기반 5세트제 분포로 승패와 세트핸디를 계산합니다. TOP1점수 80 이상만 공식 VALUE, 74~79.9는 약추천, 그 미만은 관망입니다. 배구의 100점대 U/O나 큰 포인트 핸디는 세트 모델로 억지 계산하지 않고 제외합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
