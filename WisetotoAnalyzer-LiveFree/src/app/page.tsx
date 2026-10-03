@@ -1,4 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
+// V13.12.02 MODEL-FIRST TOP1: TOP1 ranking uses raw/model evidence first; market odds/probability are only a small agreement check and never a direct ranking weight
 // V13.12.01 GAME TOP1 PER MATCH: every baseball/football/court fixture promotes its own independent full-game TOP1; no daily cross-game winner gate
 // V13.11.00 FOOTBALL WORLD TOP1: K League/J League + major overseas football leagues/cups, league scoring priors, soft data-quality ranking, continuous full-game TOP1
 // V13.10.00 COURT SPORTS TOP1: KBL/WKBL/NBA + KOVO basketball/volleyball full-game market models, continuous TOP1, league priors and soft data-quality ranking
@@ -8639,6 +8640,9 @@ type MarketPick = {
   marketProbability: number | null;
   edge: number | null;
   breakEvenProbability: number | null;
+
+  /* V13.12.02: true when the scoring model itself already used market direction/total as a prior. */
+  top1MarketPriorApplied?: boolean;
   expectedValue: number | null;
 
   valueGrade: "PASS" | "WATCH" | "VALUE" | "STRONG VALUE";
@@ -9197,19 +9201,16 @@ function baseballHitFirstConsensus(input: {
   const ceiling = Math.max(...values);
   const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
   const spread = ceiling - floor;
-  const market = Number(input.marketProbability);
-  const marketTerm = Number.isFinite(market) ? market : mean;
-  const calibrated = Number(input.calibratedProbability);
-  const calibratedTerm = Number.isFinite(calibrated) ? calibrated : mean;
-
-  // EV가 아니라 "가장 약한 모델도 얼마나 확신하는가"를 가장 크게 본다.
+  /*
+   * V13.12.02 MODEL-FIRST: CONTROL/A/B/C/D/E 합의점수는 시장/배당을 섞지 않는다.
+   * marketProbability와 calibratedProbability는 외부 검증/표시용으로만 유지한다.
+   * 이 점수는 동일 선택이 여러 λ 시나리오에서 얼마나 안정적인지만 본다.
+   */
   const score = clamp(
-    floor * 0.46 +
-      mean * 0.26 +
-      calibratedTerm * 0.12 +
-      marketTerm * 0.08 +
-      current * 0.08 -
-      spread * 0.75,
+    floor * 0.54 +
+      mean * 0.30 +
+      current * 0.16 -
+      spread * 0.72,
     0,
     100
   );
@@ -11280,8 +11281,37 @@ function pickValueStatus(pick: MarketPick) {
   };
 }
 
+type Top1MarketAgreement = {
+  adjustment: number;
+  gap: number | null;
+  scale: number;
+};
+
+function top1MarketAgreementAdjustment(
+  rawModelProbability: number,
+  marketProbability: number | null,
+  marketPriorApplied = false,
+): Top1MarketAgreement {
+  const raw = Number(rawModelProbability);
+  const market = Number(marketProbability);
+  if (!Number.isFinite(raw) || !Number.isFinite(market)) {
+    return { adjustment: -0.6, gap: null, scale: marketPriorApplied ? 0.25 : 1 };
+  }
+
+  const gap = Math.abs(raw - market);
+  // 시장은 절대확률(=저배당)을 직접 보너스로 주지 않고, 순수모델과의 일치도만 최대 ±2점으로 반영한다.
+  // λ/득점모델에 시장 prior가 이미 들어갔다면 독립 신호가 아니므로 25%만 인정한다.
+  const scale = marketPriorApplied ? 0.25 : 1;
+  const adjustment = clamp(1.4 - Math.max(0, gap - 2) * 0.16, -2.2, 1.4) * scale;
+  return {
+    adjustment: Number(adjustment.toFixed(2)),
+    gap: Number(gap.toFixed(1)),
+    scale,
+  };
+}
+
 /*
- * V13.12.01 GAME TOP1 PER MATCH (baseball scoring core from V13.9.10).
+ * V13.12.02 MODEL-FIRST TOP1 (baseball scoring core from V13.9.10).
  * 하드컷을 데이터 이상/비정상 시장에만 남기고, B/C/D·시장충돌·장소표본·
  * 모델강도·합의분산은 모두 연속 감점으로 반영한다. 정상 READY 경기에서는
  * full-game 승패/핸디/UO 후보 가운데 반드시 1개의 TOP1 후보를 계산한다.
@@ -11307,11 +11337,17 @@ function baseballContinuousTopTier(score: number): BaseballContinuousTopTier {
 function baseballHitFirstSlateScore(pick: MarketPick): number | null {
   if (!isBaseballHitFirstSlateMarket(pick)) return null;
 
-  const probability = Number(pick.probability);
-  if (!Number.isFinite(probability)) return null;
+  const calibratedProbability = Number(pick.probability);
+  const rawProbabilityValue = Number(pick.rawProbability);
+  const modelProbability = Number.isFinite(rawProbabilityValue)
+    ? clamp(rawProbabilityValue, 0, 100)
+    : Number.isFinite(calibratedProbability)
+      ? clamp(calibratedProbability, 0, 100)
+      : NaN;
+  if (!Number.isFinite(modelProbability)) return null;
 
   const marketRaw = Number(pick.marketProbability);
-  const market = Number.isFinite(marketRaw) ? clamp(marketRaw, 0, 100) : 50;
+  const market = Number.isFinite(marketRaw) ? clamp(marketRaw, 0, 100) : null;
   const dataQualityRaw = Number(pick.hitFirstDataQuality);
   const dataQuality = Number.isFinite(dataQualityRaw) ? clamp(dataQualityRaw, 0, 100) : 50;
   const starterRaw = Number(pick.hitFirstStarterQuality);
@@ -11337,18 +11373,19 @@ function baseballHitFirstSlateScore(pick: MarketPick): number | null {
 
   const consensusAvailable = Number.isFinite(floorRaw) && Number.isFinite(meanRaw);
   const correlatedConsensus = consensusAvailable
-    ? baseballCorrelationAdjustedConsensus(floorRaw, meanRaw, probability)
-    : { floor: probability, mean: probability, penalty: 0 };
+    ? baseballCorrelationAdjustedConsensus(floorRaw, meanRaw, modelProbability)
+    : { floor: modelProbability, mean: modelProbability, penalty: 0 };
   const effectiveFloor = clamp(correlatedConsensus.floor, 0, 100);
   const effectiveMean = clamp(correlatedConsensus.mean, 0, 100);
   const spread = Number.isFinite(spreadRaw) ? clamp(spreadRaw, 0, 30) : 12;
   const consensusCount = Number.isFinite(countRaw) ? Math.max(0, countRaw) : 0;
-  const precision = Number.isFinite(precisionRaw) ? clamp(precisionRaw, 0, 100) : probability;
+  const precision = Number.isFinite(precisionRaw) ? clamp(precisionRaw, 0, 100) : modelProbability;
   const adjustedPrecision = clamp(precision - correlatedConsensus.penalty, 0, 100);
 
   /*
-   * 연속 감점: 임계값 바로 아래라고 탈락시키지 않는다.
-   * 품질 부족, 시장 비동의, 모델강도, 위험, 합의분산, consensus 누락이 점수를 조금씩 낮춘다.
+   * V13.12.02: TOP1의 기본점수에는 배당/시장확률을 직접 넣지 않는다.
+   * raw model + 상관보정 consensus + 데이터품질/신뢰/모델강도가 100%의 기본점수를 만든다.
+   * 시장은 아래 agreement adjustment에서만 최대 ±2점 수준으로 확인한다.
    */
   const bcdPenalty =
     Math.max(0, 70 - starterPct) * 0.03 +
@@ -11357,32 +11394,30 @@ function baseballHitFirstSlateScore(pick: MarketPick): number | null {
   const dataPenalty = Math.max(0, 70 - dataQuality) * 0.08;
   const strengthPenalty = Math.max(0, 70 - modelStrengthPct) * 0.05;
   const confidencePenalty = Math.max(0, 68 - confidence) * 0.07;
-  const modelMarketGap = Math.abs(probability - market);
-  const gapPenalty = Math.max(0, modelMarketGap - 8) * 0.12;
-  const marketOppositionPenalty = market < 50 ? (50 - market) * 0.10 : 0;
-  const missingMarketPenalty = Number.isFinite(marketRaw) ? 0 : 4;
   const consensusPenalty = consensusCount >= 4 ? 0 : (4 - Math.min(4, consensusCount)) * 1.1;
   const isTotal = /U\/O|오버|언더|OVER|UNDER/i.test(`${pick.market} ${pick.pick}`);
-  // 누적 검증에서 U/O의 분산이 더 컸기 때문에 하드 제외 대신 작은 연속 감점만 둔다.
   const totalVolatilityPenalty = isTotal ? 3.5 : 0;
+  const marketAgreement = top1MarketAgreementAdjustment(
+    modelProbability,
+    market,
+    Boolean(pick.top1MarketPriorApplied),
+  );
 
   const score =
-    probability * 0.29 +
-    market * 0.18 +
+    modelProbability * 0.39 +
     effectiveFloor * 0.14 +
     effectiveMean * 0.08 +
     adjustedPrecision * 0.11 +
     dataQuality * 0.12 +
-    confidence * 0.08 -
+    confidence * 0.08 +
+    modelStrengthPct * 0.08 +
+    marketAgreement.adjustment -
     spread * 0.16 -
     risk * 0.12 -
     bcdPenalty -
     dataPenalty -
     strengthPenalty -
     confidencePenalty -
-    gapPenalty -
-    marketOppositionPenalty -
-    missingMarketPenalty -
     consensusPenalty -
     totalVolatilityPenalty;
 
@@ -11395,10 +11430,10 @@ function bestBaseballHitFirstSlateCandidate(picks: MarketPick[]) {
     .filter((row): row is { pick: MarketPick; slateScore: number } => row.slateScore !== null)
     .sort((a, b) =>
       b.slateScore - a.slateScore ||
-      Number(b.pick.marketProbability ?? -999) - Number(a.pick.marketProbability ?? -999) ||
-      b.pick.probability - a.pick.probability ||
+      Number(b.pick.precisionConsensusFloor ?? -999) - Number(a.pick.precisionConsensusFloor ?? -999) ||
       Number(b.pick.hitFirstDataQuality ?? -999) - Number(a.pick.hitFirstDataQuality ?? -999) ||
-      Number(b.pick.precisionConsensusFloor ?? -999) - Number(a.pick.precisionConsensusFloor ?? -999)
+      Number(b.pick.rawProbability ?? b.pick.probability) - Number(a.pick.rawProbability ?? a.pick.probability) ||
+      Number(b.pick.marketProbability ?? -999) - Number(a.pick.marketProbability ?? -999)
     )[0] ?? null;
 }
 
@@ -11413,7 +11448,12 @@ function promoteBaseballSlateTopPick(pick: MarketPick, rank: number, slateScore:
   const correlatedConsensus = baseballCorrelationAdjustedConsensus(
     Number(pick.precisionConsensusFloor),
     Number(pick.precisionConsensusMean),
-    Number(pick.probability),
+    Number(pick.rawProbability ?? pick.probability),
+  );
+  const marketAgreement = top1MarketAgreementAdjustment(
+    Number(pick.rawProbability ?? pick.probability),
+    pick.marketProbability,
+    Boolean(pick.top1MarketPriorApplied),
   );
 
   return {
@@ -11422,10 +11462,10 @@ function promoteBaseballSlateTopPick(pick: MarketPick, rank: number, slateScore:
     valueGradeScore: promote
       ? Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))
       : Math.min(79.9, Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))),
-    valueGradeReason: `GAME TOP${rank} · ${tier} · TOP1점수 ${slateScore.toFixed(1)} · 모델 ${pick.probability.toFixed(1)}% · 시장 ${Number.isFinite(market) ? `${market.toFixed(1)}%` : "-"} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"} · B/C/D ${Number.isFinite(starter) ? Math.round(starter * 100) : "-"}/${Number.isFinite(batting) ? Math.round(batting * 100) : "-"}/${Number.isFinite(bullpen) ? Math.round(bullpen * 100) : "-"} · 상관보정 하한 ${Number.isFinite(correlatedConsensus.floor) ? correlatedConsensus.floor.toFixed(1) : "-"}%`,
+    valueGradeReason: `GAME TOP${rank} · ${tier} · TOP1점수 ${slateScore.toFixed(1)} · 순수모델 ${Number(pick.rawProbability ?? pick.probability).toFixed(1)}% · 최종 ${pick.probability.toFixed(1)}% · 시장 ${Number.isFinite(market) ? `${market.toFixed(1)}%` : "-"} · 시장일치 ${marketAgreement.adjustment >= 0 ? "+" : ""}${marketAgreement.adjustment.toFixed(1)}점 · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"} · B/C/D ${Number.isFinite(starter) ? Math.round(starter * 100) : "-"}/${Number.isFinite(batting) ? Math.round(batting * 100) : "-"}/${Number.isFinite(bullpen) ? Math.round(bullpen * 100) : "-"} · 상관보정 하한 ${Number.isFinite(correlatedConsensus.floor) ? correlatedConsensus.floor.toFixed(1) : "-"}%`,
     stageGradeLabel: `FINAL GAME TOP${rank} ${tier}`,
     recommendationScore: Number(slateScore.toFixed(1)),
-    detail: `${pick.detail} · V13.12.01 GAME TOP${rank} · ${tier} · QUALITY/RISK SOFT SCORE`,
+    detail: `${pick.detail} · V13.12.02 GAME TOP${rank} · ${tier} · MODEL-FIRST / MARKET-DEBIASED SCORE`,
   };
 }
 
@@ -11496,8 +11536,10 @@ function soccerSportsDataQuality(
 }
 
 function soccerConsensus(rawProbability: number, calibratedProbability: number, marketProbability: number | null) {
+  // V13.12.02: 시장 자체를 세 번째 "모델"처럼 합의 배열에 중복 삽입하지 않는다.
+  // calibratedProbability에는 시장 보정이 이미 일부 포함되어 있으므로 raw+calibrated 범위만 진단한다.
+  void marketProbability;
   const values = [rawProbability, calibratedProbability];
-  if (marketProbability !== null && Number.isFinite(marketProbability)) values.push(marketProbability);
   const clean = values.filter(Number.isFinite).map((v) => clamp(Number(v), 0, 100));
   const floor = clean.length ? Math.min(...clean) : null;
   const mean = clean.length ? clean.reduce((a, b) => a + b, 0) / clean.length : null;
@@ -11528,38 +11570,37 @@ function soccerContinuousTopTier(score: number): BaseballContinuousTopTier {
 
 function soccerSlateScore(pick: MarketPick): number | null {
   if (!isSoccerSlateMarket(pick)) return null;
-  const p = Number(pick.probability);
-  if (!Number.isFinite(p)) return null;
+  const calibrated = Number(pick.probability);
+  const raw = Number(pick.rawProbability);
+  const modelP = Number.isFinite(raw) ? clamp(raw, 0, 100) : Number.isFinite(calibrated) ? clamp(calibrated, 0, 100) : NaN;
+  if (!Number.isFinite(modelP)) return null;
   const marketRaw = Number(pick.marketProbability);
-  const market = Number.isFinite(marketRaw) ? clamp(marketRaw, 0, 100) : 50;
+  const market = Number.isFinite(marketRaw) ? clamp(marketRaw, 0, 100) : null;
   const qualityRaw = Number(pick.soccerDataQuality);
   const quality = Number.isFinite(qualityRaw) ? clamp(qualityRaw, 0, 100) : 45;
   const confidence = clamp(Number(pick.confidenceScore ?? 50), 0, 100);
   const risk = clamp(Number(pick.decisionRiskScore ?? 25), 0, 100);
-  const floor = Number.isFinite(Number(pick.precisionConsensusFloor)) ? clamp(Number(pick.precisionConsensusFloor), 0, 100) : Math.min(p, market);
-  const mean = Number.isFinite(Number(pick.precisionConsensusMean)) ? clamp(Number(pick.precisionConsensusMean), 0, 100) : (p + market) / 2;
-  const spread = Number.isFinite(Number(pick.precisionConsensusSpread)) ? clamp(Number(pick.precisionConsensusSpread), 0, 40) : Math.abs(p - market);
   const model = Number.isFinite(Number(pick.soccerModelQuality)) ? clamp(Number(pick.soccerModelQuality) * 100, 0, 100) : 50;
-  const venue = Number.isFinite(Number(pick.soccerVenueQuality)) ? clamp(Number(pick.soccerVenueQuality) * 100, 0, 100) : 50;
+  const recent = Number.isFinite(Number(pick.soccerRecentQuality)) ? clamp(Number(pick.soccerRecentQuality) * 100, 0, 100) : 45;
+  const venue = Number.isFinite(Number(pick.soccerVenueQuality)) ? clamp(Number(pick.soccerVenueQuality) * 100, 0, 100) : 45;
+  const scoring = Number.isFinite(Number(pick.soccerScoringQuality)) ? clamp(Number(pick.soccerScoringQuality) * 100, 0, 100) : 45;
   const lineup = Number.isFinite(Number(pick.soccerLineupQuality)) ? clamp(Number(pick.soccerLineupQuality) * 100, 0, 100) : 45;
   const isTotal = /U\/O|오버|언더|OVER|UNDER/i.test(`${pick.market} ${pick.pick}`);
   const isThreeWay = /승무패/i.test(`${pick.market}`) && !/핸디/i.test(`${pick.market}`);
   const totalPenalty = isTotal ? 1.2 : 0;
   const threeWayPenalty = isThreeWay ? 0.8 : 0;
-  const marketGapPenalty = Math.max(0, Math.abs(p - market) - 12) * 0.10;
+  const marketAgreement = top1MarketAgreementAdjustment(modelP, market, Boolean(pick.top1MarketPriorApplied));
   const score =
-    p * 0.28 +
-    market * 0.18 +
-    floor * 0.14 +
-    mean * 0.08 +
-    quality * 0.16 +
-    confidence * 0.07 +
-    model * 0.04 +
-    venue * 0.02 +
-    lineup * 0.03 -
-    spread * 0.20 -
+    modelP * 0.44 +
+    quality * 0.18 +
+    confidence * 0.09 +
+    model * 0.07 +
+    recent * 0.07 +
+    venue * 0.04 +
+    scoring * 0.07 +
+    lineup * 0.04 +
+    marketAgreement.adjustment -
     risk * 0.14 -
-    marketGapPenalty -
     totalPenalty -
     threeWayPenalty;
   return Number(clamp(score, 0, 100).toFixed(2));
@@ -11587,10 +11628,10 @@ function promoteSoccerSlateTopPick(pick: MarketPick, rank: number, slateScore: n
     valueGradeScore: promote
       ? Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))
       : Math.min(77.9, Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))),
-    valueGradeReason: `FOOTBALL GAME TOP${rank} · ${tier} · TOP1점수 ${slateScore.toFixed(1)} · ${String(pick.soccerLeagueGroup ?? "FOOTBALL")} · 모델 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
+    valueGradeReason: `FOOTBALL GAME TOP${rank} · ${tier} · TOP1점수 ${slateScore.toFixed(1)} · ${String(pick.soccerLeagueGroup ?? "FOOTBALL")} · 순수모델 ${Number(pick.rawProbability ?? pick.probability).toFixed(1)}% · 최종 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
     stageGradeLabel: `FOOTBALL GAME TOP${rank} ${tier}`,
     recommendationScore: Number(slateScore.toFixed(1)),
-    detail: `${pick.detail} · V13.12.01 FOOTBALL GAME TOP${rank} · ${tier} · CONTINUOUS QUALITY/RISK SCORE`,
+    detail: `${pick.detail} · V13.12.02 FOOTBALL GAME TOP${rank} · ${tier} · MODEL-FIRST / MARKET-DEBIASED SCORE`,
   };
 }
 
@@ -11668,8 +11709,9 @@ function courtConsensus(
   calibratedProbability: number,
   marketProbability: number | null
 ) {
+  // V13.12.02: 시장 자체를 합의 구성원으로 재사용하지 않는다.
+  void marketProbability;
   const values = [rawProbability, calibratedProbability];
-  if (marketProbability !== null && Number.isFinite(marketProbability)) values.push(marketProbability);
   const clean = values.filter(Number.isFinite).map((v) => clamp(Number(v), 0, 100));
   const floor = clean.length ? Math.min(...clean) : null;
   const mean = clean.length ? clean.reduce((a, b) => a + b, 0) / clean.length : null;
@@ -11700,38 +11742,35 @@ function courtContinuousTopTier(score: number): BaseballContinuousTopTier {
 
 function courtSlateScore(pick: MarketPick): number | null {
   if (!isCourtSlateMarket(pick)) return null;
-  const p = Number(pick.probability);
-  if (!Number.isFinite(p)) return null;
+  const calibrated = Number(pick.probability);
+  const raw = Number(pick.rawProbability);
+  const modelP = Number.isFinite(raw) ? clamp(raw, 0, 100) : Number.isFinite(calibrated) ? clamp(calibrated, 0, 100) : NaN;
+  if (!Number.isFinite(modelP)) return null;
 
   const marketRaw = Number(pick.marketProbability);
-  const market = Number.isFinite(marketRaw) ? clamp(marketRaw, 0, 100) : 50;
+  const market = Number.isFinite(marketRaw) ? clamp(marketRaw, 0, 100) : null;
   const qualityRaw = Number(pick.courtDataQuality);
   const quality = Number.isFinite(qualityRaw) ? clamp(qualityRaw, 0, 100) : 45;
   const confidence = clamp(Number(pick.confidenceScore ?? 50), 0, 100);
   const risk = clamp(Number(pick.decisionRiskScore ?? 25), 0, 100);
-  const floor = Number.isFinite(Number(pick.precisionConsensusFloor)) ? clamp(Number(pick.precisionConsensusFloor), 0, 100) : Math.min(p, market);
-  const mean = Number.isFinite(Number(pick.precisionConsensusMean)) ? clamp(Number(pick.precisionConsensusMean), 0, 100) : (p + market) / 2;
-  const spread = Number.isFinite(Number(pick.precisionConsensusSpread)) ? clamp(Number(pick.precisionConsensusSpread), 0, 40) : Math.abs(p - market);
   const modelStrength = Number.isFinite(Number(pick.courtModelQuality)) ? clamp(Number(pick.courtModelQuality) * 100, 0, 100) : 50;
-  const recentQuality = Number.isFinite(Number(pick.courtRecentQuality)) ? clamp(Number(pick.courtRecentQuality) * 100, 0, 100) : 50;
-  const venueQuality = Number.isFinite(Number(pick.courtVenueQuality)) ? clamp(Number(pick.courtVenueQuality) * 100, 0, 100) : 50;
+  const recentQuality = Number.isFinite(Number(pick.courtRecentQuality)) ? clamp(Number(pick.courtRecentQuality) * 100, 0, 100) : 45;
+  const venueQuality = Number.isFinite(Number(pick.courtVenueQuality)) ? clamp(Number(pick.courtVenueQuality) * 100, 0, 100) : 45;
+  const scoringQuality = Number.isFinite(Number(pick.courtScoringQuality)) ? clamp(Number(pick.courtScoringQuality) * 100, 0, 100) : 45;
 
   const isTotal = /U\/O|오버|언더|OVER|UNDER/i.test(`${pick.market} ${pick.pick}`);
   const totalPenalty = isTotal ? 1.8 : 0;
-  const marketGapPenalty = Math.max(0, Math.abs(p - market) - 10) * 0.10;
+  const marketAgreement = top1MarketAgreementAdjustment(modelP, market, Boolean(pick.top1MarketPriorApplied));
   const score =
-    p * 0.30 +
-    market * 0.16 +
-    floor * 0.12 +
-    mean * 0.07 +
-    quality * 0.16 +
-    confidence * 0.08 +
-    modelStrength * 0.05 +
-    recentQuality * 0.04 +
-    venueQuality * 0.02 -
-    spread * 0.18 -
+    modelP * 0.43 +
+    quality * 0.18 +
+    confidence * 0.09 +
+    modelStrength * 0.07 +
+    recentQuality * 0.08 +
+    venueQuality * 0.05 +
+    scoringQuality * 0.10 +
+    marketAgreement.adjustment -
     risk * 0.13 -
-    marketGapPenalty -
     totalPenalty;
 
   return Number(clamp(score, 0, 100).toFixed(2));
@@ -11760,10 +11799,10 @@ function promoteCourtSlateTopPick(pick: MarketPick, rank: number, slateScore: nu
     valueGradeScore: promote
       ? Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))
       : Math.min(79.9, Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))),
-    valueGradeReason: `COURT GAME TOP${rank} · ${tier} · TOP1점수 ${slateScore.toFixed(1)} · ${profile} · 모델 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
+    valueGradeReason: `COURT GAME TOP${rank} · ${tier} · TOP1점수 ${slateScore.toFixed(1)} · ${profile} · 순수모델 ${Number(pick.rawProbability ?? pick.probability).toFixed(1)}% · 최종 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
     stageGradeLabel: `COURT GAME TOP${rank} ${tier}`,
     recommendationScore: Number(slateScore.toFixed(1)),
-    detail: `${pick.detail} · V13.12.01 COURT GAME TOP${rank} · ${tier} · VERIFIED HISTORY + CONTINUOUS QUALITY/RISK SCORE`,
+    detail: `${pick.detail} · V13.12.02 COURT GAME TOP${rank} · ${tier} · VERIFIED HISTORY + MODEL-FIRST / MARKET-DEBIASED SCORE`,
   };
 }
 
@@ -12159,6 +12198,9 @@ function buildActualMarketPicks(
           odds: safeOdds,
           marketProbability,
           edge,
+          top1MarketPriorApplied: Boolean(
+            factors.marketPriorWeight > 0 || factors.scoreGuardApplied
+          ),
           breakEvenProbability:
             ev.breakEvenProbability,
           expectedValue:
@@ -12330,6 +12372,9 @@ function buildActualMarketPicks(
             odds: safeOdds,
             marketProbability,
             edge,
+            top1MarketPriorApplied: Boolean(
+              factors.marketPriorWeight > 0 || factors.scoreGuardApplied
+            ),
             breakEvenProbability: ev.breakEvenProbability,
             expectedValue: ev.expectedValue,
             valueGrade: passOnly ? "PASS" : "WATCH",
@@ -12774,6 +12819,12 @@ function buildActualMarketPicks(
           odds: best.odds,
           marketProbability: best.marketProbability,
           edge: best.edge,
+          top1MarketPriorApplied: Boolean(
+            factors.baseballTeamStrengthSource === "BETMAN_DIRECTION_GUARD" ||
+            factors.baseballPreMarketWeight > 0 ||
+            factors.marketPriorWeight > 0 ||
+            factors.scoreGuardApplied
+          ),
           breakEvenProbability: best.ev.breakEvenProbability,
           expectedValue: best.ev.expectedValue,
           valueGrade: best.valueGrade.grade,
@@ -17444,7 +17495,7 @@ export default function Home() {
       ? stickyReadyMarketPicks
       : liveActualMarketPicks;
 
-  /* V13.12.01: TOP1은 날짜 전체 경쟁이 아니라 각 경기 내부에서 독립 산출한다. */
+  /* V13.12.02: 경기별 독립 TOP1 유지 + 시장확률 직접가중 제거. */
   const currentSlateCandidate =
     currentSport === "야구" && analysisFactors.baseballAnalysisStage === "READY"
       ? bestBaseballHitFirstSlateCandidate(actualMarketPicksBase)
@@ -18870,7 +18921,7 @@ export default function Home() {
     const precision90Records = liveTrackerRecords.filter(
       (record) =>
         record.sport === "야구" &&
-        ["V13.9.04_SOFT_STRENGTH_SLATE_TOP2", "V13.9.06_CORRELATION_SAMPLE_GUARD", "V13.9.07_STICKY_READY_QUALITY_AUDIT", "V13.9.08_VENUE_SAMPLE_CONFIDENCE_GUARD", "V13.9.09_FINAL_SEASON_TOP1_LOCK", "V13.9.10_CONTINUOUS_TOP1", "V13.12.01_GAME_TOP1_PER_MATCH"].includes(String(record.recommendationEngineVersion ?? "")) &&
+        ["V13.9.04_SOFT_STRENGTH_SLATE_TOP2", "V13.9.06_CORRELATION_SAMPLE_GUARD", "V13.9.07_STICKY_READY_QUALITY_AUDIT", "V13.9.08_VENUE_SAMPLE_CONFIDENCE_GUARD", "V13.9.09_FINAL_SEASON_TOP1_LOCK", "V13.9.10_CONTINUOUS_TOP1", "V13.12.01_GAME_TOP1_PER_MATCH", "V13.12.02_MODEL_FIRST_TOP1"].includes(String(record.recommendationEngineVersion ?? "")) &&
         record.verificationStatus === "VERIFIED"
     );
     const precision90Ids = new Set(precision90Records.map((record) => record.id));
@@ -19253,11 +19304,11 @@ export default function Home() {
         gateVersion: "FALLBACK_GATE_V2",
         recommendationEngineVersion:
           currentSport === "야구"
-            ? "V13.12.01_GAME_TOP1_PER_MATCH"
+            ? "V13.12.02_MODEL_FIRST_TOP1"
             : currentSport === "축구"
-              ? "V13.12.01_GAME_TOP1_PER_MATCH"
+              ? "V13.12.02_MODEL_FIRST_TOP1"
               : currentSport === "농구" || currentSport === "배구"
-                ? "V13.12.01_GAME_TOP1_PER_MATCH"
+                ? "V13.12.02_MODEL_FIRST_TOP1"
                 : undefined,
         decision: trackerPicks.length ? "PICK" : "PASS",
         picks: trackerPicks,
@@ -19371,7 +19422,7 @@ export default function Home() {
   ]);
 
   /*
-   * V13.12.01 GAME TOP1 PER MATCH.
+   * V13.12.02 MODEL-FIRST TOP1.
    * 날짜 전체에서 한 경기만 고르지 않는다. READY/PENDING 각 경기 내부에서
    * full-game 후보를 독립 비교하고 TOP1 하나를 고정한다.
    * TOP1 tier가 "실전 추천"인 경우에만 공식 PICK/VALUE로 저장하고,
@@ -19436,14 +19487,14 @@ export default function Home() {
       });
       const afterSig = JSON.stringify({
         decision: nextDecision,
-        engine: "V13.12.01_GAME_TOP1_PER_MATCH",
+        engine: "V13.12.02_MODEL_FIRST_TOP1",
         picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
       });
       if (beforeSig === afterSig) return record;
       changed = true;
       return {
         ...record,
-        recommendationEngineVersion: "V13.12.01_GAME_TOP1_PER_MATCH",
+        recommendationEngineVersion: "V13.12.02_MODEL_FIRST_TOP1",
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -19455,7 +19506,7 @@ export default function Home() {
     }
   }, [backtestMode, liveTrackerRecords]);
 
-  /* V13.12.01: 축구도 경기별 독립 TOP1. */
+  /* V13.12.02: 축구 경기별 독립 TOP1 + model-first ranking. */
   useEffect(() => {
     if (backtestMode || !liveTrackerRecords.length) return;
     const now = Date.now();
@@ -19514,14 +19565,14 @@ export default function Home() {
       });
       const afterSig = JSON.stringify({
         decision: nextDecision,
-        engine: "V13.12.01_GAME_TOP1_PER_MATCH",
+        engine: "V13.12.02_MODEL_FIRST_TOP1",
         picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
       });
       if (beforeSig === afterSig) return record;
       changed = true;
       return {
         ...record,
-        recommendationEngineVersion: "V13.12.01_GAME_TOP1_PER_MATCH",
+        recommendationEngineVersion: "V13.12.02_MODEL_FIRST_TOP1",
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -19533,7 +19584,7 @@ export default function Home() {
     }
   }, [backtestMode, liveTrackerRecords]);
 
-  /* V13.12.01: 농구/NBA/배구도 경기별 독립 TOP1. */
+  /* V13.12.02: 농구/NBA/배구 경기별 독립 TOP1 + model-first ranking. */
   useEffect(() => {
     if (backtestMode || !liveTrackerRecords.length) return;
     const now = Date.now();
@@ -19592,14 +19643,14 @@ export default function Home() {
       });
       const afterSig = JSON.stringify({
         decision: nextDecision,
-        engine: "V13.12.01_GAME_TOP1_PER_MATCH",
+        engine: "V13.12.02_MODEL_FIRST_TOP1",
         picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
       });
       if (beforeSig === afterSig) return record;
       changed = true;
       return {
         ...record,
-        recommendationEngineVersion: "V13.12.01_GAME_TOP1_PER_MATCH",
+        recommendationEngineVersion: "V13.12.02_MODEL_FIRST_TOP1",
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -24482,7 +24533,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.01 · GAME TOP1 PER MATCH</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.02 · MODEL-FIRST TOP1</div>
         </div>
         <div className="bar">
           <button
@@ -26003,7 +26054,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.01 GAME TOP1 PER MATCH · 모든 야구/축구/농구/NBA/배구 경기는 자기 경기 내부에서 TOP1 1개를 독립 산출 · 일일 1경기 제한 없음</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.02 MODEL-FIRST TOP1 · 모든 경기는 자기 경기 내부에서 TOP1 1개 독립 산출 · 순수모델/합의/데이터품질 중심 · 시장은 일치도 확인만 반영</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 축구는 SportsAPI/Naver에서 최근 득실과 홈·원정 장소표본을 확보한 경기를 공통 Poisson 기반으로 계산하고, K리그/J리그·유럽 5대리그·UEFA 대회·MLS는 리그별 중립 득점 prior를 적용합니다. 선발 11+11은 λ를 임의 변경하지 않고 데이터품질에 soft 반영하며, alias가 없는 기타 리그도 동일경기 매칭이 되면 OTHER 프로필로 분석합니다.
               </div>
@@ -26753,6 +26804,11 @@ export default function Home() {
                     {currentContinuousTopScore !== null && currentContinuousTopTier
                       ? `TOP1점수 ${currentContinuousTopScore.toFixed(1)} · ${currentContinuousTopTier}`
                       : `정확도점수 ${bestDisplayPick.recommendationScore.toFixed(1)}`}
+                    <br />
+                    순수모델 {Number(bestDisplayPick.rawProbability ?? bestDisplayPick.probability).toFixed(1)}%
+                    {" · "}최종 {bestDisplayPick.probability.toFixed(1)}%
+                    {" · "}시장 {bestDisplayPick.marketProbability === null ? "-" : `${bestDisplayPick.marketProbability.toFixed(1)}%`}
+                    {bestDisplayPick.top1MarketPriorApplied ? " · 시장prior 중복감쇠" : ""}
                     {bestDisplayPick.precisionConsensusFloor !== undefined && bestDisplayPick.precisionConsensusFloor !== null ? (
                       <>
                         <br />
@@ -26763,7 +26819,7 @@ export default function Home() {
                           const adjusted = baseballCorrelationAdjustedConsensus(
                             Number(bestDisplayPick.precisionConsensusFloor),
                             Number(bestDisplayPick.precisionConsensusMean),
-                            Number(bestDisplayPick.probability),
+                            Number(bestDisplayPick.rawProbability ?? bestDisplayPick.probability),
                           );
                           return Number.isFinite(adjusted.floor) && Number.isFinite(adjusted.mean) ? (
                             <>
@@ -26894,14 +26950,14 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="notice" style={{ margin: "8px 0 0" }}>
-                  K리그/J리그와 EPL·LaLiga·Serie A·Bundesliga·Ligue 1·UEFA 대회·MLS를 리그별 득점 prior로 구분하고, 최근 득실·홈/원정 장소표본·시장확률·선발 XI 확보·모델강도를 연속 점수로 반영합니다. full-game 승무패/핸디/U/O에서 각 경기마다 독립적으로 경기 TOP1을 1개 산출합니다. 다른 경기 점수 때문에 현재 경기 TOP1이 취소되거나 강등되지 않습니다. TOP1점수 78 이상만 공식 VALUE, 72~77.9는 약추천, 그 미만은 관망입니다.
+                  K리그/J리그와 EPL·LaLiga·Serie A·Bundesliga·Ligue 1·UEFA 대회·MLS를 리그별 득점 prior로 구분하고, 최근 득실·홈/원정 장소표본·선발 XI 확보·모델강도를 연속 점수로 반영합니다. 시장확률은 TOP1 기본점수에 직접 더하지 않고 순수모델과의 일치도 확인에만 사용합니다. full-game 승무패/핸디/U/O에서 각 경기마다 독립적으로 경기 TOP1을 1개 산출합니다. 다른 경기 점수 때문에 현재 경기 TOP1이 취소되거나 강등되지 않습니다. TOP1점수 78 이상만 공식 VALUE, 72~77.9는 약추천, 그 미만은 관망입니다.
                 </div>
               </div>
             )}
 
             {isCourtSport && currentCourtProfile && (
               <div className="section" style={{ marginTop: 0, marginBottom: 8 }}>
-                <h3>V13.12.01 COURT DATA + GAME TOP1 · {currentCourtProfile.label}</h3>
+                <h3>V13.12.02 COURT DATA + MODEL-FIRST TOP1 · {currentCourtProfile.label}</h3>
                 <div className="cards">
                   <div className="card">
                     모델 단위
@@ -29273,7 +29329,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.12.01 GAME TOP1 PER MATCH는 야구/축구/농구/NBA/배구 모든 경기에서 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 축구는 리그별 득점 prior와 최근 득실·장소표본·시장확률·선발 XI·모델강도를 soft score로 합쳐 승무패/핸디/UO를 비교하며, TOP1점수 78 이상만 공식 VALUE, 72~77.9는 약추천, 그 미만은 관망입니다. 농구는 V13.12.00 VERIFIED HISTORY 누적을 추가하고, 배구는 V13.10.00 기준을 유지합니다.
+                    V13.12.02 MODEL-FIRST TOP1은 야구/축구/농구/NBA/배구 모든 경기에서 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. TOP1 순위에는 저배당/높은 시장확률을 직접 가중하지 않고 순수모델확률·모델합의·데이터품질·신뢰도를 우선 사용합니다. 시장은 순수모델과의 일치도 확인만 최대 소폭 가감하며, 득점모델에 시장 prior가 이미 들어간 경우 그 영향은 25%만 인정해 중복반영을 줄입니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
