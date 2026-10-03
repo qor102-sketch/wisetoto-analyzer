@@ -1,5 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
-// V13.12.00 COURT DATA ACCUMULATOR: verified KBL/WKBL/NBA finals are reused as persistent recent/venue scoring history; collector audit added
+// V13.12.01 GAME TOP1 PER MATCH: every baseball/football/court fixture promotes its own independent full-game TOP1; no daily cross-game winner gate
 // V13.11.00 FOOTBALL WORLD TOP1: K League/J League + major overseas football leagues/cups, league scoring priors, soft data-quality ranking, continuous full-game TOP1
 // V13.10.00 COURT SPORTS TOP1: KBL/WKBL/NBA + KOVO basketball/volleyball full-game market models, continuous TOP1, league priors and soft data-quality ranking
 // V13.9.10 FINAL-SEASON CONTINUOUS TOP1: always rank one full-game candidate; quality/risk are soft penalties; only high-score TOP1 becomes official VALUE
@@ -11281,12 +11281,12 @@ function pickValueStatus(pick: MarketPick) {
 }
 
 /*
- * V13.9.10 FINAL-SEASON CONTINUOUS TOP1.
+ * V13.12.01 GAME TOP1 PER MATCH (baseball scoring core from V13.9.10).
  * 하드컷을 데이터 이상/비정상 시장에만 남기고, B/C/D·시장충돌·장소표본·
  * 모델강도·합의분산은 모두 연속 감점으로 반영한다. 정상 READY 경기에서는
  * full-game 승패/핸디/UO 후보 가운데 반드시 1개의 TOP1 후보를 계산한다.
- * TOP1 점수에 따라 "실전 추천 / 약추천 / 관망"을 구분하며, 실전 추천만
- * tracker의 공식 VALUE 성적으로 집계한다. +2.5 전용 우대 lane은 제거했다.
+ * 각 경기 TOP1 점수에 따라 "실전 추천 / 약추천 / 관망"을 구분하며, 실전 추천만
+ * tracker의 공식 VALUE 성적으로 집계한다. 다른 경기와의 일일 경쟁은 없다. +2.5 전용 우대 lane은 제거했다.
  */
 function isBaseballHitFirstSlateMarket(pick: MarketPick) {
   const label = `${pick.market} ${pick.pick}`;
@@ -11422,10 +11422,10 @@ function promoteBaseballSlateTopPick(pick: MarketPick, rank: number, slateScore:
     valueGradeScore: promote
       ? Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))
       : Math.min(79.9, Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))),
-    valueGradeReason: `CONTINUOUS TOP${rank} · ${tier} · TOP1점수 ${slateScore.toFixed(1)} · 모델 ${pick.probability.toFixed(1)}% · 시장 ${Number.isFinite(market) ? `${market.toFixed(1)}%` : "-"} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"} · B/C/D ${Number.isFinite(starter) ? Math.round(starter * 100) : "-"}/${Number.isFinite(batting) ? Math.round(batting * 100) : "-"}/${Number.isFinite(bullpen) ? Math.round(bullpen * 100) : "-"} · 상관보정 하한 ${Number.isFinite(correlatedConsensus.floor) ? correlatedConsensus.floor.toFixed(1) : "-"}%`,
-    stageGradeLabel: `FINAL TOP${rank} ${tier}`,
+    valueGradeReason: `GAME TOP${rank} · ${tier} · TOP1점수 ${slateScore.toFixed(1)} · 모델 ${pick.probability.toFixed(1)}% · 시장 ${Number.isFinite(market) ? `${market.toFixed(1)}%` : "-"} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"} · B/C/D ${Number.isFinite(starter) ? Math.round(starter * 100) : "-"}/${Number.isFinite(batting) ? Math.round(batting * 100) : "-"}/${Number.isFinite(bullpen) ? Math.round(bullpen * 100) : "-"} · 상관보정 하한 ${Number.isFinite(correlatedConsensus.floor) ? correlatedConsensus.floor.toFixed(1) : "-"}%`,
+    stageGradeLabel: `FINAL GAME TOP${rank} ${tier}`,
     recommendationScore: Number(slateScore.toFixed(1)),
-    detail: `${pick.detail} · V13.9.10 CONTINUOUS TOP${rank} · ${tier} · QUALITY/RISK SOFT SCORE`,
+    detail: `${pick.detail} · V13.12.01 GAME TOP${rank} · ${tier} · QUALITY/RISK SOFT SCORE`,
   };
 }
 
@@ -11587,10 +11587,10 @@ function promoteSoccerSlateTopPick(pick: MarketPick, rank: number, slateScore: n
     valueGradeScore: promote
       ? Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))
       : Math.min(77.9, Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))),
-    valueGradeReason: `FOOTBALL TOP${rank} · ${tier} · TOP1점수 ${slateScore.toFixed(1)} · ${String(pick.soccerLeagueGroup ?? "FOOTBALL")} · 모델 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
-    stageGradeLabel: `FOOTBALL TOP${rank} ${tier}`,
+    valueGradeReason: `FOOTBALL GAME TOP${rank} · ${tier} · TOP1점수 ${slateScore.toFixed(1)} · ${String(pick.soccerLeagueGroup ?? "FOOTBALL")} · 모델 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
+    stageGradeLabel: `FOOTBALL GAME TOP${rank} ${tier}`,
     recommendationScore: Number(slateScore.toFixed(1)),
-    detail: `${pick.detail} · V13.11.00 FOOTBALL TOP${rank} · ${tier} · CONTINUOUS QUALITY/RISK SCORE`,
+    detail: `${pick.detail} · V13.12.01 FOOTBALL GAME TOP${rank} · ${tier} · CONTINUOUS QUALITY/RISK SCORE`,
   };
 }
 
@@ -11760,16 +11760,11 @@ function promoteCourtSlateTopPick(pick: MarketPick, rank: number, slateScore: nu
     valueGradeScore: promote
       ? Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))
       : Math.min(79.9, Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))),
-    valueGradeReason: `COURT TOP${rank} · ${tier} · TOP1점수 ${slateScore.toFixed(1)} · ${profile} · 모델 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
-    stageGradeLabel: `COURT TOP${rank} ${tier}`,
+    valueGradeReason: `COURT GAME TOP${rank} · ${tier} · TOP1점수 ${slateScore.toFixed(1)} · ${profile} · 모델 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
+    stageGradeLabel: `COURT GAME TOP${rank} ${tier}`,
     recommendationScore: Number(slateScore.toFixed(1)),
-    detail: `${pick.detail} · V13.12.00 COURT TOP${rank} · ${tier} · VERIFIED HISTORY + CONTINUOUS QUALITY/RISK SCORE`,
+    detail: `${pick.detail} · V13.12.01 COURT GAME TOP${rank} · ${tier} · VERIFIED HISTORY + CONTINUOUS QUALITY/RISK SCORE`,
   };
-}
-
-function kstDateKeyFromMs(ms: number) {
-  if (!Number.isFinite(ms)) return "";
-  return new Date(ms + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 function trackerMarketPickSnapshots(record: LiveTrackerRecord): MarketPick[] {
@@ -17449,149 +17444,32 @@ export default function Home() {
       ? stickyReadyMarketPicks
       : liveActualMarketPicks;
 
-  const selectedStartMs = selectedBetman ? gameTimeMs(selectedBetman) : NaN;
-  const selectedSlateDate = kstDateKeyFromMs(selectedStartMs);
+  /* V13.12.01: TOP1은 날짜 전체 경쟁이 아니라 각 경기 내부에서 독립 산출한다. */
   const currentSlateCandidate =
     currentSport === "야구" && analysisFactors.baseballAnalysisStage === "READY"
       ? bestBaseballHitFirstSlateCandidate(actualMarketPicksBase)
       : null;
-
-  const otherSlateCandidates =
-    currentSport === "야구" && selectedSlateDate
-      ? liveTrackerRecords
-          .filter((record) =>
-            record.sport === "야구" &&
-            record.verificationStatus === "PENDING" &&
-            record.venueShadow?.stage === "READY" &&
-            record.betmanIdentity !== selectedBaseballTrackerIdentity &&
-            kstDateKeyFromMs(record.startMs) === selectedSlateDate &&
-            record.startMs >= Date.now() - 30 * 60 * 1000
-          )
-          .map((record) => {
-            const candidate = bestBaseballHitFirstSlateCandidate(trackerMarketPickSnapshots(record));
-            return candidate
-              ? { id: record.id, identity: record.betmanIdentity ?? record.id, ...candidate }
-              : null;
-          })
-          .filter((row): row is NonNullable<typeof row> => row !== null)
-      : [];
-
-  const currentSlateIdentity = selectedBaseballTrackerIdentity || `current:${selectedStartMs}`;
-  const slateTopRows = [
-    ...otherSlateCandidates,
-    ...(currentSlateCandidate
-      ? [{
-          id: `current:${currentSlateIdentity}`,
-          identity: currentSlateIdentity,
-          ...currentSlateCandidate,
-        }]
-      : []),
-  ]
-    .sort((a, b) =>
-      b.slateScore - a.slateScore ||
-      Number(b.pick.precisionConsensusFloor ?? -999) - Number(a.pick.precisionConsensusFloor ?? -999) ||
-      Number(b.pick.hitFirstDataQuality ?? -999) - Number(a.pick.hitFirstDataQuality ?? -999) ||
-      Number(b.pick.precisionConsensusMean ?? -999) - Number(a.pick.precisionConsensusMean ?? -999)
-    )
-    .slice(0, 1);
-
-  const currentSlateRankIndex = slateTopRows.findIndex((row) => row.identity === currentSlateIdentity);
-  const currentSlatePromotion =
-    currentSlateCandidate && currentSlateRankIndex >= 0
-      ? promoteBaseballSlateTopPick(
-          currentSlateCandidate.pick,
-          currentSlateRankIndex + 1,
-          currentSlateCandidate.slateScore
-        )
-      : null;
+  const currentSlatePromotion = currentSlateCandidate
+    ? promoteBaseballSlateTopPick(currentSlateCandidate.pick, 1, currentSlateCandidate.slateScore)
+    : null;
 
   const isSoccerSport = currentSport === "축구";
   const currentSoccerCandidate =
     isSoccerSport && analysisFactors.hasRealData
       ? bestSoccerSlateCandidate(actualMarketPicksBase)
       : null;
-  const otherSoccerCandidates =
-    isSoccerSport && selectedSlateDate
-      ? liveTrackerRecords
-          .filter((record) =>
-            record.sport === "축구" &&
-            record.verificationStatus === "PENDING" &&
-            record.betmanIdentity !== selectedSoccerTrackerIdentity &&
-            kstDateKeyFromMs(record.startMs) === selectedSlateDate &&
-            record.startMs >= Date.now() - 30 * 60 * 1000 &&
-            (record.marketResults?.length ?? 0) > 0
-          )
-          .map((record) => {
-            const candidate = bestSoccerSlateCandidate(trackerMarketPickSnapshots(record));
-            return candidate ? { id: record.id, identity: record.betmanIdentity ?? record.id, ...candidate } : null;
-          })
-          .filter((row): row is NonNullable<typeof row> => row !== null)
-      : [];
-  const currentSoccerIdentity = selectedSoccerTrackerIdentity || `soccer:${selectedStartMs}`;
-  const soccerTopRows = [
-    ...otherSoccerCandidates,
-    ...(currentSoccerCandidate
-      ? [{ id: `current:${currentSoccerIdentity}`, identity: currentSoccerIdentity, ...currentSoccerCandidate }]
-      : []),
-  ]
-    .sort((a, b) =>
-      b.slateScore - a.slateScore ||
-      Number(b.pick.precisionConsensusFloor ?? -999) - Number(a.pick.precisionConsensusFloor ?? -999) ||
-      Number(b.pick.soccerDataQuality ?? -999) - Number(a.pick.soccerDataQuality ?? -999)
-    )
-    .slice(0, 1);
-  const currentSoccerRankIndex = soccerTopRows.findIndex((row) => row.identity === currentSoccerIdentity);
-  const currentSoccerPromotion =
-    currentSoccerCandidate && currentSoccerRankIndex >= 0
-      ? promoteSoccerSlateTopPick(currentSoccerCandidate.pick, currentSoccerRankIndex + 1, currentSoccerCandidate.slateScore)
-      : null;
+  const currentSoccerPromotion = currentSoccerCandidate
+    ? promoteSoccerSlateTopPick(currentSoccerCandidate.pick, 1, currentSoccerCandidate.slateScore)
+    : null;
 
   const isCourtSport = currentSport === "농구" || currentSport === "배구";
-  const selectedCourtTrackerIdentity =
-    isCourtSport && selectedBetman
-      ? actualGameIdentity(selectedBetman)
-      : "";
   const currentCourtCandidate =
     isCourtSport && analysisFactors.hasRealData
       ? bestCourtSlateCandidate(actualMarketPicksBase)
       : null;
-  const otherCourtCandidates =
-    isCourtSport && selectedSlateDate
-      ? liveTrackerRecords
-          .filter((record) =>
-            record.sport === currentSport &&
-            record.verificationStatus === "PENDING" &&
-            record.betmanIdentity !== selectedCourtTrackerIdentity &&
-            kstDateKeyFromMs(record.startMs) === selectedSlateDate &&
-            record.startMs >= Date.now() - 30 * 60 * 1000 &&
-            (record.marketResults?.length ?? 0) > 0
-          )
-          .map((record) => {
-            const candidate = bestCourtSlateCandidate(trackerMarketPickSnapshots(record));
-            return candidate
-              ? { id: record.id, identity: record.betmanIdentity ?? record.id, ...candidate }
-              : null;
-          })
-          .filter((row): row is NonNullable<typeof row> => row !== null)
-      : [];
-  const currentCourtIdentity = selectedCourtTrackerIdentity || `court:${selectedStartMs}`;
-  const courtTopRows = [
-    ...otherCourtCandidates,
-    ...(currentCourtCandidate
-      ? [{ id: `current:${currentCourtIdentity}`, identity: currentCourtIdentity, ...currentCourtCandidate }]
-      : []),
-  ]
-    .sort((a, b) =>
-      b.slateScore - a.slateScore ||
-      Number(b.pick.precisionConsensusFloor ?? -999) - Number(a.pick.precisionConsensusFloor ?? -999) ||
-      Number(b.pick.courtDataQuality ?? -999) - Number(a.pick.courtDataQuality ?? -999)
-    )
-    .slice(0, 1);
-  const currentCourtRankIndex = courtTopRows.findIndex((row) => row.identity === currentCourtIdentity);
-  const currentCourtPromotion =
-    currentCourtCandidate && currentCourtRankIndex >= 0
-      ? promoteCourtSlateTopPick(currentCourtCandidate.pick, currentCourtRankIndex + 1, currentCourtCandidate.slateScore)
-      : null;
+  const currentCourtPromotion = currentCourtCandidate
+    ? promoteCourtSlateTopPick(currentCourtCandidate.pick, 1, currentCourtCandidate.slateScore)
+    : null;
 
   const actualMarketPicks =
     currentSport === "야구" && analysisFactors.baseballAnalysisStage === "READY"
@@ -17604,7 +17482,7 @@ export default function Home() {
               ...pick,
               valueGrade: "WATCH" as ValueGrade,
               valueGradeScore: Math.min(pick.valueGradeScore, 67.9),
-              valueGradeReason: `CONTINUOUS TOP1: 오늘 1위 후보 미선정 · ${pick.valueGradeReason}`,
+              valueGradeReason: `GAME TOP1: 경기 TOP1 미선정 · ${pick.valueGradeReason}`,
               stageGradeLabel: "CONTINUOUS WATCH",
             };
           }
@@ -17620,7 +17498,7 @@ export default function Home() {
                 ...pick,
                 valueGrade: "WATCH" as ValueGrade,
                 valueGradeScore: Math.min(pick.valueGradeScore, 77.9),
-                valueGradeReason: `FOOTBALL TOP1: 오늘 1위 후보 미선정 · ${pick.valueGradeReason}`,
+                valueGradeReason: `FOOTBALL GAME TOP1: 경기 TOP1 미선정 · ${pick.valueGradeReason}`,
                 stageGradeLabel: "FOOTBALL WATCH",
               };
             }
@@ -17636,7 +17514,7 @@ export default function Home() {
                 ...pick,
                 valueGrade: "WATCH" as ValueGrade,
                 valueGradeScore: Math.min(pick.valueGradeScore, 79.9),
-                valueGradeReason: `COURT TOP1: 오늘 1위 후보 미선정 · ${pick.valueGradeReason}`,
+                valueGradeReason: `COURT GAME TOP1: 경기 TOP1 미선정 · ${pick.valueGradeReason}`,
                 stageGradeLabel: "COURT WATCH",
               };
             }
@@ -18320,14 +18198,6 @@ export default function Home() {
         : isCourtSport && currentCourtCandidate
           ? courtContinuousTopTier(currentCourtCandidate.slateScore)
           : null;
-  const currentContinuousIsDailyTop1 =
-    currentSport === "야구"
-      ? Boolean(currentSlateCandidate && currentSlateRankIndex >= 0)
-      : isSoccerSport
-        ? Boolean(currentSoccerCandidate && currentSoccerRankIndex >= 0)
-        : isCourtSport
-          ? Boolean(currentCourtCandidate && currentCourtRankIndex >= 0)
-          : false;
   const currentContinuousTopScore =
     currentSport === "야구" && currentSlateCandidate
       ? currentSlateCandidate.slateScore
@@ -19000,7 +18870,7 @@ export default function Home() {
     const precision90Records = liveTrackerRecords.filter(
       (record) =>
         record.sport === "야구" &&
-        ["V13.9.04_SOFT_STRENGTH_SLATE_TOP2", "V13.9.06_CORRELATION_SAMPLE_GUARD", "V13.9.07_STICKY_READY_QUALITY_AUDIT", "V13.9.08_VENUE_SAMPLE_CONFIDENCE_GUARD", "V13.9.09_FINAL_SEASON_TOP1_LOCK", "V13.9.10_CONTINUOUS_TOP1"].includes(String(record.recommendationEngineVersion ?? "")) &&
+        ["V13.9.04_SOFT_STRENGTH_SLATE_TOP2", "V13.9.06_CORRELATION_SAMPLE_GUARD", "V13.9.07_STICKY_READY_QUALITY_AUDIT", "V13.9.08_VENUE_SAMPLE_CONFIDENCE_GUARD", "V13.9.09_FINAL_SEASON_TOP1_LOCK", "V13.9.10_CONTINUOUS_TOP1", "V13.12.01_GAME_TOP1_PER_MATCH"].includes(String(record.recommendationEngineVersion ?? "")) &&
         record.verificationStatus === "VERIFIED"
     );
     const precision90Ids = new Set(precision90Records.map((record) => record.id));
@@ -19383,11 +19253,11 @@ export default function Home() {
         gateVersion: "FALLBACK_GATE_V2",
         recommendationEngineVersion:
           currentSport === "야구"
-            ? "V13.9.10_CONTINUOUS_TOP1"
+            ? "V13.12.01_GAME_TOP1_PER_MATCH"
             : currentSport === "축구"
-              ? "V13.11.00_FOOTBALL_WORLD_TOP1"
+              ? "V13.12.01_GAME_TOP1_PER_MATCH"
               : currentSport === "농구" || currentSport === "배구"
-                ? "V13.12.00_COURT_DATA_ACCUMULATOR"
+                ? "V13.12.01_GAME_TOP1_PER_MATCH"
                 : undefined,
         decision: trackerPicks.length ? "PICK" : "PASS",
         picks: trackerPicks,
@@ -19501,17 +19371,18 @@ export default function Home() {
   ]);
 
   /*
-   * V13.9.10 continuous daily TOP1 rebalance. Every READY game gets a ranked candidate; only "실전 추천" TOP1 is stored as an official PICK.
-   * Every READY/PENDING baseball record keeps all marketResults.  As more games are
-   * analysed, re-rank the best candidate per game and keep at most one PICK record
-   * per KST date.  This prevents an early analysed game from remaining selected after
-   * a clearly stronger later game enters the slate.
+   * V13.12.01 GAME TOP1 PER MATCH.
+   * 날짜 전체에서 한 경기만 고르지 않는다. READY/PENDING 각 경기 내부에서
+   * full-game 후보를 독립 비교하고 TOP1 하나를 고정한다.
+   * TOP1 tier가 "실전 추천"인 경우에만 공식 PICK/VALUE로 저장하고,
+   * 약추천/관망은 marketResults의 GAME TOP1 스냅샷으로 유지해 별도 검증한다.
    */
   useEffect(() => {
     if (backtestMode || !liveTrackerRecords.length) return;
 
     const now = Date.now();
-    const groups = new Map<string, LiveTrackerRecord[]>();
+    const desired = new Map<string, LiveTrackerPick | null>();
+
     for (const record of liveTrackerRecords) {
       if (
         record.sport !== "야구" ||
@@ -19519,64 +19390,37 @@ export default function Home() {
         record.venueShadow?.stage !== "READY" ||
         record.startMs < now - 30 * 60 * 1000
       ) continue;
-      const dateKey = kstDateKeyFromMs(record.startMs);
-      if (!dateKey) continue;
-      const rows = groups.get(dateKey) ?? [];
-      rows.push(record);
-      groups.set(dateKey, rows);
-    }
 
-    const desired = new Map<string, LiveTrackerPick | null>();
-    for (const records of groups.values()) {
-      const ranked = records
-        .map((record) => {
-          const candidate = bestBaseballHitFirstSlateCandidate(trackerMarketPickSnapshots(record));
-          return candidate ? { record, ...candidate } : null;
-        })
-        .filter((row): row is NonNullable<typeof row> => row !== null)
-        .sort((a, b) =>
-          b.slateScore - a.slateScore ||
-          Number(b.pick.precisionConsensusFloor ?? -999) - Number(a.pick.precisionConsensusFloor ?? -999) ||
-          Number(b.pick.precisionConsensusMean ?? -999) - Number(a.pick.precisionConsensusMean ?? -999)
-        );
-
-      const rankById = new Map(ranked.slice(0, 1).map((row, index) => [row.record.id, index + 1]));
-      const candidateById = new Map(ranked.map((row) => [row.record.id, row]));
-
-      for (const record of records) {
-        const rank = rankById.get(record.id);
-        const candidate = candidateById.get(record.id);
-        if (!rank || !candidate) {
-          desired.set(record.id, null);
-          continue;
-        }
-
-        const source = (record.marketResults ?? []).find((pick) => pick.key === candidate.pick.key) ?? null;
-        if (!source) {
-          desired.set(record.id, null);
-          continue;
-        }
-        const promoted = promoteBaseballSlateTopPick(candidate.pick, rank, candidate.slateScore);
-        if (promoted.valueGrade !== "VALUE" && promoted.valueGrade !== "STRONG VALUE") {
-          desired.set(record.id, null);
-          continue;
-        }
-        desired.set(record.id, {
-          ...source,
-          probability: promoted.probability,
-          odds: promoted.odds,
-          marketProbability: promoted.marketProbability,
-          edge: promoted.edge,
-          expectedValue: promoted.expectedValue,
-          grade: promoted.valueGrade,
-          confidenceGrade: promoted.confidenceGrade,
-          recommendationScore: promoted.recommendationScore,
-          modelSnapshot: promoted,
-          resultStatus: source.resultStatus ?? "PENDING",
-          actualLabel: source.actualLabel ?? null,
-          resultNote: source.resultNote ?? null,
-        });
+      const candidate = bestBaseballHitFirstSlateCandidate(trackerMarketPickSnapshots(record));
+      if (!candidate) {
+        desired.set(record.id, null);
+        continue;
       }
+      const source = (record.marketResults ?? []).find((pick) => pick.key === candidate.pick.key) ?? null;
+      if (!source) {
+        desired.set(record.id, null);
+        continue;
+      }
+      const promoted = promoteBaseballSlateTopPick(candidate.pick, 1, candidate.slateScore);
+      if (promoted.valueGrade !== "VALUE" && promoted.valueGrade !== "STRONG VALUE") {
+        desired.set(record.id, null);
+        continue;
+      }
+      desired.set(record.id, {
+        ...source,
+        probability: promoted.probability,
+        odds: promoted.odds,
+        marketProbability: promoted.marketProbability,
+        edge: promoted.edge,
+        expectedValue: promoted.expectedValue,
+        grade: promoted.valueGrade,
+        confidenceGrade: promoted.confidenceGrade,
+        recommendationScore: promoted.recommendationScore,
+        modelSnapshot: promoted,
+        resultStatus: source.resultStatus ?? "PENDING",
+        actualLabel: source.actualLabel ?? null,
+        resultNote: source.resultNote ?? null,
+      });
     }
 
     let changed = false;
@@ -19592,14 +19436,14 @@ export default function Home() {
       });
       const afterSig = JSON.stringify({
         decision: nextDecision,
-        engine: "V13.9.10_CONTINUOUS_TOP1",
+        engine: "V13.12.01_GAME_TOP1_PER_MATCH",
         picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
       });
       if (beforeSig === afterSig) return record;
       changed = true;
       return {
         ...record,
-        recommendationEngineVersion: "V13.9.10_CONTINUOUS_TOP1",
+        recommendationEngineVersion: "V13.12.01_GAME_TOP1_PER_MATCH",
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -19611,11 +19455,12 @@ export default function Home() {
     }
   }, [backtestMode, liveTrackerRecords]);
 
-  /* V13.11.00: 축구도 같은 KST 날짜에서 전체 프로/해외축구 중 하루 TOP1만 공식 PICK으로 유지한다. */
+  /* V13.12.01: 축구도 경기별 독립 TOP1. */
   useEffect(() => {
     if (backtestMode || !liveTrackerRecords.length) return;
     const now = Date.now();
-    const groups = new Map<string, LiveTrackerRecord[]>();
+    const desired = new Map<string, LiveTrackerPick | null>();
+
     for (const record of liveTrackerRecords) {
       if (
         record.sport !== "축구" ||
@@ -19623,59 +19468,37 @@ export default function Home() {
         record.startMs < now - 30 * 60 * 1000 ||
         !(record.marketResults?.length)
       ) continue;
-      const dateKey = kstDateKeyFromMs(record.startMs);
-      if (!dateKey) continue;
-      const rows = groups.get(dateKey) ?? [];
-      rows.push(record);
-      groups.set(dateKey, rows);
-    }
 
-    const desired = new Map<string, LiveTrackerPick | null>();
-    for (const records of groups.values()) {
-      const ranked = records
-        .map((record) => {
-          const candidate = bestSoccerSlateCandidate(trackerMarketPickSnapshots(record));
-          return candidate ? { record, ...candidate } : null;
-        })
-        .filter((row): row is NonNullable<typeof row> => row !== null)
-        .sort((a, b) =>
-          b.slateScore - a.slateScore ||
-          Number(b.pick.precisionConsensusFloor ?? -999) - Number(a.pick.precisionConsensusFloor ?? -999) ||
-          Number(b.pick.soccerDataQuality ?? -999) - Number(a.pick.soccerDataQuality ?? -999)
-        );
-
-      const leader = ranked[0] ?? null;
-      for (const record of records) {
-        if (!leader || leader.record.id !== record.id) {
-          desired.set(record.id, null);
-          continue;
-        }
-        const source = (record.marketResults ?? []).find((pick) => pick.key === leader.pick.key) ?? null;
-        if (!source) {
-          desired.set(record.id, null);
-          continue;
-        }
-        const promoted = promoteSoccerSlateTopPick(leader.pick, 1, leader.slateScore);
-        if (promoted.valueGrade !== "VALUE" && promoted.valueGrade !== "STRONG VALUE") {
-          desired.set(record.id, null);
-          continue;
-        }
-        desired.set(record.id, {
-          ...source,
-          probability: promoted.probability,
-          odds: promoted.odds,
-          marketProbability: promoted.marketProbability,
-          edge: promoted.edge,
-          expectedValue: promoted.expectedValue,
-          grade: promoted.valueGrade,
-          confidenceGrade: promoted.confidenceGrade,
-          recommendationScore: promoted.recommendationScore,
-          modelSnapshot: promoted,
-          resultStatus: source.resultStatus ?? "PENDING",
-          actualLabel: source.actualLabel ?? null,
-          resultNote: source.resultNote ?? null,
-        });
+      const candidate = bestSoccerSlateCandidate(trackerMarketPickSnapshots(record));
+      if (!candidate) {
+        desired.set(record.id, null);
+        continue;
       }
+      const source = (record.marketResults ?? []).find((pick) => pick.key === candidate.pick.key) ?? null;
+      if (!source) {
+        desired.set(record.id, null);
+        continue;
+      }
+      const promoted = promoteSoccerSlateTopPick(candidate.pick, 1, candidate.slateScore);
+      if (promoted.valueGrade !== "VALUE" && promoted.valueGrade !== "STRONG VALUE") {
+        desired.set(record.id, null);
+        continue;
+      }
+      desired.set(record.id, {
+        ...source,
+        probability: promoted.probability,
+        odds: promoted.odds,
+        marketProbability: promoted.marketProbability,
+        edge: promoted.edge,
+        expectedValue: promoted.expectedValue,
+        grade: promoted.valueGrade,
+        confidenceGrade: promoted.confidenceGrade,
+        recommendationScore: promoted.recommendationScore,
+        modelSnapshot: promoted,
+        resultStatus: source.resultStatus ?? "PENDING",
+        actualLabel: source.actualLabel ?? null,
+        resultNote: source.resultNote ?? null,
+      });
     }
 
     let changed = false;
@@ -19691,14 +19514,14 @@ export default function Home() {
       });
       const afterSig = JSON.stringify({
         decision: nextDecision,
-        engine: "V13.11.00_FOOTBALL_WORLD_TOP1",
+        engine: "V13.12.01_GAME_TOP1_PER_MATCH",
         picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
       });
       if (beforeSig === afterSig) return record;
       changed = true;
       return {
         ...record,
-        recommendationEngineVersion: "V13.11.00_FOOTBALL_WORLD_TOP1",
+        recommendationEngineVersion: "V13.12.01_GAME_TOP1_PER_MATCH",
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -19710,12 +19533,12 @@ export default function Home() {
     }
   }, [backtestMode, liveTrackerRecords]);
 
-  /* V13.10.00: 농구/NBA/배구도 같은 날짜·같은 종목에서 하루 TOP1만 공식 PICK으로 유지한다. */
+  /* V13.12.01: 농구/NBA/배구도 경기별 독립 TOP1. */
   useEffect(() => {
     if (backtestMode || !liveTrackerRecords.length) return;
-
     const now = Date.now();
-    const groups = new Map<string, LiveTrackerRecord[]>();
+    const desired = new Map<string, LiveTrackerPick | null>();
+
     for (const record of liveTrackerRecords) {
       if (
         (record.sport !== "농구" && record.sport !== "배구") ||
@@ -19723,60 +19546,37 @@ export default function Home() {
         record.startMs < now - 30 * 60 * 1000 ||
         !(record.marketResults?.length)
       ) continue;
-      const dateKey = kstDateKeyFromMs(record.startMs);
-      if (!dateKey) continue;
-      const groupKey = `${dateKey}|${record.sport}`;
-      const rows = groups.get(groupKey) ?? [];
-      rows.push(record);
-      groups.set(groupKey, rows);
-    }
 
-    const desired = new Map<string, LiveTrackerPick | null>();
-    for (const records of groups.values()) {
-      const ranked = records
-        .map((record) => {
-          const candidate = bestCourtSlateCandidate(trackerMarketPickSnapshots(record));
-          return candidate ? { record, ...candidate } : null;
-        })
-        .filter((row): row is NonNullable<typeof row> => row !== null)
-        .sort((a, b) =>
-          b.slateScore - a.slateScore ||
-          Number(b.pick.precisionConsensusFloor ?? -999) - Number(a.pick.precisionConsensusFloor ?? -999) ||
-          Number(b.pick.courtDataQuality ?? -999) - Number(a.pick.courtDataQuality ?? -999)
-        );
-
-      const leader = ranked[0] ?? null;
-      for (const record of records) {
-        if (!leader || leader.record.id !== record.id) {
-          desired.set(record.id, null);
-          continue;
-        }
-        const source = (record.marketResults ?? []).find((pick) => pick.key === leader.pick.key) ?? null;
-        if (!source) {
-          desired.set(record.id, null);
-          continue;
-        }
-        const promoted = promoteCourtSlateTopPick(leader.pick, 1, leader.slateScore);
-        if (promoted.valueGrade !== "VALUE" && promoted.valueGrade !== "STRONG VALUE") {
-          desired.set(record.id, null);
-          continue;
-        }
-        desired.set(record.id, {
-          ...source,
-          probability: promoted.probability,
-          odds: promoted.odds,
-          marketProbability: promoted.marketProbability,
-          edge: promoted.edge,
-          expectedValue: promoted.expectedValue,
-          grade: promoted.valueGrade,
-          confidenceGrade: promoted.confidenceGrade,
-          recommendationScore: promoted.recommendationScore,
-          modelSnapshot: promoted,
-          resultStatus: source.resultStatus ?? "PENDING",
-          actualLabel: source.actualLabel ?? null,
-          resultNote: source.resultNote ?? null,
-        });
+      const candidate = bestCourtSlateCandidate(trackerMarketPickSnapshots(record));
+      if (!candidate) {
+        desired.set(record.id, null);
+        continue;
       }
+      const source = (record.marketResults ?? []).find((pick) => pick.key === candidate.pick.key) ?? null;
+      if (!source) {
+        desired.set(record.id, null);
+        continue;
+      }
+      const promoted = promoteCourtSlateTopPick(candidate.pick, 1, candidate.slateScore);
+      if (promoted.valueGrade !== "VALUE" && promoted.valueGrade !== "STRONG VALUE") {
+        desired.set(record.id, null);
+        continue;
+      }
+      desired.set(record.id, {
+        ...source,
+        probability: promoted.probability,
+        odds: promoted.odds,
+        marketProbability: promoted.marketProbability,
+        edge: promoted.edge,
+        expectedValue: promoted.expectedValue,
+        grade: promoted.valueGrade,
+        confidenceGrade: promoted.confidenceGrade,
+        recommendationScore: promoted.recommendationScore,
+        modelSnapshot: promoted,
+        resultStatus: source.resultStatus ?? "PENDING",
+        actualLabel: source.actualLabel ?? null,
+        resultNote: source.resultNote ?? null,
+      });
     }
 
     let changed = false;
@@ -19792,14 +19592,14 @@ export default function Home() {
       });
       const afterSig = JSON.stringify({
         decision: nextDecision,
-        engine: "V13.12.00_COURT_DATA_ACCUMULATOR",
+        engine: "V13.12.01_GAME_TOP1_PER_MATCH",
         picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
       });
       if (beforeSig === afterSig) return record;
       changed = true;
       return {
         ...record,
-        recommendationEngineVersion: "V13.12.00_COURT_DATA_ACCUMULATOR",
+        recommendationEngineVersion: "V13.12.01_GAME_TOP1_PER_MATCH",
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -24682,7 +24482,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.00 · COURT DATA ACCUMULATOR</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.01 · GAME TOP1 PER MATCH</div>
         </div>
         <div className="bar">
           <button
@@ -26203,7 +26003,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.00 COURT DATA ACCUMULATOR · KBL/WKBL/NBA VERIFIED 종료점수 누적 → 최근5/장소표본 자동 재사용 · 기존 야구/축구/배구 TOP1 유지</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.01 GAME TOP1 PER MATCH · 모든 야구/축구/농구/NBA/배구 경기는 자기 경기 내부에서 TOP1 1개를 독립 산출 · 일일 1경기 제한 없음</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 축구는 SportsAPI/Naver에서 최근 득실과 홈·원정 장소표본을 확보한 경기를 공통 Poisson 기반으로 계산하고, K리그/J리그·유럽 5대리그·UEFA 대회·MLS는 리그별 중립 득점 prior를 적용합니다. 선발 11+11은 λ를 임의 변경하지 않고 데이터품질에 soft 반영하며, alias가 없는 기타 리그도 동일경기 매칭이 되면 OTHER 프로필로 분석합니다.
               </div>
@@ -26935,7 +26735,7 @@ export default function Home() {
                 <div className="label">
                   현재 최고 적중우선픽
                   {currentContinuousTopTier
-                    ? ` · ${currentContinuousIsDailyTop1 ? "오늘 TOP1" : "경기 TOP1"} · ${currentContinuousTopTier}`
+                    ? ` · 경기 TOP1 · ${currentContinuousTopTier}`
                     : bestDisplayPick
                       ? ` · ${bestDisplayPick.valueGrade}`
                       : ""}
@@ -27094,14 +26894,14 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="notice" style={{ margin: "8px 0 0" }}>
-                  K리그/J리그와 EPL·LaLiga·Serie A·Bundesliga·Ligue 1·UEFA 대회·MLS를 리그별 득점 prior로 구분하고, 최근 득실·홈/원정 장소표본·시장확률·선발 XI 확보·모델강도를 연속 점수로 반영합니다. full-game 승무패/핸디/U/O에서 항상 경기 TOP1을 만들고 같은 KST 날짜 축구 전체에서 하루 TOP1을 따로 선정합니다. TOP1점수 78 이상만 공식 VALUE, 72~77.9는 약추천, 그 미만은 관망입니다.
+                  K리그/J리그와 EPL·LaLiga·Serie A·Bundesliga·Ligue 1·UEFA 대회·MLS를 리그별 득점 prior로 구분하고, 최근 득실·홈/원정 장소표본·시장확률·선발 XI 확보·모델강도를 연속 점수로 반영합니다. full-game 승무패/핸디/U/O에서 각 경기마다 독립적으로 경기 TOP1을 1개 산출합니다. 다른 경기 점수 때문에 현재 경기 TOP1이 취소되거나 강등되지 않습니다. TOP1점수 78 이상만 공식 VALUE, 72~77.9는 약추천, 그 미만은 관망입니다.
                 </div>
               </div>
             )}
 
             {isCourtSport && currentCourtProfile && (
               <div className="section" style={{ marginTop: 0, marginBottom: 8 }}>
-                <h3>V13.12.00 COURT DATA ACCUMULATOR · {currentCourtProfile.label}</h3>
+                <h3>V13.12.01 COURT DATA + GAME TOP1 · {currentCourtProfile.label}</h3>
                 <div className="cards">
                   <div className="card">
                     모델 단위
@@ -29473,7 +29273,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.11.00 FOOTBALL WORLD TOP1은 기존 야구/COURT 연속 TOP1을 유지하면서 프로축구·해외축구에도 full-game TOP1을 확장합니다. 축구는 리그별 득점 prior와 최근 득실·장소표본·시장확률·선발 XI·모델강도를 soft score로 합쳐 승무패/핸디/UO를 비교하며, TOP1점수 78 이상만 공식 VALUE, 72~77.9는 약추천, 그 미만은 관망입니다. 농구는 V13.12.00 VERIFIED HISTORY 누적을 추가하고, 배구는 V13.10.00 기준을 유지합니다.
+                    V13.12.01 GAME TOP1 PER MATCH는 야구/축구/농구/NBA/배구 모든 경기에서 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 축구는 리그별 득점 prior와 최근 득실·장소표본·시장확률·선발 XI·모델강도를 soft score로 합쳐 승무패/핸디/UO를 비교하며, TOP1점수 78 이상만 공식 VALUE, 72~77.9는 약추천, 그 미만은 관망입니다. 농구는 V13.12.00 VERIFIED HISTORY 누적을 추가하고, 배구는 V13.10.00 기준을 유지합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
