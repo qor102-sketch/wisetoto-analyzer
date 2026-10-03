@@ -1,4 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
+// V13.12.00 COURT DATA ACCUMULATOR: verified KBL/WKBL/NBA finals are reused as persistent recent/venue scoring history; collector audit added
 // V13.11.00 FOOTBALL WORLD TOP1: K League/J League + major overseas football leagues/cups, league scoring priors, soft data-quality ranking, continuous full-game TOP1
 // V13.10.00 COURT SPORTS TOP1: KBL/WKBL/NBA + KOVO basketball/volleyball full-game market models, continuous TOP1, league priors and soft data-quality ranking
 // V13.9.10 FINAL-SEASON CONTINUOUS TOP1: always rank one full-game candidate; quality/risk are soft penalties; only high-score TOP1 becomes official VALUE
@@ -4622,6 +4623,205 @@ function recentFormAuditRows(
     .sort((a, b) => b.time - a.time)
     .slice(0, maxGames)
     .map(({ time: _time, ...row }) => row);
+}
+
+/*
+ * V13.12.00 COURT DATA ACCUMULATOR
+ * 농구는 시즌 초 SportsAPI current-season recent가 0/0일 수 있다.
+ * 이미 PRE 잠금 후 VERIFY까지 끝난 실전 tracker 결과를 팀별 경기 이력으로 재사용해
+ * 이후 경기의 최근 5경기/홈·원정 장소표본을 실제 종료점수로 채운다.
+ * - 결과가 확정된 VERIFIED 농구 경기만 사용
+ * - 현재 경기 시작시각 이후 결과는 절대 사용하지 않음
+ * - 같은 리그그룹(KBL/WKBL/NBA)만 합침
+ * - API recentSummary가 있으면 삭제하지 않고 tracker 이력을 dedupe 후 보강
+ */
+type CourtHistoryAudit = {
+  source: "LIVE_TRACKER_VERIFIED";
+  leagueGroup: string;
+  eligibleVerifiedGames: number;
+  homeHistoryGames: number;
+  awayHistoryGames: number;
+  homeVenueGames: number;
+  awayVenueGames: number;
+  homeLatestAt: number | null;
+  awayLatestAt: number | null;
+};
+
+function courtCanonicalTeam(value: unknown) {
+  const raw = String(value ?? "").trim();
+  const aliased = sportsApiTeamName(raw);
+  return normalizeTeamName(aliased || raw);
+}
+
+function sameCourtTeam(a: unknown, b: unknown) {
+  const ca = courtCanonicalTeam(a);
+  const cb = courtCanonicalTeam(b);
+  if (ca && cb && ca === cb) return true;
+  const ra = String(a ?? "").trim();
+  const rb = String(b ?? "").trim();
+  return teamSimilarity(ra, rb) >= 0.72 || teamSimilarity(aliasedCourtName(ra), aliasedCourtName(rb)) >= 0.72;
+}
+
+function aliasedCourtName(value: string) {
+  return sportsApiTeamName(value) || value;
+}
+
+function courtLeagueGroupForRaw(leagueRaw: unknown, homeName: unknown = "", awayName: unknown = "") {
+  return courtLeagueProfile("농구", `${String(leagueRaw ?? "")} ${String(homeName ?? "")} ${String(awayName ?? "")}`)?.group ?? "OTHER";
+}
+
+function trackerRecordCourtGroup(record: LiveTrackerRecord) {
+  return courtLeagueGroupForRaw(record.league, record.home, record.away);
+}
+
+function trackerRecordToCourtFixture(record: LiveTrackerRecord) {
+  const homeScore = Number(record.result?.homeScore);
+  const awayScore = Number(record.result?.awayScore);
+  if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) return null;
+  return {
+    id: record.id,
+    startTime: new Date(record.startMs).toISOString(),
+    date: new Date(record.startMs).toISOString(),
+    home: record.home,
+    away: record.away,
+    homeScore,
+    awayScore,
+    score: { home: homeScore, away: awayScore },
+    source: "LIVE_TRACKER_VERIFIED",
+  };
+}
+
+function courtTeamFromFixtures(teamName: string, fixtures: any[]): RecentTeam {
+  const ordered = [...fixtures]
+    .filter(Boolean)
+    .sort((a, b) => fixtureTimeMs(b) - fixtureTimeMs(a))
+    .slice(0, 30);
+  const stub: RecentTeam = { teamName, fixtures: ordered };
+  const rows = recentFormAuditRows(stub, 5);
+  const wins = rows.filter((row) => row.result === "W").length;
+  const draws = rows.filter((row) => row.result === "D").length;
+  const losses = rows.filter((row) => row.result === "L").length;
+  const scored = rows.reduce((sum, row) => sum + row.scored, 0);
+  const conceded = rows.reduce((sum, row) => sum + row.conceded, 0);
+  const played = rows.length;
+  return {
+    teamName,
+    fixtures: ordered,
+    form: {
+      played,
+      wins,
+      draws,
+      losses,
+      scored,
+      conceded,
+      goalDifference: scored - conceded,
+      points: wins * 2 + draws,
+      formPercent: played > 0 ? (wins / played) * 100 : null,
+    },
+  };
+}
+
+function courtTrackerRecentSummary(
+  records: LiveTrackerRecord[],
+  homeName: string,
+  awayName: string,
+  leagueRaw: unknown,
+  cutoffMs: number
+): { recentSummary: RecentSummary | null; audit: CourtHistoryAudit } {
+  const leagueGroup = courtLeagueGroupForRaw(leagueRaw, homeName, awayName);
+  const eligible = records
+    .filter((record) =>
+      record.verificationStatus === "VERIFIED" &&
+      koreanSport(record.sport) === "농구" &&
+      Boolean(record.result) &&
+      Number.isFinite(record.startMs) &&
+      record.startMs < cutoffMs &&
+      trackerRecordCourtGroup(record) === leagueGroup
+    )
+    .sort((a, b) => b.startMs - a.startMs);
+
+  const homeRecords = eligible.filter((record) => sameCourtTeam(record.home, homeName) || sameCourtTeam(record.away, homeName));
+  const awayRecords = eligible.filter((record) => sameCourtTeam(record.home, awayName) || sameCourtTeam(record.away, awayName));
+
+  const homeFixtures = homeRecords.map(trackerRecordToCourtFixture).filter(Boolean) as any[];
+  const awayFixtures = awayRecords.map(trackerRecordToCourtFixture).filter(Boolean) as any[];
+  const homeTeam = courtTeamFromFixtures(homeName, homeFixtures);
+  const awayTeam = courtTeamFromFixtures(awayName, awayFixtures);
+  const homeVenueGames = venueAuditRows(homeTeam, "home", 5).length;
+  const awayVenueGames = venueAuditRows(awayTeam, "away", 5).length;
+
+  const audit: CourtHistoryAudit = {
+    source: "LIVE_TRACKER_VERIFIED",
+    leagueGroup,
+    eligibleVerifiedGames: eligible.length,
+    homeHistoryGames: homeFixtures.length,
+    awayHistoryGames: awayFixtures.length,
+    homeVenueGames,
+    awayVenueGames,
+    homeLatestAt: homeRecords[0]?.startMs ?? null,
+    awayLatestAt: awayRecords[0]?.startMs ?? null,
+  };
+
+  return {
+    recentSummary: homeFixtures.length || awayFixtures.length
+      ? { home: homeTeam, away: awayTeam }
+      : null,
+    audit,
+  };
+}
+
+function courtFixtureDedupeKey(fixture: any) {
+  const score = fixtureFinalScore(fixture);
+  const time = fixtureTimeMs(fixture);
+  return [
+    Number.isFinite(time) ? Math.round(time / 60000) : "-",
+    courtCanonicalTeam(fixtureTeamName(fixture, "home")),
+    courtCanonicalTeam(fixtureTeamName(fixture, "away")),
+    score?.home ?? "-",
+    score?.away ?? "-",
+  ].join("|");
+}
+
+function mergeCourtRecentTeam(
+  primary: RecentTeam | null | undefined,
+  collected: RecentTeam | null | undefined,
+  fallbackTeamName: string
+): RecentTeam | null {
+  const primaryFixtures = Array.isArray(primary?.fixtures) ? primary!.fixtures! : [];
+  const collectedFixtures = Array.isArray(collected?.fixtures) ? collected!.fixtures! : [];
+  if (!primary && !collected && !primaryFixtures.length && !collectedFixtures.length) return null;
+
+  const byKey = new Map<string, any>();
+  for (const fixture of [...primaryFixtures, ...collectedFixtures]) {
+    const key = courtFixtureDedupeKey(fixture);
+    if (!byKey.has(key)) byKey.set(key, fixture);
+  }
+  const fixtures = Array.from(byKey.values())
+    .sort((a, b) => fixtureTimeMs(b) - fixtureTimeMs(a))
+    .slice(0, 30);
+  const teamName = String(primary?.teamName ?? collected?.teamName ?? fallbackTeamName).trim() || fallbackTeamName;
+  const rebuilt = courtTeamFromFixtures(teamName, fixtures);
+  if (!fixtures.length && primary?.form) {
+    rebuilt.form = primary.form;
+  }
+  return {
+    ...primary,
+    ...rebuilt,
+    teamId: primary?.teamId ?? collected?.teamId ?? null,
+  };
+}
+
+function mergeCourtRecentSummary(
+  primary: RecentSummary | null | undefined,
+  collected: RecentSummary | null | undefined,
+  homeName: string,
+  awayName: string
+): RecentSummary | null {
+  if (!primary && !collected) return null;
+  return {
+    home: mergeCourtRecentTeam(primary?.home, collected?.home, homeName),
+    away: mergeCourtRecentTeam(primary?.away, collected?.away, awayName),
+  };
 }
 
 type VenueRobustShadow = {
@@ -11563,7 +11763,7 @@ function promoteCourtSlateTopPick(pick: MarketPick, rank: number, slateScore: nu
     valueGradeReason: `COURT TOP${rank} · ${tier} · TOP1점수 ${slateScore.toFixed(1)} · ${profile} · 모델 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
     stageGradeLabel: `COURT TOP${rank} ${tier}`,
     recommendationScore: Number(slateScore.toFixed(1)),
-    detail: `${pick.detail} · V13.10.00 COURT TOP${rank} · ${tier} · CONTINUOUS QUALITY/RISK SCORE`,
+    detail: `${pick.detail} · V13.12.00 COURT TOP${rank} · ${tier} · VERIFIED HISTORY + CONTINUOUS QUALITY/RISK SCORE`,
   };
 }
 
@@ -18047,6 +18247,10 @@ export default function Home() {
     isCourtSport
       ? courtSportsDataQuality(betman.matched, analysisFactors, currentSport)
       : null;
+  const currentCourtHistoryAudit: CourtHistoryAudit | null =
+    currentSport === "농구"
+      ? matched?.courtHistoryAudit ?? null
+      : null;
 
   const displayPicks: Pick[] = actualMarketPicks.length
     ? actualMarketPicks.map((pick) => [
@@ -19183,7 +19387,7 @@ export default function Home() {
             : currentSport === "축구"
               ? "V13.11.00_FOOTBALL_WORLD_TOP1"
               : currentSport === "농구" || currentSport === "배구"
-                ? "V13.10.00_COURT_SPORTS_TOP1"
+                ? "V13.12.00_COURT_DATA_ACCUMULATOR"
                 : undefined,
         decision: trackerPicks.length ? "PICK" : "PASS",
         picks: trackerPicks,
@@ -19588,14 +19792,14 @@ export default function Home() {
       });
       const afterSig = JSON.stringify({
         decision: nextDecision,
-        engine: "V13.10.00_COURT_SPORTS_TOP1",
+        engine: "V13.12.00_COURT_DATA_ACCUMULATOR",
         picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
       });
       if (beforeSig === afterSig) return record;
       changed = true;
       return {
         ...record,
-        recommendationEngineVersion: "V13.10.00_COURT_SPORTS_TOP1",
+        recommendationEngineVersion: "V13.12.00_COURT_DATA_ACCUMULATOR",
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -23783,14 +23987,39 @@ export default function Home() {
             h2h: wisetotoLiveFallback?.h2h?.sample > 0
               ? wisetotoLiveFallback.h2h
               : null,
-            recentSummary:
-              wisetotoLiveFallback?.recentSummary?.home?.form?.played > 0 &&
-              wisetotoLiveFallback?.recentSummary?.away?.form?.played > 0
-                ? wisetotoLiveFallback.recentSummary
-                : naverTodayLineupFallback?.recentSummary?.home?.form?.played > 0 &&
-                    naverTodayLineupFallback?.recentSummary?.away?.form?.played > 0
-                  ? naverTodayLineupFallback.recentSummary
-                  : null,
+            recentSummary: (() => {
+              const primaryRecent =
+                wisetotoLiveFallback?.recentSummary?.home?.form?.played > 0 &&
+                wisetotoLiveFallback?.recentSummary?.away?.form?.played > 0
+                  ? wisetotoLiveFallback.recentSummary
+                  : naverTodayLineupFallback?.recentSummary?.home?.form?.played > 0 &&
+                      naverTodayLineupFallback?.recentSummary?.away?.form?.played > 0
+                    ? naverTodayLineupFallback.recentSummary
+                    : null;
+              if (koreanSport(String((selectedBetman as any)?.sport ?? "")) !== "농구") return primaryRecent;
+              const history = courtTrackerRecentSummary(
+                liveTrackerRecords,
+                String(selectedBetman?.home ?? ""),
+                String(selectedBetman?.away ?? ""),
+                String((selectedBetman as any)?.league ?? (selectedBetman as any)?.leagueName ?? ""),
+                Number.isFinite(selectedStartMs) ? selectedStartMs : Date.now()
+              );
+              return mergeCourtRecentSummary(
+                primaryRecent,
+                history.recentSummary,
+                String(selectedBetman?.home ?? ""),
+                String(selectedBetman?.away ?? "")
+              );
+            })(),
+            courtHistoryAudit: koreanSport(String((selectedBetman as any)?.sport ?? "")) === "농구"
+              ? courtTrackerRecentSummary(
+                  liveTrackerRecords,
+                  String(selectedBetman?.home ?? ""),
+                  String(selectedBetman?.away ?? ""),
+                  String((selectedBetman as any)?.league ?? (selectedBetman as any)?.leagueName ?? ""),
+                  Number.isFinite(selectedStartMs) ? selectedStartMs : Date.now()
+                ).audit
+              : null,
             statistics: null,
             lineups: naverLiveLineups,
             lineupsSource: naverLiveLineups ? naverSource : null,
@@ -24052,12 +24281,37 @@ export default function Home() {
             (wisetotoBaseballPrimary && wisetotoLive?.h2h?.sample > 0
               ? wisetotoLive.h2h
               : detailData?.h2h ?? data?.h2h ?? null),
-          recentSummary:
-            (wisetotoBaseballPrimary && wisetotoLive?.recentSummary?.home?.form?.played > 0 && wisetotoLive?.recentSummary?.away?.form?.played > 0
-              ? wisetotoLive.recentSummary
-              : naverTodayLineup?.recentSummary?.home?.form?.played > 0 && naverTodayLineup?.recentSummary?.away?.form?.played > 0
-                ? naverTodayLineup.recentSummary
-                : detailData?.recentSummary ?? data?.recentSummary ?? null),
+          recentSummary: (() => {
+            const primaryRecent =
+              wisetotoBaseballPrimary && wisetotoLive?.recentSummary?.home?.form?.played > 0 && wisetotoLive?.recentSummary?.away?.form?.played > 0
+                ? wisetotoLive.recentSummary
+                : naverTodayLineup?.recentSummary?.home?.form?.played > 0 && naverTodayLineup?.recentSummary?.away?.form?.played > 0
+                  ? naverTodayLineup.recentSummary
+                  : detailData?.recentSummary ?? data?.recentSummary ?? null;
+            if (koreanSport(String((selectedBetman as any)?.sport ?? "")) !== "농구") return primaryRecent;
+            const history = courtTrackerRecentSummary(
+              liveTrackerRecords,
+              String(selectedBetman?.home ?? detailData?.selectedFixture?.home ?? data?.selectedFixture?.home ?? ""),
+              String(selectedBetman?.away ?? detailData?.selectedFixture?.away ?? data?.selectedFixture?.away ?? ""),
+              String((selectedBetman as any)?.league ?? (selectedBetman as any)?.leagueName ?? detailData?.selectedFixture?.league ?? data?.selectedFixture?.league ?? ""),
+              Number.isFinite(selectedStartMs) ? selectedStartMs : Date.now()
+            );
+            return mergeCourtRecentSummary(
+              primaryRecent,
+              history.recentSummary,
+              String(selectedBetman?.home ?? ""),
+              String(selectedBetman?.away ?? "")
+            );
+          })(),
+          courtHistoryAudit: koreanSport(String((selectedBetman as any)?.sport ?? "")) === "농구"
+            ? courtTrackerRecentSummary(
+                liveTrackerRecords,
+                String(selectedBetman?.home ?? detailData?.selectedFixture?.home ?? data?.selectedFixture?.home ?? ""),
+                String(selectedBetman?.away ?? detailData?.selectedFixture?.away ?? data?.selectedFixture?.away ?? ""),
+                String((selectedBetman as any)?.league ?? (selectedBetman as any)?.leagueName ?? detailData?.selectedFixture?.league ?? data?.selectedFixture?.league ?? ""),
+                Number.isFinite(selectedStartMs) ? selectedStartMs : Date.now()
+              ).audit
+            : null,
           statistics:
             detailData?.statistics ??
             data?.statistics ??
@@ -24428,7 +24682,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.11.00 · FOOTBALL WORLD TOP1</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.00 · COURT DATA ACCUMULATOR</div>
         </div>
         <div className="bar">
           <button
@@ -25949,7 +26203,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.11.00 FOOTBALL WORLD TOP1 · 야구/COURT TOP1 유지 · K리그/J리그/유럽5대리그/UEFA/MLS 등 축구 승무패·핸디·U/O 연속 TOP1 · 리그 prior + 품질/시장/라인업 soft score</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.00 COURT DATA ACCUMULATOR · KBL/WKBL/NBA VERIFIED 종료점수 누적 → 최근5/장소표본 자동 재사용 · 기존 야구/축구/배구 TOP1 유지</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 축구는 SportsAPI/Naver에서 최근 득실과 홈·원정 장소표본을 확보한 경기를 공통 Poisson 기반으로 계산하고, K리그/J리그·유럽 5대리그·UEFA 대회·MLS는 리그별 중립 득점 prior를 적용합니다. 선발 11+11은 λ를 임의 변경하지 않고 데이터품질에 soft 반영하며, alias가 없는 기타 리그도 동일경기 매칭이 되면 OTHER 프로필로 분석합니다.
               </div>
@@ -26847,7 +27101,7 @@ export default function Home() {
 
             {isCourtSport && currentCourtProfile && (
               <div className="section" style={{ marginTop: 0, marginBottom: 8 }}>
-                <h3>V13.10.00 COURT SPORTS · {currentCourtProfile.label}</h3>
+                <h3>V13.12.00 COURT DATA ACCUMULATOR · {currentCourtProfile.label}</h3>
                 <div className="cards">
                   <div className="card">
                     모델 단위
@@ -26863,6 +27117,11 @@ export default function Home() {
                     장소 표본
                     <b>{analysisFactors.homeVenueSample} / {analysisFactors.awayVenueSample}</b>
                     <div className="small">5/5를 full coverage로 평가</div>
+                  </div>
+                  <div className="card">
+                    수집 DB · VERIFIED
+                    <b>{currentCourtHistoryAudit ? `${currentCourtHistoryAudit.homeHistoryGames} / ${currentCourtHistoryAudit.awayHistoryGames}` : "-"}</b>
+                    <div className="small">팀 누적 · 장소 {currentCourtHistoryAudit ? `${currentCourtHistoryAudit.homeVenueGames}/${currentCourtHistoryAudit.awayVenueGames}` : "-"} · {currentCourtHistoryAudit?.leagueGroup ?? "-"}</div>
                   </div>
                   <div className="card">
                     COURT 품질
@@ -26881,7 +27140,7 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="notice" style={{ margin: "8px 0 0" }}>
-                  농구(KBL/WKBL/NBA)는 리그별 득점 prior와 최근 득실·장소표본을 수축한 뒤 승패/핸디/U/O를 점수분포로 계산합니다.
+                  농구(KBL/WKBL/NBA)는 리그별 득점 prior와 최근 득실·장소표본을 수축한 뒤 승패/핸디/U/O를 점수분포로 계산합니다. V13.12.00부터 PRE 잠금 후 VERIFIED된 농구 종료점수를 실전 tracker에서 자동 누적해 다음 경기의 최근/홈·원정 장소표본으로 재사용합니다. API 최근기록이 있으면 삭제하지 않고 중복 제거 후 보강하며 현재 경기 이후 결과는 사용하지 않습니다.
                   배구(KOVO)는 최근 세트 스코어에서 세트승률을 만들고 3-0/3-1/3-2 분포로 승패와 세트핸디를 계산합니다.
                   {currentSport === "배구" ? " Betman U/O 기준이 6.5를 넘으면 세트 U/O가 아니라 총 포인트 시장으로 보고 현재 TOP1 대상에서 제외합니다." : ""}
                   {" "}선수 부상·출장시간·로테이션은 아직 독립 court 모델 입력으로 사용하지 않으므로 데이터품질 점수에도 포함하지 않습니다.
@@ -29214,7 +29473,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.11.00 FOOTBALL WORLD TOP1은 기존 야구/COURT 연속 TOP1을 유지하면서 프로축구·해외축구에도 full-game TOP1을 확장합니다. 축구는 리그별 득점 prior와 최근 득실·장소표본·시장확률·선발 XI·모델강도를 soft score로 합쳐 승무패/핸디/UO를 비교하며, TOP1점수 78 이상만 공식 VALUE, 72~77.9는 약추천, 그 미만은 관망입니다. 농구/배구는 V13.10.00 기준을 유지합니다.
+                    V13.11.00 FOOTBALL WORLD TOP1은 기존 야구/COURT 연속 TOP1을 유지하면서 프로축구·해외축구에도 full-game TOP1을 확장합니다. 축구는 리그별 득점 prior와 최근 득실·장소표본·시장확률·선발 XI·모델강도를 soft score로 합쳐 승무패/핸디/UO를 비교하며, TOP1점수 78 이상만 공식 VALUE, 72~77.9는 약추천, 그 미만은 관망입니다. 농구는 V13.12.00 VERIFIED HISTORY 누적을 추가하고, 배구는 V13.10.00 기준을 유지합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
