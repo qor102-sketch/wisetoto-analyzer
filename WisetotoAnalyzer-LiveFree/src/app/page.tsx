@@ -1,3 +1,4 @@
+// V13.12.05: calibrated reliability, immutable legacy snapshots, fair verification queue, court data.
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
 // V13.12.04 PARK SHINJA CUP EXCLUDED: preserve V13.12.03 reliability TOP1, exclude Park Shin-ja Cup from listing/analysis and court VERIFIED accumulation
 // V13.12.02 MODEL-FIRST TOP1: TOP1 ranking uses raw/model evidence first; market odds/probability are only a small agreement check and never a direct ranking weight
@@ -17,6 +18,8 @@
 // DEPLOY_MARKER_V13_8_34_NAVER_RECENT_BATTING_V1_20260903
 
 import { useEffect, useMemo, useState, useRef } from "react";
+import { pendingVerificationBatch, courtInputLabel, finiteValue } from "./model-integrity";
+const ACTIVE_ENGINE = "V13.12.05_INPUT_INTEGRITY";
 
 type Sport =
   | "전체"
@@ -843,6 +846,7 @@ type LiveTrackerRecord = {
   venueShadow?: VenueShadowValidationSnapshot | null;
   venueShadowResult?: VenueShadowValidationResult | null;
   baseballReadyHold?: BaseballReadyHoldSnapshot | null;
+  starterInputAudit?: { capturedAt: number; homeName: string | null; awayName: string | null; source: string | null };
   baseballChallenger?: BaseballChallengerSnapshot | null;
   footballLineup?: FootballLineupSnapshot | null;
   footballPre?: FootballPreValidationSnapshot | null;
@@ -4678,9 +4682,9 @@ function trackerRecordCourtGroup(record: LiveTrackerRecord) {
 }
 
 function trackerRecordToCourtFixture(record: LiveTrackerRecord) {
-  const homeScore = Number(record.result?.homeScore);
-  const awayScore = Number(record.result?.awayScore);
-  if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) return null;
+  const homeScore = finiteValue(record.result?.homeScore);
+  const awayScore = finiteValue(record.result?.awayScore);
+  if (homeScore === null || awayScore === null || !Number.isInteger(homeScore) || !Number.isInteger(awayScore) || homeScore < 0 || awayScore < 0 || homeScore === awayScore) return null;
   return {
     id: record.id,
     startTime: new Date(record.startMs).toISOString(),
@@ -4740,6 +4744,8 @@ function courtTrackerRecentSummary(
       Boolean(record.result) &&
       Number.isFinite(record.startMs) &&
       record.startMs < cutoffMs &&
+      record.capturedAt < record.startMs &&
+      record.verifiedAt != null && record.verifiedAt < cutoffMs &&
       trackerRecordCourtGroup(record) === leagueGroup
     )
     .sort((a, b) => b.startMs - a.startMs);
@@ -4775,14 +4781,11 @@ function courtTrackerRecentSummary(
 }
 
 function courtFixtureDedupeKey(fixture: any) {
-  const score = fixtureFinalScore(fixture);
   const time = fixtureTimeMs(fixture);
   return [
     Number.isFinite(time) ? Math.round(time / 60000) : "-",
     courtCanonicalTeam(fixtureTeamName(fixture, "home")),
     courtCanonicalTeam(fixtureTeamName(fixture, "away")),
-    score?.home ?? "-",
-    score?.away ?? "-",
   ].join("|");
 }
 
@@ -11379,12 +11382,12 @@ function baseballTop1ReliabilityDiagnostics(
   /*
    * V13.12.03: the ranking must not treat one fixed-lambda Poisson/Skellam tail as certainty.
    * We therefore rank with a conservative probability anchored to the correlation-adjusted
-   * consensus floor, and add a small structural tail-risk penalty to full-game run handicaps.
+   * consensus floor AND calibrated probability (no +2.5 uplift), plus a structural ranking penalty.
    * This is generic uncertainty control: it does not depend on the previous game's result,
    * the offered odds, or whether the pick is home/away.
    */
   const conservativeProbability = clamp(
-    Math.min(modelProbability, effectiveFloor + 2.5),
+    Math.min(modelProbability, effectiveFloor, finiteValue(pick.probability) ?? modelProbability),
     0,
     100,
   );
@@ -11477,7 +11480,7 @@ function baseballHitFirstSlateScore(pick: MarketPick): number | null {
 
   const consensusAvailable = Number.isFinite(floorRaw) && Number.isFinite(meanRaw);
   const correlatedConsensus = consensusAvailable
-    ? baseballCorrelationAdjustedConsensus(floorRaw, meanRaw, modelProbability)
+    ? baseballCorrelationAdjustedConsensus(floorRaw, meanRaw, calibratedProbability)
     : { floor: modelProbability, mean: modelProbability, penalty: 0 };
   const effectiveFloor = clamp(correlatedConsensus.floor, 0, 100);
   const effectiveMean = clamp(correlatedConsensus.mean, 0, 100);
@@ -11563,7 +11566,7 @@ function promoteBaseballSlateTopPick(pick: MarketPick, rank: number, slateScore:
   const correlatedConsensus = baseballCorrelationAdjustedConsensus(
     Number(pick.precisionConsensusFloor),
     Number(pick.precisionConsensusMean),
-    Number(pick.rawProbability ?? pick.probability),
+    Number(pick.probability),
   );
   const marketAgreement = top1MarketAgreementAdjustment(
     Number(pick.rawProbability ?? pick.probability),
@@ -11599,7 +11602,7 @@ function promoteBaseballSlateTopPick(pick: MarketPick, rank: number, slateScore:
     top1ConservativeProbability: reliability.conservativeProbability,
     top1TailRiskPenalty: reliability.tailRiskPenalty,
     top1ReliabilityLabel: reliability.label,
-    detail: `${pick.detail} · V13.12.03 GAME TOP${rank} · ${tier} · RELIABILITY / MODEL-FIRST / MARKET-DEBIASED SCORE`,
+    detail: `${pick.detail} · V13.12.05 GAME TOP${rank} · ${tier} · RELIABILITY / MODEL-FIRST / MARKET-DEBIASED SCORE`,
   };
 }
 
@@ -17476,6 +17479,8 @@ export default function Home() {
   const stickyReadyActive = Boolean(
     currentSport === "야구" &&
     liveAnalysisFactors.baseballAnalysisStage !== "READY" &&
+    !(selectedBaseballTrackerRecord?.starterInputAudit?.homeName && liveAnalysisFactors.homeStarterName && selectedBaseballTrackerRecord.starterInputAudit.homeName !== liveAnalysisFactors.homeStarterName) &&
+    !(selectedBaseballTrackerRecord?.starterInputAudit?.awayName && liveAnalysisFactors.awayStarterName && selectedBaseballTrackerRecord.starterInputAudit.awayName !== liveAnalysisFactors.awayStarterName) &&
     selectedBaseballTrackerRecord?.venueShadow?.stage === "READY" &&
     (selectedBaseballTrackerRecord.marketResults?.length ?? 0) > 0
   );
@@ -19198,6 +19203,7 @@ export default function Home() {
         return sameBetmanIdentity || sameFixture;
       });
       const existingRecord = existingIndex >= 0 ? previous[existingIndex] : null;
+      if (existingRecord && existingRecord.recommendationEngineVersion !== ACTIVE_ENGINE) return previous;
 
       /*
        * V13.8.49: 최초 PRE/STARTER 잠금이 있더라도 경기 시작 전 READY가
@@ -19439,14 +19445,7 @@ export default function Home() {
             ? Date.now()
             : null,
         gateVersion: "FALLBACK_GATE_V2",
-        recommendationEngineVersion:
-          currentSport === "야구"
-            ? "V13.12.03_RELIABILITY_TOP1"
-            : currentSport === "축구"
-              ? "V13.12.02_MODEL_FIRST_TOP1"
-              : currentSport === "농구" || currentSport === "배구"
-                ? "V13.12.02_MODEL_FIRST_TOP1"
-                : undefined,
+        recommendationEngineVersion: ACTIVE_ENGINE,
         decision: trackerPicks.length ? "PICK" : "PASS",
         picks: trackerPicks,
         marketResults: trackerMarketResults,
@@ -19492,6 +19491,7 @@ export default function Home() {
                 dataCompleteness: analysisFactors.baseballDataCompleteness,
               }
             : null,
+        starterInputAudit: currentSport === "야구" ? { capturedAt: Date.now(), homeName: analysisFactors.homeStarterName, awayName: analysisFactors.awayStarterName, source: matched?.lineups?.source ?? null } : undefined,
         baseballChallenger: baseballChallengerSnapshot,
         footballLineup: footballLineupSnapshot,
         footballPre: footballPreSnapshot,
@@ -19572,11 +19572,12 @@ export default function Home() {
     const desired = new Map<string, LiveTrackerPick | null>();
 
     for (const record of liveTrackerRecords) {
+      if (record.recommendationEngineVersion !== ACTIVE_ENGINE || record.startMs <= now) continue;
       if (
         record.sport !== "야구" ||
         record.verificationStatus !== "PENDING" ||
         record.venueShadow?.stage !== "READY" ||
-        record.startMs < now - 30 * 60 * 1000
+        record.startMs <= now
       ) continue;
 
       const candidate = bestBaseballHitFirstSlateCandidate(trackerMarketPickSnapshots(record));
@@ -19624,14 +19625,14 @@ export default function Home() {
       });
       const afterSig = JSON.stringify({
         decision: nextDecision,
-        engine: "V13.12.03_RELIABILITY_TOP1",
+        engine: ACTIVE_ENGINE,
         picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
       });
       if (beforeSig === afterSig) return record;
       changed = true;
       return {
         ...record,
-        recommendationEngineVersion: "V13.12.03_RELIABILITY_TOP1",
+        recommendationEngineVersion: ACTIVE_ENGINE,
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -19650,10 +19651,11 @@ export default function Home() {
     const desired = new Map<string, LiveTrackerPick | null>();
 
     for (const record of liveTrackerRecords) {
+      if (record.recommendationEngineVersion !== ACTIVE_ENGINE || record.startMs <= now) continue;
       if (
         record.sport !== "축구" ||
         record.verificationStatus !== "PENDING" ||
-        record.startMs < now - 30 * 60 * 1000 ||
+        record.startMs <= now ||
         !(record.marketResults?.length)
       ) continue;
 
@@ -19702,14 +19704,14 @@ export default function Home() {
       });
       const afterSig = JSON.stringify({
         decision: nextDecision,
-        engine: "V13.12.02_MODEL_FIRST_TOP1",
+        engine: ACTIVE_ENGINE,
         picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
       });
       if (beforeSig === afterSig) return record;
       changed = true;
       return {
         ...record,
-        recommendationEngineVersion: "V13.12.02_MODEL_FIRST_TOP1",
+        recommendationEngineVersion: ACTIVE_ENGINE,
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -19728,6 +19730,7 @@ export default function Home() {
     const desired = new Map<string, LiveTrackerPick | null>();
 
     for (const record of liveTrackerRecords) {
+      if (record.recommendationEngineVersion !== ACTIVE_ENGINE || record.startMs <= now) continue;
       if (record.sport === "농구" && isParkShinjaCup(record.league)) {
         // V13.12.04: 이미 저장된 박신자컵 PENDING 레코드도 공식 PICK으로 승격/유지하지 않는다.
         if (record.verificationStatus === "PENDING") desired.set(record.id, null);
@@ -19736,7 +19739,7 @@ export default function Home() {
       if (
         (record.sport !== "농구" && record.sport !== "배구") ||
         record.verificationStatus !== "PENDING" ||
-        record.startMs < now - 30 * 60 * 1000 ||
+        record.startMs <= now ||
         !(record.marketResults?.length)
       ) continue;
 
@@ -19785,14 +19788,14 @@ export default function Home() {
       });
       const afterSig = JSON.stringify({
         decision: nextDecision,
-        engine: "V13.12.02_MODEL_FIRST_TOP1",
+        engine: ACTIVE_ENGINE,
         picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
       });
       if (beforeSig === afterSig) return record;
       changed = true;
       return {
         ...record,
-        recommendationEngineVersion: "V13.12.02_MODEL_FIRST_TOP1",
+        recommendationEngineVersion: ACTIVE_ENGINE,
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -19830,12 +19833,13 @@ export default function Home() {
     const score = payload?.finalScore ?? game?.finalScore ?? null;
     const homeRaw = score?.home ?? game?.homeScore ?? game?.homeTeamScore ?? game?.hScore ?? null;
     const awayRaw = score?.away ?? game?.awayScore ?? game?.awayTeamScore ?? game?.aScore ?? null;
-    const home = Number(homeRaw);
-    const away = Number(awayRaw);
+    const home = finiteValue(homeRaw) ?? NaN;
+    const away = finiteValue(awayRaw) ?? NaN;
     const statusText = [game?.statusCode, game?.statusInfo, game?.gameStatus, game?.status]
       .map((v) => String(v ?? "").toLowerCase())
       .join(" ");
     const completed = payload?.completed === true || /final|finish|finished|ended|end|result|종료|경기종료/.test(statusText);
+    if (homeRaw === null || awayRaw === null || homeRaw === "" || awayRaw === "" || /scheduled|before|live|진행|예정/.test(statusText)) return null;
     if (!completed || !Number.isFinite(home) || !Number.isFinite(away) || home < 0 || away < 0) return null;
     return {
       home,
@@ -19852,6 +19856,7 @@ export default function Home() {
         away: record.away,
         sport: koreanSport(record.sport),
         league: record.league,
+        mode: "verify",
       });
       const response = await fetch(`/api/naver/lineup?${params.toString()}`, { cache: "no-store" });
       const payload = await readApiResponse(response, `Naver VERIFY · ${record.home} vs ${record.away}`);
@@ -19897,13 +19902,7 @@ export default function Home() {
 
     // V13.8.62: 시작한 PENDING 레코드는 Betman FINAL을 먼저 확인한다.
     // +2시간은 SportsAPI fallback 자격에만 사용하고 VERIFY 후보 자체를 막지 않는다.
-    const candidates = liveTrackerRecords
-      .filter(
-        (record) =>
-          record.verificationStatus === "PENDING" &&
-          record.startMs < Date.now()
-      )
-      .slice(0, 10);
+    const candidates = pendingVerificationBatch(liveTrackerRecords, Date.now(), 10);
     // FIX9 migration: old Naver VERIFY could misread cancelled games as 0:0 RESULT.
     // Recheck only legacy Naver 0:0 VERIFIED rows once; genuine 0:0 finals remain VERIFIED.
     const legacyVoidRepairCandidates = liveTrackerRecords
@@ -19998,6 +19997,7 @@ export default function Home() {
         try {
           let truth: BacktestValidationResult | null = null;
 
+          next = next.map((row) => row.id === record.id ? { ...row, verifyLastCheckedAt: Date.now() } : row);
           const betmanResolved = matchBetmanFinishedGame(record, betmanFinishedGames);
           const betmanMatch = betmanResolved.game;
           const betmanScore = betmanMatch ? fixtureFinalScore(betmanMatch) : null;
@@ -20127,6 +20127,11 @@ export default function Home() {
             };
           });
 
+          const settledMarketResults = (record.marketResults ?? []).map((pick) => {
+            const validation = validateBacktestMarket(pick.marketSnapshot, pick.modelSnapshot as MarketPick, truth!);
+            return { ...pick, resultStatus: validation.status, actualLabel: validation.actualLabel, resultNote: validation.note };
+          });
+
           const shadow = record.venueShadow;
           const shadowResult: VenueShadowValidationResult | null = shadow
             ? {
@@ -20167,6 +20172,7 @@ export default function Home() {
               ? {
                   ...candidate,
                   picks: settledPicks,
+                  marketResults: settledMarketResults,
                   verificationStatus: "VERIFIED",
                   verifiedAt: Date.now(),
                   result: truth,
@@ -23873,7 +23879,7 @@ export default function Home() {
             }
           }
 
-          if (["야구", "축구"].includes(koreanSport(String((selectedBetman as any)?.sport ?? "")))) {
+          if (["야구", "축구", "농구"].includes(koreanSport(String((selectedBetman as any)?.sport ?? "")))) {
             try {
               const naverParams = new URLSearchParams({
                 date: Number.isFinite(selectedStartMs)
@@ -23998,7 +24004,7 @@ export default function Home() {
                 Number.isFinite(selectedStartMs) ? selectedStartMs : Date.now()
               );
               return mergeCourtRecentSummary(
-                primaryRecent,
+                mergeCourtRecentSummary(wisetotoLiveFallback?.recentSummary, naverTodayLineupFallback?.recentSummary, String(selectedBetman?.home ?? ""), String(selectedBetman?.away ?? "")),
                 history.recentSummary,
                 String(selectedBetman?.home ?? ""),
                 String(selectedBetman?.away ?? "")
@@ -24142,7 +24148,7 @@ export default function Home() {
         let naverTodayLineup: any = null;
         if (
           !backtestMode &&
-          ["야구", "축구"].includes(koreanSport(String((selectedBetman as any)?.sport ?? "")))
+          ["야구", "축구", "농구"].includes(koreanSport(String((selectedBetman as any)?.sport ?? "")))
         ) {
           try {
             const fixtureStart =
@@ -24290,7 +24296,10 @@ export default function Home() {
               Number.isFinite(selectedStartMs) ? selectedStartMs : Date.now()
             );
             return mergeCourtRecentSummary(
-              primaryRecent,
+              mergeCourtRecentSummary(
+                mergeCourtRecentSummary(wisetotoLive?.recentSummary, naverTodayLineup?.recentSummary, String(selectedBetman?.home ?? ""), String(selectedBetman?.away ?? "")),
+                primaryRecent, String(selectedBetman?.home ?? ""), String(selectedBetman?.away ?? "")
+              ),
               history.recentSummary,
               String(selectedBetman?.home ?? ""),
               String(selectedBetman?.away ?? "")
@@ -26196,7 +26205,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.04 · V13.12.03 RELIABILITY TOP1 유지 · 박신자컵은 경기목록/분석/농구 VERIFIED 누적에서 제외</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.05 · 입력 검증·보수 순위·농구 수집 개선 · 기존 동결 기록 보존 · 박신자컵 제외</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 축구는 SportsAPI/Naver에서 최근 득실과 홈·원정 장소표본을 확보한 경기를 공통 Poisson 기반으로 계산하고, K리그/J리그·유럽 5대리그·UEFA 대회·MLS는 리그별 중립 득점 prior를 적용합니다. 선발 11+11은 λ를 임의 변경하지 않고 데이터품질에 soft 반영하며, alias가 없는 기타 리그도 동일경기 매칭이 되면 OTHER 프로필로 분석합니다.
               </div>
@@ -27106,7 +27115,8 @@ export default function Home() {
 
             {isCourtSport && currentCourtProfile && (
               <div className="section" style={{ marginTop: 0, marginBottom: 8 }}>
-                <h3>V13.12.04 COURT DATA · {currentCourtProfile.label}</h3>
+                <h3>V13.12.05 COURT DATA · {currentCourtProfile.label}</h3>
+                <div className="notice">{courtInputLabel(analysisFactors.homeRecentSample, analysisFactors.awayRecentSample)} · 시장 prior {analysisFactors.scoreGuardApplied ? "적용" : "미적용"} · 부상/로테이션 독립 입력 미지원</div>
                 <div className="cards">
                   <div className="card">
                     모델 단위
@@ -29319,7 +29329,7 @@ export default function Home() {
                         팀 기본전력 fallback
                         <b>{analysisFactors.baseballTeamStrengthApplied ? "✓ 적용" : "미적용"}</b>
                         <div className="small">
-                          {analysisFactors.baseballTeamStrengthSource ?? "최근 Form 사용"}
+                          {currentSport === "농구" ? courtInputLabel(analysisFactors.homeRecentSample, analysisFactors.awayRecentSample) : (analysisFactors.baseballTeamStrengthSource ?? (analysisFactors.homeRecentSample || analysisFactors.awayRecentSample ? "최근 Form 사용" : "최근 기록 없음 · prior 기반"))}
                           {analysisFactors.baseballTeamStrengthHomeGames || analysisFactors.baseballTeamStrengthAwayGames
                             ? ` · 표본 ${analysisFactors.baseballTeamStrengthHomeGames}/${analysisFactors.baseballTeamStrengthAwayGames}G`
                             : ""}
@@ -29478,7 +29488,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.12.04는 V13.12.03 RELIABILITY TOP1을 유지하면서 박신자컵을 경기목록·분석·농구 VERIFIED 누적에서 제외합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
+                    V13.12.05는 입력 검증·농구 수집을 강화하고 박신자컵을 경기목록·분석·농구 VERIFIED 누적에서 제외합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구 V13.12.05는 순수모델·상관보정 합의하한·최종 보정확률 중 최솟값을 보수 순위 입력으로 사용하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
