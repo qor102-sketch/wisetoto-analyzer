@@ -1,5 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
-// V13.12.03 RELIABILITY TOP1: model-first ranking + conservative consensus floor + baseball handicap tail-risk correction; market stays a small agreement check
+// V13.12.04 PARK SHINJA CUP EXCLUDED: preserve V13.12.03 reliability TOP1, exclude Park Shin-ja Cup from listing/analysis and court VERIFIED accumulation
 // V13.12.02 MODEL-FIRST TOP1: TOP1 ranking uses raw/model evidence first; market odds/probability are only a small agreement check and never a direct ranking weight
 // V13.12.01 GAME TOP1 PER MATCH: every baseball/football/court fixture promotes its own independent full-game TOP1; no daily cross-game winner gate
 // V13.11.00 FOOTBALL WORLD TOP1: K League/J League + major overseas football leagues/cups, league scoring priors, soft data-quality ranking, continuous full-game TOP1
@@ -4669,6 +4669,7 @@ function aliasedCourtName(value: string) {
 }
 
 function courtLeagueGroupForRaw(leagueRaw: unknown, homeName: unknown = "", awayName: unknown = "") {
+  if (isParkShinjaCup(leagueRaw)) return "EXCLUDED";
   return courtLeagueProfile("농구", `${String(leagueRaw ?? "")} ${String(homeName ?? "")} ${String(awayName ?? "")}`)?.group ?? "OTHER";
 }
 
@@ -4735,6 +4736,7 @@ function courtTrackerRecentSummary(
     .filter((record) =>
       record.verificationStatus === "VERIFIED" &&
       koreanSport(record.sport) === "농구" &&
+      !isParkShinjaCup(record.league) &&
       Boolean(record.result) &&
       Number.isFinite(record.startMs) &&
       record.startMs < cutoffMs &&
@@ -5024,6 +5026,39 @@ function soccerLeagueProfile(leagueRaw: unknown, teamsRaw: unknown = ""): Soccer
 type CourtLeagueGroup = "NBA" | "KBL" | "WKBL" | "KOVO" | "OTHER";
 type CourtScoreUnit = "POINTS" | "SETS";
 
+/* V13.12.04: 박신자컵은 분석/누적 대상에서 완전히 제외한다.
+ * 팀명이 WKBL과 동일해 팀명만으로는 구분할 수 없으므로 대회명/리그명 필드만 사용한다. */
+function competitionSearchText(value: unknown) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function isParkShinjaCup(value: unknown) {
+  const text = competitionSearchText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]/g, "");
+  return /박신자컵|박신자|parkshinjacup|parkshinja/.test(text);
+}
+
+function isExcludedBetmanCompetition(game: BetmanMatch | null | undefined) {
+  if (!game) return false;
+  const competitionText = [
+    (game as any)?.league,
+    (game as any)?.leagueName,
+    (game as any)?.sportName,
+    (game as any)?.competition,
+    (game as any)?.competitionName,
+    (game as any)?.tournament,
+    (game as any)?.tournamentName,
+  ].map(competitionSearchText).join(" ");
+  return isParkShinjaCup(competitionText);
+}
+
 type CourtLeagueProfile = {
   group: CourtLeagueGroup;
   label: string;
@@ -5040,6 +5075,7 @@ function courtLeagueProfile(
   leagueRaw: unknown
 ): CourtLeagueProfile | null {
   if (sport !== "농구" && sport !== "배구") return null;
+  if (sport === "농구" && isParkShinjaCup(leagueRaw)) return null;
   const text = String(leagueRaw ?? "").toLowerCase().replace(/[^a-z0-9가-힣]/g, "");
 
   // Betman league 필드가 비어 있는 경우가 있어 팀명 자체로도 리그를 식별한다.
@@ -16850,6 +16886,7 @@ export default function Home() {
       const liveGraceMs = 30 * 60 * 1000;
 
       const games = getBetmanGames(payload)
+        .filter((game) => !isExcludedBetmanCompetition(game))
         .filter((game) => {
           const start = gameTimeMs(game);
 
@@ -16929,6 +16966,7 @@ export default function Home() {
       const recentWindowMs = 24 * 60 * 60 * 1000;
 
       const games = getBetmanGames(payload)
+        .filter((game) => !isExcludedBetmanCompetition(game))
         .filter((game) => {
           const start = gameTimeMs(game);
           const markets = Array.isArray((game as any)?.markets)
@@ -17213,7 +17251,8 @@ export default function Home() {
   useEffect(() => { loadBetmanList(); }, []);
 
   const visibleBetmanGames = useMemo(
-    () => mergeActualGames(backtestMode ? backtestGames : betmanGames),
+    () => mergeActualGames(backtestMode ? backtestGames : betmanGames)
+      .filter((game) => !isExcludedBetmanCompetition(game)),
     [backtestMode, backtestGames, betmanGames]
   );
 
@@ -19689,6 +19728,11 @@ export default function Home() {
     const desired = new Map<string, LiveTrackerPick | null>();
 
     for (const record of liveTrackerRecords) {
+      if (record.sport === "농구" && isParkShinjaCup(record.league)) {
+        // V13.12.04: 이미 저장된 박신자컵 PENDING 레코드도 공식 PICK으로 승격/유지하지 않는다.
+        if (record.verificationStatus === "PENDING") desired.set(record.id, null);
+        continue;
+      }
       if (
         (record.sport !== "농구" && record.sport !== "배구") ||
         record.verificationStatus !== "PENDING" ||
@@ -24631,7 +24675,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.03 · RELIABILITY TOP1</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.04 · PARK SHINJA CUP EXCLUDED</div>
         </div>
         <div className="bar">
           <button
@@ -26152,7 +26196,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.03 RELIABILITY TOP1 · 모든 경기는 자기 경기 내부에서 TOP1 1개 독립 산출 · 순수모델/합의하한/데이터품질 중심 · 시장은 일치도 확인만 · 야구 핸디 꼬리위험 보정</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.04 · V13.12.03 RELIABILITY TOP1 유지 · 박신자컵은 경기목록/분석/농구 VERIFIED 누적에서 제외</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 축구는 SportsAPI/Naver에서 최근 득실과 홈·원정 장소표본을 확보한 경기를 공통 Poisson 기반으로 계산하고, K리그/J리그·유럽 5대리그·UEFA 대회·MLS는 리그별 중립 득점 prior를 적용합니다. 선발 11+11은 λ를 임의 변경하지 않고 데이터품질에 soft 반영하며, alias가 없는 기타 리그도 동일경기 매칭이 되면 OTHER 프로필로 분석합니다.
               </div>
@@ -27062,7 +27106,7 @@ export default function Home() {
 
             {isCourtSport && currentCourtProfile && (
               <div className="section" style={{ marginTop: 0, marginBottom: 8 }}>
-                <h3>V13.12.02 COURT DATA + MODEL-FIRST TOP1 · {currentCourtProfile.label}</h3>
+                <h3>V13.12.04 COURT DATA · {currentCourtProfile.label}</h3>
                 <div className="cards">
                   <div className="card">
                     모델 단위
@@ -27101,7 +27145,7 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="notice" style={{ margin: "8px 0 0" }}>
-                  농구(KBL/WKBL/NBA)는 리그별 득점 prior와 최근 득실·장소표본을 수축한 뒤 승패/핸디/U/O를 점수분포로 계산합니다. V13.12.00부터 PRE 잠금 후 VERIFIED된 농구 종료점수를 실전 tracker에서 자동 누적해 다음 경기의 최근/홈·원정 장소표본으로 재사용합니다. API 최근기록이 있으면 삭제하지 않고 중복 제거 후 보강하며 현재 경기 이후 결과는 사용하지 않습니다.
+                  농구(KBL/WKBL/NBA)는 리그별 득점 prior와 최근 득실·장소표본을 수축한 뒤 승패/핸디/U/O를 점수분포로 계산합니다. 박신자컵은 V13.12.04부터 경기목록·분석·VERIFIED 농구 누적 대상에서 제외합니다. V13.12.00부터 PRE 잠금 후 VERIFIED된 지원 리그의 농구 종료점수를 실전 tracker에서 자동 누적해 다음 경기의 최근/홈·원정 장소표본으로 재사용합니다. API 최근기록이 있으면 삭제하지 않고 중복 제거 후 보강하며 현재 경기 이후 결과는 사용하지 않습니다.
                   배구(KOVO)는 최근 세트 스코어에서 세트승률을 만들고 3-0/3-1/3-2 분포로 승패와 세트핸디를 계산합니다.
                   {currentSport === "배구" ? " Betman U/O 기준이 6.5를 넘으면 세트 U/O가 아니라 총 포인트 시장으로 보고 현재 TOP1 대상에서 제외합니다." : ""}
                   {" "}선수 부상·출장시간·로테이션은 아직 독립 court 모델 입력으로 사용하지 않으므로 데이터품질 점수에도 포함하지 않습니다.
@@ -29434,7 +29478,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.12.03 RELIABILITY TOP1은 모든 경기에서 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
+                    V13.12.04는 V13.12.03 RELIABILITY TOP1을 유지하면서 박신자컵을 경기목록·분석·농구 VERIFIED 누적에서 제외합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
