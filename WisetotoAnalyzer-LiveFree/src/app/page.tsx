@@ -1,4 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
+// V13.12.03 RELIABILITY TOP1: model-first ranking + conservative consensus floor + baseball handicap tail-risk correction; market stays a small agreement check
 // V13.12.02 MODEL-FIRST TOP1: TOP1 ranking uses raw/model evidence first; market odds/probability are only a small agreement check and never a direct ranking weight
 // V13.12.01 GAME TOP1 PER MATCH: every baseball/football/court fixture promotes its own independent full-game TOP1; no daily cross-game winner gate
 // V13.11.00 FOOTBALL WORLD TOP1: K League/J League + major overseas football leagues/cups, league scoring priors, soft data-quality ranking, continuous full-game TOP1
@@ -8643,6 +8644,11 @@ type MarketPick = {
 
   /* V13.12.02: true when the scoring model itself already used market direction/total as a prior. */
   top1MarketPriorApplied?: boolean;
+
+  /* V13.12.03: baseball TOP1 reliability audit. These are ranking diagnostics, not advertised hit-rate guarantees. */
+  top1ConservativeProbability?: number | null;
+  top1TailRiskPenalty?: number | null;
+  top1ReliabilityLabel?: string | null;
   expectedValue: number | null;
 
   valueGrade: "PASS" | "WATCH" | "VALUE" | "STRONG VALUE";
@@ -11310,8 +11316,70 @@ function top1MarketAgreementAdjustment(
   };
 }
 
+type BaseballTop1Reliability = {
+  conservativeProbability: number;
+  tailRiskPenalty: number;
+  handicapLine: number | null;
+  label: string;
+};
+
+function baseballTop1HandicapLine(pick: MarketPick): number | null {
+  const text = `${pick.market} ${pick.pick}`;
+  const match = text.match(/(?:^|\s)H\s*([+-]?\d+(?:\.\d+)?)/i);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function baseballTop1ReliabilityDiagnostics(
+  pick: MarketPick,
+  modelProbability: number,
+  effectiveFloor: number,
+  spread: number,
+  dataQuality: number,
+  starterPct: number,
+  bullpenPct: number,
+): BaseballTop1Reliability {
+  /*
+   * V13.12.03: the ranking must not treat one fixed-lambda Poisson/Skellam tail as certainty.
+   * We therefore rank with a conservative probability anchored to the correlation-adjusted
+   * consensus floor, and add a small structural tail-risk penalty to full-game run handicaps.
+   * This is generic uncertainty control: it does not depend on the previous game's result,
+   * the offered odds, or whether the pick is home/away.
+   */
+  const conservativeProbability = clamp(
+    Math.min(modelProbability, effectiveFloor + 2.5),
+    0,
+    100,
+  );
+
+  const handicapLine = baseballTop1HandicapLine(pick);
+  const isHandicap = handicapLine !== null;
+  const lineMagnitude = isHandicap ? Math.abs(Number(handicapLine)) : 0;
+  const tailRiskPenalty = isHandicap
+    ? clamp(
+        Math.max(0, lineMagnitude - 1.5) * 0.90 +
+          Math.max(0, 75 - bullpenPct) * 0.06 +
+          Math.max(0, 65 - starterPct) * 0.035 +
+          Math.max(0, 80 - dataQuality) * 0.04 +
+          Math.max(0, spread - 5) * 0.08,
+        0,
+        6.5,
+      )
+    : 0;
+
+  return {
+    conservativeProbability: Number(conservativeProbability.toFixed(1)),
+    tailRiskPenalty: Number(tailRiskPenalty.toFixed(2)),
+    handicapLine,
+    label: isHandicap
+      ? `보수확률 ${conservativeProbability.toFixed(1)}% · 핸디 꼬리위험 -${tailRiskPenalty.toFixed(1)}점`
+      : `보수확률 ${conservativeProbability.toFixed(1)}% · 비핸디 꼬리위험 0.0점`,
+  };
+}
+
 /*
- * V13.12.02 MODEL-FIRST TOP1 (baseball scoring core from V13.9.10).
+ * V13.12.03 RELIABILITY TOP1 (baseball scoring core from V13.12.02).
  * 하드컷을 데이터 이상/비정상 시장에만 남기고, B/C/D·시장충돌·장소표본·
  * 모델강도·합의분산은 모두 연속 감점으로 반영한다. 정상 READY 경기에서는
  * full-game 승패/핸디/UO 후보 가운데 반드시 1개의 TOP1 후보를 계산한다.
@@ -11383,9 +11451,10 @@ function baseballHitFirstSlateScore(pick: MarketPick): number | null {
   const adjustedPrecision = clamp(precision - correlatedConsensus.penalty, 0, 100);
 
   /*
-   * V13.12.02: TOP1의 기본점수에는 배당/시장확률을 직접 넣지 않는다.
-   * raw model + 상관보정 consensus + 데이터품질/신뢰/모델강도가 100%의 기본점수를 만든다.
-   * 시장은 아래 agreement adjustment에서만 최대 ±2점 수준으로 확인한다.
+   * V13.12.03: TOP1은 여전히 배당/시장확률을 직접 가중하지 않는다.
+   * 대신 raw 단일 확률보다 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 잡고,
+   * 야구 핸디캡에는 고정 λ Poisson/Skellam이 대패 꼬리를 과소평가할 수 있는 구조적 불확실성을
+   * 작은 연속 감점으로 반영한다. 시장은 agreement check에서만 최대 소폭 가감한다.
    */
   const bcdPenalty =
     Math.max(0, 70 - starterPct) * 0.03 +
@@ -11402,24 +11471,34 @@ function baseballHitFirstSlateScore(pick: MarketPick): number | null {
     market,
     Boolean(pick.top1MarketPriorApplied),
   );
+  const reliability = baseballTop1ReliabilityDiagnostics(
+    pick,
+    modelProbability,
+    effectiveFloor,
+    spread,
+    dataQuality,
+    starterPct,
+    bullpenPct,
+  );
 
   const score =
-    modelProbability * 0.39 +
-    effectiveFloor * 0.14 +
-    effectiveMean * 0.08 +
-    adjustedPrecision * 0.11 +
+    reliability.conservativeProbability * 0.34 +
+    effectiveFloor * 0.22 +
+    effectiveMean * 0.10 +
+    adjustedPrecision * 0.08 +
     dataQuality * 0.12 +
-    confidence * 0.08 +
+    confidence * 0.06 +
     modelStrengthPct * 0.08 +
     marketAgreement.adjustment -
-    spread * 0.16 -
+    spread * 0.18 -
     risk * 0.12 -
     bcdPenalty -
     dataPenalty -
     strengthPenalty -
     confidencePenalty -
     consensusPenalty -
-    totalVolatilityPenalty;
+    totalVolatilityPenalty -
+    reliability.tailRiskPenalty;
 
   return Number(clamp(score, 0, 100).toFixed(2));
 }
@@ -11455,6 +11534,22 @@ function promoteBaseballSlateTopPick(pick: MarketPick, rank: number, slateScore:
     pick.marketProbability,
     Boolean(pick.top1MarketPriorApplied),
   );
+  const starterPct = Number.isFinite(starter) ? clamp(starter * 100, 0, 100) : 50;
+  const bullpenPct = Number.isFinite(bullpen) ? clamp(bullpen * 100, 0, 100) : 50;
+  const spread = Number.isFinite(Number(pick.precisionConsensusSpread))
+    ? clamp(Number(pick.precisionConsensusSpread), 0, 30)
+    : 12;
+  const reliability = baseballTop1ReliabilityDiagnostics(
+    pick,
+    Number(pick.rawProbability ?? pick.probability),
+    Number.isFinite(correlatedConsensus.floor)
+      ? clamp(correlatedConsensus.floor, 0, 100)
+      : Number(pick.rawProbability ?? pick.probability),
+    spread,
+    Number.isFinite(quality) ? clamp(quality, 0, 100) : 50,
+    starterPct,
+    bullpenPct,
+  );
 
   return {
     ...pick,
@@ -11462,10 +11557,13 @@ function promoteBaseballSlateTopPick(pick: MarketPick, rank: number, slateScore:
     valueGradeScore: promote
       ? Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))
       : Math.min(79.9, Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))),
-    valueGradeReason: `GAME TOP${rank} · ${tier} · TOP1점수 ${slateScore.toFixed(1)} · 순수모델 ${Number(pick.rawProbability ?? pick.probability).toFixed(1)}% · 최종 ${pick.probability.toFixed(1)}% · 시장 ${Number.isFinite(market) ? `${market.toFixed(1)}%` : "-"} · 시장일치 ${marketAgreement.adjustment >= 0 ? "+" : ""}${marketAgreement.adjustment.toFixed(1)}점 · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"} · B/C/D ${Number.isFinite(starter) ? Math.round(starter * 100) : "-"}/${Number.isFinite(batting) ? Math.round(batting * 100) : "-"}/${Number.isFinite(bullpen) ? Math.round(bullpen * 100) : "-"} · 상관보정 하한 ${Number.isFinite(correlatedConsensus.floor) ? correlatedConsensus.floor.toFixed(1) : "-"}%`,
+    valueGradeReason: `GAME TOP${rank} · ${tier} · TOP1점수 ${slateScore.toFixed(1)} · 순수모델 ${Number(pick.rawProbability ?? pick.probability).toFixed(1)}% · 보수확률 ${reliability.conservativeProbability.toFixed(1)}% · 꼬리위험 -${reliability.tailRiskPenalty.toFixed(1)}점 · 최종 ${pick.probability.toFixed(1)}% · 시장 ${Number.isFinite(market) ? `${market.toFixed(1)}%` : "-"} · 시장일치 ${marketAgreement.adjustment >= 0 ? "+" : ""}${marketAgreement.adjustment.toFixed(1)}점 · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"} · B/C/D ${Number.isFinite(starter) ? Math.round(starter * 100) : "-"}/${Number.isFinite(batting) ? Math.round(batting * 100) : "-"}/${Number.isFinite(bullpen) ? Math.round(bullpen * 100) : "-"} · 상관보정 하한 ${Number.isFinite(correlatedConsensus.floor) ? correlatedConsensus.floor.toFixed(1) : "-"}%`,
     stageGradeLabel: `FINAL GAME TOP${rank} ${tier}`,
     recommendationScore: Number(slateScore.toFixed(1)),
-    detail: `${pick.detail} · V13.12.02 GAME TOP${rank} · ${tier} · MODEL-FIRST / MARKET-DEBIASED SCORE`,
+    top1ConservativeProbability: reliability.conservativeProbability,
+    top1TailRiskPenalty: reliability.tailRiskPenalty,
+    top1ReliabilityLabel: reliability.label,
+    detail: `${pick.detail} · V13.12.03 GAME TOP${rank} · ${tier} · RELIABILITY / MODEL-FIRST / MARKET-DEBIASED SCORE`,
   };
 }
 
@@ -18921,7 +19019,7 @@ export default function Home() {
     const precision90Records = liveTrackerRecords.filter(
       (record) =>
         record.sport === "야구" &&
-        ["V13.9.04_SOFT_STRENGTH_SLATE_TOP2", "V13.9.06_CORRELATION_SAMPLE_GUARD", "V13.9.07_STICKY_READY_QUALITY_AUDIT", "V13.9.08_VENUE_SAMPLE_CONFIDENCE_GUARD", "V13.9.09_FINAL_SEASON_TOP1_LOCK", "V13.9.10_CONTINUOUS_TOP1", "V13.12.01_GAME_TOP1_PER_MATCH", "V13.12.02_MODEL_FIRST_TOP1"].includes(String(record.recommendationEngineVersion ?? "")) &&
+        ["V13.9.04_SOFT_STRENGTH_SLATE_TOP2", "V13.9.06_CORRELATION_SAMPLE_GUARD", "V13.9.07_STICKY_READY_QUALITY_AUDIT", "V13.9.08_VENUE_SAMPLE_CONFIDENCE_GUARD", "V13.9.09_FINAL_SEASON_TOP1_LOCK", "V13.9.10_CONTINUOUS_TOP1", "V13.12.01_GAME_TOP1_PER_MATCH", "V13.12.02_MODEL_FIRST_TOP1", "V13.12.03_RELIABILITY_TOP1"].includes(String(record.recommendationEngineVersion ?? "")) &&
         record.verificationStatus === "VERIFIED"
     );
     const precision90Ids = new Set(precision90Records.map((record) => record.id));
@@ -19304,7 +19402,7 @@ export default function Home() {
         gateVersion: "FALLBACK_GATE_V2",
         recommendationEngineVersion:
           currentSport === "야구"
-            ? "V13.12.02_MODEL_FIRST_TOP1"
+            ? "V13.12.03_RELIABILITY_TOP1"
             : currentSport === "축구"
               ? "V13.12.02_MODEL_FIRST_TOP1"
               : currentSport === "농구" || currentSport === "배구"
@@ -19422,7 +19520,7 @@ export default function Home() {
   ]);
 
   /*
-   * V13.12.02 MODEL-FIRST TOP1.
+   * V13.12.03 RELIABILITY TOP1.
    * 날짜 전체에서 한 경기만 고르지 않는다. READY/PENDING 각 경기 내부에서
    * full-game 후보를 독립 비교하고 TOP1 하나를 고정한다.
    * TOP1 tier가 "실전 추천"인 경우에만 공식 PICK/VALUE로 저장하고,
@@ -19487,14 +19585,14 @@ export default function Home() {
       });
       const afterSig = JSON.stringify({
         decision: nextDecision,
-        engine: "V13.12.02_MODEL_FIRST_TOP1",
+        engine: "V13.12.03_RELIABILITY_TOP1",
         picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
       });
       if (beforeSig === afterSig) return record;
       changed = true;
       return {
         ...record,
-        recommendationEngineVersion: "V13.12.02_MODEL_FIRST_TOP1",
+        recommendationEngineVersion: "V13.12.03_RELIABILITY_TOP1",
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -24533,7 +24631,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.02 · MODEL-FIRST TOP1</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.03 · RELIABILITY TOP1</div>
         </div>
         <div className="bar">
           <button
@@ -26054,7 +26152,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.02 MODEL-FIRST TOP1 · 모든 경기는 자기 경기 내부에서 TOP1 1개 독립 산출 · 순수모델/합의/데이터품질 중심 · 시장은 일치도 확인만 반영</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.03 RELIABILITY TOP1 · 모든 경기는 자기 경기 내부에서 TOP1 1개 독립 산출 · 순수모델/합의하한/데이터품질 중심 · 시장은 일치도 확인만 · 야구 핸디 꼬리위험 보정</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 축구는 SportsAPI/Naver에서 최근 득실과 홈·원정 장소표본을 확보한 경기를 공통 Poisson 기반으로 계산하고, K리그/J리그·유럽 5대리그·UEFA 대회·MLS는 리그별 중립 득점 prior를 적용합니다. 선발 11+11은 λ를 임의 변경하지 않고 데이터품질에 soft 반영하며, alias가 없는 기타 리그도 동일경기 매칭이 되면 OTHER 프로필로 분석합니다.
               </div>
@@ -26809,6 +26907,13 @@ export default function Home() {
                     {" · "}최종 {bestDisplayPick.probability.toFixed(1)}%
                     {" · "}시장 {bestDisplayPick.marketProbability === null ? "-" : `${bestDisplayPick.marketProbability.toFixed(1)}%`}
                     {bestDisplayPick.top1MarketPriorApplied ? " · 시장prior 중복감쇠" : ""}
+                    {currentSport === "야구" && bestDisplayPick.top1ConservativeProbability !== undefined && bestDisplayPick.top1ConservativeProbability !== null ? (
+                      <>
+                        <br />
+                        보수확률 {bestDisplayPick.top1ConservativeProbability.toFixed(1)}%
+                        {" · "}꼬리위험 감점 {bestDisplayPick.top1TailRiskPenalty === null || bestDisplayPick.top1TailRiskPenalty === undefined ? "-" : `-${bestDisplayPick.top1TailRiskPenalty.toFixed(1)}점`}
+                      </>
+                    ) : null}
                     {bestDisplayPick.precisionConsensusFloor !== undefined && bestDisplayPick.precisionConsensusFloor !== null ? (
                       <>
                         <br />
@@ -29329,7 +29434,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.12.02 MODEL-FIRST TOP1은 야구/축구/농구/NBA/배구 모든 경기에서 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. TOP1 순위에는 저배당/높은 시장확률을 직접 가중하지 않고 순수모델확률·모델합의·데이터품질·신뢰도를 우선 사용합니다. 시장은 순수모델과의 일치도 확인만 최대 소폭 가감하며, 득점모델에 시장 prior가 이미 들어간 경우 그 영향은 25%만 인정해 중복반영을 줄입니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
+                    V13.12.03 RELIABILITY TOP1은 모든 경기에서 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
