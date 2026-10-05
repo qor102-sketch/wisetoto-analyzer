@@ -1,4 +1,4 @@
-// DEPLOY_MARKER_V13_12_06_COURT_NAVER_VERIFY_20261005
+// DEPLOY_MARKER_V13_12_07_FROZEN_TOP1_AUDIT_20261005
 // DEPLOY_MARKER_V13_8_64_J1_ACTUAL_SCHEDULE_API_20260906
 // DEPLOY_MARKER_V13_8_63_J1_CATEGORY_RESOLVER_20260906
 // DEPLOY_MARKER_V13_8_62_LEAGUE_ADAPTER_VERIFY_READY_20260906
@@ -547,7 +547,7 @@ async function resolveBasketballScheduleGame(
         headers: {
           accept: "application/json, text/plain, */*",
           referer: profile.referer,
-          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.12.06",
+          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.12.07",
         },
       });
       const payload = await response.json().catch(() => null);
@@ -614,7 +614,7 @@ async function resolveBasketballScheduleGame(
       status: obj?.statusCode ?? obj?.statusInfo ?? obj?.gameStatus ?? obj?.status ?? obj?.statusNum ?? null,
       score: naverScheduleFinalScore(obj),
     })),
-    build: "V13.12.06_COURT_NAVER_VERIFY",
+    build: "V13.12.07_FROZEN_TOP1_AUDIT",
   };
 }
 
