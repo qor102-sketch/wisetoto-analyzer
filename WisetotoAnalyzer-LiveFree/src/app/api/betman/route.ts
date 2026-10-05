@@ -1,7 +1,7 @@
 // WISETOTO_ROUTE_DIAG_V4_20260823
 const BETMAN_PROXY_URL =
   process.env.BETMAN_PROXY_URL?.trim() ||
-  "https://codes-int-pieces-continuously.trycloudflare.com/betman";
+  "https://champions-wishes-documented-modification.trycloudflare.com/betman";
 
 const BETMAN_FETCH_TIMEOUT_MS = 20_000;
 const BETMAN_FETCH_RETRIES = 3;
