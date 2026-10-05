@@ -1,3 +1,4 @@
+// DEPLOY_MARKER_V13_12_06_COURT_NAVER_VERIFY_20261005
 // DEPLOY_MARKER_V13_8_64_J1_ACTUAL_SCHEDULE_API_20260906
 // DEPLOY_MARKER_V13_8_63_J1_CATEGORY_RESOLVER_20260906
 // DEPLOY_MARKER_V13_8_62_LEAGUE_ADAPTER_VERIFY_READY_20260906
@@ -430,6 +431,190 @@ async function resolveKboGameId(date: string, home: string, away: string) {
     endpoint,
     status: response.status,
     candidateCount: candidates.length,
+  };
+}
+
+
+
+type BasketballVerifyGroup = "KBL" | "WKBL" | "NBA";
+
+function basketballVerifyGroup(leagueRaw: string): BasketballVerifyGroup {
+  const league = String(leagueRaw ?? "").toLowerCase().replace(/\s/g, "");
+  if (/wkbl|여자프로농구|여자농구/.test(league)) return "WKBL";
+  if (/nba|미프로농구|미국프로농구/.test(league)) return "NBA";
+  return "KBL";
+}
+
+function basketballScheduleProfile(group: BasketballVerifyGroup) {
+  if (group === "NBA") {
+    return {
+      categoryId: "nba",
+      upperCategoryIds: ["wbasketball", "basketball"],
+      referer: "https://m.sports.naver.com/basketball/schedule/index?category=nba",
+    };
+  }
+  if (group === "WKBL") {
+    return {
+      categoryId: "wkbl",
+      upperCategoryIds: ["kbasketball", "basketball"],
+      referer: "https://m.sports.naver.com/basketball/schedule/index?category=wkbl",
+    };
+  }
+  return {
+    categoryId: "kbl",
+    upperCategoryIds: ["kbasketball", "basketball"],
+    referer: "https://m.sports.naver.com/basketball/schedule/index?category=kbl",
+  };
+}
+
+function basketballScheduleTeam(game: AnyObj, side: "home" | "away") {
+  const prefix = side === "home" ? "home" : "away";
+  return String(
+    game?.[`${prefix}TeamName`] ??
+    game?.[`${prefix}TeamShortName`] ??
+    game?.[`${prefix}TeamFullName`] ??
+    game?.[`${prefix}Name`] ??
+    game?.[`${prefix}Team`]?.name ??
+    game?.[`${prefix}Team`]?.teamName ??
+    game?.[side]?.name ??
+    game?.[side]?.teamName ??
+    ""
+  ).trim();
+}
+
+function basketballScheduleDateMatches(game: AnyObj, date: string) {
+  const raw = game?.gameDateTime ?? game?.startTime ?? game?.gameDate ?? game?.date ?? null;
+  const key = raw ? dateKey(String(raw)) : null;
+  if (key) return key === date;
+  const gameId = String(game?.gameId ?? game?.game_id ?? "").trim();
+  return !gameId || !/^20\d{6}/.test(gameId) || gameId.startsWith(date);
+}
+
+function basketballScheduleCategoryMatches(game: AnyObj, group: BasketballVerifyGroup) {
+  const category = String(game?.categoryId ?? game?.category ?? game?.leagueId ?? game?.league ?? "")
+    .toLowerCase()
+    .replace(/\s/g, "");
+  if (!category) return true;
+  if (group === "NBA") return /nba|wbasketball/.test(category);
+  if (group === "WKBL") return /wkbl|여자/.test(category);
+  // KBL 요청에서 WKBL/NBA가 섞인 generic payload를 잘못 고르지 않는다.
+  return /kbl|kbasketball/.test(category) && !/wkbl|nba/.test(category);
+}
+
+function basketballScheduleCompleted(game: AnyObj) {
+  if (naverVerifyGameVoidReason(game)) return false;
+  const statusText = [
+    game?.statusCode,
+    game?.statusInfo,
+    game?.gameStatus,
+    game?.status,
+    game?.statusNum,
+    game?.gameStatusName,
+  ].map((v) => String(v ?? "").toLowerCase()).join(" ");
+  if (/scheduled|before|live|playing|진행|예정|경기전/.test(statusText)) return false;
+  if (/final|finish|finished|ended|end|result|종료|경기종료|경기끝/.test(statusText)) return true;
+  // 일부 schedule 응답은 종료 상태 문자열 없이 최종 점수만 남긴다.
+  // 이 경우에도 경기 시작 후 3시간이 지난 뒤에만 완료로 간주해 라이브 점수 오인을 막는다.
+  const score = naverScheduleFinalScore(game);
+  const start = naverLocalGameMs(game?.gameDateTime ?? game?.startTime ?? game?.gameDate);
+  return Boolean(score && start !== null && start < Date.now() - 3 * 60 * 60 * 1000);
+}
+
+async function resolveBasketballScheduleGame(
+  date: string,
+  home: string,
+  away: string,
+  startRaw: string,
+  leagueRaw: string,
+) {
+  const d = isoDate(date);
+  const group = basketballVerifyGroup(leagueRaw);
+  const profile = basketballScheduleProfile(group);
+  const attempts: Array<{ endpoint: string; status: number | null; rows: number }> = [];
+  const rowsByKey = new Map<string, AnyObj>();
+  const fields = "basic%2Cschedule%2CcategoryName%2CstatusNum";
+
+  const endpoints: string[] = [];
+  for (const upperCategoryId of profile.upperCategoryIds) {
+    endpoints.push(`${NAVER_API}?fields=${fields}&upperCategoryId=${encodeURIComponent(upperCategoryId)}&categoryId=${encodeURIComponent(profile.categoryId)}&fromDate=${encodeURIComponent(d)}&toDate=${encodeURIComponent(d)}&size=200`);
+    endpoints.push(`${NAVER_API}?fields=${fields}&upperCategoryId=${encodeURIComponent(upperCategoryId)}&fromDate=${encodeURIComponent(d)}&toDate=${encodeURIComponent(d)}&size=200`);
+  }
+
+  for (const endpoint of Array.from(new Set(endpoints))) {
+    try {
+      const response = await fetch(endpoint, {
+        cache: "no-store",
+        headers: {
+          accept: "application/json, text/plain, */*",
+          referer: profile.referer,
+          "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.12.06",
+        },
+      });
+      const payload = await response.json().catch(() => null);
+      const discovered = response.ok && payload ? allObjects(payload) : [];
+      let added = 0;
+      for (const obj of discovered) {
+        const gameId = String(obj?.gameId ?? obj?.game_id ?? "").trim();
+        const h = basketballScheduleTeam(obj, "home");
+        const a = basketballScheduleTeam(obj, "away");
+        if (!gameId || !h || !a) continue;
+        if (!basketballScheduleDateMatches(obj, date)) continue;
+        if (!basketballScheduleCategoryMatches(obj, group)) continue;
+        const key = gameId || `${h}|${a}|${String(obj?.gameDateTime ?? obj?.startTime ?? "")}`;
+        if (!rowsByKey.has(key)) {
+          rowsByKey.set(key, obj);
+          added += 1;
+        }
+      }
+      attempts.push({ endpoint, status: response.status, rows: added });
+      // category 전용 endpoint에서 실제 행을 얻었으면 불필요한 generic 호출을 줄인다.
+      if (added > 0 && endpoint.includes(`categoryId=${encodeURIComponent(profile.categoryId)}`)) break;
+    } catch {
+      attempts.push({ endpoint, status: null, rows: 0 });
+    }
+  }
+
+  const rows = Array.from(rowsByKey.values());
+  const requestedMs = requestedStartMs(startRaw);
+  const matched = rows.filter((obj) =>
+    teamMatches(basketballScheduleTeam(obj, "home"), home) &&
+    teamMatches(basketballScheduleTeam(obj, "away"), away)
+  );
+  const ranked = matched.map((obj) => {
+    const candidateMs = naverLocalGameMs(obj?.gameDateTime ?? obj?.startTime ?? obj?.gameDate);
+    const diff = requestedMs === null || candidateMs === null
+      ? Number.POSITIVE_INFINITY
+      : Math.abs(candidateMs - requestedMs);
+    return { obj, diff };
+  }).sort((a, b) => a.diff - b.diff);
+
+  let selected: AnyObj | null = matched.length === 1 ? matched[0] : null;
+  if (!selected && ranked.length > 0) {
+    const best = ranked[0];
+    const second = ranked[1];
+    // 같은 팀이 하루 2경기를 치르는 특수 대회까지 고려해 시간 차가 명확할 때만 선택한다.
+    if (Number.isFinite(best.diff) && best.diff <= 90 * 60 * 1000 && (!second || !Number.isFinite(second.diff) || best.diff + 30 * 60 * 1000 < second.diff)) {
+      selected = best.obj;
+    }
+  }
+
+  return {
+    group,
+    categoryId: profile.categoryId,
+    gameId: selected ? String(selected?.gameId ?? selected?.game_id ?? "") : null,
+    selectedGame: selected,
+    candidateCount: matched.length,
+    rows: rows.length,
+    attempts,
+    candidates: matched.slice(0, 10).map((obj) => ({
+      gameId: String(obj?.gameId ?? obj?.game_id ?? ""),
+      home: basketballScheduleTeam(obj, "home"),
+      away: basketballScheduleTeam(obj, "away"),
+      gameDateTime: obj?.gameDateTime ?? obj?.startTime ?? obj?.gameDate ?? null,
+      status: obj?.statusCode ?? obj?.statusInfo ?? obj?.gameStatus ?? obj?.status ?? obj?.statusNum ?? null,
+      score: naverScheduleFinalScore(obj),
+    })),
+    build: "V13.12.06_COURT_NAVER_VERIFY",
   };
 }
 
@@ -1099,6 +1284,8 @@ function naverScheduleFinalScore(game: AnyObj) {
     game?.score?.home,
     game?.scores?.home,
     game?.result?.home,
+    game?.homeTeam?.score,
+    game?.homeTeam?.teamScore,
     game?.home?.score,
   );
   const away = naverScheduleScoreNumber(
@@ -1108,6 +1295,8 @@ function naverScheduleFinalScore(game: AnyObj) {
     game?.score?.away,
     game?.scores?.away,
     game?.result?.away,
+    game?.awayTeam?.score,
+    game?.awayTeam?.teamScore,
     game?.away?.score,
   );
   return home !== null && away !== null ? { home, away } : null;
@@ -3500,12 +3689,56 @@ export async function GET(request: Request) {
     const homeMlb = normalizedMlbName(home);
     const awayMlb = normalizedMlbName(away);
     const isFootball = /축구|football|soccer/i.test(String(sport));
+    const isBasketball = /농구|basketball/i.test(String(sport));
     const footballAdapter = footballAdapterId(requestedLeague);
-    let league: "NPB" | "KBO" | "MLB" | "FOOTBALL" = isFootball ? "FOOTBALL" : homeNpb && awayNpb ? "NPB" : homeMlb && awayMlb ? "MLB" : "KBO";
+    let league: "NPB" | "KBO" | "MLB" | "FOOTBALL" | "BASKETBALL" = isFootball
+      ? "FOOTBALL"
+      : isBasketball
+        ? "BASKETBALL"
+        : homeNpb && awayNpb
+          ? "NPB"
+          : homeMlb && awayMlb
+            ? "MLB"
+            : "KBO";
     let gameId: string | null = null;
     let resolverDebug: any = null;
 
-    if (league === "FOOTBALL") {
+    if (league === "BASKETBALL") {
+      const resolved = await resolveBasketballScheduleGame(date, home, away, startRaw, requestedLeague);
+      gameId = resolved.gameId;
+      resolverDebug = resolved;
+      const game = resolved.selectedGame;
+      if (!game || !gameId) {
+        return Response.json({
+          ok: false,
+          error: "네이버 농구 당일 일정에서 경기 자동매칭 실패",
+          debug: { date, home, away, requestedLeague, resolver: resolved },
+        }, { status: 404 });
+      }
+
+      const voidReason = naverVerifyGameVoidReason(game);
+      const finalScore = naverScheduleFinalScore(game);
+      const completed = !voidReason && basketballScheduleCompleted(game);
+      return Response.json({
+        ok: true,
+        gameId,
+        categoryId: resolved.categoryId,
+        completed,
+        cancelled: Boolean(voidReason),
+        voidReason,
+        finalScore: completed ? finalScore : null,
+        game: {
+          ...game,
+          gameId,
+          categoryId: game?.categoryId ?? resolved.categoryId,
+          homeTeamName: basketballScheduleTeam(game, "home") || home,
+          awayTeamName: basketballScheduleTeam(game, "away") || away,
+          homeScore: finalScore?.home ?? game?.homeScore ?? game?.homeTeamScore ?? null,
+          awayScore: finalScore?.away ?? game?.awayScore ?? game?.awayTeamScore ?? null,
+        },
+        debug: { resolver: resolved, source: "NAVER_BASKETBALL_SCHEDULE" },
+      });
+    } else if (league === "FOOTBALL") {
       const resolved = await resolveFootballGameId(date, home, away, startRaw, footballAdapter);
       gameId = resolved.gameId;
       resolverDebug = resolved;
