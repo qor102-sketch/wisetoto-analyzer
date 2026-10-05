@@ -1,4 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
+// V13.12.07 FROZEN TOP1 AUDIT: preserve V13.12.05 court model + V13.12.06 verifier; add frozen GAME TOP1 performance and global court-history audit, fix cold-start tier display
 // V13.12.06 COURT NAVER VERIFY: preserve V13.12.05 court model; add basketball-aware Naver final resolver/audit so fixtureId-null KBL/WKBL/NBA can become VERIFIED
 // V13.12.04 PARK SHINJA CUP EXCLUDED: preserve V13.12.03 reliability TOP1, exclude Park Shin-ja Cup from listing/analysis and court VERIFIED accumulation
 // V13.12.02 MODEL-FIRST TOP1: TOP1 ranking uses raw/model evidence first; market odds/probability are only a small agreement check and never a direct ranking weight
@@ -18416,7 +18417,7 @@ export default function Home() {
       : isSoccerSport && currentSoccerCandidate
         ? soccerContinuousTopTier(currentSoccerCandidate.slateScore)
         : isCourtSport && currentCourtCandidate
-          ? courtContinuousTopTier(currentCourtCandidate.slateScore)
+          ? (Boolean(currentContinuousTopPick?.courtColdStart) ? "관망" : courtContinuousTopTier(currentCourtCandidate.slateScore))
           : null;
   const currentContinuousTopScore =
     currentSport === "야구" && currentSlateCandidate
@@ -18477,6 +18478,173 @@ export default function Home() {
       pending,
       settled,
       hitRate: settled > 0 ? (hits / settled) * 100 : null,
+    };
+  }, [liveTrackerRecords]);
+
+  /*
+   * V13.12.07 COURT HISTORY STORAGE AUDIT
+   * 다음 경기 분석에 실제로 투입 가능한 VERIFIED 농구 결과를 전역에서 바로 확인한다.
+   * 박신자컵은 보존만 하고 누적 대상에서는 제외한다.
+   */
+  const courtHistoryStorageSummary = useMemo(() => {
+    const rows = liveTrackerRecords
+      .filter((record) =>
+        record.verificationStatus === "VERIFIED" &&
+        koreanSport(record.sport) === "농구" &&
+        !isParkShinjaCup(record.league) &&
+        Boolean(record.result) &&
+        Number.isFinite(Number(record.result?.homeScore)) &&
+        Number.isFinite(Number(record.result?.awayScore))
+      )
+      .sort((a, b) => b.startMs - a.startMs);
+
+    const groupMap = new Map<string, LiveTrackerRecord[]>();
+    const teamMap = new Map<string, Set<string>>();
+    for (const record of rows) {
+      const group = trackerRecordCourtGroup(record);
+      if (group === "EXCLUDED") continue;
+      groupMap.set(group, [...(groupMap.get(group) ?? []), record]);
+      const teams = teamMap.get(group) ?? new Set<string>();
+      const home = courtCanonicalTeam(record.home);
+      const away = courtCanonicalTeam(record.away);
+      if (home) teams.add(home);
+      if (away) teams.add(away);
+      teamMap.set(group, teams);
+    }
+
+    const groups = [...groupMap.entries()]
+      .map(([group, records]) => ({
+        group,
+        games: records.length,
+        teams: teamMap.get(group)?.size ?? 0,
+        latestAt: records[0]?.startMs ?? null,
+      }))
+      .sort((a, b) => b.games - a.games || a.group.localeCompare(b.group));
+
+    return {
+      games: rows.length,
+      groups,
+      latest: rows.slice(0, 5).map((record) => ({
+        id: record.id,
+        group: trackerRecordCourtGroup(record),
+        home: record.home,
+        away: record.away,
+        homeScore: Number(record.result?.homeScore),
+        awayScore: Number(record.result?.awayScore),
+        startMs: record.startMs,
+      })),
+    };
+  }, [liveTrackerRecords]);
+
+  /*
+   * V13.12.07 FROZEN GAME TOP1 VALIDATOR
+   * 현재 코드로 과거 픽을 재계산하지 않는다. PRE 잠금 당시 marketResults.modelSnapshot에
+   * 저장된 GAME TOP1 하나와 그 resultStatus만 읽어서 공식 VALUE / 약추천 / 관망을 분리한다.
+   */
+  const frozenGameTop1Summary = useMemo(() => {
+    type FrozenTop1Row = {
+      record: LiveTrackerRecord;
+      pick: LiveTrackerPick;
+      snapshot: MarketPick;
+      tier: "공식 VALUE" | "약추천" | "관망";
+      sport: string;
+      engine: string;
+    };
+
+    const rows: FrozenTop1Row[] = [];
+    for (const record of liveTrackerRecords) {
+      if (record.verificationStatus !== "VERIFIED" || isParkShinjaCup(record.league)) continue;
+      const candidateRows = (record.marketResults ?? []).filter((pick) => {
+        if (pick.resultStatus !== "HIT" && pick.resultStatus !== "MISS") return false;
+        const snapshot = pick.modelSnapshot as MarketPick | null;
+        const marker = `${String(snapshot?.stageGradeLabel ?? "")} ${String(snapshot?.valueGradeReason ?? "")}`;
+        return /GAME TOP1/i.test(marker);
+      });
+      if (!candidateRows.length) continue;
+
+      const pick = [...candidateRows].sort((a, b) =>
+        Number((b.modelSnapshot as MarketPick | null)?.recommendationScore ?? b.recommendationScore ?? -999) -
+        Number((a.modelSnapshot as MarketPick | null)?.recommendationScore ?? a.recommendationScore ?? -999)
+      )[0];
+      const snapshot = pick.modelSnapshot as MarketPick;
+      const marker = `${String(snapshot.stageGradeLabel ?? "")} ${String(snapshot.valueGradeReason ?? "")}`;
+      const tier: FrozenTop1Row["tier"] = /실전 추천/i.test(marker)
+        ? "공식 VALUE"
+        : /약추천/i.test(marker)
+          ? "약추천"
+          : "관망";
+      rows.push({
+        record,
+        pick,
+        snapshot,
+        tier,
+        sport: koreanSport(record.sport),
+        engine: String(record.recommendationEngineVersion ?? "UNKNOWN"),
+      });
+    }
+
+    const summarize = (input: FrozenTop1Row[]) => {
+      const hits = input.filter((row) => row.pick.resultStatus === "HIT").length;
+      const misses = input.filter((row) => row.pick.resultStatus === "MISS").length;
+      const probs = input
+        .map((row) => Number(row.snapshot.probability ?? row.pick.probability))
+        .filter((v) => Number.isFinite(v));
+      const brierValues = input
+        .map((row) => {
+          const p = Number(row.snapshot.probability ?? row.pick.probability) / 100;
+          if (!Number.isFinite(p)) return null;
+          const y = row.pick.resultStatus === "HIT" ? 1 : 0;
+          return (p - y) ** 2;
+        })
+        .filter((v): v is number => v !== null && Number.isFinite(v));
+      return {
+        picks: input.length,
+        hits,
+        misses,
+        hitRate: input.length ? (hits / input.length) * 100 : null,
+        avgPredicted: probs.length ? probs.reduce((a, b) => a + b, 0) / probs.length : null,
+        brier: brierValues.length ? brierValues.reduce((a, b) => a + b, 0) / brierValues.length : null,
+      };
+    };
+
+    const grouped = (keyFn: (row: FrozenTop1Row) => string) => {
+      const map = new Map<string, FrozenTop1Row[]>();
+      for (const row of rows) {
+        const key = keyFn(row);
+        map.set(key, [...(map.get(key) ?? []), row]);
+      }
+      return [...map.entries()]
+        .map(([label, groupRows]) => ({ label, ...summarize(groupRows) }))
+        .sort((a, b) => b.picks - a.picks || a.label.localeCompare(b.label, "ko"));
+    };
+
+    const tierOrder = ["공식 VALUE", "약추천", "관망"];
+    const byTier = grouped((row) => row.tier)
+      .sort((a, b) => tierOrder.indexOf(a.label) - tierOrder.indexOf(b.label));
+
+    const recent = [...rows]
+      .sort((a, b) => b.record.startMs - a.record.startMs)
+      .slice(0, 12)
+      .map((row) => ({
+        id: row.record.id,
+        game: `${row.record.home} vs ${row.record.away}`,
+        sport: row.sport,
+        tier: row.tier,
+        market: row.pick.market,
+        pick: row.pick.pick,
+        probability: Number(row.snapshot.probability ?? row.pick.probability),
+        score: Number(row.snapshot.recommendationScore ?? row.pick.recommendationScore),
+        resultStatus: row.pick.resultStatus,
+        actualLabel: row.pick.actualLabel,
+        startMs: row.record.startMs,
+      }));
+
+    return {
+      total: summarize(rows),
+      byTier,
+      bySport: grouped((row) => row.sport),
+      byEngine: grouped((row) => row.engine),
+      recent,
     };
   }, [liveTrackerRecords]);
 
@@ -19828,6 +19996,49 @@ export default function Home() {
         decision: nextDecision,
         picks: nextPicks,
       };
+    });
+
+    if (changed) {
+      saveLiveTrackerRecords(next);
+      setLiveTrackerRecords(next);
+    }
+  }, [backtestMode, liveTrackerRecords]);
+
+  /*
+   * V13.12.07 legacy GAME TOP1 settlement migration.
+   * 과거에 이미 VERIFIED된 레코드는 result가 저장되어 있어도 V13.12.05 이전 marketResults가
+   * PENDING일 수 있다. 현재 모델을 다시 돌리지 않고 frozen marketSnapshot/modelSnapshot +
+   * 저장된 실제 result만으로 HIT/MISS 상태를 채운다.
+   */
+  useEffect(() => {
+    if (backtestMode || !liveTrackerRecords.length) return;
+    let changed = false;
+    const next = liveTrackerRecords.map((record) => {
+      if (
+        record.verificationStatus !== "VERIFIED" ||
+        !record.result ||
+        !(record.marketResults?.length) ||
+        !(record.marketResults ?? []).some((pick) => pick.resultStatus !== "HIT" && pick.resultStatus !== "MISS" && pick.resultStatus !== "VOID")
+      ) return record;
+
+      const truth = record.result;
+      let recordChanged = false;
+      const settled = (record.marketResults ?? []).map((pick) => {
+        if (pick.resultStatus === "HIT" || pick.resultStatus === "MISS" || pick.resultStatus === "VOID") return pick;
+        const snapshot = pick.modelSnapshot as MarketPick | null;
+        if (!snapshot || !pick.marketSnapshot) return pick;
+        const validation = validateBacktestMarket(pick.marketSnapshot, snapshot, truth);
+        if (validation.status !== "HIT" && validation.status !== "MISS" && validation.status !== "VOID") return pick;
+        recordChanged = true;
+        changed = true;
+        return {
+          ...pick,
+          resultStatus: validation.status,
+          actualLabel: validation.actualLabel,
+          resultNote: validation.note,
+        };
+      });
+      return recordChanged ? { ...record, marketResults: settled } : record;
     });
 
     if (changed) {
@@ -24754,7 +24965,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.06 · COURT NAVER VERIFY + COLD START SAFE</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.07 · FROZEN TOP1 AUDIT + COURT HISTORY</div>
         </div>
         <div className="bar">
           <button
@@ -26063,6 +26274,25 @@ export default function Home() {
           </div>
         </div>
 
+        <div style={{ padding: "8px 12px", borderTop: "1px solid #e2e8f0", background: "#f0fdf4" }}>
+          <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
+            V13.12.07 COURT VERIFIED HISTORY AUDIT · 다음 경기 입력 가능 표본
+          </div>
+          <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.65 }}>
+            누적 {courtHistoryStorageSummary.games}경기
+            {courtHistoryStorageSummary.groups.map((row) => (
+              <span key={`court-history-${row.group}`}> · {row.group} {row.games}G / {row.teams}팀</span>
+            ))}
+            {courtHistoryStorageSummary.latest.length ? (
+              <div style={{ marginTop: 3 }}>
+                최근 누적 · {courtHistoryStorageSummary.latest.map((row) => `${row.group} ${row.home} ${row.homeScore}:${row.awayScore} ${row.away}`).join(" | ")}
+              </div>
+            ) : (
+              <div style={{ marginTop: 3 }}>아직 박신자컵을 제외한 VERIFIED 농구 종료점수가 없습니다.</div>
+            )}
+          </div>
+        </div>
+
         <div style={{ padding: "8px 12px", borderTop: "1px solid #e2e8f0", background: "#f6fff8" }}>
           <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
             V13.9.08 · VERIFY VOID/STICKY READY 유지 · 야구 장소표본 5경기 confidence 목표 + 3경기 soft 위험
@@ -26100,6 +26330,51 @@ export default function Home() {
               ) : null}
             </>
           )}
+        </div>
+
+        <div style={{ padding: "10px 12px", borderTop: "1px solid #dbeafe", background: "#f8fbff" }}>
+          <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
+            V13.12.07 FROZEN GAME TOP1 OOS VALIDATOR · 사후 재계산 금지
+          </div>
+          <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.6, marginBottom: 8 }}>
+            VERIFIED 당시 저장된 marketResults.modelSnapshot의 GAME TOP1만 사용 · 현재 모델로 과거 픽 재계산 안 함 · 박신자컵 제외 · 공식 VALUE / 약추천 / 관망 분리
+          </div>
+          <div className="cards" style={{ marginBottom: 8 }}>
+            <div className="card">전체 frozen TOP1<b>{frozenGameTop1Summary.total.hitRate === null ? "-" : `${frozenGameTop1Summary.total.hitRate.toFixed(1)}%`}</b><div className="small">{frozenGameTop1Summary.total.picks}픽 · HIT {frozenGameTop1Summary.total.hits} / MISS {frozenGameTop1Summary.total.misses} · Brier {frozenGameTop1Summary.total.brier === null ? "-" : frozenGameTop1Summary.total.brier.toFixed(3)}</div></div>
+            {frozenGameTop1Summary.byTier.map((row) => (
+              <div className="card" key={`frozen-tier-card-${row.label}`}>{row.label}<b>{row.hitRate === null ? "-" : `${row.hitRate.toFixed(1)}%`}</b><div className="small">{row.picks}픽 · {row.hits}-{row.misses} · 예측평균 {row.avgPredicted === null ? "-" : `${row.avgPredicted.toFixed(1)}%`} · Brier {row.brier === null ? "-" : row.brier.toFixed(3)}</div></div>
+            ))}
+          </div>
+          <div style={{ overflowX: "auto", marginBottom: 8 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 760 }}>
+              <thead><tr style={{ background: "#eff6ff" }}>
+                {['종목','frozen TOP1','HIT','MISS','적중률','평균예측','Brier'].map((head) => <th key={head} style={{ border: "1px solid #bfdbfe", padding: "5px 6px", textAlign: head === '종목' ? 'left' : 'right' }}>{head}</th>)}
+              </tr></thead>
+              <tbody>
+                {frozenGameTop1Summary.bySport.length ? frozenGameTop1Summary.bySport.map((row) => (
+                  <tr key={`frozen-sport-${row.label}`}>
+                    <td style={{ border: "1px solid #bfdbfe", padding: "5px 6px", fontWeight: 800 }}>{row.label}</td>
+                    <td style={{ border: "1px solid #bfdbfe", padding: "5px 6px", textAlign: "right" }}>{row.picks}</td>
+                    <td style={{ border: "1px solid #bfdbfe", padding: "5px 6px", textAlign: "right" }}>{row.hits}</td>
+                    <td style={{ border: "1px solid #bfdbfe", padding: "5px 6px", textAlign: "right" }}>{row.misses}</td>
+                    <td style={{ border: "1px solid #bfdbfe", padding: "5px 6px", textAlign: "right" }}>{row.hitRate === null ? '-' : `${row.hitRate.toFixed(1)}%`}</td>
+                    <td style={{ border: "1px solid #bfdbfe", padding: "5px 6px", textAlign: "right" }}>{row.avgPredicted === null ? '-' : `${row.avgPredicted.toFixed(1)}%`}</td>
+                    <td style={{ border: "1px solid #bfdbfe", padding: "5px 6px", textAlign: "right" }}>{row.brier === null ? '-' : row.brier.toFixed(3)}</td>
+                  </tr>
+                )) : <tr><td colSpan={7} style={{ border: "1px solid #bfdbfe", padding: 6 }}>정산된 frozen GAME TOP1 없음</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          {frozenGameTop1Summary.recent.length ? (
+            <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.6 }}>
+              최근 frozen 정산 · {frozenGameTop1Summary.recent.map((row) => `${row.sport} ${row.game} / ${row.tier} / ${row.market} ${row.pick} ${Number.isFinite(row.probability) ? `${row.probability.toFixed(1)}%` : '-'} → ${row.resultStatus}`).join(" | ")}
+            </div>
+          ) : null}
+          {frozenGameTop1Summary.byEngine.length ? (
+            <div className="small" style={{ marginTop: 4, whiteSpace: "normal", lineHeight: 1.55 }}>
+              엔진별 표본 · {frozenGameTop1Summary.byEngine.map((row) => `${row.label} ${row.picks}픽 ${row.hitRate === null ? '-' : `${row.hitRate.toFixed(1)}%`}`).join(" | ")}
+            </div>
+          ) : null}
         </div>
 
         <div style={{ padding: "10px 12px", borderTop: "1px solid #e2e8f0", background: "#fbfcff" }}>
@@ -26279,7 +26554,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.06 · V13.12.03 RELIABILITY TOP1 유지 · COURT COLD START SAFE + NAVER VERIFY · 박신자컵 제외</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.07 · FROZEN GAME TOP1 AUDIT + COURT HISTORY · V13.12.05 모델 / V13.12.06 VERIFY 유지 · 박신자컵 제외</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 축구는 SportsAPI/Naver에서 최근 득실과 홈·원정 장소표본을 확보한 경기를 공통 Poisson 기반으로 계산하고, K리그/J리그·유럽 5대리그·UEFA 대회·MLS는 리그별 중립 득점 prior를 적용합니다. 선발 11+11은 λ를 임의 변경하지 않고 데이터품질에 soft 반영하며, alias가 없는 기타 리그도 동일경기 매칭이 되면 OTHER 프로필로 분석합니다.
               </div>
@@ -29583,7 +29858,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.12.06은 V13.12.05 모델과 V13.12.03 RELIABILITY TOP1을 그대로 유지하면서, fixtureId=null 농구의 Naver 종료결과 매칭과 VERIFY 진단표시를 보강합니다. V13.12.05의 박신자컵 제외·COLD START·marketResults 정산 정책은 그대로 유지합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
+                    V13.12.07은 V13.12.05 농구 모델과 V13.12.03 RELIABILITY TOP1, V13.12.06 Naver VERIFY를 그대로 유지하면서, 사전 동결 GAME TOP1 전용 성과판과 전역 COURT VERIFIED HISTORY audit를 추가하고 COLD START 화면 tier가 항상 관망으로 일치하도록 수정합니다. V13.12.05의 박신자컵 제외·COLD START·marketResults 정산 정책은 그대로 유지합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
