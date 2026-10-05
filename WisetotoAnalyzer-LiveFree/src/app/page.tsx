@@ -1,5 +1,5 @@
-// V13.12.05: calibrated reliability, immutable legacy snapshots, fair verification queue, court data.
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
+// V13.12.05 COURT COLD START SAFE: preserve V13.12.03 baseball reliability TOP1; anchor cold-start basketball totals to market line, auto-verify due court history, settle marketResults, and expose COLD START explicitly
 // V13.12.04 PARK SHINJA CUP EXCLUDED: preserve V13.12.03 reliability TOP1, exclude Park Shin-ja Cup from listing/analysis and court VERIFIED accumulation
 // V13.12.02 MODEL-FIRST TOP1: TOP1 ranking uses raw/model evidence first; market odds/probability are only a small agreement check and never a direct ranking weight
 // V13.12.01 GAME TOP1 PER MATCH: every baseball/football/court fixture promotes its own independent full-game TOP1; no daily cross-game winner gate
@@ -18,8 +18,6 @@
 // DEPLOY_MARKER_V13_8_34_NAVER_RECENT_BATTING_V1_20260903
 
 import { useEffect, useMemo, useState, useRef } from "react";
-import { pendingVerificationBatch, courtInputLabel, finiteValue } from "./model-integrity";
-const ACTIVE_ENGINE = "V13.12.05_INPUT_INTEGRITY";
 
 type Sport =
   | "전체"
@@ -846,7 +844,6 @@ type LiveTrackerRecord = {
   venueShadow?: VenueShadowValidationSnapshot | null;
   venueShadowResult?: VenueShadowValidationResult | null;
   baseballReadyHold?: BaseballReadyHoldSnapshot | null;
-  starterInputAudit?: { capturedAt: number; homeName: string | null; awayName: string | null; source: string | null };
   baseballChallenger?: BaseballChallengerSnapshot | null;
   footballLineup?: FootballLineupSnapshot | null;
   footballPre?: FootballPreValidationSnapshot | null;
@@ -4682,9 +4679,9 @@ function trackerRecordCourtGroup(record: LiveTrackerRecord) {
 }
 
 function trackerRecordToCourtFixture(record: LiveTrackerRecord) {
-  const homeScore = finiteValue(record.result?.homeScore);
-  const awayScore = finiteValue(record.result?.awayScore);
-  if (homeScore === null || awayScore === null || !Number.isInteger(homeScore) || !Number.isInteger(awayScore) || homeScore < 0 || awayScore < 0 || homeScore === awayScore) return null;
+  const homeScore = Number(record.result?.homeScore);
+  const awayScore = Number(record.result?.awayScore);
+  if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) return null;
   return {
     id: record.id,
     startTime: new Date(record.startMs).toISOString(),
@@ -4744,8 +4741,6 @@ function courtTrackerRecentSummary(
       Boolean(record.result) &&
       Number.isFinite(record.startMs) &&
       record.startMs < cutoffMs &&
-      record.capturedAt < record.startMs &&
-      record.verifiedAt != null && record.verifiedAt < cutoffMs &&
       trackerRecordCourtGroup(record) === leagueGroup
     )
     .sort((a, b) => b.startMs - a.startMs);
@@ -4781,11 +4776,14 @@ function courtTrackerRecentSummary(
 }
 
 function courtFixtureDedupeKey(fixture: any) {
+  const score = fixtureFinalScore(fixture);
   const time = fixtureTimeMs(fixture);
   return [
     Number.isFinite(time) ? Math.round(time / 60000) : "-",
     courtCanonicalTeam(fixtureTeamName(fixture, "home")),
     courtCanonicalTeam(fixtureTeamName(fixture, "away")),
+    score?.home ?? "-",
+    score?.away ?? "-",
   ].join("|");
 }
 
@@ -7582,6 +7580,23 @@ function buildAnalysis(
     if (sport === "야구") expectedHomeScore += 0.10;
     if ((sport === "농구" || sport === "배구") && courtProfile) expectedHomeScore += courtProfile.homeEdge;
 
+    /*
+     * V13.12.05 COURT COLD START SAFE
+     * 실제 최근 득실이 0/0인 농구에서 시장 total line을 임시 raw score로 사용한 뒤
+     * 다시 league prior로 shrink하면 높은 total line일수록 인위적인 UNDER edge가 생긴다.
+     * 독립 scoring data가 없을 때는 시장 total을 "예측 신호"가 아니라 기준점(anchor)으로만 사용해
+     * 최종 예상 총점을 해당 line에 맞춘다. 따라서 U/O는 독립 데이터가 쌓이기 전 50% 부근에서 시작한다.
+     */
+    if (sport === "농구" && courtPriorFallback && courtProfile) {
+      const coldTotalMarket = chooseBetmanTotal(betmanMatch);
+      const coldTotalLine = Number(coldTotalMarket?.line);
+      if (Number.isFinite(coldTotalLine) && coldTotalLine >= 100 && coldTotalLine <= 300) {
+        const coldMargin = expectedHomeScore - expectedAwayScore;
+        expectedHomeScore = Math.max(45, coldTotalLine / 2 + coldMargin / 2);
+        expectedAwayScore = Math.max(45, coldTotalLine / 2 - coldMargin / 2);
+      }
+    }
+
     postShrinkHomeScore = expectedHomeScore;
     postShrinkAwayScore = expectedAwayScore;
 
@@ -8754,6 +8769,8 @@ type MarketPick = {
   courtScoringQuality?: number | null;
   courtMarketQuality?: number | null;
   courtModelQuality?: number | null;
+  courtColdStart?: boolean;
+  courtDataMode?: "COLD_START" | "HISTORY_ACTIVE" | null;
   courtCoverageLabel?: string | null;
 
   detail: string;
@@ -11382,12 +11399,12 @@ function baseballTop1ReliabilityDiagnostics(
   /*
    * V13.12.03: the ranking must not treat one fixed-lambda Poisson/Skellam tail as certainty.
    * We therefore rank with a conservative probability anchored to the correlation-adjusted
-   * consensus floor AND calibrated probability (no +2.5 uplift), plus a structural ranking penalty.
+   * consensus floor, and add a small structural tail-risk penalty to full-game run handicaps.
    * This is generic uncertainty control: it does not depend on the previous game's result,
    * the offered odds, or whether the pick is home/away.
    */
   const conservativeProbability = clamp(
-    Math.min(modelProbability, effectiveFloor, finiteValue(pick.probability) ?? modelProbability),
+    Math.min(modelProbability, effectiveFloor + 2.5),
     0,
     100,
   );
@@ -11480,7 +11497,7 @@ function baseballHitFirstSlateScore(pick: MarketPick): number | null {
 
   const consensusAvailable = Number.isFinite(floorRaw) && Number.isFinite(meanRaw);
   const correlatedConsensus = consensusAvailable
-    ? baseballCorrelationAdjustedConsensus(floorRaw, meanRaw, calibratedProbability)
+    ? baseballCorrelationAdjustedConsensus(floorRaw, meanRaw, modelProbability)
     : { floor: modelProbability, mean: modelProbability, penalty: 0 };
   const effectiveFloor = clamp(correlatedConsensus.floor, 0, 100);
   const effectiveMean = clamp(correlatedConsensus.mean, 0, 100);
@@ -11566,7 +11583,7 @@ function promoteBaseballSlateTopPick(pick: MarketPick, rank: number, slateScore:
   const correlatedConsensus = baseballCorrelationAdjustedConsensus(
     Number(pick.precisionConsensusFloor),
     Number(pick.precisionConsensusMean),
-    Number(pick.probability),
+    Number(pick.rawProbability ?? pick.probability),
   );
   const marketAgreement = top1MarketAgreementAdjustment(
     Number(pick.rawProbability ?? pick.probability),
@@ -11602,7 +11619,7 @@ function promoteBaseballSlateTopPick(pick: MarketPick, rank: number, slateScore:
     top1ConservativeProbability: reliability.conservativeProbability,
     top1TailRiskPenalty: reliability.tailRiskPenalty,
     top1ReliabilityLabel: reliability.label,
-    detail: `${pick.detail} · V13.12.05 GAME TOP${rank} · ${tier} · RELIABILITY / MODEL-FIRST / MARKET-DEBIASED SCORE`,
+    detail: `${pick.detail} · V13.12.03 GAME TOP${rank} · ${tier} · RELIABILITY / MODEL-FIRST / MARKET-DEBIASED SCORE`,
   };
 }
 
@@ -11779,6 +11796,8 @@ type CourtDataQuality = {
   scoring: number;
   market: number;
   model: number;
+  coldStart: boolean;
+  mode: "COLD_START" | "HISTORY_ACTIVE";
   label: string;
 };
 
@@ -11789,14 +11808,11 @@ function courtSportsDataQuality(
 ): CourtDataQuality | null {
   if (sport !== "농구" && sport !== "배구") return null;
 
-  const recent = clamp(
-    Math.min(
-      Math.max(0, Number(factors.homeRecentSample ?? 0)),
-      Math.max(0, Number(factors.awayRecentSample ?? 0))
-    ) / 5,
-    0,
-    1
+  const minRecentSample = Math.min(
+    Math.max(0, Number(factors.homeRecentSample ?? 0)),
+    Math.max(0, Number(factors.awayRecentSample ?? 0))
   );
+  const recent = clamp(minRecentSample / 5, 0, 1);
   const venue = clamp(
     Math.min(
       Math.max(0, Number(factors.homeVenueSample ?? 0)),
@@ -11805,8 +11821,14 @@ function courtSportsDataQuality(
     0,
     1
   );
-  const scoring = factors.scoringUsed ? 1 : factors.hasRealData ? 0.42 : 0;
-  const model = clamp(Number(factors.scoreShrinkage ?? 0), 0, 1);
+  /*
+   * V13.12.05: 농구 양 팀 중 한쪽이라도 최근 실전 표본이 2경기 미만이면 COLD START.
+   * market line/prior로 예상점수가 생성되어도 독립 scoring data로 간주하지 않는다.
+   */
+  const coldStart = sport === "농구" && minRecentSample < 2;
+  const scoring = factors.scoringUsed ? 1 : factors.hasRealData ? (coldStart ? 0.18 : 0.42) : 0;
+  const rawModel = clamp(Number(factors.scoreShrinkage ?? 0), 0, 1);
+  const model = coldStart ? Math.min(rawModel, 0.25) : rawModel;
 
   const relevantMarkets = (Array.isArray(game?.markets) ? game!.markets! : []).filter((market: any) => {
     const name = `${String(market?.betName ?? "")} ${String(market?.betTypeName ?? "")}`;
@@ -11830,6 +11852,7 @@ function courtSportsDataQuality(
   );
 
   const pct = (v: number) => Math.round(v * 100);
+  const mode = coldStart ? "COLD_START" as const : "HISTORY_ACTIVE" as const;
   return {
     overall: Number(overall.toFixed(1)),
     recent: Number(recent.toFixed(3)),
@@ -11837,7 +11860,9 @@ function courtSportsDataQuality(
     scoring: Number(scoring.toFixed(3)),
     market: Number(market.toFixed(3)),
     model: Number(model.toFixed(3)),
-    label: `품질 ${overall.toFixed(1)} · R ${pct(recent)} / V ${pct(venue)} / S ${pct(scoring)} / MKT ${pct(market)} / G ${pct(model)}`,
+    coldStart,
+    mode,
+    label: `${coldStart ? "COLD START · " : ""}품질 ${overall.toFixed(1)} · R ${pct(recent)} / V ${pct(venue)} / S ${pct(scoring)} / MKT ${pct(market)} / G ${pct(model)}`,
   };
 }
 
@@ -11926,8 +11951,9 @@ function bestCourtSlateCandidate(picks: MarketPick[]) {
 }
 
 function promoteCourtSlateTopPick(pick: MarketPick, rank: number, slateScore: number): MarketPick {
-  const tier = courtContinuousTopTier(slateScore);
-  const promote = tier === "실전 추천";
+  const coldStart = Boolean(pick.courtColdStart);
+  const tier = coldStart ? "관망" : courtContinuousTopTier(slateScore);
+  const promote = tier === "실전 추천" && !coldStart;
   const quality = Number(pick.courtDataQuality);
   const profile = String(pick.courtLeagueGroup ?? "COURT");
   return {
@@ -11936,10 +11962,10 @@ function promoteCourtSlateTopPick(pick: MarketPick, rank: number, slateScore: nu
     valueGradeScore: promote
       ? Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))
       : Math.min(79.9, Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))),
-    valueGradeReason: `COURT GAME TOP${rank} · ${tier} · TOP1점수 ${slateScore.toFixed(1)} · ${profile} · 순수모델 ${Number(pick.rawProbability ?? pick.probability).toFixed(1)}% · 최종 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
-    stageGradeLabel: `COURT GAME TOP${rank} ${tier}`,
+    valueGradeReason: `COURT GAME TOP${rank} · ${tier}${coldStart ? " · COLD START 공식추천 차단" : ""} · TOP1점수 ${slateScore.toFixed(1)} · ${profile} · 순수모델 ${Number(pick.rawProbability ?? pick.probability).toFixed(1)}% · 최종 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
+    stageGradeLabel: `COURT GAME TOP${rank} ${tier}${coldStart ? " · COLD START" : ""}`,
     recommendationScore: Number(slateScore.toFixed(1)),
-    detail: `${pick.detail} · V13.12.02 COURT GAME TOP${rank} · ${tier} · VERIFIED HISTORY + MODEL-FIRST / MARKET-DEBIASED SCORE`,
+    detail: `${pick.detail} · V13.12.05 COURT GAME TOP${rank} · ${tier} · ${coldStart ? "COLD START SAFE / MARKET-LINE ANCHOR" : "VERIFIED HISTORY + MODEL-FIRST / MARKET-DEBIASED SCORE"}`,
   };
 }
 
@@ -12539,8 +12565,10 @@ function buildActualMarketPicks(
             courtScoringQuality: courtDataQuality?.scoring ?? null,
             courtMarketQuality: courtDataQuality?.market ?? null,
             courtModelQuality: courtDataQuality?.model ?? null,
+            courtColdStart: courtDataQuality?.coldStart ?? false,
+            courtDataMode: courtDataQuality?.mode ?? null,
             courtCoverageLabel: courtDataQuality?.label ?? null,
-            detail: `${courtProfile.label} · ${modelNote} · ${factors.scoringUsed ? "최근 득실 모델" : "시장 prior fallback"} · 합의 하한 ${consensus.floor?.toFixed(1) ?? "-"}%`,
+            detail: `${courtProfile.label} · ${modelNote} · ${courtDataQuality?.coldStart ? "COLD START · 시장 기준점 앵커" : factors.scoringUsed ? "최근 득실 모델" : "시장 prior fallback"} · 합의 하한 ${consensus.floor?.toFixed(1) ?? "-"}%`,
           });
           continue;
         }
@@ -15637,6 +15665,7 @@ export default function Home() {
     useRef<HTMLInputElement | null>(null);
   const liveTrackerHydratedRef = useRef(false);
   const liveTrackerSkipInitialPersistRef = useRef(true);
+  const courtAutoVerifyAttemptRef = useRef("");
 
   useEffect(() => {
     const stored = readLiveTrackerRecords();
@@ -17479,8 +17508,6 @@ export default function Home() {
   const stickyReadyActive = Boolean(
     currentSport === "야구" &&
     liveAnalysisFactors.baseballAnalysisStage !== "READY" &&
-    !(selectedBaseballTrackerRecord?.starterInputAudit?.homeName && liveAnalysisFactors.homeStarterName && selectedBaseballTrackerRecord.starterInputAudit.homeName !== liveAnalysisFactors.homeStarterName) &&
-    !(selectedBaseballTrackerRecord?.starterInputAudit?.awayName && liveAnalysisFactors.awayStarterName && selectedBaseballTrackerRecord.starterInputAudit.awayName !== liveAnalysisFactors.awayStarterName) &&
     selectedBaseballTrackerRecord?.venueShadow?.stage === "READY" &&
     (selectedBaseballTrackerRecord.marketResults?.length ?? 0) > 0
   );
@@ -19203,7 +19230,6 @@ export default function Home() {
         return sameBetmanIdentity || sameFixture;
       });
       const existingRecord = existingIndex >= 0 ? previous[existingIndex] : null;
-      if (existingRecord && existingRecord.recommendationEngineVersion !== ACTIVE_ENGINE) return previous;
 
       /*
        * V13.8.49: 최초 PRE/STARTER 잠금이 있더라도 경기 시작 전 READY가
@@ -19445,7 +19471,14 @@ export default function Home() {
             ? Date.now()
             : null,
         gateVersion: "FALLBACK_GATE_V2",
-        recommendationEngineVersion: ACTIVE_ENGINE,
+        recommendationEngineVersion:
+          currentSport === "야구"
+            ? "V13.12.03_RELIABILITY_TOP1"
+            : currentSport === "축구"
+              ? "V13.12.02_MODEL_FIRST_TOP1"
+              : currentSport === "농구" || currentSport === "배구"
+                ? "V13.12.05_COURT_COLD_START_SAFE"
+                : undefined,
         decision: trackerPicks.length ? "PICK" : "PASS",
         picks: trackerPicks,
         marketResults: trackerMarketResults,
@@ -19491,7 +19524,6 @@ export default function Home() {
                 dataCompleteness: analysisFactors.baseballDataCompleteness,
               }
             : null,
-        starterInputAudit: currentSport === "야구" ? { capturedAt: Date.now(), homeName: analysisFactors.homeStarterName, awayName: analysisFactors.awayStarterName, source: matched?.lineups?.source ?? null } : undefined,
         baseballChallenger: baseballChallengerSnapshot,
         footballLineup: footballLineupSnapshot,
         footballPre: footballPreSnapshot,
@@ -19572,12 +19604,11 @@ export default function Home() {
     const desired = new Map<string, LiveTrackerPick | null>();
 
     for (const record of liveTrackerRecords) {
-      if (record.recommendationEngineVersion !== ACTIVE_ENGINE || record.startMs <= now) continue;
       if (
         record.sport !== "야구" ||
         record.verificationStatus !== "PENDING" ||
         record.venueShadow?.stage !== "READY" ||
-        record.startMs <= now
+        record.startMs < now - 30 * 60 * 1000
       ) continue;
 
       const candidate = bestBaseballHitFirstSlateCandidate(trackerMarketPickSnapshots(record));
@@ -19625,14 +19656,14 @@ export default function Home() {
       });
       const afterSig = JSON.stringify({
         decision: nextDecision,
-        engine: ACTIVE_ENGINE,
+        engine: "V13.12.03_RELIABILITY_TOP1",
         picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
       });
       if (beforeSig === afterSig) return record;
       changed = true;
       return {
         ...record,
-        recommendationEngineVersion: ACTIVE_ENGINE,
+        recommendationEngineVersion: "V13.12.03_RELIABILITY_TOP1",
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -19651,11 +19682,10 @@ export default function Home() {
     const desired = new Map<string, LiveTrackerPick | null>();
 
     for (const record of liveTrackerRecords) {
-      if (record.recommendationEngineVersion !== ACTIVE_ENGINE || record.startMs <= now) continue;
       if (
         record.sport !== "축구" ||
         record.verificationStatus !== "PENDING" ||
-        record.startMs <= now ||
+        record.startMs < now - 30 * 60 * 1000 ||
         !(record.marketResults?.length)
       ) continue;
 
@@ -19704,14 +19734,14 @@ export default function Home() {
       });
       const afterSig = JSON.stringify({
         decision: nextDecision,
-        engine: ACTIVE_ENGINE,
+        engine: "V13.12.02_MODEL_FIRST_TOP1",
         picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
       });
       if (beforeSig === afterSig) return record;
       changed = true;
       return {
         ...record,
-        recommendationEngineVersion: ACTIVE_ENGINE,
+        recommendationEngineVersion: "V13.12.02_MODEL_FIRST_TOP1",
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -19723,14 +19753,13 @@ export default function Home() {
     }
   }, [backtestMode, liveTrackerRecords]);
 
-  /* V13.12.02: 농구/NBA/배구 경기별 독립 TOP1 + model-first ranking. */
+  /* V13.12.05: 농구/NBA/배구 경기별 독립 TOP1 + COLD START SAFE ranking. */
   useEffect(() => {
     if (backtestMode || !liveTrackerRecords.length) return;
     const now = Date.now();
     const desired = new Map<string, LiveTrackerPick | null>();
 
     for (const record of liveTrackerRecords) {
-      if (record.recommendationEngineVersion !== ACTIVE_ENGINE || record.startMs <= now) continue;
       if (record.sport === "농구" && isParkShinjaCup(record.league)) {
         // V13.12.04: 이미 저장된 박신자컵 PENDING 레코드도 공식 PICK으로 승격/유지하지 않는다.
         if (record.verificationStatus === "PENDING") desired.set(record.id, null);
@@ -19739,7 +19768,7 @@ export default function Home() {
       if (
         (record.sport !== "농구" && record.sport !== "배구") ||
         record.verificationStatus !== "PENDING" ||
-        record.startMs <= now ||
+        record.startMs < now - 30 * 60 * 1000 ||
         !(record.marketResults?.length)
       ) continue;
 
@@ -19788,14 +19817,14 @@ export default function Home() {
       });
       const afterSig = JSON.stringify({
         decision: nextDecision,
-        engine: ACTIVE_ENGINE,
+        engine: "V13.12.05_COURT_COLD_START_SAFE",
         picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
       });
       if (beforeSig === afterSig) return record;
       changed = true;
       return {
         ...record,
-        recommendationEngineVersion: ACTIVE_ENGINE,
+        recommendationEngineVersion: "V13.12.05_COURT_COLD_START_SAFE",
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -19833,13 +19862,12 @@ export default function Home() {
     const score = payload?.finalScore ?? game?.finalScore ?? null;
     const homeRaw = score?.home ?? game?.homeScore ?? game?.homeTeamScore ?? game?.hScore ?? null;
     const awayRaw = score?.away ?? game?.awayScore ?? game?.awayTeamScore ?? game?.aScore ?? null;
-    const home = finiteValue(homeRaw) ?? NaN;
-    const away = finiteValue(awayRaw) ?? NaN;
+    const home = Number(homeRaw);
+    const away = Number(awayRaw);
     const statusText = [game?.statusCode, game?.statusInfo, game?.gameStatus, game?.status]
       .map((v) => String(v ?? "").toLowerCase())
       .join(" ");
     const completed = payload?.completed === true || /final|finish|finished|ended|end|result|종료|경기종료/.test(statusText);
-    if (homeRaw === null || awayRaw === null || homeRaw === "" || awayRaw === "" || /scheduled|before|live|진행|예정/.test(statusText)) return null;
     if (!completed || !Number.isFinite(home) || !Number.isFinite(away) || home < 0 || away < 0) return null;
     return {
       home,
@@ -19856,7 +19884,6 @@ export default function Home() {
         away: record.away,
         sport: koreanSport(record.sport),
         league: record.league,
-        mode: "verify",
       });
       const response = await fetch(`/api/naver/lineup?${params.toString()}`, { cache: "no-store" });
       const payload = await readApiResponse(response, `Naver VERIFY · ${record.home} vs ${record.away}`);
@@ -19897,32 +19924,51 @@ export default function Home() {
     }
   }
 
-  async function verifyLiveTrackerResults() {
+  async function verifyLiveTrackerResults(options?: { courtAutoOnly?: boolean }) {
     if (validationLoading) return;
+    const courtAutoOnly = Boolean(options?.courtAutoOnly);
+    const now = Date.now();
 
     // V13.8.62: 시작한 PENDING 레코드는 Betman FINAL을 먼저 확인한다.
-    // +2시간은 SportsAPI fallback 자격에만 사용하고 VERIFY 후보 자체를 막지 않는다.
-    const candidates = pendingVerificationBatch(liveTrackerRecords, Date.now(), 10);
-    // FIX9 migration: old Naver VERIFY could misread cancelled games as 0:0 RESULT.
-    // Recheck only legacy Naver 0:0 VERIFIED rows once; genuine 0:0 finals remain VERIFIED.
-    const legacyVoidRepairCandidates = liveTrackerRecords
-      .filter((record) =>
-        record.verificationStatus === "VERIFIED" &&
-        record.verifyResultSource === "NAVER" &&
-        koreanSport(record.sport) === "야구" &&
-        Number(record.result?.homeScore) === 0 &&
-        Number(record.result?.awayScore) === 0 &&
-        !record.verifyVoidCheckedAt
+    // V13.12.05 court auto는 경기 종료 가능성이 충분한 +2시간 이후 지원 농구만 1회 자동 확인한다.
+    const candidates = liveTrackerRecords
+      .filter(
+        (record) =>
+          record.verificationStatus === "PENDING" &&
+          record.startMs < (courtAutoOnly ? now - 2 * 60 * 60 * 1000 : now) &&
+          (!courtAutoOnly || (
+            koreanSport(record.sport) === "농구" &&
+            !isParkShinjaCup(record.league) &&
+            trackerRecordCourtGroup(record) !== "EXCLUDED"
+          ))
       )
       .slice(0, 10);
+    // FIX9 migration: old Naver VERIFY could misread cancelled games as 0:0 RESULT.
+    // Recheck only legacy Naver 0:0 VERIFIED rows once; genuine 0:0 finals remain VERIFIED.
+    const legacyVoidRepairCandidates = courtAutoOnly
+      ? []
+      : liveTrackerRecords
+          .filter((record) =>
+            record.verificationStatus === "VERIFIED" &&
+            record.verifyResultSource === "NAVER" &&
+            koreanSport(record.sport) === "야구" &&
+            Number(record.result?.homeScore) === 0 &&
+            Number(record.result?.awayScore) === 0 &&
+            !record.verifyVoidCheckedAt
+          )
+          .slice(0, 10);
 
     if (!candidates.length && !legacyVoidRepairCandidates.length) {
-      setStatus("실전 추적 · 지금 확인할 PENDING/VOID 재검사 기록이 없습니다.");
+      if (!courtAutoOnly) {
+        setStatus("실전 추적 · 지금 확인할 PENDING/VOID 재검사 기록이 없습니다.");
+      }
       return;
     }
 
     setValidationLoading(true);
-    setStatus(`실전 추적 · PENDING ${candidates.length}건 · legacy 0:0 재검사 ${legacyVoidRepairCandidates.length}건 확인 중…`);
+    setStatus(courtAutoOnly
+      ? `COURT HISTORY 자동 확인 · 종료 예상 농구 ${candidates.length}경기 확인 중…`
+      : `실전 추적 · PENDING ${candidates.length}건 · legacy 0:0 재검사 ${legacyVoidRepairCandidates.length}건 확인 중…`);
 
     let next = [...liveTrackerRecords];
     let verified = 0;
@@ -19997,7 +20043,6 @@ export default function Home() {
         try {
           let truth: BacktestValidationResult | null = null;
 
-          next = next.map((row) => row.id === record.id ? { ...row, verifyLastCheckedAt: Date.now() } : row);
           const betmanResolved = matchBetmanFinishedGame(record, betmanFinishedGames);
           const betmanMatch = betmanResolved.game;
           const betmanScore = betmanMatch ? fixtureFinalScore(betmanMatch) : null;
@@ -20113,7 +20158,7 @@ export default function Home() {
             continue;
           }
 
-          const settledPicks = (record.picks ?? []).map((pick) => {
+          const settleTrackerRows = (rows: LiveTrackerPick[]) => rows.map((pick) => {
             const validation = validateBacktestMarket(
               pick.marketSnapshot,
               pick.modelSnapshot as MarketPick,
@@ -20126,11 +20171,12 @@ export default function Home() {
               resultNote: validation.note,
             };
           });
-
-          const settledMarketResults = (record.marketResults ?? []).map((pick) => {
-            const validation = validateBacktestMarket(pick.marketSnapshot, pick.modelSnapshot as MarketPick, truth!);
-            return { ...pick, resultStatus: validation.status, actualLabel: validation.actualLabel, resultNote: validation.note };
-          });
+          const settledPicks = settleTrackerRows(record.picks ?? []);
+          /*
+           * V13.12.05: picks는 공식 VALUE만 비어 있을 수 있고 GAME TOP1 후보는 marketResults에 저장된다.
+           * 기존 VERIFY는 picks만 정산해 관망/약추천 TOP1이 영원히 PENDING으로 남았다.
+           */
+          const settledMarketResults = settleTrackerRows(record.marketResults ?? []);
 
           const shadow = record.venueShadow;
           const shadowResult: VenueShadowValidationResult | null = shadow
@@ -20214,6 +20260,27 @@ export default function Home() {
       setValidationLoading(false);
     }
   }
+
+  // V13.12.05: 수동 VERIFY를 누르지 않아도 종료 후 2시간이 지난 지원 농구 결과를 세션당 1회 확인해
+  // 다음 경기 분석에서 VERIFIED HISTORY가 자동으로 recent/venue 표본으로 들어오게 한다.
+  useEffect(() => {
+    if (!liveTrackerHydratedRef.current || validationLoading || !liveTrackerRecords.length) return;
+    const cutoff = Date.now() - 2 * 60 * 60 * 1000;
+    const dueCourt = liveTrackerRecords
+      .filter((record) =>
+        record.verificationStatus === "PENDING" &&
+        koreanSport(record.sport) === "농구" &&
+        !isParkShinjaCup(record.league) &&
+        record.startMs < cutoff
+      )
+      .map((record) => record.id)
+      .sort();
+    if (!dueCourt.length) return;
+    const signature = dueCourt.join("|");
+    if (courtAutoVerifyAttemptRef.current === signature) return;
+    courtAutoVerifyAttemptRef.current = signature;
+    void verifyLiveTrackerResults({ courtAutoOnly: true });
+  }, [liveTrackerRecords, validationLoading]);
 
   function downloadLiveTrackerBackup() {
     const payload: LiveTrackerPortableBundle = {
@@ -23879,7 +23946,7 @@ export default function Home() {
             }
           }
 
-          if (["야구", "축구", "농구"].includes(koreanSport(String((selectedBetman as any)?.sport ?? "")))) {
+          if (["야구", "축구"].includes(koreanSport(String((selectedBetman as any)?.sport ?? "")))) {
             try {
               const naverParams = new URLSearchParams({
                 date: Number.isFinite(selectedStartMs)
@@ -24004,7 +24071,7 @@ export default function Home() {
                 Number.isFinite(selectedStartMs) ? selectedStartMs : Date.now()
               );
               return mergeCourtRecentSummary(
-                mergeCourtRecentSummary(wisetotoLiveFallback?.recentSummary, naverTodayLineupFallback?.recentSummary, String(selectedBetman?.home ?? ""), String(selectedBetman?.away ?? "")),
+                primaryRecent,
                 history.recentSummary,
                 String(selectedBetman?.home ?? ""),
                 String(selectedBetman?.away ?? "")
@@ -24148,7 +24215,7 @@ export default function Home() {
         let naverTodayLineup: any = null;
         if (
           !backtestMode &&
-          ["야구", "축구", "농구"].includes(koreanSport(String((selectedBetman as any)?.sport ?? "")))
+          ["야구", "축구"].includes(koreanSport(String((selectedBetman as any)?.sport ?? "")))
         ) {
           try {
             const fixtureStart =
@@ -24296,10 +24363,7 @@ export default function Home() {
               Number.isFinite(selectedStartMs) ? selectedStartMs : Date.now()
             );
             return mergeCourtRecentSummary(
-              mergeCourtRecentSummary(
-                mergeCourtRecentSummary(wisetotoLive?.recentSummary, naverTodayLineup?.recentSummary, String(selectedBetman?.home ?? ""), String(selectedBetman?.away ?? "")),
-                primaryRecent, String(selectedBetman?.home ?? ""), String(selectedBetman?.away ?? "")
-              ),
+              primaryRecent,
               history.recentSummary,
               String(selectedBetman?.home ?? ""),
               String(selectedBetman?.away ?? "")
@@ -24684,7 +24748,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.04 · PARK SHINJA CUP EXCLUDED</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.05 · COURT COLD START SAFE</div>
         </div>
         <div className="bar">
           <button
@@ -26205,7 +26269,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.05 · 입력 검증·보수 순위·농구 수집 개선 · 기존 동결 기록 보존 · 박신자컵 제외</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.05 · V13.12.03 RELIABILITY TOP1 유지 · COURT COLD START SAFE · 박신자컵 제외</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 축구는 SportsAPI/Naver에서 최근 득실과 홈·원정 장소표본을 확보한 경기를 공통 Poisson 기반으로 계산하고, K리그/J리그·유럽 5대리그·UEFA 대회·MLS는 리그별 중립 득점 prior를 적용합니다. 선발 11+11은 λ를 임의 변경하지 않고 데이터품질에 soft 반영하며, alias가 없는 기타 리그도 동일경기 매칭이 되면 OTHER 프로필로 분석합니다.
               </div>
@@ -27116,7 +27180,6 @@ export default function Home() {
             {isCourtSport && currentCourtProfile && (
               <div className="section" style={{ marginTop: 0, marginBottom: 8 }}>
                 <h3>V13.12.05 COURT DATA · {currentCourtProfile.label}</h3>
-                <div className="notice">{courtInputLabel(analysisFactors.homeRecentSample, analysisFactors.awayRecentSample)} · 시장 prior {analysisFactors.scoreGuardApplied ? "적용" : "미적용"} · 부상/로테이션 독립 입력 미지원</div>
                 <div className="cards">
                   <div className="card">
                     모델 단위
@@ -27139,6 +27202,11 @@ export default function Home() {
                     <div className="small">팀 누적 · 장소 {currentCourtHistoryAudit ? `${currentCourtHistoryAudit.homeVenueGames}/${currentCourtHistoryAudit.awayVenueGames}` : "-"} · {currentCourtHistoryAudit?.leagueGroup ?? "-"}</div>
                   </div>
                   <div className="card">
+                    데이터 상태
+                    <b>{currentCourtQuality?.coldStart ? "COLD START" : "HISTORY ACTIVE"}</b>
+                    <div className="small">{currentCourtQuality?.coldStart ? "양 팀 최근 실전표본 2경기 미만 · 공식추천 차단" : "최근 실전 득실 기반 모델 활성"}</div>
+                  </div>
+                  <div className="card">
                     COURT 품질
                     <b>{currentCourtQuality ? currentCourtQuality.overall.toFixed(1) : "-"}</b>
                     <div className="small">{currentCourtQuality?.label ?? "분석 대기"}</div>
@@ -27155,7 +27223,7 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="notice" style={{ margin: "8px 0 0" }}>
-                  농구(KBL/WKBL/NBA)는 리그별 득점 prior와 최근 득실·장소표본을 수축한 뒤 승패/핸디/U/O를 점수분포로 계산합니다. 박신자컵은 V13.12.04부터 경기목록·분석·VERIFIED 농구 누적 대상에서 제외합니다. V13.12.00부터 PRE 잠금 후 VERIFIED된 지원 리그의 농구 종료점수를 실전 tracker에서 자동 누적해 다음 경기의 최근/홈·원정 장소표본으로 재사용합니다. API 최근기록이 있으면 삭제하지 않고 중복 제거 후 보강하며 현재 경기 이후 결과는 사용하지 않습니다.
+                  농구(KBL/WKBL/NBA)는 리그별 득점 prior와 최근 득실·장소표본을 수축한 뒤 승패/핸디/U/O를 점수분포로 계산합니다. 박신자컵은 V13.12.04부터 경기목록·분석·VERIFIED 농구 누적 대상에서 제외합니다. V13.12.05부터 양 팀 최근 실전표본이 2경기 미만이면 COLD START로 표시하고 공식 VALUE 승격을 차단합니다. 최근 득실이 전혀 없을 때 시장 total은 독립 예측값이 아니라 총점 기준점(anchor)으로만 사용해 가짜 U/O 엣지를 만들지 않습니다. 종료 후 2시간이 지난 지원 농구 PENDING은 세션당 1회 자동 VERIFY하여 다음 경기의 최근/홈·원정 장소표본으로 재사용합니다. API 최근기록이 있으면 삭제하지 않고 중복 제거 후 보강하며 현재 경기 이후 결과는 사용하지 않습니다.
                   배구(KOVO)는 최근 세트 스코어에서 세트승률을 만들고 3-0/3-1/3-2 분포로 승패와 세트핸디를 계산합니다.
                   {currentSport === "배구" ? " Betman U/O 기준이 6.5를 넘으면 세트 U/O가 아니라 총 포인트 시장으로 보고 현재 TOP1 대상에서 제외합니다." : ""}
                   {" "}선수 부상·출장시간·로테이션은 아직 독립 court 모델 입력으로 사용하지 않으므로 데이터품질 점수에도 포함하지 않습니다.
@@ -29325,16 +29393,29 @@ export default function Home() {
                         중립 사전값
                         <b>{analysisFactors.scorePrior?.toFixed(2) ?? "-"}</b>
                       </div>
-                      <div className="card">
-                        팀 기본전력 fallback
-                        <b>{analysisFactors.baseballTeamStrengthApplied ? "✓ 적용" : "미적용"}</b>
-                        <div className="small">
-                          {currentSport === "농구" ? courtInputLabel(analysisFactors.homeRecentSample, analysisFactors.awayRecentSample) : (analysisFactors.baseballTeamStrengthSource ?? (analysisFactors.homeRecentSample || analysisFactors.awayRecentSample ? "최근 Form 사용" : "최근 기록 없음 · prior 기반"))}
-                          {analysisFactors.baseballTeamStrengthHomeGames || analysisFactors.baseballTeamStrengthAwayGames
-                            ? ` · 표본 ${analysisFactors.baseballTeamStrengthHomeGames}/${analysisFactors.baseballTeamStrengthAwayGames}G`
-                            : ""}
+                      {currentSport === "야구" ? (
+                        <div className="card">
+                          팀 기본전력 fallback
+                          <b>{analysisFactors.baseballTeamStrengthApplied ? "✓ 적용" : "미적용"}</b>
+                          <div className="small">
+                            {analysisFactors.baseballTeamStrengthSource ?? (analysisFactors.scoringUsed ? "최근 Form 사용" : "최근 Form 없음")}
+                            {analysisFactors.baseballTeamStrengthHomeGames || analysisFactors.baseballTeamStrengthAwayGames
+                              ? ` · 표본 ${analysisFactors.baseballTeamStrengthHomeGames}/${analysisFactors.baseballTeamStrengthAwayGames}G`
+                              : ""}
+                          </div>
                         </div>
-                      </div>
+                      ) : isCourtSport ? (
+                        <div className="card">
+                          COURT 데이터 모드
+                          <b>{currentCourtQuality?.coldStart ? "COLD START" : analysisFactors.scoringUsed ? "최근 Form 사용" : "리그 prior"}</b>
+                          <div className="small">최근 {analysisFactors.homeRecentSample}/{analysisFactors.awayRecentSample} · 장소 {analysisFactors.homeVenueSample}/{analysisFactors.awayVenueSample}</div>
+                        </div>
+                      ) : (
+                        <div className="card">
+                          최근 Form
+                          <b>{analysisFactors.scoringUsed ? "사용" : "미사용"}</b>
+                        </div>
+                      )}
                       <div className="card">
                         시장 공정 승률
                         <b>{analysisFactors.marketHomeFair?.toFixed(1) ?? "-"}% / {analysisFactors.marketAwayFair?.toFixed(1) ?? "-"}%</b>
@@ -29349,9 +29430,13 @@ export default function Home() {
                     </div>
 
                     <div className="notice" style={{ margin: "8px 0" }}>
-                      예상득점은 배당을 그대로 점수로 바꾸지 않습니다. 최근 득실을 robust 처리하고, Form이 비면 MLB/NPB 공식 최근 팀 득실을 기본전력 fallback으로 먼저 사용합니다.
-                      공식 팀 전력도 없을 때만 시장 방향을 약한 안전장치로 써서 강팀/약팀을 무조건 50:50으로 시작하는 가짜 엣지를 막습니다.
-                      선발·라인업·Challenger B/C/D는 그 뒤 별도로 반영합니다.
+                      {currentSport === "야구"
+                        ? "예상득점은 배당을 그대로 점수로 바꾸지 않습니다. 최근 득실을 robust 처리하고, Form이 비면 MLB/NPB 공식 최근 팀 득실을 기본전력 fallback으로 먼저 사용합니다. 공식 팀 전력도 없을 때만 시장 방향을 약한 안전장치로 쓰며 선발·라인업·Challenger B/C/D는 그 뒤 별도로 반영합니다."
+                        : isCourtSport
+                          ? (currentCourtQuality?.coldStart
+                              ? "COLD START: 실제 최근 득실이 부족하므로 시장 승패는 방향 안전장치, total line은 총점 기준점으로만 사용합니다. 이 상태에서는 최근 Form 사용으로 표시하지 않고 공식 VALUE도 승격하지 않습니다."
+                              : "COURT HISTORY ACTIVE: VERIFIED/API 최근 득실과 장소표본을 실제 모델 입력으로 사용합니다.")
+                          : "최근 득실과 장소표본을 우선 사용하고 부족한 정보는 종목 prior로 수축합니다."}
                     </div>
                   </div>
 
@@ -29488,7 +29573,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.12.05는 입력 검증·농구 수집을 강화하고 박신자컵을 경기목록·분석·농구 VERIFIED 누적에서 제외합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구 V13.12.05는 순수모델·상관보정 합의하한·최종 보정확률 중 최솟값을 보수 순위 입력으로 사용하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
+                    V13.12.05는 V13.12.03 RELIABILITY TOP1을 유지하면서 박신자컵 제외 정책을 유지하고, 농구 COLD START/자동 VERIFIED 누적/marketResults 정산을 보강합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
