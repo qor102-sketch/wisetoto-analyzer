@@ -1,5 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
-// V13.12.05 COURT COLD START SAFE: preserve V13.12.03 baseball reliability TOP1; anchor cold-start basketball totals to market line, auto-verify due court history, settle marketResults, and expose COLD START explicitly
+// V13.12.06 COURT NAVER VERIFY: preserve V13.12.05 court model; add basketball-aware Naver final resolver/audit so fixtureId-null KBL/WKBL/NBA can become VERIFIED
 // V13.12.04 PARK SHINJA CUP EXCLUDED: preserve V13.12.03 reliability TOP1, exclude Park Shin-ja Cup from listing/analysis and court VERIFIED accumulation
 // V13.12.02 MODEL-FIRST TOP1: TOP1 ranking uses raw/model evidence first; market odds/probability are only a small agreement check and never a direct ranking weight
 // V13.12.01 GAME TOP1 PER MATCH: every baseball/football/court fixture promotes its own independent full-game TOP1; no daily cross-game winner gate
@@ -19936,9 +19936,9 @@ export default function Home() {
         (record) =>
           record.verificationStatus === "PENDING" &&
           record.startMs < (courtAutoOnly ? now - 2 * 60 * 60 * 1000 : now) &&
+          !(koreanSport(record.sport) === "농구" && isParkShinjaCup(record.league)) &&
           (!courtAutoOnly || (
             koreanSport(record.sport) === "농구" &&
-            !isParkShinjaCup(record.league) &&
             trackerRecordCourtGroup(record) !== "EXCLUDED"
           ))
       )
@@ -20137,7 +20137,9 @@ export default function Home() {
           } else if (!truth && !fallbackEligible) {
             waitReason = waitReason ?? "FALLBACK_TIME_WAIT";
           } else if (!truth && fallbackEligible && (record.fixtureId === null || !Number.isFinite(Number(record.fixtureId)))) {
-            waitReason = "FIXTURE_ID_MISSING";
+            // V13.12.06: KBL/WKBL/NBA는 Naver schedule이 primary VERIFY source라 fixtureId=null 자체가 실패 원인이 아니다.
+            // Naver에서도 결과를 못 찾았을 때는 RESULT_NOT_FOUND로 남겨 source 문제와 fixture 부재를 구분한다.
+            waitReason = koreanSport(record.sport) === "농구" ? "RESULT_NOT_FOUND" : "FIXTURE_ID_MISSING";
           }
 
           if (!truth || !Number.isFinite(truth.homeScore) || !Number.isFinite(truth.awayScore)) {
@@ -20246,7 +20248,11 @@ export default function Home() {
       saveLiveTrackerRecords(next);
       setLiveTrackerRecords(next);
       setLiveTrackerStorageAudit(auditLiveTrackerStorage());
-      const waiting = next.filter((record) => record.verificationStatus === "PENDING" && record.verifyLastCheckedAt);
+      const waiting = next.filter((record) =>
+        record.verificationStatus === "PENDING" &&
+        record.verifyLastCheckedAt &&
+        !(koreanSport(record.sport) === "농구" && isParkShinjaCup(record.league))
+      );
       const waitCounts = waiting.reduce<Record<string, number>>((acc, record) => {
         const key = String(record.verifyWaitReason ?? "UNKNOWN");
         acc[key] = (acc[key] ?? 0) + 1;
@@ -24748,7 +24754,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.05 · COURT COLD START SAFE</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.06 · COURT NAVER VERIFY + COLD START SAFE</div>
         </div>
         <div className="bar">
           <button
@@ -26040,15 +26046,19 @@ export default function Home() {
 
         <div style={{ padding: "8px 12px", borderTop: "1px solid #e2e8f0", background: "#f8fbff" }}>
           <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-            V13.8.67 BETMAN VERIFY MATCH AUDIT · STORAGE 8.66 보호 유지
+            V13.12.06 VERIFY SOURCE AUDIT · BETMAN + NAVER COURT · STORAGE 보호 유지
           </div>
           <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.7 }}>
-            {liveTrackerRecords.filter((record) => record.verificationStatus === "PENDING" && record.startMs < Date.now()).length === 0
+            {liveTrackerRecords.filter((record) => record.verificationStatus === "PENDING" && record.startMs < Date.now() && !(koreanSport(record.sport) === "농구" && isParkShinjaCup(record.league))).length === 0
               ? "확인 대상 PENDING 없음"
               : liveTrackerRecords
-                  .filter((record) => record.verificationStatus === "PENDING" && record.startMs < Date.now())
+                  .filter((record) => record.verificationStatus === "PENDING" && record.startMs < Date.now() && !(koreanSport(record.sport) === "농구" && isParkShinjaCup(record.league)))
                   .slice(0, 3)
-                  .map((record) => `${record.home} vs ${record.away} · ${record.verifyMatchMethod ?? "MATCH 미확정"} · ${record.verifyMatchAudit ?? record.verifyWaitReason ?? "아직 결과 확인 전"}`)
+                  .map((record) => {
+                    const betmanAudit = record.verifyMatchAudit ?? record.verifyWaitReason ?? "아직 결과 확인 전";
+                    const naverAudit = record.verifyNaverAudit ? ` · NAVER ${record.verifyNaverAudit}` : "";
+                    return `${record.home} vs ${record.away} · ${record.verifyMatchMethod ?? "MATCH 미확정"} · ${betmanAudit}${naverAudit}`;
+                  })
                   .join(" | ")}
           </div>
         </div>
@@ -26269,7 +26279,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.05 · V13.12.03 RELIABILITY TOP1 유지 · COURT COLD START SAFE · 박신자컵 제외</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.06 · V13.12.03 RELIABILITY TOP1 유지 · COURT COLD START SAFE + NAVER VERIFY · 박신자컵 제외</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 축구는 SportsAPI/Naver에서 최근 득실과 홈·원정 장소표본을 확보한 경기를 공통 Poisson 기반으로 계산하고, K리그/J리그·유럽 5대리그·UEFA 대회·MLS는 리그별 중립 득점 prior를 적용합니다. 선발 11+11은 λ를 임의 변경하지 않고 데이터품질에 soft 반영하며, alias가 없는 기타 리그도 동일경기 매칭이 되면 OTHER 프로필로 분석합니다.
               </div>
@@ -27223,7 +27233,7 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="notice" style={{ margin: "8px 0 0" }}>
-                  농구(KBL/WKBL/NBA)는 리그별 득점 prior와 최근 득실·장소표본을 수축한 뒤 승패/핸디/U/O를 점수분포로 계산합니다. 박신자컵은 V13.12.04부터 경기목록·분석·VERIFIED 농구 누적 대상에서 제외합니다. V13.12.05부터 양 팀 최근 실전표본이 2경기 미만이면 COLD START로 표시하고 공식 VALUE 승격을 차단합니다. 최근 득실이 전혀 없을 때 시장 total은 독립 예측값이 아니라 총점 기준점(anchor)으로만 사용해 가짜 U/O 엣지를 만들지 않습니다. 종료 후 2시간이 지난 지원 농구 PENDING은 세션당 1회 자동 VERIFY하여 다음 경기의 최근/홈·원정 장소표본으로 재사용합니다. API 최근기록이 있으면 삭제하지 않고 중복 제거 후 보강하며 현재 경기 이후 결과는 사용하지 않습니다.
+                  농구(KBL/WKBL/NBA)는 리그별 득점 prior와 최근 득실·장소표본을 수축한 뒤 승패/핸디/U/O를 점수분포로 계산합니다. 박신자컵은 V13.12.04부터 경기목록·분석·VERIFIED 농구 누적 대상에서 제외합니다. V13.12.05부터 양 팀 최근 실전표본이 2경기 미만이면 COLD START로 표시하고 공식 VALUE 승격을 차단합니다. 최근 득실이 전혀 없을 때 시장 total은 독립 예측값이 아니라 총점 기준점(anchor)으로만 사용해 가짜 U/O 엣지를 만들지 않습니다. 종료 후 2시간이 지난 지원 농구 PENDING은 세션당 1회 자동 VERIFY하며, V13.12.06부터 fixtureId가 없어도 Naver KBL/WKBL/NBA 일정 결과를 날짜·홈/원정 팀·시작시간으로 매칭해 다음 경기의 최근/홈·원정 장소표본으로 재사용합니다. API 최근기록이 있으면 삭제하지 않고 중복 제거 후 보강하며 현재 경기 이후 결과는 사용하지 않습니다.
                   배구(KOVO)는 최근 세트 스코어에서 세트승률을 만들고 3-0/3-1/3-2 분포로 승패와 세트핸디를 계산합니다.
                   {currentSport === "배구" ? " Betman U/O 기준이 6.5를 넘으면 세트 U/O가 아니라 총 포인트 시장으로 보고 현재 TOP1 대상에서 제외합니다." : ""}
                   {" "}선수 부상·출장시간·로테이션은 아직 독립 court 모델 입력으로 사용하지 않으므로 데이터품질 점수에도 포함하지 않습니다.
@@ -29573,7 +29583,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.12.05는 V13.12.03 RELIABILITY TOP1을 유지하면서 박신자컵 제외 정책을 유지하고, 농구 COLD START/자동 VERIFIED 누적/marketResults 정산을 보강합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
+                    V13.12.06은 V13.12.05 모델과 V13.12.03 RELIABILITY TOP1을 그대로 유지하면서, fixtureId=null 농구의 Naver 종료결과 매칭과 VERIFY 진단표시를 보강합니다. V13.12.05의 박신자컵 제외·COLD START·marketResults 정산 정책은 그대로 유지합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
