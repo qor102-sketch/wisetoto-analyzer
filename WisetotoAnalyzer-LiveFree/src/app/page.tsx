@@ -20018,17 +20018,17 @@ export default function Home() {
         record.verificationStatus !== "VERIFIED" ||
         !record.result ||
         !(record.marketResults?.length) ||
-        !(record.marketResults ?? []).some((pick) => pick.resultStatus !== "HIT" && pick.resultStatus !== "MISS" && pick.resultStatus !== "VOID")
+        !(record.marketResults ?? []).some((pick) => pick.resultStatus === "PENDING")
       ) return record;
 
       const truth = record.result;
       let recordChanged = false;
       const settled = (record.marketResults ?? []).map((pick) => {
-        if (pick.resultStatus === "HIT" || pick.resultStatus === "MISS" || pick.resultStatus === "VOID") return pick;
+        if (pick.resultStatus !== "PENDING") return pick;
         const snapshot = pick.modelSnapshot as MarketPick | null;
         if (!snapshot || !pick.marketSnapshot) return pick;
         const validation = validateBacktestMarket(pick.marketSnapshot, snapshot, truth);
-        if (validation.status !== "HIT" && validation.status !== "MISS" && validation.status !== "VOID") return pick;
+        if (validation.status !== "HIT" && validation.status !== "MISS") return pick;
         recordChanged = true;
         changed = true;
         return {
