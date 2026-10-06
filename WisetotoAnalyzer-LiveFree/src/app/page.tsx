@@ -1,5 +1,6 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
-// V13.12.07 FROZEN TOP1 AUDIT: preserve V13.12.05 court model + V13.12.06 verifier; add frozen GAME TOP1 performance and global court-history audit, fix cold-start tier display
+// V13.12.08 READY FRESHNESS + FROZEN CONTINUITY: keep V13.12.05 court core + V13.12.06 verifier;
+// guard stale baseball READY snapshots, stage court warmup, and recover frozen TOP1 from append-only READY snapshots.
 // V13.12.06 COURT NAVER VERIFY: preserve V13.12.05 court model; add basketball-aware Naver final resolver/audit so fixtureId-null KBL/WKBL/NBA can become VERIFIED
 // V13.12.04 PARK SHINJA CUP EXCLUDED: preserve V13.12.03 reliability TOP1, exclude Park Shin-ja Cup from listing/analysis and court VERIFIED accumulation
 // V13.12.02 MODEL-FIRST TOP1: TOP1 ranking uses raw/model evidence first; market odds/probability are only a small agreement check and never a direct ranking weight
@@ -689,6 +690,10 @@ type BaseballReadyHoldSnapshot = {
   starterCount: number;
   lineupPlayerCount: number;
   dataCompleteness: number;
+  /* V13.12.08: stale READY 방지용 provenance. 구버전 snapshot 호환을 위해 optional. */
+  homeStarterName?: string | null;
+  awayStarterName?: string | null;
+  sourceLabel?: string | null;
 };
 
 const BASEBALL_CHALLENGER_START_MS = new Date("2026-09-15T10:00:00+09:00").getTime();
@@ -8771,7 +8776,8 @@ type MarketPick = {
   courtMarketQuality?: number | null;
   courtModelQuality?: number | null;
   courtColdStart?: boolean;
-  courtDataMode?: "COLD_START" | "HISTORY_ACTIVE" | null;
+  courtHistoryWarmup?: boolean;
+  courtDataMode?: "COLD_START" | "WARMUP" | "HISTORY_ACTIVE" | null;
   courtCoverageLabel?: string | null;
 
   detail: string;
@@ -11620,7 +11626,7 @@ function promoteBaseballSlateTopPick(pick: MarketPick, rank: number, slateScore:
     top1ConservativeProbability: reliability.conservativeProbability,
     top1TailRiskPenalty: reliability.tailRiskPenalty,
     top1ReliabilityLabel: reliability.label,
-    detail: `${pick.detail} · V13.12.03 GAME TOP${rank} · ${tier} · RELIABILITY / MODEL-FIRST / MARKET-DEBIASED SCORE`,
+    detail: `${pick.detail} · V13.12.08 GAME TOP${rank} · ${tier} · RELIABILITY / READY-FRESHNESS / MODEL-FIRST / MARKET-DEBIASED SCORE`,
   };
 }
 
@@ -11798,7 +11804,8 @@ type CourtDataQuality = {
   market: number;
   model: number;
   coldStart: boolean;
-  mode: "COLD_START" | "HISTORY_ACTIVE";
+  warmup: boolean;
+  mode: "COLD_START" | "WARMUP" | "HISTORY_ACTIVE";
   label: string;
 };
 
@@ -11823,13 +11830,17 @@ function courtSportsDataQuality(
     1
   );
   /*
-   * V13.12.05: 농구 양 팀 중 한쪽이라도 최근 실전 표본이 2경기 미만이면 COLD START.
-   * market line/prior로 예상점수가 생성되어도 독립 scoring data로 간주하지 않는다.
+   * V13.12.08 COURT SAMPLE RAMP:
+   * 0~1G = COLD START, 양 팀 최소 2G = WARMUP, 최소 3G부터 HISTORY ACTIVE.
+   * 계산 자체는 robust shrink로 계속 수행하지만 2G만으로 공식 VALUE를 열지 않는다.
    */
   const coldStart = sport === "농구" && minRecentSample < 2;
-  const scoring = factors.scoringUsed ? 1 : factors.hasRealData ? (coldStart ? 0.18 : 0.42) : 0;
+  const warmup = sport === "농구" && minRecentSample >= 2 && minRecentSample < 3;
+  const scoring = factors.scoringUsed
+    ? coldStart ? 0.35 : warmup ? 0.60 : 1
+    : factors.hasRealData ? (coldStart ? 0.18 : warmup ? 0.32 : 0.42) : 0;
   const rawModel = clamp(Number(factors.scoreShrinkage ?? 0), 0, 1);
-  const model = coldStart ? Math.min(rawModel, 0.25) : rawModel;
+  const model = coldStart ? Math.min(rawModel, 0.25) : warmup ? Math.min(rawModel, 0.55) : rawModel;
 
   const relevantMarkets = (Array.isArray(game?.markets) ? game!.markets! : []).filter((market: any) => {
     const name = `${String(market?.betName ?? "")} ${String(market?.betTypeName ?? "")}`;
@@ -11853,7 +11864,7 @@ function courtSportsDataQuality(
   );
 
   const pct = (v: number) => Math.round(v * 100);
-  const mode = coldStart ? "COLD_START" as const : "HISTORY_ACTIVE" as const;
+  const mode = coldStart ? "COLD_START" as const : warmup ? "WARMUP" as const : "HISTORY_ACTIVE" as const;
   return {
     overall: Number(overall.toFixed(1)),
     recent: Number(recent.toFixed(3)),
@@ -11862,8 +11873,9 @@ function courtSportsDataQuality(
     market: Number(market.toFixed(3)),
     model: Number(model.toFixed(3)),
     coldStart,
+    warmup,
     mode,
-    label: `${coldStart ? "COLD START · " : ""}품질 ${overall.toFixed(1)} · R ${pct(recent)} / V ${pct(venue)} / S ${pct(scoring)} / MKT ${pct(market)} / G ${pct(model)}`,
+    label: `${coldStart ? "COLD START · " : warmup ? "WARMUP · " : ""}품질 ${overall.toFixed(1)} · R ${pct(recent)} / V ${pct(venue)} / S ${pct(scoring)} / MKT ${pct(market)} / G ${pct(model)}`,
   };
 }
 
@@ -11953,20 +11965,23 @@ function bestCourtSlateCandidate(picks: MarketPick[]) {
 
 function promoteCourtSlateTopPick(pick: MarketPick, rank: number, slateScore: number): MarketPick {
   const coldStart = Boolean(pick.courtColdStart);
-  const tier = coldStart ? "관망" : courtContinuousTopTier(slateScore);
-  const promote = tier === "실전 추천" && !coldStart;
+  const warmup = Boolean(pick.courtHistoryWarmup);
+  const restricted = coldStart || warmup;
+  const tier = restricted ? "관망" : courtContinuousTopTier(slateScore);
+  const promote = tier === "실전 추천" && !restricted;
   const quality = Number(pick.courtDataQuality);
   const profile = String(pick.courtLeagueGroup ?? "COURT");
+  const restrictionLabel = coldStart ? "COLD START 공식추천 차단" : warmup ? "WARMUP 공식추천 차단" : "";
   return {
     ...pick,
     valueGrade: promote ? "VALUE" : "WATCH",
     valueGradeScore: promote
       ? Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))
       : Math.min(79.9, Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))),
-    valueGradeReason: `COURT GAME TOP${rank} · ${tier}${coldStart ? " · COLD START 공식추천 차단" : ""} · TOP1점수 ${slateScore.toFixed(1)} · ${profile} · 순수모델 ${Number(pick.rawProbability ?? pick.probability).toFixed(1)}% · 최종 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
-    stageGradeLabel: `COURT GAME TOP${rank} ${tier}${coldStart ? " · COLD START" : ""}`,
+    valueGradeReason: `COURT GAME TOP${rank} · ${tier}${restrictionLabel ? ` · ${restrictionLabel}` : ""} · TOP1점수 ${slateScore.toFixed(1)} · ${profile} · 순수모델 ${Number(pick.rawProbability ?? pick.probability).toFixed(1)}% · 최종 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
+    stageGradeLabel: `COURT GAME TOP${rank} ${tier}${coldStart ? " · COLD START" : warmup ? " · WARMUP" : ""}`,
     recommendationScore: Number(slateScore.toFixed(1)),
-    detail: `${pick.detail} · V13.12.05 COURT GAME TOP${rank} · ${tier} · ${coldStart ? "COLD START SAFE / MARKET-LINE ANCHOR" : "VERIFIED HISTORY + MODEL-FIRST / MARKET-DEBIASED SCORE"}`,
+    detail: `${pick.detail} · V13.12.08 COURT GAME TOP${rank} · ${tier} · ${coldStart ? "COLD START SAFE / MARKET-LINE ANCHOR" : warmup ? "WARMUP SAMPLE RAMP / VERIFIED HISTORY" : "VERIFIED HISTORY + MODEL-FIRST / MARKET-DEBIASED SCORE"}`,
   };
 }
 
@@ -12000,6 +12015,94 @@ function trackerReadyHitFirstQuality(record: LiveTrackerRecord | null | undefine
       ? clamp(Number(pick.hitFirstModelStrength), 0, 1)
       : parsePct("M"),
     label: label || `품질 ${Number(pick.hitFirstDataQuality).toFixed(1)} · READY 저장 스냅샷`,
+  };
+}
+
+
+type BaseballReadyFreshness = {
+  officialEligible: boolean;
+  label: string;
+  capturedAt: number | null;
+  ageMinutesToStart: number | null;
+  starterNamesPresent: boolean;
+  starterMatch: boolean | null;
+};
+
+function normalizeBaseballReadyName(value: unknown) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^0-9a-z가-힣ぁ-んァ-ヶ一-龯]/g, "");
+}
+
+function baseballReadyFreshness(
+  record: LiveTrackerRecord | null | undefined,
+  liveFactors?: AnalysisFactors | null,
+  nowMs = Date.now()
+): BaseballReadyFreshness {
+  const liveReady = Boolean(
+    liveFactors &&
+    liveFactors.baseballAnalysisStage === "READY" &&
+    Number(liveFactors.baseballStarterCount ?? 0) >= 2 &&
+    Number(liveFactors.baseballLineupPlayerCount ?? 0) >= 14
+  );
+  if (liveReady) {
+    return {
+      officialEligible: true,
+      label: "LIVE READY · 현재 선발/라인업 확인",
+      capturedAt: nowMs,
+      ageMinutesToStart: null,
+      starterNamesPresent: Boolean(liveFactors?.homeStarterName && liveFactors?.awayStarterName),
+      starterMatch: true,
+    };
+  }
+
+  const hold = record?.baseballReadyHold ?? null;
+  const capturedRaw = Number(hold?.capturedAt ?? record?.readyCapturedAt);
+  const capturedAt = Number.isFinite(capturedRaw) ? capturedRaw : null;
+  const startMs = Number(record?.startMs);
+  const ageMinutesToStart = capturedAt !== null && Number.isFinite(startMs)
+    ? (startMs - capturedAt) / 60000
+    : null;
+  // READY lineup은 경기 당일/직전 스냅샷이어야 한다. 12시간보다 오래됐거나 시작 30분 이후 캡처는 stale 처리.
+  const timeFresh = ageMinutesToStart !== null && ageMinutesToStart >= -30 && ageMinutesToStart <= 12 * 60;
+  const countReady = Number(hold?.starterCount ?? 0) >= 2 && Number(hold?.lineupPlayerCount ?? 0) >= 14;
+  const savedHome = normalizeBaseballReadyName(hold?.homeStarterName);
+  const savedAway = normalizeBaseballReadyName(hold?.awayStarterName);
+  const starterNamesPresent = Boolean(savedHome && savedAway);
+  const liveHome = normalizeBaseballReadyName(liveFactors?.homeStarterName);
+  const liveAway = normalizeBaseballReadyName(liveFactors?.awayStarterName);
+  const starterMatch = liveHome && liveAway && savedHome && savedAway
+    ? liveHome === savedHome && liveAway === savedAway
+    : null;
+  const mismatch = starterMatch === false;
+  const officialEligible = Boolean(timeFresh && countReady && starterNamesPresent && !mismatch);
+  const reasons = [
+    !timeFresh ? "READY 시각 stale/미확인" : null,
+    !countReady ? "선발/라인업 표본 부족" : null,
+    !starterNamesPresent ? "저장 선발명 없음" : null,
+    mismatch ? "현재 선발과 불일치" : null,
+  ].filter(Boolean);
+  return {
+    officialEligible,
+    label: officialEligible
+      ? `LOCKED READY FRESH · 경기 ${Math.max(0, ageMinutesToStart ?? 0).toFixed(0)}분 전 · 선발명 보존`
+      : `READY FRESHNESS BLOCK · ${reasons.join(" · ") || "검증정보 부족"}`,
+    capturedAt,
+    ageMinutesToStart,
+    starterNamesPresent,
+    starterMatch,
+  };
+}
+
+function applyBaseballReadyFreshnessGate(pick: MarketPick, freshness: BaseballReadyFreshness | null): MarketPick {
+  if (!freshness || freshness.officialEligible) return pick;
+  return {
+    ...pick,
+    valueGrade: "WATCH",
+    valueGradeScore: Math.min(79.9, pick.valueGradeScore),
+    valueGradeReason: `${pick.valueGradeReason} · ${freshness.label}`,
+    stageGradeLabel: "FINAL GAME TOP1 관망 · READY FRESHNESS BLOCK",
+    detail: `${pick.detail} · V13.12.08 READY FRESHNESS BLOCK`,
   };
 }
 
@@ -12567,9 +12670,10 @@ function buildActualMarketPicks(
             courtMarketQuality: courtDataQuality?.market ?? null,
             courtModelQuality: courtDataQuality?.model ?? null,
             courtColdStart: courtDataQuality?.coldStart ?? false,
+            courtHistoryWarmup: courtDataQuality?.warmup ?? false,
             courtDataMode: courtDataQuality?.mode ?? null,
             courtCoverageLabel: courtDataQuality?.label ?? null,
-            detail: `${courtProfile.label} · ${modelNote} · ${courtDataQuality?.coldStart ? "COLD START · 시장 기준점 앵커" : factors.scoringUsed ? "최근 득실 모델" : "시장 prior fallback"} · 합의 하한 ${consensus.floor?.toFixed(1) ?? "-"}%`,
+            detail: `${courtProfile.label} · ${modelNote} · ${courtDataQuality?.coldStart ? "COLD START · 시장 기준점 앵커" : courtDataQuality?.warmup ? "WARMUP · 최근 득실 보수 반영" : factors.scoringUsed ? "최근 득실 모델" : "시장 prior fallback"} · 합의 하한 ${consensus.floor?.toFixed(1) ?? "-"}%`,
           });
           continue;
         }
@@ -17556,6 +17660,8 @@ export default function Home() {
         baseballLineupPlayerCount: heldReady?.lineupPlayerCount ?? 18,
         baseballStarterCount: heldReady?.starterCount ?? 2,
         baseballDataCompleteness: heldReady?.dataCompleteness ?? 100,
+        homeStarterName: heldReady?.homeStarterName ?? liveAnalysisFactors.homeStarterName,
+        awayStarterName: heldReady?.awayStarterName ?? liveAnalysisFactors.awayStarterName,
       }
     : liveAnalysisFactors;
 
@@ -17611,6 +17717,11 @@ export default function Home() {
       ? baseballHitFirstDataQuality(analysisFactors, currentBaseballChallenger, currentBaseballDecisionCoverage)
       : null);
 
+  const currentBaseballReadyFreshness =
+    currentSport === "야구"
+      ? baseballReadyFreshness(selectedBaseballTrackerRecord, liveAnalysisFactors, Date.now())
+      : null;
+
   const currentBaseballEffectiveCompleteness =
     currentSport === "야구"
       ? Math.min(
@@ -17665,13 +17776,16 @@ export default function Home() {
       ? stickyReadyMarketPicks
       : liveActualMarketPicks;
 
-  /* V13.12.02: 경기별 독립 TOP1 유지 + 시장확률 직접가중 제거. */
+  /* V13.12.08: 경기별 독립 TOP1 유지 + READY freshness gate. */
   const currentSlateCandidate =
     currentSport === "야구" && analysisFactors.baseballAnalysisStage === "READY"
       ? bestBaseballHitFirstSlateCandidate(actualMarketPicksBase)
       : null;
   const currentSlatePromotion = currentSlateCandidate
-    ? promoteBaseballSlateTopPick(currentSlateCandidate.pick, 1, currentSlateCandidate.slateScore)
+    ? applyBaseballReadyFreshnessGate(
+        promoteBaseballSlateTopPick(currentSlateCandidate.pick, 1, currentSlateCandidate.slateScore),
+        currentBaseballReadyFreshness
+      )
     : null;
 
   const isSoccerSport = currentSport === "축구";
@@ -18413,11 +18527,11 @@ export default function Home() {
           : null;
   const currentContinuousTopTier =
     currentSport === "야구" && currentSlateCandidate
-      ? baseballContinuousTopTier(currentSlateCandidate.slateScore)
+      ? (currentBaseballReadyFreshness?.officialEligible ? baseballContinuousTopTier(currentSlateCandidate.slateScore) : "관망")
       : isSoccerSport && currentSoccerCandidate
         ? soccerContinuousTopTier(currentSoccerCandidate.slateScore)
         : isCourtSport && currentCourtCandidate
-          ? (Boolean(currentContinuousTopPick?.courtColdStart) ? "관망" : courtContinuousTopTier(currentCourtCandidate.slateScore))
+          ? (Boolean(currentContinuousTopPick?.courtColdStart) || Boolean(currentContinuousTopPick?.courtHistoryWarmup) ? "관망" : courtContinuousTopTier(currentCourtCandidate.slateScore))
           : null;
   const currentContinuousTopScore =
     currentSport === "야구" && currentSlateCandidate
@@ -18482,7 +18596,7 @@ export default function Home() {
   }, [liveTrackerRecords]);
 
   /*
-   * V13.12.07 COURT HISTORY STORAGE AUDIT
+   * V13.12.08 COURT HISTORY STORAGE AUDIT
    * 다음 경기 분석에 실제로 투입 가능한 VERIFIED 농구 결과를 전역에서 바로 확인한다.
    * 박신자컵은 보존만 하고 누적 대상에서는 제외한다.
    */
@@ -18537,7 +18651,7 @@ export default function Home() {
   }, [liveTrackerRecords]);
 
   /*
-   * V13.12.07 FROZEN GAME TOP1 VALIDATOR
+   * V13.12.08 FROZEN GAME TOP1 VALIDATOR + APPEND CONTINUITY
    * 현재 코드로 과거 픽을 재계산하지 않는다. PRE 잠금 당시 marketResults.modelSnapshot에
    * 저장된 GAME TOP1 하나와 그 resultStatus만 읽어서 공식 VALUE / 약추천 / 관망을 분리한다.
    */
@@ -18552,21 +18666,52 @@ export default function Home() {
     };
 
     const rows: FrozenTop1Row[] = [];
-    for (const record of liveTrackerRecords) {
-      if (record.verificationStatus !== "VERIFIED" || isParkShinjaCup(record.league)) continue;
-      const candidateRows = (record.marketResults ?? []).filter((pick) => {
-        if (pick.resultStatus !== "HIT" && pick.resultStatus !== "MISS") return false;
+    const appendSnapshots = readLiveTrackerAppendOnlySnapshots()
+      .filter((entry) => entry?.record && entry.stage !== "VERIFIED" && entry.stage !== "VOID")
+      .sort((a, b) => Number(a.savedAt ?? 0) - Number(b.savedAt ?? 0));
+    const appendReadyById = new Map<string, LiveTrackerRecord>();
+    for (const entry of appendSnapshots) {
+      // 야구는 최초 BASEBALL_READY를 frozen 의사결정 원본으로 사용한다.
+      if (entry.stage !== "BASEBALL_READY" || appendReadyById.has(entry.record.id)) continue;
+      const hasTop1 = (entry.record.marketResults ?? []).some((pick) => {
         const snapshot = pick.modelSnapshot as MarketPick | null;
         const marker = `${String(snapshot?.stageGradeLabel ?? "")} ${String(snapshot?.valueGradeReason ?? "")}`;
         return /GAME TOP1/i.test(marker);
       });
-      if (!candidateRows.length) continue;
+      if (hasTop1) appendReadyById.set(entry.record.id, entry.record);
+    }
+    let appendRecovered = 0;
 
-      const pick = [...candidateRows].sort((a, b) =>
+    for (const record of liveTrackerRecords) {
+      if (record.verificationStatus !== "VERIFIED" || isParkShinjaCup(record.league)) continue;
+      const frozenRecord = koreanSport(record.sport) === "야구"
+        ? (appendReadyById.get(record.id) ?? record)
+        : record;
+      if (frozenRecord !== record) appendRecovered += 1;
+
+      const candidateRows = (frozenRecord.marketResults ?? []).filter((pick) => {
+        const snapshot = pick.modelSnapshot as MarketPick | null;
+        const marker = `${String(snapshot?.stageGradeLabel ?? "")} ${String(snapshot?.valueGradeReason ?? "")}`;
+        return /GAME TOP1/i.test(marker);
+      });
+      if (!candidateRows.length || !record.result) continue;
+
+      const sourcePick = [...candidateRows].sort((a, b) =>
         Number((b.modelSnapshot as MarketPick | null)?.recommendationScore ?? b.recommendationScore ?? -999) -
         Number((a.modelSnapshot as MarketPick | null)?.recommendationScore ?? a.recommendationScore ?? -999)
       )[0];
-      const snapshot = pick.modelSnapshot as MarketPick;
+      const snapshot = sourcePick.modelSnapshot as MarketPick;
+      let pick = sourcePick;
+      if (pick.resultStatus !== "HIT" && pick.resultStatus !== "MISS") {
+        const validation = validateBacktestMarket(pick.marketSnapshot, snapshot, record.result);
+        if (validation.status !== "HIT" && validation.status !== "MISS") continue;
+        pick = {
+          ...pick,
+          resultStatus: validation.status,
+          actualLabel: validation.actualLabel,
+          resultNote: validation.note,
+        };
+      }
       const marker = `${String(snapshot.stageGradeLabel ?? "")} ${String(snapshot.valueGradeReason ?? "")}`;
       const tier: FrozenTop1Row["tier"] = /실전 추천/i.test(marker)
         ? "공식 VALUE"
@@ -18579,7 +18724,7 @@ export default function Home() {
         snapshot,
         tier,
         sport: koreanSport(record.sport),
-        engine: String(record.recommendationEngineVersion ?? "UNKNOWN"),
+        engine: String(frozenRecord.recommendationEngineVersion ?? record.recommendationEngineVersion ?? "UNKNOWN"),
       });
     }
 
@@ -18645,6 +18790,7 @@ export default function Home() {
       bySport: grouped((row) => row.sport),
       byEngine: grouped((row) => row.engine),
       recent,
+      appendRecovered,
     };
   }, [liveTrackerRecords]);
 
@@ -19258,7 +19404,7 @@ export default function Home() {
     const precision90Records = liveTrackerRecords.filter(
       (record) =>
         record.sport === "야구" &&
-        ["V13.9.04_SOFT_STRENGTH_SLATE_TOP2", "V13.9.06_CORRELATION_SAMPLE_GUARD", "V13.9.07_STICKY_READY_QUALITY_AUDIT", "V13.9.08_VENUE_SAMPLE_CONFIDENCE_GUARD", "V13.9.09_FINAL_SEASON_TOP1_LOCK", "V13.9.10_CONTINUOUS_TOP1", "V13.12.01_GAME_TOP1_PER_MATCH", "V13.12.02_MODEL_FIRST_TOP1", "V13.12.03_RELIABILITY_TOP1"].includes(String(record.recommendationEngineVersion ?? "")) &&
+        ["V13.9.04_SOFT_STRENGTH_SLATE_TOP2", "V13.9.06_CORRELATION_SAMPLE_GUARD", "V13.9.07_STICKY_READY_QUALITY_AUDIT", "V13.9.08_VENUE_SAMPLE_CONFIDENCE_GUARD", "V13.9.09_FINAL_SEASON_TOP1_LOCK", "V13.9.10_CONTINUOUS_TOP1", "V13.12.01_GAME_TOP1_PER_MATCH", "V13.12.02_MODEL_FIRST_TOP1", "V13.12.03_RELIABILITY_TOP1", "V13.12.08_RELIABILITY_FRESHNESS_TOP1"].includes(String(record.recommendationEngineVersion ?? "")) &&
         record.verificationStatus === "VERIFIED"
     );
     const precision90Ids = new Set(precision90Records.map((record) => record.id));
@@ -19641,7 +19787,7 @@ export default function Home() {
         gateVersion: "FALLBACK_GATE_V2",
         recommendationEngineVersion:
           currentSport === "야구"
-            ? "V13.12.03_RELIABILITY_TOP1"
+            ? "V13.12.08_RELIABILITY_FRESHNESS_TOP1"
             : currentSport === "축구"
               ? "V13.12.02_MODEL_FIRST_TOP1"
               : currentSport === "농구" || currentSport === "배구"
@@ -19690,6 +19836,9 @@ export default function Home() {
                 starterCount: analysisFactors.baseballStarterCount,
                 lineupPlayerCount: analysisFactors.baseballLineupPlayerCount,
                 dataCompleteness: analysisFactors.baseballDataCompleteness,
+                homeStarterName: analysisFactors.homeStarterName,
+                awayStarterName: analysisFactors.awayStarterName,
+                sourceLabel: currentBaseballChallenger?.featureAudit?.challengerSourcePolicy ?? "READY_ANALYSIS",
               }
             : null,
         baseballChallenger: baseballChallengerSnapshot,
@@ -19717,7 +19866,7 @@ export default function Home() {
                     /* 첫 PRE 잠금 시각/ID는 보존하고, READY 내용만 승격한다. */
                     id: existingRecord.id,
                     capturedAt: existingRecord.capturedAt,
-                    readyCapturedAt: Date.now(),
+                    readyCapturedAt: nextRecord.readyCapturedAt ?? existingRecord.readyCapturedAt ?? null,
                     venueShadow: nextRecord.venueShadow ?? existingRecord.venueShadow ?? null,
                     baseballReadyHold: nextRecord.baseballReadyHold ?? existingRecord.baseballReadyHold ?? null,
                     baseballChallenger: nextRecord.baseballChallenger ?? existingRecord.baseballChallenger ?? null,
@@ -19759,7 +19908,7 @@ export default function Home() {
   ]);
 
   /*
-   * V13.12.03 RELIABILITY TOP1.
+   * V13.12.08 RELIABILITY TOP1 + READY FRESHNESS.
    * 날짜 전체에서 한 경기만 고르지 않는다. READY/PENDING 각 경기 내부에서
    * full-game 후보를 독립 비교하고 TOP1 하나를 고정한다.
    * TOP1 tier가 "실전 추천"인 경우에만 공식 PICK/VALUE로 저장하고,
@@ -19789,7 +19938,10 @@ export default function Home() {
         desired.set(record.id, null);
         continue;
       }
-      const promoted = promoteBaseballSlateTopPick(candidate.pick, 1, candidate.slateScore);
+      const promoted = applyBaseballReadyFreshnessGate(
+        promoteBaseballSlateTopPick(candidate.pick, 1, candidate.slateScore),
+        baseballReadyFreshness(record, null, now)
+      );
       if (promoted.valueGrade !== "VALUE" && promoted.valueGrade !== "STRONG VALUE") {
         desired.set(record.id, null);
         continue;
@@ -19824,14 +19976,14 @@ export default function Home() {
       });
       const afterSig = JSON.stringify({
         decision: nextDecision,
-        engine: "V13.12.03_RELIABILITY_TOP1",
+        engine: "V13.12.08_RELIABILITY_FRESHNESS_TOP1",
         picks: nextPicks.map((pick) => [pick.key, pick.grade, pick.recommendationScore]),
       });
       if (beforeSig === afterSig) return record;
       changed = true;
       return {
         ...record,
-        recommendationEngineVersion: "V13.12.03_RELIABILITY_TOP1",
+        recommendationEngineVersion: "V13.12.08_RELIABILITY_FRESHNESS_TOP1",
         decision: nextDecision,
         picks: nextPicks,
       };
@@ -24965,7 +25117,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.07 · FROZEN TOP1 AUDIT + COURT HISTORY</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.08 · READY FRESHNESS + FROZEN CONTINUITY</div>
         </div>
         <div className="bar">
           <button
@@ -26276,7 +26428,7 @@ export default function Home() {
 
         <div style={{ padding: "8px 12px", borderTop: "1px solid #e2e8f0", background: "#f0fdf4" }}>
           <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-            V13.12.07 COURT VERIFIED HISTORY AUDIT · 다음 경기 입력 가능 표본
+            V13.12.08 COURT VERIFIED HISTORY AUDIT · 다음 경기 입력 가능 표본
           </div>
           <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.65 }}>
             누적 {courtHistoryStorageSummary.games}경기
@@ -26334,10 +26486,10 @@ export default function Home() {
 
         <div style={{ padding: "10px 12px", borderTop: "1px solid #dbeafe", background: "#f8fbff" }}>
           <div className="small" style={{ fontWeight: 900, marginBottom: 5 }}>
-            V13.12.07 FROZEN GAME TOP1 OOS VALIDATOR · 사후 재계산 금지
+            V13.12.08 FROZEN GAME TOP1 OOS VALIDATOR · APPEND FREEZE 복원 · 사후 재계산 금지
           </div>
           <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.6, marginBottom: 8 }}>
-            VERIFIED 당시 저장된 marketResults.modelSnapshot의 GAME TOP1만 사용 · 현재 모델로 과거 픽 재계산 안 함 · 박신자컵 제외 · 공식 VALUE / 약추천 / 관망 분리
+            VERIFIED 당시 저장된 marketResults.modelSnapshot의 GAME TOP1만 사용 · 현재 모델로 과거 픽 재계산 안 함 · 박신자컵 제외 · 공식 VALUE / 약추천 / 관망 분리 · append-only READY 복원 {frozenGameTop1Summary.appendRecovered}경기
           </div>
           <div className="cards" style={{ marginBottom: 8 }}>
             <div className="card">전체 frozen TOP1<b>{frozenGameTop1Summary.total.hitRate === null ? "-" : `${frozenGameTop1Summary.total.hitRate.toFixed(1)}%`}</b><div className="small">{frozenGameTop1Summary.total.picks}픽 · HIT {frozenGameTop1Summary.total.hits} / MISS {frozenGameTop1Summary.total.misses} · Brier {frozenGameTop1Summary.total.brier === null ? "-" : frozenGameTop1Summary.total.brier.toFixed(3)}</div></div>
@@ -26554,7 +26706,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.07 · FROZEN GAME TOP1 AUDIT + COURT HISTORY · V13.12.05 모델 / V13.12.06 VERIFY 유지 · 박신자컵 제외</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.08 · READY FRESHNESS + FROZEN CONTINUITY · V13.12.05 court core / V13.12.06 VERIFY 유지 · 박신자컵 제외</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 축구는 SportsAPI/Naver에서 최근 득실과 홈·원정 장소표본을 확보한 경기를 공통 Poisson 기반으로 계산하고, K리그/J리그·유럽 5대리그·UEFA 대회·MLS는 리그별 중립 득점 prior를 적용합니다. 선발 11+11은 λ를 임의 변경하지 않고 데이터품질에 soft 반영하며, alias가 없는 기타 리그도 동일경기 매칭이 되면 OTHER 프로필로 분석합니다.
               </div>
@@ -28571,6 +28723,11 @@ export default function Home() {
                               현재 재수신 품질 {liveBaseballHitFirstQuality.overall.toFixed(1)} · {liveBaseballHitFirstQuality.label} · 추천 판정에는 저장 READY 품질 사용
                             </div>
                           )}
+                          {currentBaseballReadyFreshness && (
+                            <div className="small" style={{ marginTop: 4, fontWeight: 800, color: currentBaseballReadyFreshness.officialEligible ? "#166534" : "#b45309" }}>
+                              READY freshness · {currentBaseballReadyFreshness.label}
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -29692,7 +29849,7 @@ export default function Home() {
                       ) : isCourtSport ? (
                         <div className="card">
                           COURT 데이터 모드
-                          <b>{currentCourtQuality?.coldStart ? "COLD START" : analysisFactors.scoringUsed ? "최근 Form 사용" : "리그 prior"}</b>
+                          <b>{currentCourtQuality?.coldStart ? "COLD START" : currentCourtQuality?.warmup ? "WARMUP · 공식추천 차단" : analysisFactors.scoringUsed ? "최근 Form 사용" : "리그 prior"}</b>
                           <div className="small">최근 {analysisFactors.homeRecentSample}/{analysisFactors.awayRecentSample} · 장소 {analysisFactors.homeVenueSample}/{analysisFactors.awayVenueSample}</div>
                         </div>
                       ) : (
@@ -29858,7 +30015,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.12.07은 V13.12.05 농구 모델과 V13.12.03 RELIABILITY TOP1, V13.12.06 Naver VERIFY를 그대로 유지하면서, 사전 동결 GAME TOP1 전용 성과판과 전역 COURT VERIFIED HISTORY audit를 추가하고 COLD START 화면 tier가 항상 관망으로 일치하도록 수정합니다. V13.12.05의 박신자컵 제외·COLD START·marketResults 정산 정책은 그대로 유지합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
+                    V13.12.08은 V13.12.05 농구 모델과 V13.12.06 Naver VERIFY를 유지하면서, 야구 STICKY READY의 캡처시각·선발명·라인업 수를 검증해 stale snapshot의 공식 실전추천을 차단하고, append-only BASEBALL_READY에서 최초 frozen GAME TOP1을 복원해 OOS 성과가 후속 재분석으로 사라지지 않게 합니다. 농구는 0~1경기 COLD START, 양 팀 최소 2경기 WARMUP, 최소 3경기부터 HISTORY ACTIVE로 단계화해 2경기만으로 공식 VALUE가 열리지 않게 합니다. V13.12.05의 박신자컵 제외·COLD START·marketResults 정산 정책은 그대로 유지합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
