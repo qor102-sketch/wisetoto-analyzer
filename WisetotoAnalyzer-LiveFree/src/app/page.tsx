@@ -1,5 +1,6 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
-// V13.12.08 READY FRESHNESS + FROZEN CONTINUITY: keep V13.12.05 court core + V13.12.06 verifier;
+// V13.12.09 PRE TOP1 CONTINUITY: keep V13.12.05 court core + V13.12.06 verifier + V13.12.08 READY freshness/frozen continuity;
+// baseball PRE/STARTER/LINEUP now always computes one display-only full-game TOP1, forced to WATCH until fresh READY.
 // guard stale baseball READY snapshots, stage court warmup, and recover frozen TOP1 from append-only READY snapshots.
 // V13.12.06 COURT NAVER VERIFY: preserve V13.12.05 court model; add basketball-aware Naver final resolver/audit so fixtureId-null KBL/WKBL/NBA can become VERIFIED
 // V13.12.04 PARK SHINJA CUP EXCLUDED: preserve V13.12.03 reliability TOP1, exclude Park Shin-ja Cup from listing/analysis and court VERIFIED accumulation
@@ -12106,6 +12107,31 @@ function applyBaseballReadyFreshnessGate(pick: MarketPick, freshness: BaseballRe
   };
 }
 
+/*
+ * V13.12.09 PRE TOP1 CONTINUITY.
+ * TOP1 후보 자체는 PRE/STARTER/LINEUP에서도 항상 계산해 화면에 보여준다.
+ * 다만 READY 이전 후보는 표시 전용 WATCH이며 공식 VALUE/약추천 승격과 frozen 저장 대상이 아니다.
+ * READY에 도달한 뒤에만 V13.12.08 freshness gate를 통과해 공식 tier를 사용할 수 있다.
+ */
+function applyBaseballTop1DisplayStageGate(
+  pick: MarketPick,
+  stage: AnalysisFactors["baseballAnalysisStage"],
+  freshness: BaseballReadyFreshness | null
+): MarketPick {
+  if (stage === "READY") {
+    return applyBaseballReadyFreshnessGate(pick, freshness);
+  }
+
+  return {
+    ...pick,
+    valueGrade: "WATCH",
+    valueGradeScore: Math.min(79.9, pick.valueGradeScore),
+    valueGradeReason: `${pick.valueGradeReason} · ${stage} 단계 표시용 TOP1 · READY 전 공식 VALUE/약추천/frozen 차단`,
+    stageGradeLabel: `FINAL GAME TOP1 관망 · ${stage} DISPLAY ONLY`,
+    detail: `${pick.detail} · V13.12.09 ${stage} DISPLAY TOP1 · OFFICIAL/FROZEN BLOCK`,
+  };
+}
+
 type HandicapOutcome = "home" | "draw" | "away";
 
 /**
@@ -17776,14 +17802,16 @@ export default function Home() {
       ? stickyReadyMarketPicks
       : liveActualMarketPicks;
 
-  /* V13.12.08: 경기별 독립 TOP1 유지 + READY freshness gate. */
+  /* V13.12.09: PRE/STARTER/LINEUP도 경기별 TOP1 후보는 항상 계산하되 표시 전용 관망으로 고정한다.
+   * 공식 VALUE/약추천 및 frozen 저장 자격은 기존대로 READY + freshness 통과 이후에만 열린다. */
   const currentSlateCandidate =
-    currentSport === "야구" && analysisFactors.baseballAnalysisStage === "READY"
+    currentSport === "야구"
       ? bestBaseballHitFirstSlateCandidate(actualMarketPicksBase)
       : null;
   const currentSlatePromotion = currentSlateCandidate
-    ? applyBaseballReadyFreshnessGate(
+    ? applyBaseballTop1DisplayStageGate(
         promoteBaseballSlateTopPick(currentSlateCandidate.pick, 1, currentSlateCandidate.slateScore),
+        analysisFactors.baseballAnalysisStage,
         currentBaseballReadyFreshness
       )
     : null;
@@ -17856,6 +17884,17 @@ export default function Home() {
             return pick;
           })
         : actualMarketPicksBase;
+
+  /*
+   * UI 전용 배열: READY 이전 야구 TOP1은 WATCH로 강조해서 보여주되,
+   * tracker/append-only/frozen 저장에는 원본 actualMarketPicks를 계속 사용한다.
+   */
+  const displayActualMarketPicks =
+    currentSport === "야구" && currentSlatePromotion
+      ? actualMarketPicks.map((pick) =>
+          pick.key === currentSlatePromotion.key ? currentSlatePromotion : pick
+        )
+      : actualMarketPicks;
 
   const marketConnectionDiagnostics =
     buildMarketConnectionDiagnostics(
@@ -18465,8 +18504,8 @@ export default function Home() {
       ? matched?.courtHistoryAudit ?? null
       : null;
 
-  const displayPicks: Pick[] = actualMarketPicks.length
-    ? actualMarketPicks.map((pick) => [
+  const displayPicks: Pick[] = displayActualMarketPicks.length
+    ? displayActualMarketPicks.map((pick) => [
         pick.market,
         `${pick.pick} · ${pick.detail}`,
         pick.probability,
@@ -18519,7 +18558,7 @@ export default function Home() {
   /* V13.11.00: 야구/축구/농구/NBA/배구 모두 공식 VALUE가 없어도 경기 TOP1 후보를 항상 보여준다. */
   const currentContinuousTopPick =
     currentSport === "야구" && currentSlateCandidate
-      ? actualMarketPicks.find((pick) => pick.key === currentSlateCandidate.pick.key) ?? currentSlateCandidate.pick
+      ? displayActualMarketPicks.find((pick) => pick.key === currentSlateCandidate.pick.key) ?? currentSlatePromotion ?? currentSlateCandidate.pick
       : isSoccerSport && currentSoccerCandidate
         ? actualMarketPicks.find((pick) => pick.key === currentSoccerCandidate.pick.key) ?? currentSoccerCandidate.pick
         : isCourtSport && currentCourtCandidate
@@ -18527,7 +18566,9 @@ export default function Home() {
           : null;
   const currentContinuousTopTier =
     currentSport === "야구" && currentSlateCandidate
-      ? (currentBaseballReadyFreshness?.officialEligible ? baseballContinuousTopTier(currentSlateCandidate.slateScore) : "관망")
+      ? (analysisFactors.baseballAnalysisStage === "READY" && currentBaseballReadyFreshness?.officialEligible
+          ? baseballContinuousTopTier(currentSlateCandidate.slateScore)
+          : "관망")
       : isSoccerSport && currentSoccerCandidate
         ? soccerContinuousTopTier(currentSoccerCandidate.slateScore)
         : isCourtSport && currentCourtCandidate
@@ -25117,7 +25158,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.08 · READY FRESHNESS + FROZEN CONTINUITY</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.09 · PRE TOP1 CONTINUITY + READY FRESHNESS</div>
         </div>
         <div className="bar">
           <button
@@ -26706,7 +26747,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.08 · READY FRESHNESS + FROZEN CONTINUITY · V13.12.05 court core / V13.12.06 VERIFY 유지 · 박신자컵 제외</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.09 · PRE TOP1 CONTINUITY + READY FRESHNESS · V13.12.05 court core / V13.12.06 VERIFY 유지 · 박신자컵 제외</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 축구는 SportsAPI/Naver에서 최근 득실과 홈·원정 장소표본을 확보한 경기를 공통 Poisson 기반으로 계산하고, K리그/J리그·유럽 5대리그·UEFA 대회·MLS는 리그별 중립 득점 prior를 적용합니다. 선발 11+11은 λ를 임의 변경하지 않고 데이터품질에 soft 반영하며, alias가 없는 기타 리그도 동일경기 매칭이 되면 OTHER 프로필로 분석합니다.
               </div>
@@ -27678,12 +27719,12 @@ export default function Home() {
             </div>
 
             <div className="section" style={{ marginTop: 0 }}>
-              {actualMarketPicks.length ? (
+              {displayActualMarketPicks.length ? (
                 <div className="compactMarket">
                   <div className="compactMarketHead">
                     <div>유형</div><div>추천</div><div className="cmNum">최종</div><div className="cmNum">시장</div><div className="cmNum">엣지</div><div className="cmNum">EV</div><div className="cmNum">최종 등급</div>
                   </div>
-                  {actualMarketPicks.map((pick) => {
+                  {displayActualMarketPicks.map((pick) => {
                     const isBest = bestDisplayPick?.key === pick.key;
                     return (
                       <div className={`compactMarketRow ${isBest ? "bestRow" : ""}`} key={pick.key} title={`${pick.detail} · 홈팀 기준 핸디 · 원모델 ${pick.rawProbability.toFixed(1)}% · 데이터보정 ${pick.preProbabilityBefore === null || pick.preProbabilityBefore === undefined ? pick.probability.toFixed(1) : pick.preProbabilityBefore.toFixed(1)}% · 최종 ${pick.probability.toFixed(1)}% · EV ${pick.expectedValue === null ? "-" : pick.expectedValue.toFixed(1) + "%"} · ${pick.valueGrade} · ${pick.valueGradeReason}`}>
@@ -29915,7 +29956,7 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {actualMarketPicks.length > 0 && (
+                  {displayActualMarketPicks.length > 0 && (
                     <div style={{ marginTop: 8, overflowX: "auto" }}>
                       <div style={{ minWidth: 620 }}>
                         <div style={{
@@ -29932,7 +29973,7 @@ export default function Home() {
                           <div>마켓</div><div>원모델</div><div>시장</div><div>데이터보정</div><div>PRE최종</div><div>손익분기</div><div>엣지</div><div>EV</div><div>등급</div>
                         </div>
 
-                        {actualMarketPicks.map((pick) => (
+                        {displayActualMarketPicks.map((pick) => (
                           <div
                             key={`trace-${pick.key}`}
                             style={{
@@ -30015,7 +30056,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.12.08은 V13.12.05 농구 모델과 V13.12.06 Naver VERIFY를 유지하면서, 야구 STICKY READY의 캡처시각·선발명·라인업 수를 검증해 stale snapshot의 공식 실전추천을 차단하고, append-only BASEBALL_READY에서 최초 frozen GAME TOP1을 복원해 OOS 성과가 후속 재분석으로 사라지지 않게 합니다. 농구는 0~1경기 COLD START, 양 팀 최소 2경기 WARMUP, 최소 3경기부터 HISTORY ACTIVE로 단계화해 2경기만으로 공식 VALUE가 열리지 않게 합니다. V13.12.05의 박신자컵 제외·COLD START·marketResults 정산 정책은 그대로 유지합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
+                    V13.12.09는 V13.12.08의 READY freshness/frozen 연속성을 그대로 유지하면서, 야구 PRE·STARTER·LINEUP에서도 full-game TOP1 후보 하나를 화면에 항상 계산해 관망으로 표시합니다. READY 이전 TOP1은 표시 전용이며 공식 VALUE·약추천·frozen 저장은 차단되고, READY + freshness 통과 후에만 기존 tier가 열립니다. 농구는 0~1경기 COLD START, 양 팀 최소 2경기 WARMUP, 최소 3경기부터 HISTORY ACTIVE로 단계화해 2경기만으로 공식 VALUE가 열리지 않게 합니다. V13.12.05의 박신자컵 제외·COLD START·marketResults 정산 정책은 그대로 유지합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
