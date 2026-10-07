@@ -1,4 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
+// V13.12.10 FIX2 EXPLICIT ANALYSIS GATE + COURT COLD START DECOUPLE: selection never becomes model input; predictions activate only after analyzeSelected succeeds; basketball cold-start total line never seeds expected score and U/O stays neutral/excluded from TOP1 until independent scoring history exists.
 // V13.12.09 PRE TOP1 CONTINUITY: keep V13.12.05 court core + V13.12.06 verifier + V13.12.08 READY freshness/frozen continuity;
 // baseball PRE/STARTER/LINEUP now always computes one display-only full-game TOP1, forced to WATCH until fresh READY.
 // guard stale baseball READY snapshots, stage court warmup, and recover frozen TOP1 from append-only READY snapshots.
@@ -7428,12 +7429,13 @@ function buildAnalysis(
       baseballTeamStrengthRawHome = rawHome;
       baseballTeamStrengthRawAway = rawAway;
     } else if (courtPriorFallback && courtProfile) {
-      const totalMarket = chooseBetmanTotal(betmanMatch);
-      const totalLine = Number(totalMarket?.line);
-      let base = courtProfile.neutralTeamScore;
-      if (sport === "농구" && Number.isFinite(totalLine) && totalLine >= 100 && totalLine <= 300) {
-        base = clamp(totalLine / 2, courtProfile.neutralTeamScore - 18, courtProfile.neutralTeamScore + 18);
-      }
+      /*
+       * V13.12.10 COURT COLD START DECOUPLE
+       * 최근 실제 득실이 0/0이면 Betman U/O line을 예상 총점의 입력으로 쓰지 않는다.
+       * 팀당 득점은 리그 중립 prior에서 시작하고, 승패 시장은 방향만 약하게 보정한다.
+       * U/O는 아래 court market 계산에서 50/50 neutral로 고정하고 TOP1 pool에서도 제외한다.
+       */
+      const base = courtProfile.neutralTeamScore;
       const fairDiff =
         moneylineFair.home !== null && moneylineFair.away !== null
           ? moneylineFair.home - moneylineFair.away
@@ -7445,10 +7447,10 @@ function buildAnalysis(
       );
       rawHome = base + marketMargin / 2;
       rawAway = base - marketMargin / 2;
-      scoreGuardApplied = true;
-      scoreGuardStrength = 0.18;
-      marketPriorWeight = 0.18;
-      marketMarginPrior = marketMargin;
+      scoreGuardApplied = moneylineFair.home !== null || moneylineFair.away !== null;
+      scoreGuardStrength = scoreGuardApplied ? 0.18 : 0;
+      marketPriorWeight = scoreGuardApplied ? 0.18 : 0;
+      marketMarginPrior = scoreGuardApplied ? marketMargin : null;
     } else {
       rawHome = baseballRunPrior ?? courtProfile?.neutralTeamScore ?? neutralScorePrior(sport);
       rawAway = rawHome;
@@ -7588,21 +7590,11 @@ function buildAnalysis(
     if ((sport === "농구" || sport === "배구") && courtProfile) expectedHomeScore += courtProfile.homeEdge;
 
     /*
-     * V13.12.05 COURT COLD START SAFE
-     * 실제 최근 득실이 0/0인 농구에서 시장 total line을 임시 raw score로 사용한 뒤
-     * 다시 league prior로 shrink하면 높은 total line일수록 인위적인 UNDER edge가 생긴다.
-     * 독립 scoring data가 없을 때는 시장 total을 "예측 신호"가 아니라 기준점(anchor)으로만 사용해
-     * 최종 예상 총점을 해당 line에 맞춘다. 따라서 U/O는 독립 데이터가 쌓이기 전 50% 부근에서 시작한다.
+     * V13.12.10 COURT COLD START SAFE
+     * 시장 U/O line은 예상득점/예상총점 계산에 절대 주입하지 않는다.
+     * 독립 최근 득실이 없으면 화면 예상점수는 league prior + 약한 moneyline 방향 보정만 반영한다.
+     * U/O 자체는 buildActualMarketPicks에서 50/50 neutral + TOP1 제외로 처리한다.
      */
-    if (sport === "농구" && courtPriorFallback && courtProfile) {
-      const coldTotalMarket = chooseBetmanTotal(betmanMatch);
-      const coldTotalLine = Number(coldTotalMarket?.line);
-      if (Number.isFinite(coldTotalLine) && coldTotalLine >= 100 && coldTotalLine <= 300) {
-        const coldMargin = expectedHomeScore - expectedAwayScore;
-        expectedHomeScore = Math.max(45, coldTotalLine / 2 + coldMargin / 2);
-        expectedAwayScore = Math.max(45, coldTotalLine / 2 - coldMargin / 2);
-      }
-    }
 
     postShrinkHomeScore = expectedHomeScore;
     postShrinkAwayScore = expectedAwayScore;
@@ -11907,6 +11899,8 @@ function courtConsensus(
 function isCourtSlateMarket(pick: MarketPick) {
   const label = `${pick.market} ${pick.pick}`;
   if (/SUM|홀짝|전반|1st\s*half|first\s*half/i.test(label)) return false;
+  // V13.12.10: 농구 COLD START U/O는 독립 득점 신호가 없으므로 TOP1 후보에서 제외.
+  if (pick.courtColdStart && /U\/O|오버|언더|OVER|UNDER/i.test(label)) return false;
   return /승패|핸디|H\s*[+-]?\d|U\/O|오버|언더|OVER|UNDER/i.test(label);
 }
 
@@ -11982,7 +11976,7 @@ function promoteCourtSlateTopPick(pick: MarketPick, rank: number, slateScore: nu
     valueGradeReason: `COURT GAME TOP${rank} · ${tier}${restrictionLabel ? ` · ${restrictionLabel}` : ""} · TOP1점수 ${slateScore.toFixed(1)} · ${profile} · 순수모델 ${Number(pick.rawProbability ?? pick.probability).toFixed(1)}% · 최종 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
     stageGradeLabel: `COURT GAME TOP${rank} ${tier}${coldStart ? " · COLD START" : warmup ? " · WARMUP" : ""}`,
     recommendationScore: Number(slateScore.toFixed(1)),
-    detail: `${pick.detail} · V13.12.08 COURT GAME TOP${rank} · ${tier} · ${coldStart ? "COLD START SAFE / MARKET-LINE ANCHOR" : warmup ? "WARMUP SAMPLE RAMP / VERIFIED HISTORY" : "VERIFIED HISTORY + MODEL-FIRST / MARKET-DEBIASED SCORE"}`,
+    detail: `${pick.detail} · V13.12.08 COURT GAME TOP${rank} · ${tier} · ${coldStart ? "COLD START SAFE / TOTAL-LINE DECOUPLED" : warmup ? "WARMUP SAMPLE RAMP / VERIFIED HISTORY" : "VERIFIED HISTORY + MODEL-FIRST / MARKET-DEBIASED SCORE"}`,
   };
 }
 
@@ -12581,9 +12575,15 @@ function buildActualMarketPicks(
           probs = { home: homeP, away: 100 - homeP };
           modelNote = `정규분포 마진 · μ ${periodMargin.toFixed(1)} · σ ${marginSd.toFixed(1)}`;
         } else if (isTotalMarket && line !== null) {
-          const overP = normalCdf((periodTotal - line) / totalSd) * 100;
-          probs = { over: overP, under: 100 - overP };
-          modelNote = `정규분포 총점 · μ ${periodTotal.toFixed(1)} · σ ${totalSd.toFixed(1)}`;
+          if (courtDataQuality?.coldStart) {
+            // V13.12.10: 독립 최근 득실이 없으면 시장 line과 league prior 차이를 엣지로 오인하지 않는다.
+            probs = { over: 50, under: 50 };
+            modelNote = `COLD START U/O neutral · 독립 득점표본 없음 · 시장 line ${line}은 예상득점 입력 아님`;
+          } else {
+            const overP = normalCdf((periodTotal - line) / totalSd) * 100;
+            probs = { over: overP, under: 100 - overP };
+            modelNote = `정규분포 총점 · μ ${periodTotal.toFixed(1)} · σ ${totalSd.toFixed(1)}`;
+          }
         } else if (isMoneylineMarket) {
           const homeP = normalCdf(periodMargin / marginSd) * 100;
           probs = { home: homeP, away: 100 - homeP };
@@ -12647,9 +12647,14 @@ function buildActualMarketPicks(
           const ev = betExpectedValue(calibratedProbability, safeOdds);
           const consensus = courtConsensus(best.probability, calibratedProbability, marketProbability);
           const recScore = recommendationScore(calibratedProbability, edge, confidence);
-          const passOnly = isSumMarket || isFirstHalf;
+          const coldStartTotal = sport === "농구" && Boolean(courtDataQuality?.coldStart) && isTotalMarket;
+          const passOnly = isSumMarket || isFirstHalf || coldStartTotal;
           const baseReason = passOnly
-            ? isSumMarket ? "COURT SUM은 검증용 · TOP1 제외" : "COURT 전반은 검증용 · TOP1 제외"
+            ? isSumMarket
+              ? "COURT SUM은 검증용 · TOP1 제외"
+              : isFirstHalf
+                ? "COURT 전반은 검증용 · TOP1 제외"
+                : "COURT COLD START U/O · 독립 득점표본 없음 · 50/50 neutral · TOP1 제외"
             : "COURT CONTINUOUS TOP1 pool";
 
           result.push({
@@ -12699,7 +12704,7 @@ function buildActualMarketPicks(
             courtHistoryWarmup: courtDataQuality?.warmup ?? false,
             courtDataMode: courtDataQuality?.mode ?? null,
             courtCoverageLabel: courtDataQuality?.label ?? null,
-            detail: `${courtProfile.label} · ${modelNote} · ${courtDataQuality?.coldStart ? "COLD START · 시장 기준점 앵커" : courtDataQuality?.warmup ? "WARMUP · 최근 득실 보수 반영" : factors.scoringUsed ? "최근 득실 모델" : "시장 prior fallback"} · 합의 하한 ${consensus.floor?.toFixed(1) ?? "-"}%`,
+            detail: `${courtProfile.label} · ${modelNote} · ${courtDataQuality?.coldStart ? "COLD START · league prior + 약한 승패 방향 · U/O neutral" : courtDataQuality?.warmup ? "WARMUP · 최근 득실 보수 반영" : factors.scoringUsed ? "최근 득실 모델" : "시장 prior fallback"} · 합의 하한 ${consensus.floor?.toFixed(1) ?? "-"}%`,
           });
           continue;
         }
@@ -16213,6 +16218,8 @@ export default function Home() {
   const [betmanGames, setBetmanGames] = useState<BetmanMatch[]>([]);
   const [betmanDiagnostics, setBetmanDiagnostics] = useState<any>(null);
   const [selectedBetmanKey, setSelectedBetmanKey] = useState<string | null>(null);
+  // V13.12.10 FIX2: 선택은 navigation-only. analyzeSelected 성공 전에는 Betman/league-prior/sticky READY를 활성 모델 입력으로 쓰지 않는다.
+  const [analyzedBetmanKey, setAnalyzedBetmanKey] = useState<string | null>(null);
 
   const [liveBatchSelectedKeys, setLiveBatchSelectedKeys] =
     useState<string[]>([]);
@@ -16228,6 +16235,10 @@ export default function Home() {
   const [liveBatchOutcomes, setLiveBatchOutcomes] =
     useState<Record<string, LiveBatchOutcome>>({});
   const liveBatchWorkerRef = useRef(false);
+
+  useEffect(() => {
+    setAnalyzedBetmanKey(null);
+  }, [selectedBetmanKey]);
 
   const [baseballSnapshots, setBaseballSnapshots] =
     useState<Record<string, BaseballAnalysisSnapshot[]>>({});
@@ -17089,7 +17100,8 @@ export default function Home() {
       setMatched(null);
       if (games.length) {
         setSelectedBetmanKey(gameKey(games[0],0));
-        setBetman({ loading:false, matched:games[0], score:1, error:null });
+        setAnalyzedBetmanKey(null);
+        setBetman({ loading:false, matched:null, score:null, error:null });
         setStatus(`실전 발매경기 ${games.length}개 · 경기 선택 후 분석`);
       } else {
         setSelectedBetmanKey(null);
@@ -17167,7 +17179,8 @@ export default function Home() {
         // selectedBetman을 찾지 못하고 "선택 경기 분석" 버튼이 disabled 되는 경우가 있다.
         // 최초 선택부터 mergeActualGames와 동일한 안정 식별자를 사용한다.
         setSelectedBetmanKey(actualGameIdentity(games[0]));
-        setBetman({ loading: false, matched: games[0], score: 1, error: null });
+        setAnalyzedBetmanKey(null);
+        setBetman({ loading: false, matched: null, score: null, error: null });
         setStatus(
           `🔎 최근 경기 검증 · 최근 24시간 ${games.length}경기 · PRE 저장 없이 LIVE DATA 재검증`
         );
@@ -17566,6 +17579,11 @@ export default function Home() {
     );
   }, [visibleBetmanGames, selectedBetmanKey]);
 
+  const analysisUiReady = Boolean(
+    selectedBetmanKey &&
+    analyzedBetmanKey === selectedBetmanKey
+  );
+
   const selectedFixture = matched?.selectedFixture ?? null;
   const detail = matched?.detail ?? null;
   const h2h = matched?.h2h ?? null;
@@ -17599,12 +17617,23 @@ export default function Home() {
     venue: String((selectedBetman as any)?.stadium ?? "-"),
   };
 
+  /*
+   * V13.12.10 FIX2 EXPLICIT ANALYSIS GATE
+   * selectedBetman is navigation only. Until analyzeSelected succeeds, Betman odds,
+   * league priors, sticky READY and any stale matched payload are not allowed to become
+   * the active analysis input. This removes the old "click row -> prediction already exists" path.
+   */
+  const analysisBetmanMatch = analysisUiReady ? betman.matched : null;
+  const analysisMatched = analysisUiReady ? matched : null;
+  const analysisRecentSummary: RecentSummary | null = analysisUiReady ? recentSummary : null;
+  const analysisH2H = analysisUiReady ? h2h : null;
+
   const analysis = buildAnalysis(
     currentSport,
-    h2h,
-    recentSummary,
-    betman.matched,
-    matched
+    analysisH2H,
+    analysisRecentSummary,
+    analysisBetmanMatch,
+    analysisMatched
   );
   const liveAnalysisFactors = analysis.factors;
 
@@ -17637,6 +17666,7 @@ export default function Home() {
       : null;
 
   const stickyReadyActive = Boolean(
+    analysisUiReady &&
     currentSport === "야구" &&
     liveAnalysisFactors.baseballAnalysisStage !== "READY" &&
     selectedBaseballTrackerRecord?.venueShadow?.stage === "READY" &&
@@ -17762,8 +17792,8 @@ export default function Home() {
         )
       : analysisFactors.baseballDataCompleteness;
 
-  const betmanHandicap = chooseBetmanHandicap(betman.matched);
-  const betmanTotal = chooseBetmanTotal(betman.matched);
+  const betmanHandicap = chooseBetmanHandicap(analysisBetmanMatch);
+  const betmanTotal = chooseBetmanTotal(analysisBetmanMatch);
   const currentFootballLineupReady =
     currentSport === "축구" &&
     (
@@ -17777,11 +17807,11 @@ export default function Home() {
       selectedSoccerTrackerRecord?.footballLineup?.stage === "LINEUP_READY"
     );
   const actualMarketPicksRaw = buildActualMarketPicks(
-    betman.matched,
+    analysisBetmanMatch,
     currentSport,
     liveAnalysisFactors,
-    recentSummary,
-    h2h,
+    analysisRecentSummary,
+    analysisH2H,
     liveBaseballChallenger,
     currentFootballLineupReady
   );
@@ -17805,7 +17835,7 @@ export default function Home() {
   /* V13.12.09: PRE/STARTER/LINEUP도 경기별 TOP1 후보는 항상 계산하되 표시 전용 관망으로 고정한다.
    * 공식 VALUE/약추천 및 frozen 저장 자격은 기존대로 READY + freshness 통과 이후에만 열린다. */
   const currentSlateCandidate =
-    currentSport === "야구"
+    analysisUiReady && currentSport === "야구"
       ? bestBaseballHitFirstSlateCandidate(actualMarketPicksBase)
       : null;
   const currentSlatePromotion = currentSlateCandidate
@@ -17818,7 +17848,7 @@ export default function Home() {
 
   const isSoccerSport = currentSport === "축구";
   const currentSoccerCandidate =
-    isSoccerSport && analysisFactors.hasRealData
+    analysisUiReady && isSoccerSport && analysisFactors.hasRealData
       ? bestSoccerSlateCandidate(actualMarketPicksBase)
       : null;
   const currentSoccerPromotion = currentSoccerCandidate
@@ -17827,7 +17857,7 @@ export default function Home() {
 
   const isCourtSport = currentSport === "농구" || currentSport === "배구";
   const currentCourtCandidate =
-    isCourtSport && analysisFactors.hasRealData
+    analysisUiReady && isCourtSport && analysisFactors.hasRealData
       ? bestCourtSlateCandidate(actualMarketPicksBase)
       : null;
   const currentCourtPromotion = currentCourtCandidate
@@ -17890,15 +17920,17 @@ export default function Home() {
    * tracker/append-only/frozen 저장에는 원본 actualMarketPicks를 계속 사용한다.
    */
   const displayActualMarketPicks =
-    currentSport === "야구" && currentSlatePromotion
-      ? actualMarketPicks.map((pick) =>
-          pick.key === currentSlatePromotion.key ? currentSlatePromotion : pick
-        )
-      : actualMarketPicks;
+    !analysisUiReady
+      ? []
+      : currentSport === "야구" && currentSlatePromotion
+        ? actualMarketPicks.map((pick) =>
+            pick.key === currentSlatePromotion.key ? currentSlatePromotion : pick
+          )
+        : actualMarketPicks;
 
   const marketConnectionDiagnostics =
     buildMarketConnectionDiagnostics(
-      betman.matched,
+      analysisBetmanMatch,
       actualMarketPicks
     );
 
@@ -18242,7 +18274,7 @@ export default function Home() {
     ).length;
 
   const baseballSnapshotKey =
-    currentSport === "야구"
+    analysisUiReady && currentSport === "야구"
       ? String(
           matched?.fixtureId ??
           primaryMatchSeq(
@@ -18260,7 +18292,7 @@ export default function Home() {
       : [];
 
   const snapshotSignature =
-    currentSport === "야구"
+    analysisUiReady && currentSport === "야구"
       ? JSON.stringify({
           key:
             baseballSnapshotKey,
@@ -18291,6 +18323,7 @@ export default function Home() {
 
   useEffect(() => {
     if (
+      !analysisUiReady ||
       currentSport !== "야구" ||
       !baseballSnapshotKey ||
       !analysisFactors.hasRealData ||
@@ -18472,10 +18505,10 @@ export default function Home() {
 
   const currentSignalConflict =
     buildSignalConflict(
-      betman.matched,
+      analysisBetmanMatch,
       analysisFactors,
-      recentSummary,
-      h2h,
+      analysisRecentSummary,
+      analysisH2H,
       currentSport
     );
 
@@ -18488,7 +18521,7 @@ export default function Home() {
       : null;
   const currentSoccerQuality =
     isSoccerSport
-      ? soccerSportsDataQuality(betman.matched, analysisFactors, currentFootballLineupReady)
+      ? soccerSportsDataQuality(analysisBetmanMatch, analysisFactors, currentFootballLineupReady)
       : null;
 
   const currentCourtProfile =
@@ -18497,14 +18530,16 @@ export default function Home() {
       : null;
   const currentCourtQuality =
     isCourtSport
-      ? courtSportsDataQuality(betman.matched, analysisFactors, currentSport)
+      ? courtSportsDataQuality(analysisBetmanMatch, analysisFactors, currentSport)
       : null;
   const currentCourtHistoryAudit: CourtHistoryAudit | null =
     currentSport === "농구"
       ? matched?.courtHistoryAudit ?? null
       : null;
 
-  const displayPicks: Pick[] = displayActualMarketPicks.length
+  const displayPicks: Pick[] = !analysisUiReady
+    ? []
+    : displayActualMarketPicks.length
     ? displayActualMarketPicks.map((pick) => [
         pick.market,
         `${pick.pick} · ${pick.detail}`,
@@ -18582,7 +18617,9 @@ export default function Home() {
         : isCourtSport && currentCourtCandidate
           ? currentCourtCandidate.slateScore
           : null;
-  const bestDisplayPick = bestActualPick ?? currentContinuousTopPick;
+  const bestDisplayPick = analysisUiReady
+    ? bestActualPick ?? currentContinuousTopPick
+    : null;
 
   const best = bestDisplayPick
     ? bestDisplayPick.probability
@@ -19539,6 +19576,7 @@ export default function Home() {
    */
   useEffect(() => {
     if (
+      !analysisUiReady ||
       backtestMode ||
       !selectedBetman ||
       !analysisFactors.hasRealData ||
@@ -23956,6 +23994,7 @@ export default function Home() {
     // 단일 "선택 경기 분석" 대상으로 지정한다. 보기 버튼은 상세보기 전용이다.
     if (!isCurrentlySelected) {
       setSelectedBetmanKey(key);
+      setAnalyzedBetmanKey(null);
       setMatched(null);
 
       const game = visibleBetmanGames.find(
@@ -23963,7 +24002,7 @@ export default function Home() {
       ) ?? null;
 
       if (game) {
-        setBetman({ loading:false, matched:game, score:1, error:null });
+        setBetman({ loading:false, matched:null, score:null, error:null });
         setStatus(
           recentVerifyMode
             ? `🔎 ${game?.home ?? "-"} vs ${game?.away ?? "-"} 선택 · 선택 경기 분석을 누르세요 · PRE 저장 안 함`
@@ -24048,8 +24087,9 @@ export default function Home() {
     setBacktestMode(historical);
     setBacktestResultRevealed(false);
     setSelectedBetmanKey(gameKey(game,index));
+    setAnalyzedBetmanKey(null);
     setMatched(null);
-    setBetman({ loading:false, matched:game, score:1, error:null });
+    setBetman({ loading:false, matched:null, score:null, error:null });
     setStatus(
       historical
         ? `${game?.home ?? "-"} vs ${game?.away ?? "-"} 선택 · 백테스트 모드 자동 활성화`
@@ -24077,6 +24117,7 @@ export default function Home() {
         : null;
 
     setLoading(true);
+    setAnalyzedBetmanKey(null);
     setMatched(null);
     setBetman({ loading:false, matched:selectedBetman, score:1, error:null });
     setStatus(`${selectedBetman?.home ?? "-"} vs ${selectedBetman?.away ?? "-"} · SportsAPI 매칭 중…`);
@@ -24512,6 +24553,7 @@ export default function Home() {
               ? `SportsAPI 미수신 · Naver LIVE DATA 독립 분석 완료 · ${selectedBetman?.home ?? "-"} vs ${selectedBetman?.away ?? "-"}`
               : `SportsAPI 미수신 · Naver 독립 분석도 미수신 · ${selectedBetman?.home ?? "-"} vs ${selectedBetman?.away ?? "-"}`
           );
+          setAnalyzedBetmanKey(selectedBetmanKey);
           return true;
         }
 
@@ -24836,11 +24878,14 @@ export default function Home() {
       } else {
         setStatus(`경기 매칭 완료 · Fixture #${fixtureId} · 상세 분석 데이터 일부 미수신`);
       }
+      setAnalyzedBetmanKey(selectedBetmanKey);
       return true;
     } catch (e:any) {
       const message = readableError(e,"선택 경기 분석 실패");
+      setAnalyzedBetmanKey(null);
+      setMatched(null);
       setStatus(message);
-      setBetman((prev) => ({ ...prev, error:message }));
+      setBetman({ loading:false, matched:null, score:null, error:message });
       return false;
     } finally { setLoading(false); }
   }
@@ -24850,6 +24895,7 @@ export default function Home() {
   // 대신 일괄분석 세션의 화면 표시용 결과만 별도로 보관해 왼쪽 시장 행에 픽을 표시한다.
   useEffect(() => {
     if (
+      !analysisUiReady ||
       backtestMode ||
       !selectedBetmanKey ||
       !analysisFactors.hasRealData
@@ -25158,7 +25204,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.09 · PRE TOP1 CONTINUITY + READY FRESHNESS</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.10 FIX2 · EXPLICIT ANALYSIS GATE + COURT DECOUPLE</div>
         </div>
         <div className="bar">
           <button
@@ -26747,7 +26793,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.09 · PRE TOP1 CONTINUITY + READY FRESHNESS · V13.12.05 court core / V13.12.06 VERIFY 유지 · 박신자컵 제외</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.10 FIX2 · EXPLICIT ANALYSIS GATE + COURT DECOUPLE · V13.12.09 PRE TOP1 / V13.12.06 VERIFY 유지 · 박신자컵 제외</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 축구는 SportsAPI/Naver에서 최근 득실과 홈·원정 장소표본을 확보한 경기를 공통 Poisson 기반으로 계산하고, K리그/J리그·유럽 5대리그·UEFA 대회·MLS는 리그별 중립 득점 prior를 적용합니다. 선발 11+11은 λ를 임의 변경하지 않고 데이터품질에 soft 반영하며, alias가 없는 기타 리그도 동일경기 매칭이 되면 OTHER 프로필로 분석합니다.
               </div>
@@ -27437,9 +27483,10 @@ export default function Home() {
                         <div>
                           <button
                             className="btn light"
-                            onClick={() =>
-                              setSelectedBetmanKey(key)
-                            }
+                            onClick={() => {
+                              const visibleIndex = visibleBetmanGames.indexOf(game);
+                              chooseGame(game, visibleIndex >= 0 ? visibleIndex : 0);
+                            }}
                             style={{
                               padding: "5px 7px",
                               minWidth: 50,
@@ -27485,14 +27532,16 @@ export default function Home() {
                       : ""}
                 </div>
                 <div className="pickName">
-                  {analysisFactors.hasRealData
-                    ? (bestDisplayPick ? `${backtestMarketGroup(bestDisplayPick.market)} · ${compactBetmanPickLabel(bestDisplayPick.market, bestDisplayPick.pick)}` : actualMarketPicks.length ? "TOP1 후보 없음" : bestPick?.[1])
-                    : "분석 대기"}
+                  {!analysisUiReady
+                    ? "분석 대기 · 분석 버튼을 누르세요"
+                    : analysisFactors.hasRealData
+                      ? (bestDisplayPick ? `${backtestMarketGroup(bestDisplayPick.market)} · ${compactBetmanPickLabel(bestDisplayPick.market, bestDisplayPick.pick)}` : actualMarketPicks.length ? "TOP1 후보 없음" : bestPick?.[1])
+                      : "분석 대기"}
                 </div>
                 <div className="pickPct">
-                  {analysisFactors.hasRealData && bestDisplayPick ? `${best.toFixed(1)}%` : "-"}
+                  {analysisUiReady && analysisFactors.hasRealData && bestDisplayPick ? `${best.toFixed(1)}%` : "-"}
                 </div>
-                {bestDisplayPick && (
+                {analysisUiReady && bestDisplayPick && (
                   <div className="pickMeta">
                     {currentContinuousTopScore !== null && currentContinuousTopTier
                       ? `TOP1점수 ${currentContinuousTopScore.toFixed(1)} · ${currentContinuousTopTier}`
@@ -27578,7 +27627,37 @@ export default function Home() {
               </div>
             </div>
 
-            {currentSport === "야구" &&
+            {!analysisUiReady && (
+              <div className="notice" style={{ margin: "0 0 10px", background: "#f8fafc" }}>
+                <b>경기 선택 완료 · 아직 분석하지 않았습니다.</b>
+                {" · "}상단의 `선택 경기 분석` 또는 왼쪽의 `선택 경기 일괄 분석`을 실행한 뒤 TOP1·예상점수·확률을 표시합니다.
+              </div>
+            )}
+
+            {analysisUiReady && (
+              <div className="notice" style={{ margin: "0 0 10px", background: "#eefbf5", border: "1px solid #b7ead0" }}>
+                <b>분석 실행 완료</b>
+                {currentSport === "야구"
+                  ? ` · ${analysisFactors.baseballAnalysisStage} · 최근 ${analysisFactors.homeRecentSample}/${analysisFactors.awayRecentSample} · 선발 ${analysisFactors.baseballStarterCount}/2 · 라인업 ${analysisFactors.baseballLineupPlayerCount}/18`
+                  : isCourtSport
+                    ? ` · ${analysisFactors.scoringUsed ? "독립 최근 득실 반영" : "독립 최근 득실 미수신 · 리그 prior/시장 방향 fallback"} · 최근 ${analysisFactors.homeRecentSample}/${analysisFactors.awayRecentSample}`
+                    : ` · 최근 ${analysisFactors.homeRecentSample}/${analysisFactors.awayRecentSample} · 실데이터 ${analysisFactors.hasRealData ? "사용" : "부족"}`}
+                {isCourtSport && !analysisFactors.scoringUsed ? (
+                  <>
+                    <br />
+                    외부 최근 득실이 없으면 분석 후 값이 리그 prior·현재 시장 방향 중심으로 유지될 수 있습니다. 이는 임의로 값을 바꾸지 않는 정상 fallback이며, 분석 전에는 이 값을 결과로 표시하거나 저장하지 않습니다.
+                  </>
+                ) : null}
+                {currentSport === "야구" && analysisFactors.baseballAnalysisStage !== "READY" ? (
+                  <>
+                    <br />
+                    선발/라인업 발표 전에도 분석 후 PRE 값은 계산됩니다. 발표 뒤 다시 분석하면 STARTER/LINEUP/READY 입력이 추가되며, 분석 전 선택 상태의 값은 사용하지 않습니다.
+                  </>
+                ) : null}
+              </div>
+            )}
+
+            {analysisUiReady && currentSport === "야구" &&
               backtestMode &&
               backtestValidationTruth &&
               !backtestResultRevealed && (
@@ -27614,7 +27693,7 @@ export default function Home() {
               {" · "}회색 PASS = 분석했지만 베팅 기준 미달
             </div>
 
-            {isSoccerSport && currentSoccerProfile && (
+            {analysisUiReady && isSoccerSport && currentSoccerProfile && (
               <div className="section" style={{ marginTop: 0, marginBottom: 8 }}>
                 <h3>V13.11.00 FOOTBALL WORLD · {currentSoccerProfile.label}</h3>
                 <div className="cards">
@@ -27655,7 +27734,7 @@ export default function Home() {
               </div>
             )}
 
-            {isCourtSport && currentCourtProfile && (
+            {analysisUiReady && isCourtSport && currentCourtProfile && (
               <div className="section" style={{ marginTop: 0, marginBottom: 8 }}>
                 <h3>V13.12.05 COURT DATA · {currentCourtProfile.label}</h3>
                 <div className="cards">
@@ -27701,7 +27780,7 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="notice" style={{ margin: "8px 0 0" }}>
-                  농구(KBL/WKBL/NBA)는 리그별 득점 prior와 최근 득실·장소표본을 수축한 뒤 승패/핸디/U/O를 점수분포로 계산합니다. 박신자컵은 V13.12.04부터 경기목록·분석·VERIFIED 농구 누적 대상에서 제외합니다. V13.12.05부터 양 팀 최근 실전표본이 2경기 미만이면 COLD START로 표시하고 공식 VALUE 승격을 차단합니다. 최근 득실이 전혀 없을 때 시장 total은 독립 예측값이 아니라 총점 기준점(anchor)으로만 사용해 가짜 U/O 엣지를 만들지 않습니다. 종료 후 2시간이 지난 지원 농구 PENDING은 세션당 1회 자동 VERIFY하며, V13.12.06부터 fixtureId가 없어도 Naver KBL/WKBL/NBA 일정 결과를 날짜·홈/원정 팀·시작시간으로 매칭해 다음 경기의 최근/홈·원정 장소표본으로 재사용합니다. API 최근기록이 있으면 삭제하지 않고 중복 제거 후 보강하며 현재 경기 이후 결과는 사용하지 않습니다.
+                  농구(KBL/WKBL/NBA)는 리그별 득점 prior와 최근 득실·장소표본을 수축한 뒤 승패/핸디/U/O를 점수분포로 계산합니다. 박신자컵은 V13.12.04부터 경기목록·분석·VERIFIED 농구 누적 대상에서 제외합니다. V13.12.05부터 양 팀 최근 실전표본이 2경기 미만이면 COLD START로 표시하고 공식 VALUE 승격을 차단합니다. V13.12.10부터 최근 득실이 전혀 없는 COLD START에서는 시장 total line을 예상점수 입력으로 사용하지 않고, 예상점수는 league prior + 약한 승패 방향만 사용합니다. U/O는 독립 득점표본이 생기기 전 50/50 neutral로 두고 TOP1 후보에서도 제외합니다. 종료 후 2시간이 지난 지원 농구 PENDING은 세션당 1회 자동 VERIFY하며, V13.12.06부터 fixtureId가 없어도 Naver KBL/WKBL/NBA 일정 결과를 날짜·홈/원정 팀·시작시간으로 매칭해 다음 경기의 최근/홈·원정 장소표본으로 재사용합니다. API 최근기록이 있으면 삭제하지 않고 중복 제거 후 보강하며 현재 경기 이후 결과는 사용하지 않습니다.
                   배구(KOVO)는 최근 세트 스코어에서 세트승률을 만들고 3-0/3-1/3-2 분포로 승패와 세트핸디를 계산합니다.
                   {currentSport === "배구" ? " Betman U/O 기준이 6.5를 넘으면 세트 U/O가 아니라 총 포인트 시장으로 보고 현재 TOP1 대상에서 제외합니다." : ""}
                   {" "}선수 부상·출장시간·로테이션은 아직 독립 court 모델 입력으로 사용하지 않으므로 데이터품질 점수에도 포함하지 않습니다.
@@ -27709,6 +27788,7 @@ export default function Home() {
               </div>
             )}
 
+            {analysisUiReady && (<>
             <div className="analysisTitleRow">
               <h3>게임유형별 분석 요약</h3>
               <div className="legend">
@@ -27793,8 +27873,9 @@ export default function Home() {
                 </div>
               ))}
             </div>
+            </>)}
 
-            <details className="uiDetail">
+            {analysisUiReady && (<details className="uiDetail">
               <summary>V12.0 계산 추적 · PRE 불확실성 · 백테스트 검증 · EV</summary>
               <div className="uiDetailBody">
                 <div className="section" style={{ marginTop: 0 }}>
@@ -29917,7 +29998,7 @@ export default function Home() {
                         ? "예상득점은 배당을 그대로 점수로 바꾸지 않습니다. 최근 득실을 robust 처리하고, Form이 비면 MLB/NPB 공식 최근 팀 득실을 기본전력 fallback으로 먼저 사용합니다. 공식 팀 전력도 없을 때만 시장 방향을 약한 안전장치로 쓰며 선발·라인업·Challenger B/C/D는 그 뒤 별도로 반영합니다."
                         : isCourtSport
                           ? (currentCourtQuality?.coldStart
-                              ? "COLD START: 실제 최근 득실이 부족하므로 시장 승패는 방향 안전장치, total line은 총점 기준점으로만 사용합니다. 이 상태에서는 최근 Form 사용으로 표시하지 않고 공식 VALUE도 승격하지 않습니다."
+                              ? "COLD START: 실제 최근 득실이 부족하므로 시장 승패는 약한 방향 안전장치만 사용하고, total line은 예상득점에 주입하지 않습니다. U/O는 50/50 neutral로 두고 TOP1에서도 제외하며 공식 VALUE도 승격하지 않습니다."
                               : "COURT HISTORY ACTIVE: VERIFIED/API 최근 득실과 장소표본을 실제 모델 입력으로 사용합니다.")
                           : "최근 득실과 장소표본을 우선 사용하고 부족한 정보는 종목 prior로 수축합니다."}
                     </div>
@@ -30056,7 +30137,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.12.09는 V13.12.08의 READY freshness/frozen 연속성을 그대로 유지하면서, 야구 PRE·STARTER·LINEUP에서도 full-game TOP1 후보 하나를 화면에 항상 계산해 관망으로 표시합니다. READY 이전 TOP1은 표시 전용이며 공식 VALUE·약추천·frozen 저장은 차단되고, READY + freshness 통과 후에만 기존 tier가 열립니다. 농구는 0~1경기 COLD START, 양 팀 최소 2경기 WARMUP, 최소 3경기부터 HISTORY ACTIVE로 단계화해 2경기만으로 공식 VALUE가 열리지 않게 합니다. V13.12.05의 박신자컵 제외·COLD START·marketResults 정산 정책은 그대로 유지합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
+                    V13.12.10 FIX2는 경기 선택과 실제 분석 실행을 완전히 분리해 선택만 한 Betman 경기를 모델 입력으로 사용하지 않으며, 분석 성공 전에는 TOP1·예상점수·확률·스냅샷을 생성 결과로 사용하지 않습니다. V13.12.09의 READY freshness/frozen 연속성과 야구 PRE·STARTER·LINEUP display-only TOP1 정책은 그대로 유지합니다. READY 이전 TOP1은 표시 전용이며 공식 VALUE·약추천·frozen 저장은 차단되고, READY + freshness 통과 후에만 기존 tier가 열립니다. 농구는 0~1경기 COLD START, 양 팀 최소 2경기 WARMUP, 최소 3경기부터 HISTORY ACTIVE로 단계화해 2경기만으로 공식 VALUE가 열리지 않게 합니다. V13.12.05의 박신자컵 제외·COLD START·marketResults 정산 정책은 그대로 유지합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
@@ -30122,7 +30203,7 @@ export default function Home() {
               <div className="card">{recentSummary?.away?.teamName ?? currentMatch.away}<b>{awayForm?.wins ?? 0}승 {awayForm?.draws ?? 0}무 {awayForm?.losses ?? 0}패</b><div className="small">득점 {awayForm?.scored ?? 0} / 실점 {awayForm?.conceded ?? 0}</div></div>
             </div></div>}
               </div>
-            </details>
+            </details>)}
 
             {betman.error && <div className="notice">{betman.error}</div>}
             <div className="notice">실전 화면은 Betman에서 현재 배당이 제공되는 경기와 경기 시작 후 30분 이내 경기를 표시합니다. 시작 후 30분이 지난 경기는 상단의 최근 경기 검증에서 최근 24시간까지 PRE 저장 없이 다시 확인할 수 있습니다. 야구 LIVE 경기정보는 와이즈토토를 우선 수집하며, 와이즈토토 누락 시에만 SportsAPI 데이터를 fallback으로 사용합니다.</div>
