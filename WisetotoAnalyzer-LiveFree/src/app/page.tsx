@@ -1,4 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
+// V13.12.14 SOCCER PRIOR SAFE FALLBACK: preserve V13.12.13 result restore; when K/J or other football fixture/recent feeds fail, run a clearly-labelled league-prior PRE model after explicit analysis instead of returning an empty screen. Market total is never used as scoring input and prior-only football can never become official VALUE.
 // V13.12.13 ANALYSIS RESULT RESTORE: preserve V13.12.12 domestic football connectivity; keep explicit pre-analysis gate for new games while restoring already-analyzed session detail and showing clearly-labelled frozen tracker previews after reload/deploy.
 // V13.12.12 DOMESTIC FOOTBALL CONNECTIVITY: preserve V13.12.11 forensic/tail shadow and V13.12.10 explicit analysis gate; refresh 2026 K League 1/2 + J1/J2 aliases, split league diagnostics without changing priors, and accept verified SportsAPI 11+11 as a soft lineup-quality fallback when Naver players are unavailable.
 // V13.12.11 READY FORENSIC AUDIT + TAIL SHADOW: preserve V13.12.10 FIX2 explicit analysis gate/court decouple; freeze READY calculation components for sticky audit and add OOS-only handicap-tail/strong-total/quality-error diagnostics without changing model weights, probabilities, gates, or TOP1 thresholds.
@@ -93,6 +94,9 @@ type AnalysisFactors = {
   h2hUsed: boolean;
 
   scoringUsed: boolean;
+
+  /* V13.12.14: external football recent/fixture feed unavailable; league prior only, display/audit mode. */
+  soccerPriorFallback: boolean;
 
   homeAvgScored: number | null;
   homeAvgConceded: number | null;
@@ -7584,7 +7588,18 @@ function buildAnalysis(
     courtProfile !== null &&
     (moneylineFair.home !== null || moneylineFair.away !== null || chooseBetmanTotal(betmanMatch) !== null);
 
-  if (scoringUsed || baseballPriorFallback || courtPriorFallback) {
+  /*
+   * V13.12.14 SOCCER PRIOR SAFE FALLBACK
+   * K/J리그를 포함한 축구에서 SportsAPI/Naver recent가 비어도 분석 버튼 실행 후 빈 화면으로 끝내지 않는다.
+   * 득점은 리그 중립 prior에서만 시작한다. Betman U/O line은 절대 예상총점 입력으로 사용하지 않는다.
+   * moneyline은 아래 기존 방향 prior 로직에서만 보조 신호로 쓰며, 이 모드는 공식 VALUE 승격을 차단한다.
+   */
+  const soccerPriorFallback =
+    sport === "축구" &&
+    !scoringUsed &&
+    soccerProfile !== null;
+
+  if (scoringUsed || baseballPriorFallback || courtPriorFallback || soccerPriorFallback) {
     let rawHome: number;
     let rawAway: number;
 
@@ -7615,6 +7630,10 @@ function buildAnalysis(
       baseballTeamStrengthSource = "BETMAN_DIRECTION_GUARD";
       baseballTeamStrengthRawHome = rawHome;
       baseballTeamStrengthRawAway = rawAway;
+    } else if (soccerPriorFallback && soccerProfile) {
+      // 외부 최근득실이 없을 때는 리그 prior 자체만 사용한다. 시장 total line은 사용하지 않는다.
+      rawHome = soccerProfile.neutralTeamScore;
+      rawAway = soccerProfile.neutralTeamScore;
     } else if (courtPriorFallback && courtProfile) {
       /*
        * V13.12.10 COURT COLD START DECOUPLE
@@ -7699,6 +7718,11 @@ function buildAnalysis(
       // 최근 스코어가 없을 때는 Betman total/moneyline을 약한 방향 prior로만 사용한다.
       // 완전한 실데이터 모델처럼 보이지 않도록 강도를 42%로 고정한다.
       sampleStrength = 0.42;
+    }
+
+    if (soccerPriorFallback) {
+      // 실제 최근 득실 0/0인 축구는 prior-only임을 명시하고 모델강도를 낮게 고정한다.
+      sampleStrength = 0.30;
     }
 
     /*
@@ -8076,7 +8100,8 @@ function buildAnalysis(
     h2hUsed ||
     scoringUsed ||
     baseballPriorFallback ||
-    courtPriorFallback;
+    courtPriorFallback ||
+    soccerPriorFallback;
 
   let homeProbability =
     50;
@@ -8115,7 +8140,7 @@ function buildAnalysis(
 
     if (
       expectedMargin !== null &&
-      (scoringUsed || baseballPriorFallback)
+      (scoringUsed || baseballPriorFallback || soccerPriorFallback)
     ) {
       const marginSignal =
         clamp(
@@ -8474,6 +8499,7 @@ function buildAnalysis(
       h2hUsed,
 
       scoringUsed,
+      soccerPriorFallback,
 
       homeAvgScored:
         homeAvgScored ===
@@ -8945,6 +8971,7 @@ type MarketPick = {
   soccerModelQuality?: number | null;
   soccerH2hQuality?: number | null;
   soccerCoverageLabel?: string | null;
+  soccerPriorFallback?: boolean | null;
 
   /* V13.10.00: 농구/NBA/배구 court-sports 적중우선 진단. */
   courtLeagueGroup?: CourtLeagueGroup | null;
@@ -11837,9 +11864,10 @@ function soccerSportsDataQuality(
     0,
     1
   );
-  const scoring = factors.scoringUsed ? 1 : factors.hasRealData ? 0.38 : 0;
+  const scoring = factors.scoringUsed ? 1 : factors.soccerPriorFallback ? 0.18 : factors.hasRealData ? 0.38 : 0;
   const lineup = lineupReady ? 1 : 0.45;
-  const model = clamp(Number(factors.scoreShrinkage ?? 0), 0, 1);
+  const rawModel = clamp(Number(factors.scoreShrinkage ?? 0), 0, 1);
+  const model = factors.soccerPriorFallback ? Math.min(rawModel, 0.30) : rawModel;
   const h2h = clamp(Math.max(0, Number(factors.h2hSample ?? 0)) / 5, 0, 1);
 
   const relevantMarkets = (Array.isArray(game?.markets) ? game!.markets! : []).filter((market: any) => {
@@ -11872,7 +11900,7 @@ function soccerSportsDataQuality(
     market: Number(market.toFixed(3)),
     model: Number(model.toFixed(3)),
     h2h: Number(h2h.toFixed(3)),
-    label: `품질 ${overall.toFixed(1)} · R ${pct(recent)} / V ${pct(venue)} / S ${pct(scoring)} / XI ${pct(lineup)} / MKT ${pct(market)} / G ${pct(model)} / H2H ${pct(h2h)}`,
+    label: `${factors.soccerPriorFallback ? "PRIOR ONLY · " : ""}품질 ${overall.toFixed(1)} · R ${pct(recent)} / V ${pct(venue)} / S ${pct(scoring)} / XI ${pct(lineup)} / MKT ${pct(market)} / G ${pct(model)} / H2H ${pct(h2h)}`,
   };
 }
 
@@ -11960,8 +11988,9 @@ function bestSoccerSlateCandidate(picks: MarketPick[]) {
 }
 
 function promoteSoccerSlateTopPick(pick: MarketPick, rank: number, slateScore: number): MarketPick {
-  const tier = soccerContinuousTopTier(slateScore);
-  const promote = tier === "실전 추천";
+  const priorOnly = Boolean(pick.soccerPriorFallback);
+  const tier = priorOnly ? "관망" : soccerContinuousTopTier(slateScore);
+  const promote = !priorOnly && tier === "실전 추천";
   const quality = Number(pick.soccerDataQuality);
   return {
     ...pick,
@@ -11969,8 +11998,8 @@ function promoteSoccerSlateTopPick(pick: MarketPick, rank: number, slateScore: n
     valueGradeScore: promote
       ? Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))
       : Math.min(77.9, Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))),
-    valueGradeReason: `FOOTBALL GAME TOP${rank} · ${tier} · TOP1점수 ${slateScore.toFixed(1)} · ${String(pick.soccerLeagueGroup ?? "FOOTBALL")} · 순수모델 ${Number(pick.rawProbability ?? pick.probability).toFixed(1)}% · 최종 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
-    stageGradeLabel: `FOOTBALL GAME TOP${rank} ${tier}`,
+    valueGradeReason: `FOOTBALL GAME TOP${rank} · ${tier}${priorOnly ? " · PRIOR ONLY 공식추천 차단" : ""} · TOP1점수 ${slateScore.toFixed(1)} · ${String(pick.soccerLeagueGroup ?? "FOOTBALL")} · 순수모델 ${Number(pick.rawProbability ?? pick.probability).toFixed(1)}% · 최종 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
+    stageGradeLabel: `FOOTBALL GAME TOP${rank} ${tier}${priorOnly ? " · PRIOR ONLY" : ""}`,
     recommendationScore: Number(slateScore.toFixed(1)),
     detail: `${pick.detail} · V13.12.02 FOOTBALL GAME TOP${rank} · ${tier} · MODEL-FIRST / MARKET-DEBIASED SCORE`,
   };
@@ -12719,6 +12748,7 @@ function buildActualMarketPicks(
           soccerModelQuality: soccerDataQuality?.model ?? null,
           soccerH2hQuality: soccerDataQuality?.h2h ?? null,
           soccerCoverageLabel: soccerDataQuality?.label ?? null,
+          soccerPriorFallback: Boolean(factors.soccerPriorFallback),
           detail: `${periodText}${lineText}${pushText} · ${soccerProfile?.label ?? "FOOTBALL"}`,
         });
         continue;
@@ -16547,9 +16577,9 @@ export default function Home() {
               )
           );
 
-        const directionKeys =
+        const directionKeys: string[] =
           Array.from(
-            new Set(
+            new Set<string>(
               rows.map(
                 fallbackPickDirection
               )
@@ -18860,7 +18890,7 @@ export default function Home() {
           ? baseballContinuousTopTier(currentSlateCandidate.slateScore)
           : "관망")
       : isSoccerSport && currentSoccerCandidate
-        ? soccerContinuousTopTier(currentSoccerCandidate.slateScore)
+        ? (Boolean(currentContinuousTopPick?.soccerPriorFallback) ? "관망" : soccerContinuousTopTier(currentSoccerCandidate.slateScore))
         : isCourtSport && currentCourtCandidate
           ? (Boolean(currentContinuousTopPick?.courtColdStart) || Boolean(currentContinuousTopPick?.courtHistoryWarmup) ? "관망" : courtContinuousTopTier(currentCourtCandidate.slateScore))
           : null;
@@ -25616,7 +25646,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.13 · ANALYSIS RESULT RESTORE + DOMESTIC FOOTBALL CONNECTIVITY</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.14 · SOCCER PRIOR SAFE FALLBACK + RESULT RESTORE</div>
         </div>
         <div className="bar">
           <button
@@ -28080,11 +28110,19 @@ export default function Home() {
                   ? ` · ${analysisFactors.baseballAnalysisStage} · 최근 ${analysisFactors.homeRecentSample}/${analysisFactors.awayRecentSample} · 선발 ${analysisFactors.baseballStarterCount}/2 · 라인업 ${analysisFactors.baseballLineupPlayerCount}/18`
                   : isCourtSport
                     ? ` · ${analysisFactors.scoringUsed ? "독립 최근 득실 반영" : "독립 최근 득실 미수신 · 리그 prior/시장 방향 fallback"} · 최근 ${analysisFactors.homeRecentSample}/${analysisFactors.awayRecentSample}`
-                    : ` · 최근 ${analysisFactors.homeRecentSample}/${analysisFactors.awayRecentSample} · 실데이터 ${analysisFactors.hasRealData ? "사용" : "부족"}`}
+                    : isSoccerSport && analysisFactors.soccerPriorFallback
+                      ? ` · PRIOR ONLY 안전분석 · 외부 최근득실 미수신 · 최근 ${analysisFactors.homeRecentSample}/${analysisFactors.awayRecentSample}`
+                      : ` · 최근 ${analysisFactors.homeRecentSample}/${analysisFactors.awayRecentSample} · 실데이터 ${analysisFactors.hasRealData ? "사용" : "부족"}`}
                 {isCourtSport && !analysisFactors.scoringUsed ? (
                   <>
                     <br />
                     외부 최근 득실이 없으면 분석 후 값이 리그 prior·현재 시장 방향 중심으로 유지될 수 있습니다. 이는 임의로 값을 바꾸지 않는 정상 fallback이며, 분석 전에는 이 값을 결과로 표시하거나 저장하지 않습니다.
+                  </>
+                ) : null}
+                {isSoccerSport && analysisFactors.soccerPriorFallback ? (
+                  <>
+                    <br />
+                    SportsAPI/Naver 최근득실 연결이 비어 있어 리그 prior 기반 PRE 안전분석으로 표시합니다. Betman U/O line은 예상득점 입력에 사용하지 않으며, 실제 최근 득실이 확보되기 전 공식 VALUE 승격은 차단합니다.
                   </>
                 ) : null}
                 {currentSport === "야구" && analysisFactors.baseballAnalysisStage !== "READY" ? (
@@ -28165,6 +28203,11 @@ export default function Home() {
                     예상 득점
                     <b>{analysisFactors.expectedHomeScore?.toFixed(2) ?? "-"} : {analysisFactors.expectedAwayScore?.toFixed(2) ?? "-"}</b>
                     <div className="small">Poisson · 모델강도 {analysisFactors.scoreShrinkage === null ? "-" : `${Math.round(analysisFactors.scoreShrinkage * 100)}%`}</div>
+                  </div>
+                  <div className="card">
+                    분석 모드
+                    <b>{analysisFactors.soccerPriorFallback ? "PRIOR ONLY" : "LIVE DATA"}</b>
+                    <div className="small">{analysisFactors.soccerPriorFallback ? "최근득실 미수신 · 공식 VALUE 차단" : "최근득실 기반"}</div>
                   </div>
                 </div>
                 {currentDomesticSoccerAudit && (
@@ -30624,7 +30667,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.12.12는 2026 K리그1/2·J1/J2 팀 alias와 리그 구분을 보강하고 Naver 우선 + SportsAPI 명시적 11+11 선발 fallback을 검증/품질 신호에 연결합니다. 기존 K/J prior 수치와 축구 λ/Poisson·TOP1 임계값은 변경하지 않습니다. V13.12.11은 V13.12.10 FIX2의 명시적 분석 게이트를 유지하면서, 야구 READY 당시 raw→shrink→starter→lineup→market→decision λ와 선발/타선 보정 근거를 frozen forensic snapshot으로 저장해 후속 재수신 실패가 감사 화면을 0값으로 덮지 않게 합니다. 또한 ±1.5 이상 핸디 tail과 65% 이상 강한 U/O, READY 품질별 점수오차를 OOS SHADOW로만 누적하며 모델 가중치·확률·게이트·TOP1 임계값은 변경하지 않습니다. V13.12.10 FIX2는 경기 선택과 실제 분석 실행을 완전히 분리해 선택만 한 Betman 경기를 모델 입력으로 사용하지 않으며, 분석 성공 전에는 TOP1·예상점수·확률·스냅샷을 생성 결과로 사용하지 않습니다. V13.12.09의 READY freshness/frozen 연속성과 야구 PRE·STARTER·LINEUP display-only TOP1 정책은 그대로 유지합니다. READY 이전 TOP1은 표시 전용이며 공식 VALUE·약추천·frozen 저장은 차단되고, READY + freshness 통과 후에만 기존 tier가 열립니다. 농구는 0~1경기 COLD START, 양 팀 최소 2경기 WARMUP, 최소 3경기부터 HISTORY ACTIVE로 단계화해 2경기만으로 공식 VALUE가 열리지 않게 합니다. V13.12.05의 박신자컵 제외·COLD START·marketResults 정산 정책은 그대로 유지합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
+                    V13.12.14는 축구 외부 fixture/recent 연결이 비어도 분석 실행 후 리그 prior 기반 PRIOR ONLY 결과를 표시하고 공식 VALUE는 차단합니다. Betman U/O line은 득점 입력으로 사용하지 않습니다. V13.12.12는 2026 K리그1/2·J1/J2 팀 alias와 리그 구분을 보강하고 Naver 우선 + SportsAPI 명시적 11+11 선발 fallback을 검증/품질 신호에 연결합니다. 기존 K/J prior 수치와 축구 λ/Poisson·TOP1 임계값은 변경하지 않습니다. V13.12.11은 V13.12.10 FIX2의 명시적 분석 게이트를 유지하면서, 야구 READY 당시 raw→shrink→starter→lineup→market→decision λ와 선발/타선 보정 근거를 frozen forensic snapshot으로 저장해 후속 재수신 실패가 감사 화면을 0값으로 덮지 않게 합니다. 또한 ±1.5 이상 핸디 tail과 65% 이상 강한 U/O, READY 품질별 점수오차를 OOS SHADOW로만 누적하며 모델 가중치·확률·게이트·TOP1 임계값은 변경하지 않습니다. V13.12.10 FIX2는 경기 선택과 실제 분석 실행을 완전히 분리해 선택만 한 Betman 경기를 모델 입력으로 사용하지 않으며, 분석 성공 전에는 TOP1·예상점수·확률·스냅샷을 생성 결과로 사용하지 않습니다. V13.12.09의 READY freshness/frozen 연속성과 야구 PRE·STARTER·LINEUP display-only TOP1 정책은 그대로 유지합니다. READY 이전 TOP1은 표시 전용이며 공식 VALUE·약추천·frozen 저장은 차단되고, READY + freshness 통과 후에만 기존 tier가 열립니다. 농구는 0~1경기 COLD START, 양 팀 최소 2경기 WARMUP, 최소 3경기부터 HISTORY ACTIVE로 단계화해 2경기만으로 공식 VALUE가 열리지 않게 합니다. V13.12.05의 박신자컵 제외·COLD START·marketResults 정산 정책은 그대로 유지합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
