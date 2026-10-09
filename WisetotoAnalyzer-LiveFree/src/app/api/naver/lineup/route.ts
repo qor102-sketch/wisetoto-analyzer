@@ -1,3 +1,4 @@
+// DEPLOY_MARKER_V13_12_15_KJ_FOOTBALL_LIVE_CONNECTIVITY_20261009
 // DEPLOY_MARKER_V13_12_07_FROZEN_TOP1_AUDIT_20261005
 // DEPLOY_MARKER_V13_8_64_J1_ACTUAL_SCHEDULE_API_20260906
 // DEPLOY_MARKER_V13_8_63_J1_CATEGORY_RESOLVER_20260906
@@ -44,9 +45,48 @@ const KBO_TEAM_ALIASES: Record<string, string[]> = {
 };
 
 
-type FootballAdapterId = "J1_JP" | "MLS_US" | "EUROPE_GENERIC" | "FOOTBALL_GENERIC";
+type FootballAdapterId =
+  | "KLEAGUE1_KR"
+  | "KLEAGUE2_KR"
+  | "J1_JP"
+  | "J2_JP"
+  | "MLS_US"
+  | "EUROPE_GENERIC"
+  | "FOOTBALL_GENERIC";
 
 const FOOTBALL_ADAPTER_ALIASES: Record<FootballAdapterId, Record<string, string[]>> = {
+  KLEAGUE1_KR: {
+    ULSAN_HD: ["울산HD", "울산 HD", "울산현대", "ulsan hd", "ulsan hd fc", "ulsan hyundai"],
+    JEONBUK: ["전북현대", "전북 현대", "전북 현대 모터스", "jeonbuk hyundai motors", "jeonbuk motors"],
+    POHANG: ["포항스틸러스", "포항 스틸러스", "포항", "pohang steelers"],
+    FC_SEOUL: ["fc서울", "FC 서울", "서울FC", "fc seoul"],
+    DAEJEON: ["대전하나시티즌", "대전 하나 시티즌", "daejeon hana citizen"],
+    GWANGJU: ["광주fc", "광주 FC", "gwangju fc"],
+    GANGWON: ["강원fc", "강원 FC", "gangwon fc"],
+    GIMCHEON: ["김천상무", "김천 상무", "gimcheon sangmu"],
+    JEJU: ["제주sk", "제주 SK", "제주유나이티드", "jeju sk fc", "jeju united"],
+    DAEGU: ["대구fc", "대구 FC", "daegu fc"],
+    INCHEON: ["인천유나이티드", "인천 유나이티드", "인천utd", "incheon united"],
+    FC_ANYANG: ["fc안양", "FC 안양", "안양", "fc anyang"],
+    BUCHEON: ["부천fc1995", "부천 FC 1995", "부천fc", "bucheon fc 1995"],
+  },
+  KLEAGUE2_KR: {
+    SUWON_SAMSUNG: ["수원삼성블루윙즈", "수원 삼성 블루윙즈", "수원삼성", "suwon samsung bluewings"],
+    BUSAN_IPARK: ["부산아이파크", "부산 아이파크", "busan ipark"],
+    SEOUL_ELAND: ["서울이랜드", "서울 이랜드", "seoul e-land fc", "seoul e land"],
+    SEONGNAM: ["성남fc", "성남 FC", "seongnam fc"],
+    JEONNAM: ["전남드래곤즈", "전남 드래곤즈", "전남", "jeonnam dragons"],
+    GYEONGNAM: ["경남fc", "경남 FC", "gyeongnam fc"],
+    CHUNGNAM_ASAN: ["충남아산", "충남 아산", "chungnam asan fc"],
+    CHUNGBUK_CHEONGJU: ["충북청주", "충북 청주", "chungbuk cheongju fc"],
+    ANSAN: ["안산그리너스", "안산 그리너스", "ansan greeners"],
+    CHEONAN: ["천안시티", "천안 시티", "cheonan city fc"],
+    GIMPO: ["김포fc", "김포 FC", "gimpo fc"],
+    HWASEONG: ["화성fc", "화성 FC", "hwaseong fc"],
+    GIMHAE: ["김해fc2008", "김해 FC2008", "김해fc", "gimhae fc 2008", "gimhae fc"],
+    YONGIN: ["용인fc", "용인 FC", "yongin fc"],
+    PAJU: ["파주프런티어fc", "파주 프런티어 FC", "파주프론티어", "paju frontier fc"],
+  },
   J1_JP: {
     VISSEL_KOBE: ["비셀고베", "비셀 고베", "visselkobe", "vissel kobe", "고베"],
     V_VAREN_NAGASAKI: ["v바렌나가사키", "v-바렌나가사키", "v바렌 나가사키", "vvaren nagasaki", "v-varennagasaki", "나가사키"],
@@ -61,6 +101,30 @@ const FOOTBALL_ADAPTER_ALIASES: Record<FootballAdapterId, Record<string, string[
     FAGIANO_OKAYAMA: ["파지아노오카야마", "파지아노 오카야마", "fagianookayama", "fagiano okayama", "오카야마"],
     SANFRECCE_HIROSHIMA: ["산프레체히로시마", "산프레체 히로시마", "sanfreccehiroshima", "sanfrecce hiroshima", "히로시마"],
   },
+  J2_JP: {
+    CONSADOLE_SAPPORO: ["콘사도레삿포로", "홋카이도 콘사도레 삿포로", "삿포로", "consadole sapporo", "hokkaido consadole sapporo"],
+    VEGALTA_SENDAI: ["베갈타센다이", "베갈타 센다이", "센다이", "vegalta sendai"],
+    BLAUBLITZ_AKITA: ["블라우블리츠아키타", "블라우블리츠 아키타", "아키타", "blaublitz akita"],
+    MONTEDIO_YAMAGATA: ["몬테디오야마가타", "몬테디오 야마가타", "야마가타", "montedio yamagata"],
+    IWAKI_FC: ["이와키fc", "이와키 FC", "iwaki fc"],
+    JEF_CHIBA: ["제프유나이티드지바", "제프 지바", "jef united chiba", "jef chiba"],
+    RB_OMIYA: ["rb오미야아르디자", "RB 오미야 아르디자", "오미야", "rb omiya ardija", "omiya ardija"],
+    VENTFORET_KOFU: ["반포레고후", "반포레 고후", "고후", "ventforet kofu"],
+    JUBILO_IWATA: ["주빌로이와타", "주빌로 이와타", "이와타", "jubilo iwata"],
+    FUJIEDA: ["후지에다myfc", "후지에다 MYFC", "후지에다", "fujieda myfc"],
+    RENOFA_YAMAGUCHI: ["레노파야마구치", "레노파 야마구치", "야마구치", "renofa yamaguchi"],
+    TOKUSHIMA: ["도쿠시마보르티스", "도쿠시마 보르티스", "도쿠시마", "tokushima vortis"],
+    EHIME: ["에히메fc", "에히메 FC", "ehime fc"],
+    V_VAREN_NAGASAKI: ["v바렌나가사키", "v-바렌나가사키", "나가사키", "v-varen nagasaki", "v varen nagasaki"],
+    ROASSO_KUMAMOTO: ["로아소구마모토", "로아소 구마모토", "구마모토", "roasso kumamoto"],
+    OITA_TRINITA: ["오이타트리니타", "오이타 트리니타", "오이타", "oita trinita"],
+    SAGAN_TOSU: ["사간도스", "사간 도스", "도스", "sagan tosu"],
+    VANRAURE_HACHINOHE: ["반라우레하치노헤", "반라우레 하치노헤", "하치노헤", "vanraure hachinohe"],
+    TOCHIGI_CITY: ["도치기시티", "도치기 시티", "tochigi city"],
+    KATALLER_TOYAMA: ["카타레르도야마", "카타레르 도야마", "도야마", "kataller toyama"],
+    FC_IMABARI: ["fc이마바리", "FC 이마바리", "이마바리", "fc imabari"],
+    TEGEVAJARO_MIYAZAKI: ["테게바자로미야자키", "테게바자로 미야자키", "미야자키", "tegevajaro miyazaki"],
+  },
   MLS_US: {
     REAL_SALT_LAKE: ["레알솔트레이크", "리얼솔트레이크", "레알솔트레이크fc", "realsaltlake", "realsaltlakefc", "rsl"],
     LAFC: ["lafc", "la fc", "로스앤젤레스fc", "losangelesfc", "losangelesfootballclub"],
@@ -73,24 +137,43 @@ const FOOTBALL_ADAPTER_ALIASES: Record<FootballAdapterId, Record<string, string[
 };
 
 function footballAdapterId(leagueRaw: string): FootballAdapterId {
-  const league = String(leagueRaw ?? "").toLowerCase().replace(/\s/g, "");
-  if (/j1|j리그|일본.*축구|일본j/.test(league)) return "J1_JP";
+  const league = String(leagueRaw ?? "").toLowerCase().replace(/s/g, "");
+  if (/k리그1|kleague1|k-league1|k1/.test(league)) return "KLEAGUE1_KR";
+  if (/k리그2|kleague2|k-league2|k2/.test(league)) return "KLEAGUE2_KR";
+  if (/j리그2|j2|jleague2|j-league2/.test(league)) return "J2_JP";
+  if (/j리그1|j1|jleague1|j-league1|일본.*축구|일본j/.test(league)) return "J1_JP";
   if (/mls|미국.*축구|메이저리그사커/.test(league)) return "MLS_US";
   if (/에레디비시|네덜란드|epl|프리미어|라리가|분데스|세리에|리그1|유럽/.test(league)) return "EUROPE_GENERIC";
   return "FOOTBALL_GENERIC";
 }
 
+function footballCategoryCandidatesForAdapter(adapterId: FootballAdapterId): string[] {
+  if (adapterId === "KLEAGUE1_KR") return ["kleague", "kleague1"];
+  if (adapterId === "KLEAGUE2_KR") return ["kleague2", "kleague"];
+  if (adapterId === "J1_JP") return ["jleague", "jleague1"];
+  if (adapterId === "J2_JP") return ["jleague2", "jleague"];
+  if (adapterId === "MLS_US") return ["mls"];
+  return [];
+}
+
 function footballCategoryIdForAdapter(adapterId: FootballAdapterId): string | null {
-  if (adapterId === "J1_JP") return "jleague";
-  if (adapterId === "MLS_US") return "mls";
-  return null;
+  return footballCategoryCandidatesForAdapter(adapterId)[0] ?? null;
+}
+
+function footballUpperCategoryForAdapter(adapterId: FootballAdapterId): "kfootball" | "wfootball" {
+  return ["KLEAGUE1_KR", "KLEAGUE2_KR", "J1_JP", "J2_JP"].includes(adapterId)
+    ? "kfootball"
+    : "wfootball";
 }
 
 function footballAliasesFor(adapterId: FootballAdapterId) {
   return {
     ...FOOTBALL_ADAPTER_ALIASES.EUROPE_GENERIC,
     ...FOOTBALL_ADAPTER_ALIASES.MLS_US,
+    ...FOOTBALL_ADAPTER_ALIASES.KLEAGUE1_KR,
+    ...FOOTBALL_ADAPTER_ALIASES.KLEAGUE2_KR,
     ...FOOTBALL_ADAPTER_ALIASES.J1_JP,
+    ...FOOTBALL_ADAPTER_ALIASES.J2_JP,
     ...FOOTBALL_ADAPTER_ALIASES[adapterId],
   };
 }
@@ -275,7 +358,9 @@ function footballTeamMatches(candidate: string, requested: string, adapterId: Fo
 
 async function resolveFootballGameId(date: string, home: string, away: string, startRaw: string, adapterId: FootballAdapterId) {
   const d = isoDate(date);
-  const exactCategoryId = footballCategoryIdForAdapter(adapterId);
+  const categoryCandidates = footballCategoryCandidatesForAdapter(adapterId);
+  const exactCategoryId = categoryCandidates[0] ?? null;
+  const upperCategoryId = footballUpperCategoryForAdapter(adapterId);
   const j1MonthFrom = `${d.slice(0, 8)}01`;
   const j1MonthTo = (() => {
     const [year, month] = d.split("-").map(Number);
@@ -283,13 +368,20 @@ async function resolveFootballGameId(date: string, home: string, away: string, s
     return `${d.slice(0, 8)}${String(last).padStart(2, "0")}`;
   })();
   const j1ActualFields = "basic%2Cschedule%2CmatchRound%2CroundTournamentInfo%2CphaseCode%2CgroupName%2Cleg%2ChasPtSore%2ChomePtScore%2CawayPtScore%2Cleague%2CleagueName%2CaggregateWinner%2CneutralGround%2Cpostponed%2CmanualRelayUrl";
+  const domesticFields =
+    adapterId === "J1_JP" || adapterId === "J2_JP"
+      ? j1ActualFields
+      : "basic%2Cschedule%2Cfootball";
+  const categoryFrom = adapterId === "J1_JP" || adapterId === "J2_JP" ? j1MonthFrom : d;
+  const categoryTo = adapterId === "J1_JP" || adapterId === "J2_JP" ? j1MonthTo : d;
   const endpoints = [
-    adapterId === "J1_JP"
-      ? `${NAVER_API}?fields=${j1ActualFields}&upperCategoryId=kfootball&categoryId=jleague&fromDate=${encodeURIComponent(j1MonthFrom)}&toDate=${encodeURIComponent(j1MonthTo)}&roundCodes=&size=500`
-      : exactCategoryId
-        ? `${NAVER_API}?fields=basic%2Cschedule%2Cfootball&upperCategoryId=wfootball&categoryId=${encodeURIComponent(exactCategoryId)}&fromDate=${encodeURIComponent(d)}&toDate=${encodeURIComponent(d)}&size=500`
-        : null,
-    `${NAVER_API}?fields=basic%2Cschedule%2Cfootball&upperCategoryId=wfootball&fromDate=${encodeURIComponent(d)}&toDate=${encodeURIComponent(d)}&size=500`,
+    ...categoryCandidates.map((categoryId) =>
+      `${NAVER_API}?fields=${domesticFields}&upperCategoryId=${upperCategoryId}&categoryId=${encodeURIComponent(categoryId)}&fromDate=${encodeURIComponent(categoryFrom)}&toDate=${encodeURIComponent(categoryTo)}&roundCodes=&size=500`
+    ),
+    `${NAVER_API}?fields=${domesticFields}&upperCategoryId=${upperCategoryId}&fromDate=${encodeURIComponent(d)}&toDate=${encodeURIComponent(d)}&size=500`,
+    ...(upperCategoryId === "kfootball"
+      ? [`${NAVER_API}?fields=${domesticFields}&upperCategoryId=wfootball&fromDate=${encodeURIComponent(d)}&toDate=${encodeURIComponent(d)}&size=500`]
+      : []),
   ].filter((v, i, a): v is string => Boolean(v) && a.indexOf(v as string) === i);
 
   const attempts: Array<{ endpoint: string; status: number | null; scheduleCount: number }> = [];
@@ -302,8 +394,8 @@ async function resolveFootballGameId(date: string, home: string, away: string, s
         cache: "no-store",
         headers: {
           accept: "application/json, text/plain, */*",
-          referer: adapterId === "J1_JP"
-            ? `https://m.sports.naver.com/kfootball/schedule/index?category=jleague&date=${encodeURIComponent(d)}`
+          referer: upperCategoryId === "kfootball"
+            ? `https://m.sports.naver.com/kfootball/schedule/index?category=${encodeURIComponent(exactCategoryId ?? "")}&date=${encodeURIComponent(d)}`
             : exactCategoryId
               ? `https://m.sports.naver.com/wfootball/schedule/index?category=${encodeURIComponent(exactCategoryId)}`
               : "https://m.sports.naver.com/wfootball/schedule/index",
@@ -332,7 +424,13 @@ async function resolveFootballGameId(date: string, home: string, away: string, s
       attempts.push({ endpoint, status: response.status, scheduleCount: localRows.length });
       mergedRows.push(...localRows);
       // 리그 전용 schedule 응답에서 실제 행을 확보했으면 generic 결과와 섞지 않는다.
-      if (exactCategoryId && localRows.length > 0 && endpoint.includes(`categoryId=${encodeURIComponent(exactCategoryId)}`)) break;
+      if (
+        categoryCandidates.length > 0 &&
+        localRows.length > 0 &&
+        categoryCandidates.some((categoryId) =>
+          endpoint.includes(`categoryId=${encodeURIComponent(categoryId)}`)
+        )
+      ) break;
     } catch {
       attempts.push({ endpoint, status: null, scheduleCount: 0 });
     }
@@ -347,7 +445,14 @@ async function resolveFootballGameId(date: string, home: string, away: string, s
 
   let candidates = all.filter((obj) => {
     const category = String(obj?.categoryId ?? obj?.category ?? obj?.upperCategoryId ?? "").trim().toLowerCase();
-    if (exactCategoryId && category && category !== exactCategoryId && category !== "wfootball") return false;
+    if (
+      categoryCandidates.length > 0 &&
+      category &&
+      !categoryCandidates.includes(category) &&
+      category !== upperCategoryId &&
+      category !== "wfootball" &&
+      category !== "kfootball"
+    ) return false;
     const h = String(obj?.homeTeamName ?? obj?.homeTeamShortName ?? obj?.homeTeamFullName ?? obj?.homeName ?? "");
     const a = String(obj?.awayTeamName ?? obj?.awayTeamShortName ?? obj?.awayTeamFullName ?? obj?.awayName ?? "");
     return footballTeamMatches(h, home, adapterId) && footballTeamMatches(a, away, adapterId);
@@ -357,7 +462,14 @@ async function resolveFootballGameId(date: string, home: string, away: string, s
   if (candidates.length === 0 && requestedMs !== null) {
     const sameTime = all.filter((obj) => {
       const category = String(obj?.categoryId ?? obj?.category ?? obj?.upperCategoryId ?? "").trim().toLowerCase();
-      if (exactCategoryId && category && category !== exactCategoryId && category !== "wfootball") return false;
+      if (
+      categoryCandidates.length > 0 &&
+      category &&
+      !categoryCandidates.includes(category) &&
+      category !== upperCategoryId &&
+      category !== "wfootball" &&
+      category !== "kfootball"
+    ) return false;
       const ms = naverLocalGameMs(obj?.gameDateTime ?? obj?.startTime ?? obj?.gameTime);
       return ms !== null && Math.abs(ms - requestedMs) <= 5 * 60 * 1000;
     });
@@ -1396,16 +1508,33 @@ async function collectFootballRecentSummary(date: string, home: string, away: st
   const fromDate = isoDayOffset(date, -40);
   const toDate = isoDayOffset(date, -1);
   const j1ActualFields = "basic%2Cschedule%2CmatchRound%2CroundTournamentInfo%2CphaseCode%2CgroupName%2Cleg%2ChasPtSore%2ChomePtScore%2CawayPtScore%2Cleague%2CleagueName%2CaggregateWinner%2CneutralGround%2Cpostponed%2CmanualRelayUrl";
-  const endpoint = adapterId === "J1_JP"
-    ? `${NAVER_API}?fields=${j1ActualFields}&upperCategoryId=kfootball&categoryId=jleague&fromDate=${fromDate}&toDate=${toDate}&roundCodes=&size=500`
-    : `${NAVER_API}?fields=basic%2Cschedule%2Cfootball&upperCategoryId=wfootball&fromDate=${fromDate}&toDate=${toDate}&size=500`;
-  const scheduleResult = await fetchNaverJsonCached(
-    endpoint,
-    adapterId === "J1_JP"
-      ? `https://m.sports.naver.com/kfootball/schedule/index?category=jleague&date=${encodeURIComponent(date)}`
-      : "https://m.sports.naver.com/wfootball/schedule/index",
-    true,
-  );
+  const categories = footballCategoryCandidatesForAdapter(adapterId);
+  const upperCategoryId = footballUpperCategoryForAdapter(adapterId);
+  const domestic = upperCategoryId === "kfootball";
+  const fields = adapterId === "J1_JP" || adapterId === "J2_JP"
+    ? j1ActualFields
+    : "basic%2Cschedule%2Cfootball";
+  const endpointCandidates = [
+    ...categories.map((categoryId) =>
+      `${NAVER_API}?fields=${fields}&upperCategoryId=${upperCategoryId}&categoryId=${encodeURIComponent(categoryId)}&fromDate=${fromDate}&toDate=${toDate}&roundCodes=&size=500`
+    ),
+    `${NAVER_API}?fields=${fields}&upperCategoryId=${upperCategoryId}&fromDate=${fromDate}&toDate=${toDate}&size=500`,
+  ];
+  let scheduleResult: any = null;
+  let endpoint = endpointCandidates[0];
+  for (const candidateEndpoint of endpointCandidates) {
+    const result = await fetchNaverJsonCached(
+      candidateEndpoint,
+      domestic
+        ? `https://m.sports.naver.com/kfootball/schedule/index?category=${encodeURIComponent(categories[0] ?? "")}&date=${encodeURIComponent(date)}`
+        : "https://m.sports.naver.com/wfootball/schedule/index",
+      true,
+    );
+    scheduleResult = result;
+    endpoint = candidateEndpoint;
+    const direct = Array.isArray(result?.payload?.result?.games) ? result.payload.result.games : [];
+    if (result?.status === 200 && direct.length > 0) break;
+  }
   const directRows = Array.isArray(scheduleResult?.payload?.result?.games) ? scheduleResult.payload.result.games : [];
   const discoveredRows = allObjects(scheduleResult?.payload ?? {});
   const byId = new Map<string, AnyObj>();
