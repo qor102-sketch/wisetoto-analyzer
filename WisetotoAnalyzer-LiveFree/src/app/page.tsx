@@ -681,7 +681,7 @@ type VenueShadowValidationResult = {
 
 /* V13.12.11: READY 당시 계산 근거를 사후 재수신과 분리해 그대로 보존한다.
  * 모델 입력/확률에는 사용하지 않고 sticky READY 화면/검증 감사에만 사용한다. */
-type BaseballReadyFactorAudit = Pick<AnalysisFactors,
+type BaseballReadyFactorAudit = { [K in
   | "rawExpectedHomeScore" | "rawExpectedAwayScore" | "scorePrior"
   | "homeWeightedScored" | "homeWeightedConceded" | "awayWeightedScored" | "awayWeightedConceded"
   | "homeOverallScored" | "homeOverallConceded" | "awayOverallScored" | "awayOverallConceded"
@@ -705,7 +705,7 @@ type BaseballReadyFactorAudit = Pick<AnalysisFactors,
   | "baseballTeamStrengthApplied" | "baseballTeamStrengthSource" | "baseballTeamStrengthHomeGames"
   | "baseballTeamStrengthAwayGames" | "baseballTeamStrengthRawHome" | "baseballTeamStrengthRawAway"
   | "venueShadowRawHomeScore" | "venueShadowRawAwayScore" | "venueShadowFinalHomeScore" | "venueShadowFinalAwayScore"
->;
+]: AnalysisFactors[K] };
 
 type BaseballReadyDecisionAudit = {
   version: "V13.12.11";
