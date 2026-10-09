@@ -1,4 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
+// V13.12.12 DOMESTIC FOOTBALL CONNECTIVITY: preserve V13.12.11 forensic/tail shadow and V13.12.10 explicit analysis gate; refresh 2026 K League 1/2 + J1/J2 aliases, split league diagnostics without changing priors, and accept verified SportsAPI 11+11 as a soft lineup-quality fallback when Naver players are unavailable.
 // V13.12.11 READY FORENSIC AUDIT + TAIL SHADOW: preserve V13.12.10 FIX2 explicit analysis gate/court decouple; freeze READY calculation components for sticky audit and add OOS-only handicap-tail/strong-total/quality-error diagnostics without changing model weights, probabilities, gates, or TOP1 thresholds.
 // V13.12.10 FIX2 EXPLICIT ANALYSIS GATE + COURT COLD START DECOUPLE: selection never becomes model input; predictions activate only after analyzeSelected succeeds; basketball cold-start total line never seeds expected score and U/O stays neutral/excluded from TOP1 until independent scoring history exists.
 // V13.12.09 PRE TOP1 CONTINUITY: keep V13.12.05 court core + V13.12.06 verifier + V13.12.08 READY freshness/frozen continuity;
@@ -857,7 +858,7 @@ type BaseballChallengerSnapshot = {
 type FootballLineupSnapshot = {
   stage: "LINEUP_READY";
   capturedAt: number;
-  source: "NAVER_FOOTBALL_PLAYERS";
+  source: "NAVER_FOOTBALL_PLAYERS" | "SPORTSAPI_LINEUPS";
   gameId: string | null;
   homeTeamCode: string | null;
   awayTeamCode: string | null;
@@ -3434,6 +3435,18 @@ const SPORTS_API_TEAM_ALIASES: Record<string, string> = {
   "천안시티": "Cheonan City FC",
   "김포fc": "Gimpo FC",
   "화성fc": "Hwaseong FC",
+  // V13.12.12 · 2026 K League 1/2 current club coverage
+  "fc안양": "FC Anyang",
+  "안양": "FC Anyang",
+  "김해fc2008": "Gimhae FC 2008",
+  "김해fc": "Gimhae FC 2008",
+  "김해": "Gimhae FC 2008",
+  "용인fc": "Yongin FC",
+  "용인": "Yongin FC",
+  "파주프런티어fc": "Paju Frontier FC",
+  "파주프론티어fc": "Paju Frontier FC",
+  "파주프런티어": "Paju Frontier FC",
+  "파주프론티어": "Paju Frontier FC",
 
   "아스널": "Arsenal",
   "아스날": "Arsenal",
@@ -3541,6 +3554,33 @@ const SPORTS_API_TEAM_ALIASES: Record<string, string> = {
   "파지아노오카야마": "Fagiano Okayama",
   "산프레체히로시마": "Sanfrecce Hiroshima",
   "아비스파후쿠오카": "Avispa Fukuoka",
+  "제프유나이티드지바": "JEF United Chiba",
+  "제프지바": "JEF United Chiba",
+  "v바렌나가사키": "V-Varen Nagasaki",
+  "브이바렌나가사키": "V-Varen Nagasaki",
+  // V13.12.12 · 2026 J2 current club coverage
+  "홋카이도콘사도레삿포로": "Hokkaido Consadole Sapporo",
+  "콘사도레삿포로": "Hokkaido Consadole Sapporo",
+  "반라우레하치노헤": "Vanraure Hachinohe",
+  "반라레하치노헤": "Vanraure Hachinohe",
+  "베갈타센다이": "Vegalta Sendai",
+  "블라우블리츠아키타": "Blaublitz Akita",
+  "몬테디오야마가타": "Montedio Yamagata",
+  "이와키fc": "Iwaki FC",
+  "도치기시티": "Tochigi City",
+  "rb오미야아르디자": "RB Omiya Ardija",
+  "요코하마fc": "Yokohama FC",
+  "반포레고후": "Ventforet Kofu",
+  "카타레르도야마": "Kataller Toyama",
+  "카탈레르도야마": "Kataller Toyama",
+  "주빌로이와타": "Jubilo Iwata",
+  "후지에다myfc": "Fujieda MYFC",
+  "도쿠시마보르티스": "Tokushima Vortis",
+  "fc이마바리": "FC Imabari",
+  "사간도스": "Sagan Tosu",
+  "오이타트리니타": "Oita Trinita",
+  "테게바자로미야자키": "Tegevajaro Miyazaki",
+  "테게바자로그미야자키": "Tegevajaro Miyazaki",
 
   // V13.8.3 · NPB 12구단 direct alias
   "요미우리자이언츠": "Yomiuri Giants",
@@ -3708,6 +3748,10 @@ const SPORTS_TEAM_ALIAS_GROUPS: string[][] = [
   ["천안 시티","Cheonan City FC"],
   ["김포 FC","Gimpo FC"],
   ["화성 FC","Hwaseong FC"],
+  ["FC 안양","안양","안양 FC","FC Anyang"],
+  ["김해 FC2008","김해 FC","김해","Gimhae FC 2008","Gimhae FC","Gimhae City FC"],
+  ["용인 FC","용인","Yongin FC"],
+  ["파주 프런티어 FC","파주 프론티어 FC","파주 프런티어","파주 프론티어","Paju Frontier FC","Paju Frontier"],
 
   ["아스널","아스날","Arsenal","Arsenal FC"],
   ["맨체스터 시티","맨시티","Manchester City","Man City"],
@@ -3823,6 +3867,12 @@ const SPORTS_TEAM_ALIAS_GROUPS: string[][] = [
   ["로아소 구마모토","구마모토","Roasso Kumamoto"],
   ["오이타 트리니타","오이타","Oita Trinita"],
   ["사간 도스","도스","Sagan Tosu"],
+  // V13.12.12 · 2026 J1/J2 current roster aliases not covered above
+  ["반라우레 하치노헤","반라레 하치노헤","하치노헤","Vanraure Hachinohe"],
+  ["도치기 시티","도치기CITY","Tochigi City","TOCHIGI CITY"],
+  ["카타레르 도야마","카탈레르 도야마","도야마","Kataller Toyama"],
+  ["FC 이마바리","이마바리","FC Imabari"],
+  ["테게바자로 미야자키","미야자키","Tegevajaro Miyazaki"],
 
   ["LG 트윈스","LG Twins"],["두산 베어스","Doosan Bears"],["삼성 라이온즈","Samsung Lions"],
   ["KIA 타이거즈","KIA Tigers"],["롯데 자이언츠","Lotte Giants"],["한화 이글스","Hanwha Eagles"],
@@ -5060,8 +5110,10 @@ function neutralScorePrior(
 }
 
 type SoccerLeagueGroup =
-  | "KLEAGUE"
-  | "JLEAGUE"
+  | "KLEAGUE1"
+  | "KLEAGUE2"
+  | "JLEAGUE1"
+  | "JLEAGUE2"
   | "EPL"
   | "LALIGA"
   | "SERIEA"
@@ -5079,14 +5131,33 @@ type SoccerLeagueProfile = {
 };
 
 function soccerLeagueProfile(leagueRaw: unknown, teamsRaw: unknown = ""): SoccerLeagueProfile {
-  const text = `${String(leagueRaw ?? "")} ${String(teamsRaw ?? "")}`
-    .toLowerCase()
-    .replace(/[^a-z0-9가-힣]/g, "");
+  const leagueText = String(leagueRaw ?? "").toLowerCase().replace(/[^a-z0-9가-힣]/g, "");
+  const teamText = String(teamsRaw ?? "").toLowerCase().replace(/[^a-z0-9가-힣]/g, "");
+  const text = `${leagueText}${teamText}`;
 
-  if (/kleague|k리그|대한민국프로축구|울산hd|전북현대|포항스틸러스|fc서울|대전하나|광주fc|강원fc|수원fc|김천상무|제주sk|대구fc|인천유나이티드/.test(text))
-    return { group: "KLEAGUE", label: "K LEAGUE", neutralTeamScore: 1.33, homeEdge: 0.10 };
-  if (/j1|j2|jleague|j리그|가시마|우라와|가와사키|비셀고베|산프레체|마치다젤비아|요코하마f/.test(text))
-    return { group: "JLEAGUE", label: "J LEAGUE", neutralTeamScore: 1.40, homeEdge: 0.09 };
+  // V13.12.12: K1/K2/J1/J2를 진단상 분리한다. 기존 국가별 prior 값은 그대로 유지해 모델 계수는 바꾸지 않는다.
+  const k1League = /kleague1|k리그1|대한민국1부|한국k리그1/.test(leagueText);
+  const k2League = /kleague2|k리그2|대한민국2부|한국k리그2/.test(leagueText);
+  const j1League = /jleague1|j리그1|일본j1|일본1부|j1리그/.test(leagueText);
+  const j2League = /jleague2|j리그2|일본j2|일본2부|j2리그/.test(leagueText);
+
+  const k1Team = /울산hd|전북현대|포항스틸러스|fc서울|서울fc|대전하나|광주fc|강원fc|김천상무|제주sk|인천유나이티드|부천fc|fc안양/.test(teamText);
+  const k2Team = /경남fc|김포fc|김해fc|대구fc|부산아이파크|서울이랜드|성남fc|수원삼성|수원fc|안산그리너스|용인fc|전남드래곤즈|천안시티|충남아산|충북청주|파주프런티어|파주프론티어|화성fc/.test(teamText);
+  const j1Team = /가시마|미토홀리호크|우라와|제프.*지바|가시와|fc도쿄|도쿄베르디|마치다|가와사키|요코하마f|시미즈|나고야|교토상가|감바오사카|세레소오사카|비셀고베|파지아노오카야마|산프레체|아비스파|나가사키/.test(teamText);
+  const j2Team = /콘사도레삿포로|하치노헤|베갈타센다이|블라우블리츠아키타|몬테디오야마가타|이와키fc|도치기시티|오미야아르디자|요코하마fc|쇼난벨마레|반포레고후|알비렉스니가타|도야마|주빌로이와타|후지에다|도쿠시마|이마바리|사간도스|오이타트리니타|미야자키/.test(teamText);
+
+  if (k1League || (!k2League && k1Team))
+    return { group: "KLEAGUE1", label: "K LEAGUE 1", neutralTeamScore: 1.33, homeEdge: 0.10 };
+  if (k2League || k2Team)
+    return { group: "KLEAGUE2", label: "K LEAGUE 2", neutralTeamScore: 1.33, homeEdge: 0.10 };
+  if (j1League || (!j2League && j1Team))
+    return { group: "JLEAGUE1", label: "J1 LEAGUE", neutralTeamScore: 1.40, homeEdge: 0.09 };
+  if (j2League || j2Team)
+    return { group: "JLEAGUE2", label: "J2 LEAGUE", neutralTeamScore: 1.40, homeEdge: 0.09 };
+  if (/kleague|k리그|대한민국프로축구/.test(text))
+    return { group: "KLEAGUE1", label: "K LEAGUE · DIVISION UNKNOWN", neutralTeamScore: 1.33, homeEdge: 0.10 };
+  if (/jleague|j리그/.test(text))
+    return { group: "JLEAGUE1", label: "J LEAGUE · DIVISION UNKNOWN", neutralTeamScore: 1.40, homeEdge: 0.09 };
   if (/premierleague|epl|잉글랜드프리미어|아스널|맨체스터시티|맨체스터유나이티드|리버풀|첼시|토트넘/.test(text))
     return { group: "EPL", label: "EPL", neutralTeamScore: 1.52, homeEdge: 0.10 };
   if (/laliga|라리가|스페인1부|레알마드리드|바르셀로나|아틀레티코마드리드/.test(text))
@@ -6098,6 +6169,49 @@ function declaredTeamLineup(
     null;
 
   return Array.isArray(fullLineup) ? fullLineup : [];
+}
+
+function footballStartingLineupRows(
+  lineups: any,
+  side: "home" | "away"
+) {
+  const declared = declaredTeamLineup(lineups, side);
+  if (declared.length >= 11) return declared.slice(0, 11);
+
+  const sideKeys = side === "home"
+    ? ["homeStartingLineup", "homeStartingXI", "homePlayers", "homeLineup", "home"]
+    : ["awayStartingLineup", "awayStartingXI", "awayPlayers", "awayLineup", "away"];
+  const branch = findBranchByKeyDeep(lineups, sideKeys);
+  const rows = Array.isArray(branch)
+    ? branch
+    : Array.isArray(branch?.players)
+      ? branch.players
+      : Array.isArray(branch?.lineup)
+        ? branch.lineup
+        : Array.isArray(branch?.startingXI)
+          ? branch.startingXI
+          : [];
+
+  const starters = rows.filter((row: any) => {
+    if (!row || typeof row !== "object") return false;
+    if (row?.substitute === true || row?.isSubstitute === true || row?.starter === false || row?.isStarter === false) return false;
+    return Boolean(objectName(row) || playerIdentity(row));
+  });
+  return (starters.length >= 11 ? starters : rows).slice(0, 11);
+}
+
+function footballLineupSource(matched: any) {
+  const naverHome = Array.isArray(matched?.naverTodayLineup?.home) ? matched.naverTodayLineup.home : [];
+  const naverAway = Array.isArray(matched?.naverTodayLineup?.away) ? matched.naverTodayLineup.away : [];
+  if (matched?.naverTodayLineup?.league === "FOOTBALL" && naverHome.length >= 11 && naverAway.length >= 11) {
+    return { source: "NAVER_FOOTBALL_PLAYERS" as const, home: naverHome.slice(0, 11), away: naverAway.slice(0, 11) };
+  }
+  const sportsHome = footballStartingLineupRows(matched?.lineups, "home");
+  const sportsAway = footballStartingLineupRows(matched?.lineups, "away");
+  if (sportsHome.length >= 11 && sportsAway.length >= 11) {
+    return { source: "SPORTSAPI_LINEUPS" as const, home: sportsHome, away: sportsAway };
+  }
+  return { source: null, home: naverHome.slice(0, 11), away: naverAway.slice(0, 11) };
 }
 
 function lineupBatters(
@@ -17867,16 +17981,13 @@ export default function Home() {
 
   const betmanHandicap = chooseBetmanHandicap(analysisBetmanMatch);
   const betmanTotal = chooseBetmanTotal(analysisBetmanMatch);
+  const currentFootballLineupAudit = currentSport === "축구"
+    ? footballLineupSource(matched)
+    : { source: null, home: [] as any[], away: [] as any[] };
   const currentFootballLineupReady =
     currentSport === "축구" &&
     (
-      (
-        matched?.naverTodayLineup?.league === "FOOTBALL" &&
-        Array.isArray(matched?.naverTodayLineup?.home) &&
-        Array.isArray(matched?.naverTodayLineup?.away) &&
-        matched.naverTodayLineup.home.length >= 11 &&
-        matched.naverTodayLineup.away.length >= 11
-      ) ||
+      (currentFootballLineupAudit.home.length >= 11 && currentFootballLineupAudit.away.length >= 11) ||
       selectedSoccerTrackerRecord?.footballLineup?.stage === "LINEUP_READY"
     );
   const actualMarketPicksRaw = buildActualMarketPicks(
@@ -18595,6 +18706,28 @@ export default function Home() {
   const currentSoccerQuality =
     isSoccerSport
       ? soccerSportsDataQuality(analysisBetmanMatch, analysisFactors, currentFootballLineupReady)
+      : null;
+  const currentDomesticSoccerAudit =
+    isSoccerSport && currentSoccerProfile && ["KLEAGUE1", "KLEAGUE2", "JLEAGUE1", "JLEAGUE2"].includes(currentSoccerProfile.group)
+      ? (() => {
+          const homeAliases = sportsTeamAliases(currentMatch.home);
+          const awayAliases = sportsTeamAliases(currentMatch.away);
+          const hasEnglishAlias = (rows: string[]) => rows.some((row) => /[A-Za-z]/.test(row));
+          const sportsMatched = Boolean(matched?.fixtureId ?? matched?.selectedFixture?.id ?? matched?.fixture?.id ?? (matched?.sportsApiAvailable !== false && matched?.selectedFixture));
+          const recentReady = Number(analysisFactors.homeRecentSample ?? 0) > 0 && Number(analysisFactors.awayRecentSample ?? 0) > 0;
+          return {
+            group: currentSoccerProfile.group,
+            homeAliasOk: hasEnglishAlias(homeAliases),
+            awayAliasOk: hasEnglishAlias(awayAliases),
+            homeAlias: homeAliases.find((row) => /[A-Za-z]/.test(row)) ?? null,
+            awayAlias: awayAliases.find((row) => /[A-Za-z]/.test(row)) ?? null,
+            sportsMatched,
+            recentReady,
+            naverMatched: Boolean(matched?.naverTodayLineup?.ok && matched?.naverTodayLineup?.league === "FOOTBALL"),
+            lineupSource: currentFootballLineupAudit.source,
+            lineupReady: currentFootballLineupReady,
+          };
+        })()
       : null;
 
   const currentCourtProfile =
@@ -19813,29 +19946,24 @@ export default function Home() {
        * 나중에 들어오면 같은 경기 레코드를 READY snapshot으로 1회 승격한다.
        * 이미 READY가 잠겼거나 VERIFY가 끝난 레코드는 절대 덮어쓰지 않는다.
        */
-      const footballHomeRows =
-        currentSport === "축구" && Array.isArray(matched?.naverTodayLineup?.home)
-          ? matched.naverTodayLineup.home.slice(0, 11)
-          : [];
-      const footballAwayRows =
-        currentSport === "축구" && Array.isArray(matched?.naverTodayLineup?.away)
-          ? matched.naverTodayLineup.away.slice(0, 11)
-          : [];
+      const footballResolved = currentSport === "축구" ? footballLineupSource(matched) : { source: null, home: [] as any[], away: [] as any[] };
+      const footballHomeRows = footballResolved.home.slice(0, 11);
+      const footballAwayRows = footballResolved.away.slice(0, 11);
       const hasConfirmedFootballLineup =
         currentSport === "축구" &&
-        matched?.naverTodayLineup?.league === "FOOTBALL" &&
+        footballResolved.source !== null &&
         footballHomeRows.length === 11 &&
         footballAwayRows.length === 11;
       const footballLineupSnapshot: FootballLineupSnapshot | null = hasConfirmedFootballLineup
         ? {
             stage: "LINEUP_READY",
             capturedAt: Date.now(),
-            source: "NAVER_FOOTBALL_PLAYERS",
-            gameId: String(matched?.naverTodayLineup?.gameId ?? "").trim() || null,
+            source: footballResolved.source!,
+            gameId: String(matched?.naverTodayLineup?.gameId ?? matched?.fixtureId ?? matched?.selectedFixture?.id ?? "").trim() || null,
             homeTeamCode: String(matched?.naverTodayLineup?.footballPlayers?.homeTeamCode ?? "").trim() || null,
             awayTeamCode: String(matched?.naverTodayLineup?.footballPlayers?.awayTeamCode ?? "").trim() || null,
-            homeTeamName: String(matched?.naverTodayLineup?.footballPlayers?.homeTeamName ?? "").trim() || null,
-            awayTeamName: String(matched?.naverTodayLineup?.footballPlayers?.awayTeamName ?? "").trim() || null,
+            homeTeamName: String(matched?.naverTodayLineup?.footballPlayers?.homeTeamName ?? currentMatch.home ?? "").trim() || null,
+            awayTeamName: String(matched?.naverTodayLineup?.footballPlayers?.awayTeamName ?? currentMatch.away ?? "").trim() || null,
             home: footballHomeRows.map((p: any) => ({
               playerId: String(p?.playerId ?? p?.pcode ?? "").trim() || null,
               name: String(p?.name ?? "").trim() || null,
@@ -24605,6 +24733,9 @@ export default function Home() {
                 away: String(selectedBetman?.away ?? ""),
                 sport: koreanSport(String((selectedBetman as any)?.sport ?? "")),
                 league: String((selectedBetman as any)?.league ?? (selectedBetman as any)?.leagueName ?? ""),
+                leagueHint: soccerLeagueProfile((selectedBetman as any)?.league ?? (selectedBetman as any)?.leagueName ?? "", `${selectedBetman?.home ?? ""} ${selectedBetman?.away ?? ""}`).group,
+                homeAliases: sportsTeamAliases(selectedBetman?.home).join("|"),
+                awayAliases: sportsTeamAliases(selectedBetman?.away).join("|"),
               });
               const naverResponse = await fetch(
                 `/api/naver/lineup?${naverParams.toString()}`,
@@ -24880,6 +25011,9 @@ export default function Home() {
               away: String(selectedBetman?.away ?? detailData?.selectedFixture?.away ?? data?.selectedFixture?.away ?? ""),
               sport: koreanSport(String((selectedBetman as any)?.sport ?? "")),
               league: String((selectedBetman as any)?.league ?? (selectedBetman as any)?.leagueName ?? ""),
+              leagueHint: soccerLeagueProfile((selectedBetman as any)?.league ?? (selectedBetman as any)?.leagueName ?? "", `${selectedBetman?.home ?? ""} ${selectedBetman?.away ?? ""}`).group,
+              homeAliases: sportsTeamAliases(selectedBetman?.home).join("|"),
+              awayAliases: sportsTeamAliases(selectedBetman?.away).join("|"),
             });
             const naverResponse = await fetch(`/api/naver/lineup?${naverParams.toString()}`, { cache: "no-store" });
             const naverPayload = await readApiResponse(naverResponse, "네이버 당일 선발 라인업");
@@ -25402,7 +25536,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.11 · READY FORENSIC AUDIT + TAIL SHADOW</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.12 · DOMESTIC FOOTBALL CONNECTIVITY + READY FORENSIC</div>
         </div>
         <div className="bar">
           <button
@@ -27004,7 +27138,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.11 · READY FORENSIC AUDIT + TAIL SHADOW · V13.12.10 FIX2 GATE / V13.12.06 VERIFY 유지 · 박신자컵 제외</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.12 · DOMESTIC FOOTBALL CONNECTIVITY · V13.12.11 FORENSIC / V13.12.10 FIX2 GATE / V13.12.06 VERIFY 유지 · 박신자컵 제외</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 축구는 SportsAPI/Naver에서 최근 득실과 홈·원정 장소표본을 확보한 경기를 공통 Poisson 기반으로 계산하고, K리그/J리그·유럽 5대리그·UEFA 대회·MLS는 리그별 중립 득점 prior를 적용합니다. 선발 11+11은 λ를 임의 변경하지 않고 데이터품질에 soft 반영하며, alias가 없는 기타 리그도 동일경기 매칭이 되면 OTHER 프로필로 분석합니다.
               </div>
@@ -27939,8 +28073,33 @@ export default function Home() {
                     <div className="small">Poisson · 모델강도 {analysisFactors.scoreShrinkage === null ? "-" : `${Math.round(analysisFactors.scoreShrinkage * 100)}%`}</div>
                   </div>
                 </div>
+                {currentDomesticSoccerAudit && (
+                  <div className="cards" style={{ marginTop: 8 }}>
+                    <div className="card">
+                      국내리그 연결
+                      <b>{currentDomesticSoccerAudit.group}</b>
+                      <div className="small">K1/K2/J1/J2 분리 인식 · 기존 prior 수치 유지</div>
+                    </div>
+                    <div className="card">
+                      팀 alias
+                      <b>{currentDomesticSoccerAudit.homeAliasOk && currentDomesticSoccerAudit.awayAliasOk ? "✓ 2/2" : "⚠ 확인"}</b>
+                      <div className="small">{currentDomesticSoccerAudit.homeAlias ?? currentMatch.home} / {currentDomesticSoccerAudit.awayAlias ?? currentMatch.away}</div>
+                    </div>
+                    <div className="card">
+                      SportsAPI Fixture
+                      <b>{currentDomesticSoccerAudit.sportsMatched ? "✓ 매칭" : "미매칭/격리"}</b>
+                      <div className="small">최근표본 {currentDomesticSoccerAudit.recentReady ? "✓ 양팀 수신" : "대기/부분"}</div>
+                    </div>
+                    <div className="card">
+                      선발 XI 소스
+                      <b>{currentDomesticSoccerAudit.lineupReady ? "✓ 11+11" : "대기"}</b>
+                      <div className="small">{currentDomesticSoccerAudit.lineupSource ?? (currentDomesticSoccerAudit.naverMatched ? "NAVER_PARTIAL" : "미수신")} · Naver 우선 / SportsAPI fallback</div>
+                    </div>
+                  </div>
+                )}
                 <div className="notice" style={{ margin: "8px 0 0" }}>
-                  K리그/J리그와 EPL·LaLiga·Serie A·Bundesliga·Ligue 1·UEFA 대회·MLS를 리그별 득점 prior로 구분하고, 최근 득실·홈/원정 장소표본·선발 XI 확보·모델강도를 연속 점수로 반영합니다. 시장확률은 TOP1 기본점수에 직접 더하지 않고 순수모델과의 일치도 확인에만 사용합니다. full-game 승무패/핸디/U/O에서 각 경기마다 독립적으로 경기 TOP1을 1개 산출합니다. 다른 경기 점수 때문에 현재 경기 TOP1이 취소되거나 강등되지 않습니다. TOP1점수 78 이상만 공식 VALUE, 72~77.9는 약추천, 그 미만은 관망입니다.
+                  K리그1/K리그2/J1/J2를 별도 리그로 식별하고 2026 참가팀 alias를 우선 매칭합니다. 리그 분리는 연결/감사용이며 이번 버전에서는 기존 K리그 1.33, J리그 1.40 팀당 prior 수치를 그대로 유지해 모델 자체를 사후 변경하지 않습니다. Naver 실제 선발 11+11이 없더라도 SportsAPI가 명시적 선발 11+11을 제공하면 LINEUP 품질 신호와 PRE→LINEUP 검증 스냅샷에만 fallback으로 인정하며, 선수 명단으로 λ를 직접 변경하지 않습니다.
+                  {" "}K리그/J리그와 EPL·LaLiga·Serie A·Bundesliga·Ligue 1·UEFA 대회·MLS를 리그별 득점 prior로 구분하고, 최근 득실·홈/원정 장소표본·선발 XI 확보·모델강도를 연속 점수로 반영합니다. 시장확률은 TOP1 기본점수에 직접 더하지 않고 순수모델과의 일치도 확인에만 사용합니다. full-game 승무패/핸디/U/O에서 각 경기마다 독립적으로 경기 TOP1을 1개 산출합니다. 다른 경기 점수 때문에 현재 경기 TOP1이 취소되거나 강등되지 않습니다. TOP1점수 78 이상만 공식 VALUE, 72~77.9는 약추천, 그 미만은 관망입니다.
                 </div>
               </div>
             )}
@@ -28673,8 +28832,8 @@ export default function Home() {
                     <div className="section" style={{ marginTop: 0 }}>
                       <h3>V13.8.61 축구 LIVE DATA · Naver 실제 선발</h3>
                       <div className="notice" style={{ margin: "8px 0" }}>
-                        네이버 Sports의 경기별 players 응답에서 <b>substitute:false</b> 선수를 실제 선발로 수집합니다.
-                        현재 단계에서는 선발 11+11을 READY 진단과 경기전 스냅샷에만 연결하며 V13.0 축구 λ/Poisson 계산식은 변경하지 않습니다.
+                        네이버 Sports의 경기별 players 응답에서 <b>substitute:false</b> 선수를 실제 선발로 우선 수집합니다. V13.12.12부터 K리그1/2·J1/J2에서 Naver players가 비어 있어도 SportsAPI가 명시적 선발 11+11을 제공하면 검증용 fallback으로 인정합니다.
+                        선발 11+11은 READY/LINEUP 진단과 경기전 스냅샷에만 연결하며 축구 λ/Poisson 계산식은 변경하지 않습니다.
                       </div>
                       <div className="cards">
                         <div className="card">
@@ -28684,8 +28843,8 @@ export default function Home() {
                         </div>
                         <div className="card">
                           실제 선발 라인업
-                          <b>{Number(matched?.naverTodayLineup?.coverage?.startingPlayers ?? 0) >= 22 ? "✓ 22/22" : `${Number(matched?.naverTodayLineup?.coverage?.startingPlayers ?? 0)}/22`}</b>
-                          <div className="small">홈 {Array.isArray(matched?.naverTodayLineup?.home) ? matched.naverTodayLineup.home.length : 0}/11 · 원정 {Array.isArray(matched?.naverTodayLineup?.away) ? matched.naverTodayLineup.away.length : 0}/11{matched?.lineupsSource === "NAVER_FOOTBALL_PLAYERS" ? " · 분석 데이터 연결" : ""}</div>
+                          <b>{currentFootballLineupReady ? "✓ 22/22" : `${currentFootballLineupAudit.home.length + currentFootballLineupAudit.away.length}/22`}</b>
+                          <div className="small">홈 {currentFootballLineupAudit.home.length}/11 · 원정 {currentFootballLineupAudit.away.length}/11 · source {currentFootballLineupAudit.source ?? "대기"}</div>
                         </div>
                         <div className="card">
                           선수 ID / 포지션
@@ -28729,8 +28888,8 @@ export default function Home() {
                         </div>
                       </div>
                       {(() => {
-                        const homeLineup = Array.isArray(matched?.naverTodayLineup?.home) ? matched.naverTodayLineup.home.slice(0, 11) : [];
-                        const awayLineup = Array.isArray(matched?.naverTodayLineup?.away) ? matched.naverTodayLineup.away.slice(0, 11) : [];
+                        const homeLineup = currentFootballLineupAudit.home.slice(0, 11);
+                        const awayLineup = currentFootballLineupAudit.away.slice(0, 11);
                         const lineupReady = homeLineup.length === 11 && awayLineup.length === 11;
                         if (!homeLineup.length && !awayLineup.length) return null;
                         const rows = [
@@ -30366,7 +30525,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.12.11은 V13.12.10 FIX2의 명시적 분석 게이트를 유지하면서, 야구 READY 당시 raw→shrink→starter→lineup→market→decision λ와 선발/타선 보정 근거를 frozen forensic snapshot으로 저장해 후속 재수신 실패가 감사 화면을 0값으로 덮지 않게 합니다. 또한 ±1.5 이상 핸디 tail과 65% 이상 강한 U/O, READY 품질별 점수오차를 OOS SHADOW로만 누적하며 모델 가중치·확률·게이트·TOP1 임계값은 변경하지 않습니다. V13.12.10 FIX2는 경기 선택과 실제 분석 실행을 완전히 분리해 선택만 한 Betman 경기를 모델 입력으로 사용하지 않으며, 분석 성공 전에는 TOP1·예상점수·확률·스냅샷을 생성 결과로 사용하지 않습니다. V13.12.09의 READY freshness/frozen 연속성과 야구 PRE·STARTER·LINEUP display-only TOP1 정책은 그대로 유지합니다. READY 이전 TOP1은 표시 전용이며 공식 VALUE·약추천·frozen 저장은 차단되고, READY + freshness 통과 후에만 기존 tier가 열립니다. 농구는 0~1경기 COLD START, 양 팀 최소 2경기 WARMUP, 최소 3경기부터 HISTORY ACTIVE로 단계화해 2경기만으로 공식 VALUE가 열리지 않게 합니다. V13.12.05의 박신자컵 제외·COLD START·marketResults 정산 정책은 그대로 유지합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
+                    V13.12.12는 2026 K리그1/2·J1/J2 팀 alias와 리그 구분을 보강하고 Naver 우선 + SportsAPI 명시적 11+11 선발 fallback을 검증/품질 신호에 연결합니다. 기존 K/J prior 수치와 축구 λ/Poisson·TOP1 임계값은 변경하지 않습니다. V13.12.11은 V13.12.10 FIX2의 명시적 분석 게이트를 유지하면서, 야구 READY 당시 raw→shrink→starter→lineup→market→decision λ와 선발/타선 보정 근거를 frozen forensic snapshot으로 저장해 후속 재수신 실패가 감사 화면을 0값으로 덮지 않게 합니다. 또한 ±1.5 이상 핸디 tail과 65% 이상 강한 U/O, READY 품질별 점수오차를 OOS SHADOW로만 누적하며 모델 가중치·확률·게이트·TOP1 임계값은 변경하지 않습니다. V13.12.10 FIX2는 경기 선택과 실제 분석 실행을 완전히 분리해 선택만 한 Betman 경기를 모델 입력으로 사용하지 않으며, 분석 성공 전에는 TOP1·예상점수·확률·스냅샷을 생성 결과로 사용하지 않습니다. V13.12.09의 READY freshness/frozen 연속성과 야구 PRE·STARTER·LINEUP display-only TOP1 정책은 그대로 유지합니다. READY 이전 TOP1은 표시 전용이며 공식 VALUE·약추천·frozen 저장은 차단되고, READY + freshness 통과 후에만 기존 tier가 열립니다. 농구는 0~1경기 COLD START, 양 팀 최소 2경기 WARMUP, 최소 3경기부터 HISTORY ACTIVE로 단계화해 2경기만으로 공식 VALUE가 열리지 않게 합니다. V13.12.05의 박신자컵 제외·COLD START·marketResults 정산 정책은 그대로 유지합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
