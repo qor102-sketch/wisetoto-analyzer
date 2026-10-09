@@ -1,4 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
+// V13.12.11 READY FORENSIC AUDIT + TAIL SHADOW: preserve V13.12.10 FIX2 explicit analysis gate/court decouple; freeze READY calculation components for sticky audit and add OOS-only handicap-tail/strong-total/quality-error diagnostics without changing model weights, probabilities, gates, or TOP1 thresholds.
 // V13.12.10 FIX2 EXPLICIT ANALYSIS GATE + COURT COLD START DECOUPLE: selection never becomes model input; predictions activate only after analyzeSelected succeeds; basketball cold-start total line never seeds expected score and U/O stays neutral/excluded from TOP1 until independent scoring history exists.
 // V13.12.09 PRE TOP1 CONTINUITY: keep V13.12.05 court core + V13.12.06 verifier + V13.12.08 READY freshness/frozen continuity;
 // baseball PRE/STARTER/LINEUP now always computes one display-only full-game TOP1, forced to WATCH until fresh READY.
@@ -678,6 +679,74 @@ type VenueShadowValidationResult = {
   shadowMarginAbsError: number;
 };
 
+/* V13.12.11: READY 당시 계산 근거를 사후 재수신과 분리해 그대로 보존한다.
+ * 모델 입력/확률에는 사용하지 않고 sticky READY 화면/검증 감사에만 사용한다. */
+type BaseballReadyFactorAudit = Pick<AnalysisFactors,
+  | "rawExpectedHomeScore" | "rawExpectedAwayScore" | "scorePrior"
+  | "homeWeightedScored" | "homeWeightedConceded" | "awayWeightedScored" | "awayWeightedConceded"
+  | "homeOverallScored" | "homeOverallConceded" | "awayOverallScored" | "awayOverallConceded"
+  | "homeVenueScored" | "homeVenueConceded" | "awayVenueScored" | "awayVenueConceded"
+  | "homeVenueWeight" | "awayVenueWeight" | "homeRobustScored" | "homeRobustConceded"
+  | "awayRobustScored" | "awayRobustConceded" | "homeMetricShrink" | "awayMetricShrink"
+  | "postShrinkHomeScore" | "postShrinkAwayScore" | "postStarterHomeScore" | "postStarterAwayScore"
+  | "postLineupHomeScore" | "postLineupAwayScore" | "preMarketHomeScore" | "preMarketAwayScore"
+  | "marketAdjustmentHome" | "marketAdjustmentAway" | "lambdaTraceOk" | "marketMarginPrior"
+  | "marketPriorWeight" | "venueCoverage" | "homeStarterName" | "awayStarterName"
+  | "homeStarterEra" | "awayStarterEra" | "homeStarterWhip" | "awayStarterWhip"
+  | "homeStarterInningsPitched" | "awayStarterInningsPitched" | "homeStarterGames" | "awayStarterGames"
+  | "homeStarterGamesStarted" | "awayStarterGamesStarted" | "homeStarterSampleReliability" | "awayStarterSampleReliability"
+  | "homeStarterPosteriorEra" | "awayStarterPosteriorEra" | "homeStarterPosteriorWhip" | "awayStarterPosteriorWhip"
+  | "homeStarterEquivalentInnings" | "awayStarterEquivalentInnings" | "pitcherDataUsed"
+  | "pitcherAdjustmentHome" | "pitcherAdjustmentAway" | "homeLineupBatterCount" | "awayLineupBatterCount"
+  | "homeLineupStatsCount" | "awayLineupStatsCount" | "homeLineupOffenseIndex" | "awayLineupOffenseIndex"
+  | "homeLineupReliability" | "awayLineupReliability" | "lineupAdjustmentHome" | "lineupAdjustmentAway"
+  | "lineupDataUsed" | "homeLineupPlayerIdCount" | "awayLineupPlayerIdCount" | "lineupStatsCoverage"
+  | "lineupValueGate" | "baseballFirstHalfHomeScore" | "baseballFirstHalfAwayScore"
+  | "baseballTeamStrengthApplied" | "baseballTeamStrengthSource" | "baseballTeamStrengthHomeGames"
+  | "baseballTeamStrengthAwayGames" | "baseballTeamStrengthRawHome" | "baseballTeamStrengthRawAway"
+  | "venueShadowRawHomeScore" | "venueShadowRawAwayScore" | "venueShadowFinalHomeScore" | "venueShadowFinalAwayScore"
+>;
+
+type BaseballReadyDecisionAudit = {
+  version: "V13.12.11";
+  home: number;
+  away: number;
+  source: "CONTROL" | "RECENT_BLEND";
+  blendWeight: number;
+  coverage: string | null;
+  starterUsed: boolean;
+  battingUsed: boolean;
+  bullpenUsed: boolean;
+};
+
+function freezeBaseballReadyFactorAudit(f: AnalysisFactors): BaseballReadyFactorAudit {
+  return {
+    rawExpectedHomeScore: f.rawExpectedHomeScore, rawExpectedAwayScore: f.rawExpectedAwayScore, scorePrior: f.scorePrior,
+    homeWeightedScored: f.homeWeightedScored, homeWeightedConceded: f.homeWeightedConceded, awayWeightedScored: f.awayWeightedScored, awayWeightedConceded: f.awayWeightedConceded,
+    homeOverallScored: f.homeOverallScored, homeOverallConceded: f.homeOverallConceded, awayOverallScored: f.awayOverallScored, awayOverallConceded: f.awayOverallConceded,
+    homeVenueScored: f.homeVenueScored, homeVenueConceded: f.homeVenueConceded, awayVenueScored: f.awayVenueScored, awayVenueConceded: f.awayVenueConceded,
+    homeVenueWeight: f.homeVenueWeight, awayVenueWeight: f.awayVenueWeight, homeRobustScored: f.homeRobustScored, homeRobustConceded: f.homeRobustConceded,
+    awayRobustScored: f.awayRobustScored, awayRobustConceded: f.awayRobustConceded, homeMetricShrink: f.homeMetricShrink, awayMetricShrink: f.awayMetricShrink,
+    postShrinkHomeScore: f.postShrinkHomeScore, postShrinkAwayScore: f.postShrinkAwayScore, postStarterHomeScore: f.postStarterHomeScore, postStarterAwayScore: f.postStarterAwayScore,
+    postLineupHomeScore: f.postLineupHomeScore, postLineupAwayScore: f.postLineupAwayScore, preMarketHomeScore: f.preMarketHomeScore, preMarketAwayScore: f.preMarketAwayScore,
+    marketAdjustmentHome: f.marketAdjustmentHome, marketAdjustmentAway: f.marketAdjustmentAway, lambdaTraceOk: f.lambdaTraceOk, marketMarginPrior: f.marketMarginPrior,
+    marketPriorWeight: f.marketPriorWeight, venueCoverage: f.venueCoverage, homeStarterName: f.homeStarterName, awayStarterName: f.awayStarterName,
+    homeStarterEra: f.homeStarterEra, awayStarterEra: f.awayStarterEra, homeStarterWhip: f.homeStarterWhip, awayStarterWhip: f.awayStarterWhip,
+    homeStarterInningsPitched: f.homeStarterInningsPitched, awayStarterInningsPitched: f.awayStarterInningsPitched, homeStarterGames: f.homeStarterGames, awayStarterGames: f.awayStarterGames,
+    homeStarterGamesStarted: f.homeStarterGamesStarted, awayStarterGamesStarted: f.awayStarterGamesStarted, homeStarterSampleReliability: f.homeStarterSampleReliability, awayStarterSampleReliability: f.awayStarterSampleReliability,
+    homeStarterPosteriorEra: f.homeStarterPosteriorEra, awayStarterPosteriorEra: f.awayStarterPosteriorEra, homeStarterPosteriorWhip: f.homeStarterPosteriorWhip, awayStarterPosteriorWhip: f.awayStarterPosteriorWhip,
+    homeStarterEquivalentInnings: f.homeStarterEquivalentInnings, awayStarterEquivalentInnings: f.awayStarterEquivalentInnings, pitcherDataUsed: f.pitcherDataUsed,
+    pitcherAdjustmentHome: f.pitcherAdjustmentHome, pitcherAdjustmentAway: f.pitcherAdjustmentAway, homeLineupBatterCount: f.homeLineupBatterCount, awayLineupBatterCount: f.awayLineupBatterCount,
+    homeLineupStatsCount: f.homeLineupStatsCount, awayLineupStatsCount: f.awayLineupStatsCount, homeLineupOffenseIndex: f.homeLineupOffenseIndex, awayLineupOffenseIndex: f.awayLineupOffenseIndex,
+    homeLineupReliability: f.homeLineupReliability, awayLineupReliability: f.awayLineupReliability, lineupAdjustmentHome: f.lineupAdjustmentHome, lineupAdjustmentAway: f.lineupAdjustmentAway,
+    lineupDataUsed: f.lineupDataUsed, homeLineupPlayerIdCount: f.homeLineupPlayerIdCount, awayLineupPlayerIdCount: f.awayLineupPlayerIdCount, lineupStatsCoverage: f.lineupStatsCoverage,
+    lineupValueGate: f.lineupValueGate, baseballFirstHalfHomeScore: f.baseballFirstHalfHomeScore, baseballFirstHalfAwayScore: f.baseballFirstHalfAwayScore,
+    baseballTeamStrengthApplied: f.baseballTeamStrengthApplied, baseballTeamStrengthSource: f.baseballTeamStrengthSource, baseballTeamStrengthHomeGames: f.baseballTeamStrengthHomeGames,
+    baseballTeamStrengthAwayGames: f.baseballTeamStrengthAwayGames, baseballTeamStrengthRawHome: f.baseballTeamStrengthRawHome, baseballTeamStrengthRawAway: f.baseballTeamStrengthRawAway,
+    venueShadowRawHomeScore: f.venueShadowRawHomeScore, venueShadowRawAwayScore: f.venueShadowRawAwayScore, venueShadowFinalHomeScore: f.venueShadowFinalHomeScore, venueShadowFinalAwayScore: f.venueShadowFinalAwayScore,
+  };
+}
+
 /* V13.9.04: once a baseball fixture reaches READY, keep the pregame READY state monotonic. */
 type BaseballReadyHoldSnapshot = {
   stage: "READY";
@@ -696,6 +765,9 @@ type BaseballReadyHoldSnapshot = {
   homeStarterName?: string | null;
   awayStarterName?: string | null;
   sourceLabel?: string | null;
+  /* V13.12.11: READY 당시 화면/계산 파이프라인 forensic snapshot. 구버전 호환 optional. */
+  factorAudit?: BaseballReadyFactorAudit | null;
+  decisionAudit?: BaseballReadyDecisionAudit | null;
 };
 
 const BASEBALL_CHALLENGER_START_MS = new Date("2026-09-15T10:00:00+09:00").getTime();
@@ -17685,6 +17757,7 @@ export default function Home() {
   const analysisFactors: AnalysisFactors = stickyReadyActive
     ? {
         ...liveAnalysisFactors,
+        ...(heldReady?.factorAudit ?? {}),
         hasRealData: true,
         expectedHomeScore:
           heldReady?.expectedHomeScore ?? heldVenue?.rawHome ?? liveAnalysisFactors.expectedHomeScore,
@@ -18736,6 +18809,7 @@ export default function Home() {
   const frozenGameTop1Summary = useMemo(() => {
     type FrozenTop1Row = {
       record: LiveTrackerRecord;
+      frozenRecord: LiveTrackerRecord;
       pick: LiveTrackerPick;
       snapshot: MarketPick;
       tier: "공식 VALUE" | "약추천" | "관망";
@@ -18743,7 +18817,16 @@ export default function Home() {
       engine: string;
     };
 
+    type FrozenMarketRow = {
+      record: LiveTrackerRecord;
+      frozenRecord: LiveTrackerRecord;
+      pick: LiveTrackerPick;
+      snapshot: MarketPick;
+      sport: string;
+    };
+
     const rows: FrozenTop1Row[] = [];
+    const settledMarkets: FrozenMarketRow[] = [];
     const appendSnapshots = readLiveTrackerAppendOnlySnapshots()
       .filter((entry) => entry?.record && entry.stage !== "VERIFIED" && entry.stage !== "VOID")
       .sort((a, b) => Number(a.savedAt ?? 0) - Number(b.savedAt ?? 0));
@@ -18766,6 +18849,20 @@ export default function Home() {
         ? (appendReadyById.get(record.id) ?? record)
         : record;
       if (frozenRecord !== record) appendRecovered += 1;
+
+      if (record.result) {
+        for (const marketPick of frozenRecord.marketResults ?? []) {
+          const marketSnapshot = marketPick.modelSnapshot as MarketPick | null;
+          if (!marketSnapshot || !marketPick.marketSnapshot) continue;
+          let settledPick = marketPick;
+          if (settledPick.resultStatus !== "HIT" && settledPick.resultStatus !== "MISS") {
+            const validation = validateBacktestMarket(settledPick.marketSnapshot, marketSnapshot, record.result);
+            if (validation.status !== "HIT" && validation.status !== "MISS") continue;
+            settledPick = { ...settledPick, resultStatus: validation.status, actualLabel: validation.actualLabel, resultNote: validation.note };
+          }
+          settledMarkets.push({ record, frozenRecord, pick: settledPick, snapshot: marketSnapshot, sport: koreanSport(record.sport) });
+        }
+      }
 
       const candidateRows = (frozenRecord.marketResults ?? []).filter((pick) => {
         const snapshot = pick.modelSnapshot as MarketPick | null;
@@ -18798,6 +18895,7 @@ export default function Home() {
           : "관망";
       rows.push({
         record,
+        frozenRecord,
         pick,
         snapshot,
         tier,
@@ -18845,6 +18943,89 @@ export default function Home() {
     const byTier = grouped((row) => row.tier)
       .sort((a, b) => tierOrder.indexOf(a.label) - tierOrder.indexOf(b.label));
 
+    const marketSummary = (input: FrozenMarketRow[]) => {
+      const hits = input.filter((row) => row.pick.resultStatus === "HIT").length;
+      const misses = input.filter((row) => row.pick.resultStatus === "MISS").length;
+      const probs = input.map((row) => Number(row.snapshot.probability ?? row.pick.probability)).filter(Number.isFinite);
+      const briers = input.map((row) => {
+        const p = Number(row.snapshot.probability ?? row.pick.probability) / 100;
+        if (!Number.isFinite(p)) return null;
+        const y = row.pick.resultStatus === "HIT" ? 1 : 0;
+        return (p - y) ** 2;
+      }).filter((v): v is number => v !== null && Number.isFinite(v));
+      return {
+        picks: input.length, hits, misses,
+        hitRate: input.length ? hits / input.length * 100 : null,
+        avgPredicted: probs.length ? probs.reduce((a,b)=>a+b,0) / probs.length : null,
+        brier: briers.length ? briers.reduce((a,b)=>a+b,0) / briers.length : null,
+      };
+    };
+
+    const marketLine = (row: FrozenMarketRow) => {
+      const direct = Number((row.pick.marketSnapshot as any)?.line);
+      if (Number.isFinite(direct)) return direct;
+      const match = String(row.snapshot.market ?? row.pick.market ?? "").match(/H\s*([+-]?\d+(?:\.\d+)?)/i);
+      return match ? Number(match[1]) : null;
+    };
+    const fullGameMarket = (row: FrozenMarketRow) => !/전반|1st\s*half|first\s*half|SUM|홀짝/i.test(`${row.snapshot.market} ${String((row.pick.marketSnapshot as any)?.betName ?? "")}`);
+
+    const handicapTailRows = settledMarkets.filter((row) => {
+      if (row.sport !== "야구" || !fullGameMarket(row)) return false;
+      const line = marketLine(row);
+      const label = `${row.snapshot.market} ${String((row.pick.marketSnapshot as any)?.type ?? "")} ${String((row.pick.marketSnapshot as any)?.betName ?? "")}`;
+      return /handicap|핸디|^H\s/i.test(label) && line !== null && Math.abs(line) >= 1.5;
+    });
+    const handicapTailBase = marketSummary(handicapTailRows);
+    const handicapLargeMargins = handicapTailRows.filter((row) => row.record.result && Math.abs(Number(row.record.result.homeScore) - Number(row.record.result.awayScore)) >= 3);
+    const handicapTailPenalties = handicapTailRows.map((row) => Number(row.snapshot.top1TailRiskPenalty)).filter(Number.isFinite);
+    const handicapTailShadow = {
+      ...handicapTailBase,
+      largeMarginRate: handicapTailRows.length ? handicapLargeMargins.length / handicapTailRows.length * 100 : null,
+      missOnLargeMargin: handicapLargeMargins.filter((row) => row.pick.resultStatus === "MISS").length,
+      avgTailPenalty: handicapTailPenalties.length ? handicapTailPenalties.reduce((a,b)=>a+b,0) / handicapTailPenalties.length : null,
+    };
+
+    const strongTotalRows = settledMarkets.filter((row) => {
+      if (row.sport !== "야구" || !fullGameMarket(row)) return false;
+      const label = `${row.snapshot.market} ${String((row.pick.marketSnapshot as any)?.type ?? "")} ${String((row.pick.marketSnapshot as any)?.betName ?? "")}`;
+      return /total|U\/O|오버|언더/i.test(label) && Number(row.snapshot.probability ?? row.pick.probability) >= 65;
+    });
+    const strongTotalBase = marketSummary(strongTotalRows);
+    const strongTotalErrors = strongTotalRows.map((row) => {
+      if (!row.record.result) return null;
+      const hold = row.frozenRecord.baseballReadyHold;
+      const expectedHome = Number(hold?.decisionAudit?.home ?? hold?.expectedHomeScore);
+      const expectedAway = Number(hold?.decisionAudit?.away ?? hold?.expectedAwayScore);
+      if (!Number.isFinite(expectedHome) || !Number.isFinite(expectedAway)) return null;
+      return Math.abs((Number(row.record.result.homeScore) + Number(row.record.result.awayScore)) - (expectedHome + expectedAway));
+    }).filter((v): v is number => v !== null && Number.isFinite(v));
+    const strongTotalShadow = {
+      ...strongTotalBase,
+      avgTotalAbsError: strongTotalErrors.length ? strongTotalErrors.reduce((a,b)=>a+b,0) / strongTotalErrors.length : null,
+    };
+
+    const scoreErrorRows = rows.filter((row) => row.sport === "야구" && row.record.result).map((row) => {
+      const hold = row.frozenRecord.baseballReadyHold;
+      const expectedHome = Number(hold?.decisionAudit?.home ?? hold?.expectedHomeScore);
+      const expectedAway = Number(hold?.decisionAudit?.away ?? hold?.expectedAwayScore);
+      const actualHome = Number(row.record.result?.homeScore);
+      const actualAway = Number(row.record.result?.awayScore);
+      const quality = Number(row.snapshot.hitFirstDataQuality);
+      if (![expectedHome, expectedAway, actualHome, actualAway].every(Number.isFinite)) return null;
+      return {
+        quality: Number.isFinite(quality) ? quality : null,
+        scoreMae: (Math.abs(actualHome - expectedHome) + Math.abs(actualAway - expectedAway)) / 2,
+        totalMae: Math.abs((actualHome + actualAway) - (expectedHome + expectedAway)),
+        marginMae: Math.abs((actualHome - actualAway) - (expectedHome - expectedAway)),
+      };
+    }).filter((row): row is NonNullable<typeof row> => row !== null);
+    const qualityOrder = ["Q90+", "Q80-89", "Q<80", "Q미상"];
+    const qualityScoreError = qualityOrder.map((label) => {
+      const group = scoreErrorRows.filter((row) => row.quality === null ? label === "Q미상" : row.quality >= 90 ? label === "Q90+" : row.quality >= 80 ? label === "Q80-89" : label === "Q<80");
+      const avg = (key: "scoreMae"|"totalMae"|"marginMae") => group.length ? group.reduce((sum,row)=>sum+row[key],0)/group.length : null;
+      return { label, games: group.length, scoreMae: avg("scoreMae"), totalMae: avg("totalMae"), marginMae: avg("marginMae") };
+    }).filter((row) => row.games > 0);
+
     const recent = [...rows]
       .sort((a, b) => b.record.startMs - a.record.startMs)
       .slice(0, 12)
@@ -18869,6 +19050,9 @@ export default function Home() {
       byEngine: grouped((row) => row.engine),
       recent,
       appendRecovered,
+      handicapTailShadow,
+      strongTotalShadow,
+      qualityScoreError,
     };
   }, [liveTrackerRecords]);
 
@@ -19918,6 +20102,20 @@ export default function Home() {
                 homeStarterName: analysisFactors.homeStarterName,
                 awayStarterName: analysisFactors.awayStarterName,
                 sourceLabel: currentBaseballChallenger?.featureAudit?.challengerSourcePolicy ?? "READY_ANALYSIS",
+                factorAudit: freezeBaseballReadyFactorAudit(analysisFactors),
+                decisionAudit: currentBaseballDecisionCoverage
+                  ? {
+                      version: "V13.12.11",
+                      home: Number(currentBaseballDecisionCoverage.home.toFixed(3)),
+                      away: Number(currentBaseballDecisionCoverage.away.toFixed(3)),
+                      source: currentBaseballDecisionCoverage.source,
+                      blendWeight: currentBaseballDecisionCoverage.blendWeight,
+                      coverage: currentBaseballDecisionCoverage.coverage,
+                      starterUsed: currentBaseballDecisionCoverage.starterUsed,
+                      battingUsed: currentBaseballDecisionCoverage.battingUsed,
+                      bullpenUsed: currentBaseballDecisionCoverage.bullpenUsed,
+                    }
+                  : null,
               }
             : null,
         baseballChallenger: baseballChallengerSnapshot,
@@ -25204,7 +25402,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.10 FIX2 · EXPLICIT ANALYSIS GATE + COURT DECOUPLE</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.11 · READY FORENSIC AUDIT + TAIL SHADOW</div>
         </div>
         <div className="bar">
           <button
@@ -26614,6 +26812,19 @@ export default function Home() {
               엔진별 표본 · {frozenGameTop1Summary.byEngine.map((row) => `${row.label} ${row.picks}픽 ${row.hitRate === null ? '-' : `${row.hitRate.toFixed(1)}%`}`).join(" | ")}
             </div>
           ) : null}
+          <div className="small" style={{ fontWeight: 900, marginTop: 10, marginBottom: 5 }}>V13.12.11 TAIL / TOTAL SHADOW AUDIT · 진단 전용 · 모델/게이트/임계값 변경 없음</div>
+          <div className="cards" style={{ marginBottom: 8 }}>
+            <div className="card">야구 H ±1.5+<b>{frozenGameTop1Summary.handicapTailShadow.hitRate === null ? "-" : `${frozenGameTop1Summary.handicapTailShadow.hitRate.toFixed(1)}%`}</b><div className="small">N {frozenGameTop1Summary.handicapTailShadow.picks} · HIT {frozenGameTop1Summary.handicapTailShadow.hits} / MISS {frozenGameTop1Summary.handicapTailShadow.misses} · 실제 3점+ 마진 {frozenGameTop1Summary.handicapTailShadow.largeMarginRate === null ? "-" : `${frozenGameTop1Summary.handicapTailShadow.largeMarginRate.toFixed(1)}%`} · 그중 MISS {frozenGameTop1Summary.handicapTailShadow.missOnLargeMargin} · 평균 tail 감점 {frozenGameTop1Summary.handicapTailShadow.avgTailPenalty === null ? "-" : frozenGameTop1Summary.handicapTailShadow.avgTailPenalty.toFixed(2)}</div></div>
+            <div className="card">야구 강한 U/O ≥65%<b>{frozenGameTop1Summary.strongTotalShadow.hitRate === null ? "-" : `${frozenGameTop1Summary.strongTotalShadow.hitRate.toFixed(1)}%`}</b><div className="small">N {frozenGameTop1Summary.strongTotalShadow.picks} · 예측평균 {frozenGameTop1Summary.strongTotalShadow.avgPredicted === null ? "-" : `${frozenGameTop1Summary.strongTotalShadow.avgPredicted.toFixed(1)}%`} · Brier {frozenGameTop1Summary.strongTotalShadow.brier === null ? "-" : frozenGameTop1Summary.strongTotalShadow.brier.toFixed(3)} · 평균 총점오차 {frozenGameTop1Summary.strongTotalShadow.avgTotalAbsError === null ? "-" : frozenGameTop1Summary.strongTotalShadow.avgTotalAbsError.toFixed(2)}</div></div>
+          </div>
+          {frozenGameTop1Summary.qualityScoreError.length ? (
+            <div style={{ overflowX: "auto", marginBottom: 4 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 560 }}>
+                <thead><tr style={{ background: "#f8fafc" }}>{['READY 품질','경기','득점 MAE','총점 MAE','점수차 MAE'].map((head) => <th key={head} style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: head === 'READY 품질' ? 'left' : 'right' }}>{head}</th>)}</tr></thead>
+                <tbody>{frozenGameTop1Summary.qualityScoreError.map((row) => <tr key={`quality-score-${row.label}`}><td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", fontWeight: 800 }}>{row.label}</td><td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.games}</td><td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.scoreMae === null ? '-' : row.scoreMae.toFixed(2)}</td><td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.totalMae === null ? '-' : row.totalMae.toFixed(2)}</td><td style={{ border: "1px solid #e2e8f0", padding: "5px 6px", textAlign: "right" }}>{row.marginMae === null ? '-' : row.marginMae.toFixed(2)}</td></tr>)}</tbody>
+              </table>
+            </div>
+          ) : null}
         </div>
 
         <div style={{ padding: "10px 12px", borderTop: "1px solid #e2e8f0", background: "#fbfcff" }}>
@@ -26793,7 +27004,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginBottom: 10, padding: "8px 9px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8 }}>
-              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.10 FIX2 · EXPLICIT ANALYSIS GATE + COURT DECOUPLE · V13.12.09 PRE TOP1 / V13.12.06 VERIFY 유지 · 박신자컵 제외</div>
+              <div className="small" style={{ fontWeight: 900, marginBottom: 4 }}>V13.12.11 · READY FORENSIC AUDIT + TAIL SHADOW · V13.12.10 FIX2 GATE / V13.12.06 VERIFY 유지 · 박신자컵 제외</div>
               <div className="small" style={{ whiteSpace: "normal", lineHeight: 1.55 }}>
                 축구는 SportsAPI/Naver에서 최근 득실과 홈·원정 장소표본을 확보한 경기를 공통 Poisson 기반으로 계산하고, K리그/J리그·유럽 5대리그·UEFA 대회·MLS는 리그별 중립 득점 prior를 적용합니다. 선발 11+11은 λ를 임의 변경하지 않고 데이터품질에 soft 반영하며, alias가 없는 기타 리그도 동일경기 매칭이 되면 OTHER 프로필로 분석합니다.
               </div>
@@ -28853,6 +29064,24 @@ export default function Home() {
                         </div>
                       </div>
 
+                      {stickyReadyActive && heldReady?.factorAudit && (
+                        <div className="notice" style={{ marginTop: 7, background: "#f8fafc", borderColor: "#cbd5e1" }}>
+                          <b>V13.12.11 READY FROZEN FORENSIC</b> · 현재 재수신 값이 아니라 READY 당시 계산근거를 표시합니다.
+                          <div className="small" style={{ marginTop: 4, lineHeight: 1.65 }}>
+                            raw {heldReady.factorAudit.rawExpectedHomeScore?.toFixed(2) ?? "-"}:{heldReady.factorAudit.rawExpectedAwayScore?.toFixed(2) ?? "-"}
+                            {" → "}shrink {heldReady.factorAudit.postShrinkHomeScore?.toFixed(2) ?? "-"}:{heldReady.factorAudit.postShrinkAwayScore?.toFixed(2) ?? "-"}
+                            {" → "}starter {heldReady.factorAudit.postStarterHomeScore?.toFixed(2) ?? "-"}:{heldReady.factorAudit.postStarterAwayScore?.toFixed(2) ?? "-"}
+                            {" → "}lineup {heldReady.factorAudit.postLineupHomeScore?.toFixed(2) ?? "-"}:{heldReady.factorAudit.postLineupAwayScore?.toFixed(2) ?? "-"}
+                            {" → "}pre-market {heldReady.factorAudit.preMarketHomeScore?.toFixed(2) ?? "-"}:{heldReady.factorAudit.preMarketAwayScore?.toFixed(2) ?? "-"}
+                            {heldReady.decisionAudit ? ` → decision ${heldReady.decisionAudit.home.toFixed(2)}:${heldReady.decisionAudit.away.toFixed(2)} (${heldReady.decisionAudit.source}${heldReady.decisionAudit.coverage ? ` · ${heldReady.decisionAudit.coverage}` : ""})` : ""}
+                            <br />선발보정 {heldReady.factorAudit.pitcherAdjustmentHome >= 0 ? "+" : ""}{heldReady.factorAudit.pitcherAdjustmentHome.toFixed(2)} / {heldReady.factorAudit.pitcherAdjustmentAway >= 0 ? "+" : ""}{heldReady.factorAudit.pitcherAdjustmentAway.toFixed(2)}
+                            {" · "}타선보정 {heldReady.factorAudit.lineupAdjustmentHome >= 0 ? "+" : ""}{heldReady.factorAudit.lineupAdjustmentHome.toFixed(2)} / {heldReady.factorAudit.lineupAdjustmentAway >= 0 ? "+" : ""}{heldReady.factorAudit.lineupAdjustmentAway.toFixed(2)}
+                            {" · "}시장 prior Δ {heldReady.factorAudit.marketAdjustmentHome >= 0 ? "+" : ""}{heldReady.factorAudit.marketAdjustmentHome.toFixed(2)} / {heldReady.factorAudit.marketAdjustmentAway >= 0 ? "+" : ""}{heldReady.factorAudit.marketAdjustmentAway.toFixed(2)}
+                            {" · "}TRACE {heldReady.factorAudit.lambdaTraceOk ? "OK" : "CHECK"}
+                          </div>
+                        </div>
+                      )}
+
                       {analysisFactors.baseballAnalysisStage === "PRE" && (
                         <div
                           className="cards"
@@ -30137,7 +30366,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.12.10 FIX2는 경기 선택과 실제 분석 실행을 완전히 분리해 선택만 한 Betman 경기를 모델 입력으로 사용하지 않으며, 분석 성공 전에는 TOP1·예상점수·확률·스냅샷을 생성 결과로 사용하지 않습니다. V13.12.09의 READY freshness/frozen 연속성과 야구 PRE·STARTER·LINEUP display-only TOP1 정책은 그대로 유지합니다. READY 이전 TOP1은 표시 전용이며 공식 VALUE·약추천·frozen 저장은 차단되고, READY + freshness 통과 후에만 기존 tier가 열립니다. 농구는 0~1경기 COLD START, 양 팀 최소 2경기 WARMUP, 최소 3경기부터 HISTORY ACTIVE로 단계화해 2경기만으로 공식 VALUE가 열리지 않게 합니다. V13.12.05의 박신자컵 제외·COLD START·marketResults 정산 정책은 그대로 유지합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
+                    V13.12.11은 V13.12.10 FIX2의 명시적 분석 게이트를 유지하면서, 야구 READY 당시 raw→shrink→starter→lineup→market→decision λ와 선발/타선 보정 근거를 frozen forensic snapshot으로 저장해 후속 재수신 실패가 감사 화면을 0값으로 덮지 않게 합니다. 또한 ±1.5 이상 핸디 tail과 65% 이상 강한 U/O, READY 품질별 점수오차를 OOS SHADOW로만 누적하며 모델 가중치·확률·게이트·TOP1 임계값은 변경하지 않습니다. V13.12.10 FIX2는 경기 선택과 실제 분석 실행을 완전히 분리해 선택만 한 Betman 경기를 모델 입력으로 사용하지 않으며, 분석 성공 전에는 TOP1·예상점수·확률·스냅샷을 생성 결과로 사용하지 않습니다. V13.12.09의 READY freshness/frozen 연속성과 야구 PRE·STARTER·LINEUP display-only TOP1 정책은 그대로 유지합니다. READY 이전 TOP1은 표시 전용이며 공식 VALUE·약추천·frozen 저장은 차단되고, READY + freshness 통과 후에만 기존 tier가 열립니다. 농구는 0~1경기 COLD START, 양 팀 최소 2경기 WARMUP, 최소 3경기부터 HISTORY ACTIVE로 단계화해 2경기만으로 공식 VALUE가 열리지 않게 합니다. V13.12.05의 박신자컵 제외·COLD START·marketResults 정산 정책은 그대로 유지합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
