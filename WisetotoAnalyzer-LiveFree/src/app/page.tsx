@@ -1,4 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
+// V13.12.13 ANALYSIS RESULT RESTORE: preserve V13.12.12 domestic football connectivity; keep explicit pre-analysis gate for new games while restoring already-analyzed session detail and showing clearly-labelled frozen tracker previews after reload/deploy.
 // V13.12.12 DOMESTIC FOOTBALL CONNECTIVITY: preserve V13.12.11 forensic/tail shadow and V13.12.10 explicit analysis gate; refresh 2026 K League 1/2 + J1/J2 aliases, split league diagnostics without changing priors, and accept verified SportsAPI 11+11 as a soft lineup-quality fallback when Naver players are unavailable.
 // V13.12.11 READY FORENSIC AUDIT + TAIL SHADOW: preserve V13.12.10 FIX2 explicit analysis gate/court decouple; freeze READY calculation components for sticky audit and add OOS-only handicap-tail/strong-total/quality-error diagnostics without changing model weights, probabilities, gates, or TOP1 thresholds.
 // V13.12.10 FIX2 EXPLICIT ANALYSIS GATE + COURT COLD START DECOUPLE: selection never becomes model input; predictions activate only after analyzeSelected succeeds; basketball cold-start total line never seeds expected score and U/O stays neutral/excluded from TOP1 until independent scoring history exists.
@@ -15583,6 +15584,13 @@ type LiveBatchOutcome = {
   recommendedKeys?: string[];
 };
 
+/* V13.12.13: 실제 실행한 LIVE 분석의 full payload를 현재 브라우저 세션에서만 보존한다. */
+type LiveAnalysisCacheEntry = {
+  matched: any;
+  betmanMatch: BetmanMatch;
+  capturedAt: number;
+};
+
 type BacktestBaselineSnapshot = {
   savedAt: number;
   gateVersion?: "FALLBACK_GATE_V2";
@@ -16420,11 +16428,9 @@ export default function Home() {
     });
   const [liveBatchOutcomes, setLiveBatchOutcomes] =
     useState<Record<string, LiveBatchOutcome>>({});
+  const [liveAnalysisCache, setLiveAnalysisCache] =
+    useState<Record<string, LiveAnalysisCacheEntry>>({});
   const liveBatchWorkerRef = useRef(false);
-
-  useEffect(() => {
-    setAnalyzedBetmanKey(null);
-  }, [selectedBetmanKey]);
 
   const [baseballSnapshots, setBaseballSnapshots] =
     useState<Record<string, BaseballAnalysisSnapshot[]>>({});
@@ -17235,6 +17241,7 @@ export default function Home() {
   }
 
   async function loadBetmanList() {
+    setLiveAnalysisCache({});
     setRecentVerifyMode(false);
     setStatus("Betman 발매경기 불러오는 중…");
     try {
@@ -17311,6 +17318,7 @@ export default function Home() {
   async function loadRecentVerificationGames() {
     if (loading || liveBatchAnalysis.running || batchBacktest.running) return;
 
+    setLiveAnalysisCache({});
     setStatus("최근 경기 검증 목록 불러오는 중…");
 
     try {
@@ -17802,6 +17810,47 @@ export default function Home() {
     time: selectedBetman ? formatKST(new Date(gameTimeMs(selectedBetman)).toISOString()) : "-",
     venue: String((selectedBetman as any)?.stadium ?? "-"),
   };
+
+  /* V13.12.13: 이미 실제 분석되어 tracker에 잠긴 경기는 새 분석처럼 가장하지 않고
+   * frozen 저장결과만 읽기 전용 preview로 보여준다. */
+  const selectedStoredTrackerRecord =
+    selectedBetman
+      ? liveTrackerRecords.find((record) =>
+          record.betmanIdentity === actualGameIdentity(selectedBetman) &&
+          record.verificationStatus !== "VOID"
+        ) ?? null
+      : null;
+
+  const storedPreviewMarketPicks: MarketPick[] =
+    !analysisUiReady && selectedStoredTrackerRecord
+      ? trackerMarketPickSnapshots(selectedStoredTrackerRecord)
+      : [];
+
+  const storedPreviewCandidate = (() => {
+    if (!storedPreviewMarketPicks.length) return null;
+    const frozenTop = storedPreviewMarketPicks.find((pick) =>
+      /FINAL GAME TOP1/i.test(String(pick.stageGradeLabel ?? ""))
+    );
+    if (frozenTop) return {
+      pick: frozenTop,
+      slateScore: Number(frozenTop.recommendationScore ?? frozenTop.valueGradeScore ?? 0),
+    };
+    if (currentSport === "야구") return bestBaseballHitFirstSlateCandidate(storedPreviewMarketPicks);
+    if (currentSport === "축구") return bestSoccerSlateCandidate(storedPreviewMarketPicks);
+    if (currentSport === "농구" || currentSport === "배구") return bestCourtSlateCandidate(storedPreviewMarketPicks);
+    return null;
+  })();
+
+  const storedPreviewTopPick: MarketPick | null = storedPreviewCandidate?.pick ?? null;
+  const storedPreviewTopTier = (() => {
+    if (!storedPreviewTopPick) return null;
+    const label = String(storedPreviewTopPick.stageGradeLabel ?? "");
+    if (label.includes("실전 추천")) return "실전 추천";
+    if (label.includes("약추천")) return "약추천";
+    if (label.includes("관망")) return "관망";
+    if (storedPreviewTopPick.valueGrade === "VALUE" || storedPreviewTopPick.valueGrade === "STRONG VALUE") return "실전 추천";
+    return "관망";
+  })();
 
   /*
    * V13.12.10 FIX2 EXPLICIT ANALYSIS GATE
@@ -18826,6 +18875,14 @@ export default function Home() {
   const bestDisplayPick = analysisUiReady
     ? bestActualPick ?? currentContinuousTopPick
     : null;
+  const topBoxPick = analysisUiReady ? bestDisplayPick : storedPreviewTopPick;
+  const topBoxTier = analysisUiReady ? currentContinuousTopTier : storedPreviewTopTier;
+  const topBoxScore = analysisUiReady
+    ? currentContinuousTopScore
+    : (storedPreviewCandidate ? Number(storedPreviewCandidate.slateScore) : null);
+  const uiSummaryMarketPicks: MarketPick[] = analysisUiReady
+    ? displayActualMarketPicks
+    : storedPreviewMarketPicks;
 
   const best = bestDisplayPick
     ? bestDisplayPick.probability
@@ -24300,6 +24357,20 @@ export default function Home() {
     });
   }
 
+  function cacheLiveAnalysisResult(key: string | null, game: BetmanMatch | null, matchedData: any) {
+    if (!key || !game || !matchedData) return;
+    setLiveAnalysisCache((previous) => {
+      const next: Record<string, LiveAnalysisCacheEntry> = {
+        ...previous,
+        [key]: { matched: matchedData, betmanMatch: game, capturedAt: Date.now() },
+      };
+      const entries = Object.entries(next).sort((a, b) =>
+        Number(b[1]?.capturedAt ?? 0) - Number(a[1]?.capturedAt ?? 0)
+      );
+      return Object.fromEntries(entries.slice(0, 32));
+    });
+  }
+
   function visibleGameKey(game: BetmanMatch) {
     const index = visibleBetmanGames.indexOf(game);
     return gameKey(game, index >= 0 ? index : 0);
@@ -24319,21 +24390,13 @@ export default function Home() {
     // V13.8.40: 경기번호 옆 체크박스 선택만으로도 해당 경기를
     // 단일 "선택 경기 분석" 대상으로 지정한다. 보기 버튼은 상세보기 전용이다.
     if (!isCurrentlySelected) {
-      setSelectedBetmanKey(key);
-      setAnalyzedBetmanKey(null);
-      setMatched(null);
-
       const game = visibleBetmanGames.find(
         (candidate, index) => gameKey(candidate, index) === key
       ) ?? null;
 
       if (game) {
-        setBetman({ loading:false, matched:null, score:null, error:null });
-        setStatus(
-          recentVerifyMode
-            ? `🔎 ${game?.home ?? "-"} vs ${game?.away ?? "-"} 선택 · 선택 경기 분석을 누르세요 · PRE 저장 안 함`
-            : `${game?.home ?? "-"} vs ${game?.away ?? "-"} 선택 · 선택 경기 분석을 누르세요`
-        );
+        const index = visibleBetmanGames.indexOf(game);
+        chooseGame(game, index >= 0 ? index : 0);
       }
     } else if (selectedBetmanKey === key) {
       // 같은 경기를 체크 해제해도 상세보기 선택은 유지해 버튼이 갑자기 비활성화되지 않게 한다.
@@ -24410,9 +24473,21 @@ export default function Home() {
         Date.now() -
           3 * 60 * 60 * 1000;
 
+    const key = gameKey(game,index);
+    const cached = liveAnalysisCache[key] ?? null;
+
     setBacktestMode(historical);
     setBacktestResultRevealed(false);
-    setSelectedBetmanKey(gameKey(game,index));
+    setSelectedBetmanKey(key);
+
+    if (cached && !historical && !recentVerifyMode) {
+      setAnalyzedBetmanKey(key);
+      setMatched(cached.matched);
+      setBetman({ loading:false, matched:cached.betmanMatch ?? game, score:1, error:null });
+      setStatus(`${game?.home ?? "-"} vs ${game?.away ?? "-"} · 세션 분석결과 복원 · 재분석하려면 선택 경기 분석`);
+      return;
+    }
+
     setAnalyzedBetmanKey(null);
     setMatched(null);
     setBetman({ loading:false, matched:null, score:null, error:null });
@@ -24426,7 +24501,10 @@ export default function Home() {
   }
 
   async function analyzeSelected(): Promise<boolean> {
-    if (loading || !selectedBetman) return false;
+    if (loading || !selectedBetman || !selectedBetmanKey) return false;
+
+    const analysisKey = selectedBetmanKey;
+    const analysisGame = selectedBetman;
 
     const selectedStartMs =
       gameTimeMs(
@@ -24877,12 +24955,13 @@ export default function Home() {
           };
 
           setMatched(isolatedCombined);
+          cacheLiveAnalysisResult(analysisKey, analysisGame, isolatedCombined);
           setStatus(
             naverTodayLineupFallback?.ok
               ? `SportsAPI 미수신 · Naver LIVE DATA 독립 분석 완료 · ${selectedBetman?.home ?? "-"} vs ${selectedBetman?.away ?? "-"}`
               : `SportsAPI 미수신 · Naver 독립 분석도 미수신 · ${selectedBetman?.home ?? "-"} vs ${selectedBetman?.away ?? "-"}`
           );
-          setAnalyzedBetmanKey(selectedBetmanKey);
+          setAnalyzedBetmanKey(analysisKey);
           return true;
         }
 
@@ -25201,6 +25280,7 @@ export default function Home() {
             : combinedRaw;
 
         setMatched(combined);
+        cacheLiveAnalysisResult(analysisKey, analysisGame, combined);
 
         setStatus(
           backtestCutoffMs !== null
@@ -25210,7 +25290,7 @@ export default function Home() {
       } else {
         setStatus(`경기 매칭 완료 · Fixture #${fixtureId} · 상세 분석 데이터 일부 미수신`);
       }
-      setAnalyzedBetmanKey(selectedBetmanKey);
+      setAnalyzedBetmanKey(analysisKey);
       return true;
     } catch (e:any) {
       const message = readableError(e,"선택 경기 분석 실패");
@@ -25536,7 +25616,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.12 · DOMESTIC FOOTBALL CONNECTIVITY + READY FORENSIC</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.13 · ANALYSIS RESULT RESTORE + DOMESTIC FOOTBALL CONNECTIVITY</div>
         </div>
         <div className="bar">
           <button
@@ -27870,22 +27950,36 @@ export default function Home() {
               <div className="bestBox">
                 <div className="label">
                   현재 최고 적중우선픽
-                  {currentContinuousTopTier
-                    ? ` · 경기 TOP1 · ${currentContinuousTopTier}`
-                    : bestDisplayPick
-                      ? ` · ${bestDisplayPick.valueGrade}`
+                  {topBoxTier
+                    ? `${analysisUiReady ? " · 경기 TOP1 · " : " · 저장 frozen TOP1 · "}${topBoxTier}`
+                    : topBoxPick
+                      ? ` · ${topBoxPick.valueGrade}`
                       : ""}
                 </div>
                 <div className="pickName">
                   {!analysisUiReady
-                    ? "분석 대기 · 분석 버튼을 누르세요"
+                    ? (storedPreviewTopPick
+                        ? `저장결과 · ${backtestMarketGroup(storedPreviewTopPick.market)} · ${compactBetmanPickLabel(storedPreviewTopPick.market, storedPreviewTopPick.pick)}`
+                        : "분석 대기 · 분석 버튼을 누르세요")
                     : analysisFactors.hasRealData
                       ? (bestDisplayPick ? `${backtestMarketGroup(bestDisplayPick.market)} · ${compactBetmanPickLabel(bestDisplayPick.market, bestDisplayPick.pick)}` : actualMarketPicks.length ? "TOP1 후보 없음" : bestPick?.[1])
                       : "분석 대기"}
                 </div>
                 <div className="pickPct">
-                  {analysisUiReady && analysisFactors.hasRealData && bestDisplayPick ? `${best.toFixed(1)}%` : "-"}
+                  {topBoxPick ? `${topBoxPick.probability.toFixed(1)}%` : "-"}
                 </div>
+                {!analysisUiReady && storedPreviewTopPick && (
+                  <div className="pickMeta">
+                    저장 frozen snapshot · 현재 LIVE 재분석 아님
+                    {topBoxScore !== null && Number.isFinite(Number(topBoxScore)) ? ` · TOP1점수 ${Number(topBoxScore).toFixed(1)}` : ""}
+                    <br />
+                    최종 {storedPreviewTopPick.probability.toFixed(1)}%
+                    {storedPreviewTopPick.marketProbability === null ? " · 시장 -" : ` · 시장 ${storedPreviewTopPick.marketProbability.toFixed(1)}%`}
+                    {storedPreviewTopPick.edge === null ? "" : ` · 엣지 ${storedPreviewTopPick.edge >= 0 ? "+" : ""}${storedPreviewTopPick.edge.toFixed(1)}%p`}
+                    {storedPreviewTopPick.expectedValue === null ? "" : ` · EV ${storedPreviewTopPick.expectedValue >= 0 ? "+" : ""}${storedPreviewTopPick.expectedValue.toFixed(1)}%`}
+                    <br />최신 LIVE DATA로 다시 계산하려면 「선택 경기 분석」을 누르세요.
+                  </div>
+                )}
                 {analysisUiReady && bestDisplayPick && (
                   <div className="pickMeta">
                     {currentContinuousTopScore !== null && currentContinuousTopTier
@@ -28158,7 +28252,12 @@ export default function Home() {
               </div>
             )}
 
-            {analysisUiReady && (<>
+            {(analysisUiReady || storedPreviewMarketPicks.length > 0) && (<>
+            {!analysisUiReady && storedPreviewMarketPicks.length > 0 && (
+              <div className="notice" style={{ margin: "8px 0", background: "#fff8e8" }}>
+                <b>저장된 frozen 분석결과</b> · 이전 실제 분석에서 잠긴 시장 스냅샷입니다. 현재 LIVE DATA 재수집 결과가 아니며, 새 분석은 「선택 경기 분석」을 눌러 갱신합니다.
+              </div>
+            )}
             <div className="analysisTitleRow">
               <h3>게임유형별 분석 요약</h3>
               <div className="legend">
@@ -28169,13 +28268,13 @@ export default function Home() {
             </div>
 
             <div className="section" style={{ marginTop: 0 }}>
-              {displayActualMarketPicks.length ? (
+              {uiSummaryMarketPicks.length ? (
                 <div className="compactMarket">
                   <div className="compactMarketHead">
                     <div>유형</div><div>추천</div><div className="cmNum">최종</div><div className="cmNum">시장</div><div className="cmNum">엣지</div><div className="cmNum">EV</div><div className="cmNum">최종 등급</div>
                   </div>
-                  {displayActualMarketPicks.map((pick) => {
-                    const isBest = bestDisplayPick?.key === pick.key;
+                  {uiSummaryMarketPicks.map((pick) => {
+                    const isBest = topBoxPick?.key === pick.key;
                     return (
                       <div className={`compactMarketRow ${isBest ? "bestRow" : ""}`} key={pick.key} title={`${pick.detail} · 홈팀 기준 핸디 · 원모델 ${pick.rawProbability.toFixed(1)}% · 데이터보정 ${pick.preProbabilityBefore === null || pick.preProbabilityBefore === undefined ? pick.probability.toFixed(1) : pick.preProbabilityBefore.toFixed(1)}% · 최종 ${pick.probability.toFixed(1)}% · EV ${pick.expectedValue === null ? "-" : pick.expectedValue.toFixed(1) + "%"} · ${pick.valueGrade} · ${pick.valueGradeReason}`}>
                         <div className="cmName">{pick.market}</div>
@@ -28207,7 +28306,7 @@ export default function Home() {
                         <div className={`cmNum ${pick.expectedValue !== null && pick.expectedValue >= 0 ? "cmPos" : "cmNeg"}`}>{pick.expectedValue === null ? "-" : `${pick.expectedValue >= 0 ? "+" : ""}${pick.expectedValue.toFixed(1)}%`}</div>
                         <div
                           className="cmNum"
-                          title={`${pick.valueGradeReason} · 단계 ${analysisFactors.baseballAnalysisStageLabel} · 의사결정 위험 ${pick.decisionRiskScore.toFixed(0)} · ${pick.decisionRiskReason} · 신뢰 ${pick.confidenceGrade}(${pick.confidenceScore.toFixed(0)}) · 가치점수 ${pick.valueGradeScore.toFixed(1)}`}
+                          title={`${pick.valueGradeReason} · 단계 ${analysisUiReady ? analysisFactors.baseballAnalysisStageLabel : "저장 frozen snapshot"} · 의사결정 위험 ${pick.decisionRiskScore.toFixed(0)} · ${pick.decisionRiskReason} · 신뢰 ${pick.confidenceGrade}(${pick.confidenceScore.toFixed(0)}) · 가치점수 ${pick.valueGradeScore.toFixed(1)}`}
                         >
                           <span
                             className="cmGrade"
@@ -28236,12 +28335,12 @@ export default function Home() {
                     );
                   })}
                 </div>
-              ) : displayPicks.map((x) => (
+              ) : analysisUiReady ? displayPicks.map((x) => (
                 <div className={"pick " + (analysisFactors.hasRealData && x[2] === best ? "best" : "")} key={x[0]}>
                   <div><b>{x[0]}</b><div className="small">{x[1]}</div></div>
                   <div className="pct">{analysisFactors.hasRealData ? `${Number(x[2]).toFixed(1)}%` : "-"}</div>
                 </div>
-              ))}
+              )) : null}
             </div>
             </>)}
 
