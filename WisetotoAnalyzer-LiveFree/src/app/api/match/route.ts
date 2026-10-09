@@ -1,3 +1,5 @@
+// DEPLOY_MARKER_V13_12_15_KJ_FOOTBALL_LIVE_CONNECTIVITY_20261009
+// Selected-mode now consumes the alias/league context already sent by page.tsx so K League/J League fixture search is not limited to the old server alias table.
 // DEPLOY_MARKER_V13_7_6_PAST_FIXTURE_PAGINATION_20260829
 // DEPLOY_MARKER_V12_9_STARTER_BAYESIAN_20260825
 // WISETOTO_MATCH_SELECTED_V1_20260823
@@ -1448,12 +1450,40 @@ function teamAliases(name: string) {
   return [name, ...aliases].filter(Boolean);
 }
 
+function requestedAliasList(value: any): string[] {
+  const raw = Array.isArray(value)
+    ? value
+    : String(value ?? "").split("|");
+
+  return raw
+    .map((item: any) => String(item ?? "").trim())
+    .filter(Boolean);
+}
+
+function mergeTeamAliases(
+  primaryName: string,
+  requested: any,
+  originalName?: string | null
+) {
+  const merged = [
+    originalName,
+    primaryName,
+    ...requestedAliasList(requested),
+    ...teamAliases(String(originalName ?? "")),
+    ...teamAliases(primaryName),
+  ]
+    .map((item) => String(item ?? "").trim())
+    .filter(Boolean);
+
+  return Array.from(new Set(merged));
+}
+
 function searchQueryForTeam(name: string, aliases: string[]) {
-  // SportsAPI 검색은 영문 팀명에서 가장 안정적이므로 alias가 있으면 첫 영문명을 우선.
-  // alias가 없을 때만 Betman 원문 팀명을 사용합니다.
-  return aliases.length > 1
-    ? aliases[1]
-    : aliases[0] ?? name;
+  // V13.12.15: page.tsx가 전달한 전체 alias 중 SportsAPI 검색에 가장 안정적인
+  // 영문 팀명을 우선 사용한다. 서버 고정 alias 표에 없는 K1/K2/J1/J2 팀도
+  // 클라이언트 alias가 전달되면 그대로 검색에 사용한다.
+  const english = aliases.find((alias) => /[A-Za-z]/.test(alias));
+  return english ?? aliases[0] ?? name;
 }
 
 function bestNameSimilarity(wantedAliases: string[], actual: any) {
@@ -1554,8 +1584,17 @@ async function findSportsFixtureForBetman(
     };
   }
 
-  const homeAliases = teamAliases(home);
-  const awayAliases = teamAliases(away);
+  const homeAliases = mergeTeamAliases(
+    home,
+    betmanGame?.homeAliases,
+    String(betmanGame?.originalHome ?? "").trim() || null
+  );
+  const awayAliases = mergeTeamAliases(
+    away,
+    betmanGame?.awayAliases,
+    String(betmanGame?.originalAway ?? "").trim() || null
+  );
+  const wantedLeague = String(betmanGame?.league ?? "").trim();
 
   // KBO의 LG / NC / KT / SSG / KIA 같은 약칭도
   // teamAliases()에서 SportsAPI 영문 정식명으로 변환한 뒤 검색합니다.
@@ -1697,6 +1736,7 @@ async function findSportsFixtureForBetman(
           score: Number(bestScore.toFixed(3)),
           timeDiffMinutes: Number(bestTimeDiffMinutes.toFixed(1)),
           wantedSport,
+          wantedLeague: wantedLeague || null,
           homeAliases,
           awayAliases,
           attempts: debug,
@@ -1710,6 +1750,7 @@ async function findSportsFixtureForBetman(
     debug: {
       matched: false,
       wantedSport,
+      wantedLeague: wantedLeague || null,
       homeAliases,
       awayAliases,
       attempts: debug,
@@ -2939,7 +2980,12 @@ async function runSelectedMode(
   const url = new URL(req.url);
   const home = String(url.searchParams.get("home") || "");
   const away = String(url.searchParams.get("away") || "");
+  const originalHome = String(url.searchParams.get("originalHome") || home);
+  const originalAway = String(url.searchParams.get("originalAway") || away);
+  const homeAliases = requestedAliasList(url.searchParams.get("homeAliases"));
+  const awayAliases = requestedAliasList(url.searchParams.get("awayAliases"));
   const sport = String(url.searchParams.get("sport") || "");
+  const league = String(url.searchParams.get("league") || "");
   const gameDateMs = Number(url.searchParams.get("gameDateMs"));
 
   if (!home || !away) {
@@ -2947,9 +2993,14 @@ async function runSelectedMode(
   }
 
   const result = await findSportsFixtureForBetman({
-    home,
-    away,
+    home: originalHome || home,
+    away: originalAway || away,
+    originalHome,
+    originalAway,
+    homeAliases: [home, ...homeAliases],
+    awayAliases: [away, ...awayAliases],
     sport,
+    league,
     gameDateMs: Number.isFinite(gameDateMs) ? gameDateMs : null,
   }, key);
 
@@ -2959,7 +3010,15 @@ async function runSelectedMode(
       mode:"selected",
       matched:false,
       error:"선택한 Betman 경기를 SportsAPI에서 자동매칭하지 못했습니다.",
-      selectedBetman:{ home, away, sport, gameDateMs:Number.isFinite(gameDateMs) ? gameDateMs : null },
+      selectedBetman:{
+        home: originalHome || home,
+        away: originalAway || away,
+        sport,
+        league: league || null,
+        gameDateMs:Number.isFinite(gameDateMs) ? gameDateMs : null,
+        homeAliases:[home, ...homeAliases],
+        awayAliases:[away, ...awayAliases],
+      },
       debug:result.debug,
     });
   }
