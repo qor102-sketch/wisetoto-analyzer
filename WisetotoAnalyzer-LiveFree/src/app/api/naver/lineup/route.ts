@@ -1,3 +1,5 @@
+// DEPLOY_MARKER_V13_12_17_FOOTBALL_RECENT_INDEPENDENT_20261010
+// Current-fixture gameId failure must not erase independently available recent-form data. Football may return RECENT_ONLY partial safely with zero lineup.
 // DEPLOY_MARKER_V13_12_16_KJ_RESOLVER_ISOLATION_20261010
 // Never accept a K/J football match by time alone. Merge league-specific + domestic schedule feeds, require team identity, and aggregate recent form across all valid schedule responses.
 // DEPLOY_MARKER_V13_12_15_KJ_FOOTBALL_LIVE_CONNECTIVITY_20261009
@@ -95,7 +97,7 @@ const FOOTBALL_ADAPTER_ALIASES: Record<FootballAdapterId, Record<string, string[
     KASHIWA_REYSOL: ["가시와레이솔", "가시와 레이솔", "kashiwareysol", "kashiwa reysol", "가시와"],
     YOKOHAMA_F_MARINOS: ["요코하마f마리노스", "요코하마 f마리노스", "요코하마fm", "yokohamafmarinos", "yokohama f marinos", "fmarinos"],
     KASHIMA_ANTLERS: ["가시마앤틀러스", "가시마 앤틀러스", "kashimaantlers", "kashima antlers", "가시마"],
-    URAWA_REDS: ["우라와레즈", "우라와 레즈", "urawareddiamonds", "urawa reds", "우라와"],
+    URAWA_REDS: ["우라와레즈", "우라와 레즈", "우라와레드다이아몬즈", "우라와 레드 다이아몬즈", "우라와레드다이아몬드", "우라와 레드 다이아몬드", "urawareddiamonds", "urawa red diamonds", "urawa reds", "우라와"],
     JEF_CHIBA: ["제프유나이티드지바", "제프 지바", "jefunitedchiba", "jef chiba", "지바"],
     GAMBA_OSAKA: ["감바오사카", "감바 오사카", "gambaosaka", "gamba osaka"],
     NAGOYA_GRAMPUS: ["나고야그램퍼스", "나고야 그램퍼스", "nagoyagrampus", "nagoya grampus", "나고야"],
@@ -3897,10 +3899,97 @@ export async function GET(request: Request) {
       gameId = resolved.gameId;
       resolverDebug = resolved;
       if (!gameId) {
+        // V13.12.17: 현재 fixture/gameId 매칭 실패와 최근 Form 수집 실패를 분리한다.
+        // 다른 경기 gameId를 억지로 쓰지 않으면서도, 홈/원정 최근 경기가 독립적으로 확인되면
+        // RECENT_ONLY partial 응답으로 모델의 실제 최근득실 입력만 살린다. 선발 XI는 비운다.
+        const footballRecentOnly = await collectFootballRecentSummary(date, home, away, footballAdapter).catch((error: any) => ({
+          recentSummary: null,
+          endpoint: null,
+          status: null,
+          cacheHit: false,
+          scheduleGames: 0,
+          attempts: [],
+          error: error?.message ?? "football recent summary failed",
+        }));
+        const homePlayed = Number(footballRecentOnly?.recentSummary?.home?.form?.played ?? 0);
+        const awayPlayed = Number(footballRecentOnly?.recentSummary?.away?.form?.played ?? 0);
+        const hasRecent = homePlayed > 0 || awayPlayed > 0;
+        if (hasRecent) {
+          return Response.json({
+            ok: true,
+            partial: true,
+            recentOnly: true,
+            source: "sports.naver.com",
+            league: "FOOTBALL",
+            categoryId: null,
+            capturedAt: Date.now(),
+            gameId: null,
+            completed: false,
+            cancelled: false,
+            voidReason: null,
+            game: {
+              gameDateTime: startRaw || null,
+              stadium: null,
+              statusCode: null,
+              statusInfo: null,
+              gameStatus: null,
+              postponed: null,
+              cancelled: null,
+              homeScore: null,
+              awayScore: null,
+              finalScore: null,
+              homeTeamName: home,
+              awayTeamName: away,
+              homeStarterName: null,
+              awayStarterName: null,
+              weatherInfo: null,
+            },
+            homeStarter: null,
+            awayStarter: null,
+            home: [],
+            away: [],
+            bench: { home: [], away: [] },
+            footballIdentity: {
+              valid: true,
+              recentOnly: true,
+              requestedHome: home,
+              requestedAway: away,
+              resolvedHome: home,
+              resolvedAway: away,
+              adapterId: footballAdapter,
+            },
+            footballPlayers: {
+              ok: false,
+              status: null,
+              source: "RECENT_ONLY",
+              attempts: [],
+              total: 0,
+              substituteKnown: 0,
+              rawTeamCodes: [],
+              rawTeamNames: [],
+              homeTeamCode: null,
+              awayTeamCode: null,
+              homeTeamName: home,
+              awayTeamName: away,
+            },
+            recentSummary: footballRecentOnly?.recentSummary ?? null,
+            footballRecent: footballRecentOnly,
+            debug: {
+              source: "V13.12.17_FOOTBALL_RECENT_ONLY",
+              date,
+              home,
+              away,
+              requestedLeague,
+              footballAdapter,
+              resolver: resolved,
+              recent: footballRecentOnly,
+            },
+          });
+        }
         return Response.json({
           ok: false,
-          error: "네이버 해외축구 당일 일정에서 경기 gameId 자동매칭 실패",
-          debug: { date, home, away, requestedLeague, footballAdapter, resolver: resolved },
+          error: "네이버 축구 당일 경기 gameId 자동매칭 실패 · 최근 Form도 미수신",
+          debug: { date, home, away, requestedLeague, footballAdapter, resolver: resolved, recent: footballRecentOnly },
         }, { status: 404 });
       }
     } else if (league === "NPB") {
