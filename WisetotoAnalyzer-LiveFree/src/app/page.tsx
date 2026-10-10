@@ -6251,6 +6251,47 @@ function footballLineupSource(matched: any) {
   return { source: null, home: naverHome.slice(0, 11), away: naverAway.slice(0, 11) };
 }
 
+/* V13.12.18: confirmed starting XI is a verification snapshot only.
+ * Never pass player rows to football λ/Poisson and never backdate a capture. */
+function confirmedFootballLineupSnapshot(
+  matched: any,
+  fallbackHome: string,
+  fallbackAway: string,
+  capturedAt: number
+): FootballLineupSnapshot | null {
+  const resolved = footballLineupSource(matched);
+  if (!resolved.source || resolved.home.length !== 11 || resolved.away.length !== 11) return null;
+
+  const isNaver = resolved.source === "NAVER_FOOTBALL_PLAYERS";
+  const rawGameId = isNaver
+    ? matched?.naverTodayLineup?.gameId
+    : (matched?.fixtureId ?? matched?.selectedFixture?.id);
+  const playerRows = (rows: any[]): FootballLineupSnapshot["home"] =>
+    rows.map((p: any) => ({
+      playerId: String(p?.playerId ?? p?.pcode ?? "").trim() || null,
+      name: String(p?.name ?? "").trim() || null,
+      position: String(p?.position ?? "").trim() || null,
+      formationPlace: Number.isFinite(Number(p?.formationPlace)) ? Number(p.formationPlace) : null,
+      shirtNumber: Number.isFinite(Number(p?.shirtNumber)) ? Number(p.shirtNumber) : null,
+    }));
+  return {
+    stage: "LINEUP_READY",
+    capturedAt,
+    source: resolved.source,
+    gameId: String(rawGameId ?? "").trim() || null,
+    homeTeamCode: isNaver ? String(matched?.naverTodayLineup?.footballPlayers?.homeTeamCode ?? "").trim() || null : null,
+    awayTeamCode: isNaver ? String(matched?.naverTodayLineup?.footballPlayers?.awayTeamCode ?? "").trim() || null : null,
+    homeTeamName: isNaver
+      ? String(matched?.naverTodayLineup?.footballPlayers?.homeTeamName ?? fallbackHome).trim() || null
+      : String(fallbackHome).trim() || null,
+    awayTeamName: isNaver
+      ? String(matched?.naverTodayLineup?.footballPlayers?.awayTeamName ?? fallbackAway).trim() || null
+      : String(fallbackAway).trim() || null,
+    home: playerRows(resolved.home),
+    away: playerRows(resolved.away),
+  };
+}
+
 function lineupBatters(
   lineups: any,
   side: "home" | "away",
@@ -18095,12 +18136,15 @@ export default function Home() {
   const currentFootballLineupAudit = currentSport === "축구"
     ? footballLineupSource(matched)
     : { source: null, home: [] as any[], away: [] as any[] };
-  const currentFootballLineupReady =
+  const currentFootballLiveLineupReady =
     currentSport === "축구" &&
-    (
-      (currentFootballLineupAudit.home.length >= 11 && currentFootballLineupAudit.away.length >= 11) ||
-      selectedSoccerTrackerRecord?.footballLineup?.stage === "LINEUP_READY"
-    );
+    currentFootballLineupAudit.source !== null &&
+    currentFootballLineupAudit.home.length === 11 &&
+    currentFootballLineupAudit.away.length === 11;
+  // Preserve the existing model-quality gate: saved READY remains eligible.
+  const currentFootballLineupReady =
+    currentFootballLiveLineupReady ||
+    (currentSport === "축구" && selectedSoccerTrackerRecord?.footballLineup?.stage === "LINEUP_READY");
   const actualMarketPicksRaw = buildActualMarketPicks(
     analysisBetmanMatch,
     currentSport,
@@ -20006,6 +20050,58 @@ export default function Home() {
   }, [currentSport, selectedBetman, liveTrackerRecords]);
 
   /*
+   * V13.12.18 FOOTBALL PRE → LINEUP reconciliation:
+   * Promote an existing frozen PRE with confirmed 11+11 independently of
+   * analysis-factor/detail-debug availability. This never creates PRE or
+   * changes frozen PRE λ, picks, market snapshots, or model formulas.
+   * An XI first observed at/after kickoff is live-only, not pregame evidence.
+   */
+  useEffect(() => {
+    if (backtestMode || !analysisUiReady || currentSport !== "축구" || !selectedBetman || !matched) return;
+
+    const observedAt = Date.now();
+    const startMs = gameTimeMs(selectedBetman);
+    if (!Number.isFinite(startMs) || observedAt >= startMs) return;
+
+    const lineupSnapshot = confirmedFootballLineupSnapshot(
+      matched, currentMatch.home, currentMatch.away, observedAt
+    );
+    if (!lineupSnapshot) return;
+    if (
+      lineupSnapshot.source === "NAVER_FOOTBALL_PLAYERS" &&
+      !naverFootballIdentityMatchesSelected(matched?.naverTodayLineup, selectedBetman)
+    ) return;
+
+    const identity = actualGameIdentity(selectedBetman);
+    setLiveTrackerRecords((previous) => {
+      const index = previous.findIndex((record) =>
+        record.sport === "축구" &&
+        record.startMs === startMs &&
+        record.betmanIdentity === identity &&
+        record.verificationStatus === "PENDING" &&
+        record.footballPre?.stage === "PRE" &&
+        record.capturedAt < startMs &&
+        !record.footballLineup
+      );
+      if (index < 0) return previous;
+
+      const next = previous.map((record, rowIndex) =>
+        rowIndex === index ? { ...record, footballLineup: lineupSnapshot } : record
+      );
+      saveLiveTrackerRecords(next);
+      return next;
+    });
+  }, [
+    analysisUiReady,
+    backtestMode,
+    currentSport,
+    selectedBetman,
+    matched,
+    currentMatch.home,
+    currentMatch.away,
+  ]);
+
+  /*
    * V13.8.1 LIVE TRACKER
    * 실전 분석이 완전히 끝난 경기의 시작 전 PRE 판단만 최초 1회 잠근다.
    * 이 effect에서는 실제 결과 API를 절대 호출하지 않는다.
@@ -20065,40 +20161,10 @@ export default function Home() {
        * 나중에 들어오면 같은 경기 레코드를 READY snapshot으로 1회 승격한다.
        * 이미 READY가 잠겼거나 VERIFY가 끝난 레코드는 절대 덮어쓰지 않는다.
        */
-      const footballResolved = currentSport === "축구" ? footballLineupSource(matched) : { source: null, home: [] as any[], away: [] as any[] };
-      const footballHomeRows = footballResolved.home.slice(0, 11);
-      const footballAwayRows = footballResolved.away.slice(0, 11);
-      const hasConfirmedFootballLineup =
-        currentSport === "축구" &&
-        footballResolved.source !== null &&
-        footballHomeRows.length === 11 &&
-        footballAwayRows.length === 11;
-      const footballLineupSnapshot: FootballLineupSnapshot | null = hasConfirmedFootballLineup
-        ? {
-            stage: "LINEUP_READY",
-            capturedAt: Date.now(),
-            source: footballResolved.source!,
-            gameId: String(matched?.naverTodayLineup?.gameId ?? matched?.fixtureId ?? matched?.selectedFixture?.id ?? "").trim() || null,
-            homeTeamCode: String(matched?.naverTodayLineup?.footballPlayers?.homeTeamCode ?? "").trim() || null,
-            awayTeamCode: String(matched?.naverTodayLineup?.footballPlayers?.awayTeamCode ?? "").trim() || null,
-            homeTeamName: String(matched?.naverTodayLineup?.footballPlayers?.homeTeamName ?? currentMatch.home ?? "").trim() || null,
-            awayTeamName: String(matched?.naverTodayLineup?.footballPlayers?.awayTeamName ?? currentMatch.away ?? "").trim() || null,
-            home: footballHomeRows.map((p: any) => ({
-              playerId: String(p?.playerId ?? p?.pcode ?? "").trim() || null,
-              name: String(p?.name ?? "").trim() || null,
-              position: String(p?.position ?? "").trim() || null,
-              formationPlace: Number.isFinite(Number(p?.formationPlace)) ? Number(p.formationPlace) : null,
-              shirtNumber: Number.isFinite(Number(p?.shirtNumber)) ? Number(p.shirtNumber) : null,
-            })),
-            away: footballAwayRows.map((p: any) => ({
-              playerId: String(p?.playerId ?? p?.pcode ?? "").trim() || null,
-              name: String(p?.name ?? "").trim() || null,
-              position: String(p?.position ?? "").trim() || null,
-              formationPlace: Number.isFinite(Number(p?.formationPlace)) ? Number(p.formationPlace) : null,
-              shirtNumber: Number.isFinite(Number(p?.shirtNumber)) ? Number(p.shirtNumber) : null,
-            })),
-          }
-        : null;
+      const footballLineupSnapshot: FootballLineupSnapshot | null =
+        currentSport === "축구"
+          ? confirmedFootballLineupSnapshot(matched, currentMatch.home, currentMatch.away, Date.now())
+          : null;
 
       const footballPreSnapshot: FootballPreValidationSnapshot | null =
         currentSport === "축구" &&
@@ -29037,7 +29103,7 @@ export default function Home() {
                         </div>
                         <div className="card">
                           실제 선발 라인업
-                          <b>{currentFootballLineupReady ? "✓ 22/22" : `${currentFootballLineupAudit.home.length + currentFootballLineupAudit.away.length}/22`}</b>
+                          <b>{currentFootballLiveLineupReady ? "✓ 22/22" : `${currentFootballLineupAudit.home.length + currentFootballLineupAudit.away.length}/22`}</b>
                           <div className="small">홈 {currentFootballLineupAudit.home.length}/11 · 원정 {currentFootballLineupAudit.away.length}/11 · source {currentFootballLineupAudit.source ?? "대기"}</div>
                         </div>
                         <div className="card">
@@ -29053,15 +29119,33 @@ export default function Home() {
                       </div>
                       {selectedFootballTrackerState && (
                         <div className="notice" style={{ margin: "8px 0" }}>
-                          <b>V13.8.61 현재 경기 검증 흐름</b> · {selectedFootballTrackerState.stage === "WAITING_PRE" ? "① PRE 잠금 대기" : selectedFootballTrackerState.stage === "PRE_LOCKED" ? "① PRE 잠금 완료 → ② LINEUP 대기" : selectedFootballTrackerState.stage === "LINEUP_READY" ? "① PRE ✓ → ② LINEUP READY ✓ → ③ 결과대기" : selectedFootballTrackerState.stage === "VERIFY_DUE" ? "① PRE ✓ → ② LINEUP READY ✓ → ③ VERIFY 확인가능" : selectedFootballTrackerState.stage === "VERIFIED" ? "① PRE ✓ → ② LINEUP → ③ VERIFIED ✓" : "경기 시작 후 PRE 없음 · 검증 표본 제외"}
+                          <b>V13.12.18 현재 경기 검증 흐름</b> · {selectedFootballTrackerState.stage === "WAITING_PRE"
+                            ? "① PRE 잠금 대기"
+                            : selectedFootballTrackerState.stage === "PRE_LOCKED"
+                              ? currentFootballLiveLineupReady
+                                ? selectedFootballTrackerState.record!.startMs <= Date.now()
+                                  ? "① PRE ✓ → ② LIVE XI 22/22 확인 (경기 전 LINEUP 미잠금)"
+                                  : "① PRE ✓ → ② LIVE XI 22/22 확인 · LINEUP 저장 확인 중"
+                                : selectedFootballTrackerState.record!.startMs <= Date.now()
+                                  ? "① PRE ✓ → ② 경기 전 LINEUP 미잠금"
+                                  : "① PRE 잠금 완료 → ② LINEUP 대기"
+                              : selectedFootballTrackerState.stage === "LINEUP_READY"
+                                ? "① PRE ✓ → ② LINEUP READY ✓ → ③ 결과대기"
+                                : selectedFootballTrackerState.stage === "VERIFY_DUE"
+                                  ? `① PRE ✓ → ② ${selectedFootballTrackerState.record?.footballLineup?.stage === "LINEUP_READY" ? "LINEUP READY ✓" : "LINEUP 미잠금"} → ③ VERIFY 확인가능`
+                                  : selectedFootballTrackerState.stage === "VERIFIED"
+                                    ? `① PRE ✓ → ② ${selectedFootballTrackerState.record?.footballLineup?.stage === "LINEUP_READY" ? "LINEUP READY ✓" : "LINEUP 미잠금"} → ③ VERIFIED ✓`
+                                    : selectedFootballTrackerState.stage === "VOID"
+                                      ? "검증 VOID · LINEUP 기록 유지"
+                                      : "경기 시작 후 PRE 없음 · 검증 표본 제외"}
                           <div className="small" style={{ marginTop: 4 }}>
                             {selectedFootballTrackerState.record
-                              ? `PRE ${new Date(selectedFootballTrackerState.record.footballPre?.capturedAt ?? selectedFootballTrackerState.record.capturedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}${selectedFootballTrackerState.record.footballLineup ? ` · LINEUP ${selectedFootballTrackerState.leadMinutes === null ? "시각 저장" : `${selectedFootballTrackerState.leadMinutes.toFixed(0)}분 전 확보`}` : " · LINEUP 미확보"} · ${selectedFootballTrackerState.record.verificationStatus}`
+                              ? `PRE ${new Date(selectedFootballTrackerState.record.footballPre?.capturedAt ?? selectedFootballTrackerState.record.capturedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}${selectedFootballTrackerState.record.footballLineup ? ` · LINEUP ${selectedFootballTrackerState.leadMinutes === null ? "시각 저장" : `${selectedFootballTrackerState.leadMinutes.toFixed(0)}분 전 확보`}` : currentFootballLiveLineupReady ? " · LIVE XI 22/22 (LINEUP 스냅샷 미저장)" : " · LINEUP 스냅샷 없음"} · ${selectedFootballTrackerState.record.verificationStatus}`
                               : selectedFootballTrackerState.stage === "PAST_NO_PRE"
                                 ? "엄격 PRE 규칙 유지: 경기 시작 후 새 PRE 레코드를 만들지 않습니다."
                                 : "경기 시작 전 분석 완료 시 PRE 레코드를 최초 1회 잠급니다."}
                           </div>
-                          <div className="small" style={{ marginTop: 4 }}>LINEUP 승격 시 최초 PRE λ는 보존하고 선수 22명/확보 시각을 저장합니다. V13.11.00부터 선발 XI는 λ를 직접 바꾸지 않고 TOP1 데이터품질에 soft 반영하며, 경기 전 재분석 시 추천/시장 스냅샷은 최신 상태로 갱신합니다.</div>
+                          <div className="small" style={{ marginTop: 4 }}>실시간 선발 22/22 표시와 검증용 LINEUP_READY 잠금은 별도 상태입니다. 기존 PRE가 있고 킥오프 전에 실제 XI를 확인한 경우에만 선수 22명과 확인 시각을 검증 snapshot에 저장합니다. 킥오프 후 처음 확인한 XI는 사전 확보로 소급 승격하지 않습니다. 최초 frozen PRE λ와 축구 λ/Poisson은 보존합니다.</div>
                         </div>
                       )}
                       <div className="notice" style={{ margin: "8px 0" }}>
