@@ -1,4 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
+// V13.12.17 FOOTBALL RECENT INDEPENDENT: current fixture/gameId failure no longer erases independently available recent-form data; RECENT_ONLY partial keeps real form while lineup stays empty. Urawa Naver aliases hardened.
 // V13.12.16 K/J RESOLVER ISOLATION: K/J football never accepts a Naver game by kickoff time alone; server/client both verify requested home/away identity, and recent-form collection merges all domestic schedule candidates before team filtering.
 // V13.12.15 K/J FOOTBALL LIVE CONNECTIVITY: server selected-mode now consumes full team aliases and dedicated K League 1/2 + J1/J2 Naver adapters; preserve V13.12.14 PRIOR ONLY only as a failure-safe fallback.
 // V13.12.14 SOCCER PRIOR SAFE FALLBACK: preserve V13.12.13 result restore; when K/J or other football fixture/recent feeds fail, run a clearly-labelled league-prior PRE model after explicit analysis instead of returning an empty screen. Market total is never used as scoring input and prior-only football can never become official VALUE.
@@ -3937,6 +3938,7 @@ function sportsAliasIdentityMatch(left: unknown, right: unknown) {
 
 function naverFootballIdentityMatchesSelected(payload: any, game: any) {
   if (!payload?.ok || payload?.league !== "FOOTBALL") return true;
+  if (payload?.recentOnly === true && !payload?.gameId && payload?.recentSummary) return true;
   if (payload?.footballIdentity?.valid === false) return false;
   const requestedHome = String(game?.home ?? game?.homeTeam ?? "").trim();
   const requestedAway = String(game?.away ?? game?.awayTeam ?? "").trim();
@@ -25696,7 +25698,7 @@ export default function Home() {
         <div>
           <div className="title">Wisetoto Analyzer · Live</div>
           <div className="sub">Betman 발매경기 전체 종목(실전: 시작 후 30분까지 · 검증: 최근 24시간) → 실제 경기 단위 그룹화 → LIVE DATA 분석 → 종목별 실제 시장 최적 픽</div>
-          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.16 · K/J RESOLVER ISOLATION + RECENT MERGE</div>
+          <div className="small" style={{marginTop:4,fontWeight:800}}>DEPLOY · V13.12.17 · FOOTBALL RECENT INDEPENDENT + ALIAS HARDEN</div>
         </div>
         <div className="bar">
           <button
@@ -30717,7 +30719,7 @@ export default function Home() {
                   <div className="notice" style={{ margin: "8px 0 0" }}>
                     V11.7은 모든 핸디캡을 홈팀(왼쪽)에 적용하고, EV·엣지·신뢰도·신호충돌·데이터단계를 함께 평가합니다.
                     PASS는 가치 없음, WATCH는 관망, VALUE 이상만 최고 가치픽 후보입니다.
-                    V13.12.16은 K리그1/2·J1/J2에서 킥오프 시각만 같은 다른 경기를 Naver gameId로 대체하는 fallback을 금지하고, 서버와 화면 양쪽에서 홈/원정 팀 identity가 일치할 때만 최근기록·선발 XI를 사용합니다. 최근 Form은 리그 전용 + 국내축구 전체 schedule 응답을 합친 뒤 대상 팀 경기만 필터링합니다. V13.12.15의 SportsAPI alias/리그 전달과 V13.12.14 PRIOR ONLY 안전 fallback은 그대로 유지합니다. Betman U/O line은 득점 입력으로 사용하지 않습니다. V13.12.12는 2026 K리그1/2·J1/J2 팀 alias와 리그 구분을 보강하고 Naver 우선 + SportsAPI 명시적 11+11 선발 fallback을 검증/품질 신호에 연결합니다. 기존 K/J prior 수치와 축구 λ/Poisson·TOP1 임계값은 변경하지 않습니다. V13.12.11은 V13.12.10 FIX2의 명시적 분석 게이트를 유지하면서, 야구 READY 당시 raw→shrink→starter→lineup→market→decision λ와 선발/타선 보정 근거를 frozen forensic snapshot으로 저장해 후속 재수신 실패가 감사 화면을 0값으로 덮지 않게 합니다. 또한 ±1.5 이상 핸디 tail과 65% 이상 강한 U/O, READY 품질별 점수오차를 OOS SHADOW로만 누적하며 모델 가중치·확률·게이트·TOP1 임계값은 변경하지 않습니다. V13.12.10 FIX2는 경기 선택과 실제 분석 실행을 완전히 분리해 선택만 한 Betman 경기를 모델 입력으로 사용하지 않으며, 분석 성공 전에는 TOP1·예상점수·확률·스냅샷을 생성 결과로 사용하지 않습니다. V13.12.09의 READY freshness/frozen 연속성과 야구 PRE·STARTER·LINEUP display-only TOP1 정책은 그대로 유지합니다. READY 이전 TOP1은 표시 전용이며 공식 VALUE·약추천·frozen 저장은 차단되고, READY + freshness 통과 후에만 기존 tier가 열립니다. 농구는 0~1경기 COLD START, 양 팀 최소 2경기 WARMUP, 최소 3경기부터 HISTORY ACTIVE로 단계화해 2경기만으로 공식 VALUE가 열리지 않게 합니다. V13.12.05의 박신자컵 제외·COLD START·marketResults 정산 정책은 그대로 유지합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
+                    V13.12.17은 축구 현재 fixture/gameId 매칭이 실패해도 독립적으로 확인된 양 팀 최근 Form은 RECENT_ONLY로 사용하고, 선발 XI는 비워 둡니다. 따라서 팀 alias나 당일 gameId 한 항목이 실패했다고 실제 최근득실 전체를 PRIOR ONLY로 버리지 않습니다. 또한 Naver 우라와 표기 alias를 보강했습니다. V13.12.16의 K/J 다른 경기 오매칭 차단·팀 identity 2중 검증·recent schedule merge는 그대로 유지합니다. V13.12.15의 SportsAPI alias/리그 전달과 V13.12.14 PRIOR ONLY 안전 fallback도 유지합니다. Betman U/O line은 득점 입력으로 사용하지 않습니다. V13.12.12는 2026 K리그1/2·J1/J2 팀 alias와 리그 구분을 보강하고 Naver 우선 + SportsAPI 명시적 11+11 선발 fallback을 검증/품질 신호에 연결합니다. 기존 K/J prior 수치와 축구 λ/Poisson·TOP1 임계값은 변경하지 않습니다. V13.12.11은 V13.12.10 FIX2의 명시적 분석 게이트를 유지하면서, 야구 READY 당시 raw→shrink→starter→lineup→market→decision λ와 선발/타선 보정 근거를 frozen forensic snapshot으로 저장해 후속 재수신 실패가 감사 화면을 0값으로 덮지 않게 합니다. 또한 ±1.5 이상 핸디 tail과 65% 이상 강한 U/O, READY 품질별 점수오차를 OOS SHADOW로만 누적하며 모델 가중치·확률·게이트·TOP1 임계값은 변경하지 않습니다. V13.12.10 FIX2는 경기 선택과 실제 분석 실행을 완전히 분리해 선택만 한 Betman 경기를 모델 입력으로 사용하지 않으며, 분석 성공 전에는 TOP1·예상점수·확률·스냅샷을 생성 결과로 사용하지 않습니다. V13.12.09의 READY freshness/frozen 연속성과 야구 PRE·STARTER·LINEUP display-only TOP1 정책은 그대로 유지합니다. READY 이전 TOP1은 표시 전용이며 공식 VALUE·약추천·frozen 저장은 차단되고, READY + freshness 통과 후에만 기존 tier가 열립니다. 농구는 0~1경기 COLD START, 양 팀 최소 2경기 WARMUP, 최소 3경기부터 HISTORY ACTIVE로 단계화해 2경기만으로 공식 VALUE가 열리지 않게 합니다. V13.12.05의 박신자컵 제외·COLD START·marketResults 정산 정책은 그대로 유지합니다. 지원 경기에서는 full-game 후보를 경기 내부에서만 비교해 TOP1 하나를 독립 산출합니다. 저배당/높은 시장확률은 TOP1 기본점수에 직접 가중하지 않고 시장은 순수모델과의 일치도 확인만 소폭 반영합니다. 야구는 단일 raw 확률 대신 상관보정 합의하한에 가까운 보수확률을 중심으로 순위를 계산하고, ±1.5 이상 핸디캡에는 고정 λ Poisson/Skellam의 대패 꼬리 불확실성을 B/D·품질·합의분산에 따라 연속 감점합니다. 이는 결과 맞춤형 하드컷이 아니라 구조적 불확실성 보정이며, 경기별 TOP1은 항상 유지됩니다. 야구는 80 이상 공식 VALUE/74~79.9 약추천, 축구는 78 이상 공식 VALUE/72~77.9 약추천, 그 미만은 관망입니다. 농구는 VERIFIED HISTORY 누적을 유지합니다.
                   </div>
                 </div>
             {analysisFactors.scoringUsed && (
