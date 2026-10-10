@@ -1,3 +1,5 @@
+// DEPLOY_MARKER_V13_12_20_J2_OFFICIAL_CLUB_RECORD_RECENT_20261010
+// J2 official club record fallback only when Naver history unavailable; strict pregame cutoff, no model or lineup changes.
 // DEPLOY_MARKER_V13_12_19_J2_TEAM_IDENTITY_AND_RECENT_WINDOW_20261010
 // Resolve Kofu/Tochigi City Japanese aliases and retry 40-day J2 history in bounded windows only when actual completed samples are missing. No result or model changes.
 // DEPLOY_MARKER_V13_12_17_FOOTBALL_RECENT_INDEPENDENT_20261010
@@ -1520,6 +1522,139 @@ function naverVerifyGameCompleted(game: AnyObj) {
   return false;
 }
 
+/*
+ * V13.12.20: J2 official CLUB RECORD is verified historical source only.
+ * Do not resolve current fixture/gameId/LINEUP from club results. Club slugs
+ * are distinct; TOCHIGI CITY must never fall back to Tochigi SC.
+ */
+const J2_OFFICIAL_CLUB_PROFILES: Record<string, { slug: string; display: string; homeVenue: RegExp }> = {
+  VENTFORET_KOFU: {
+    slug: "kofu",
+    display: "Ventforet Kofu",
+    homeVenue: /\bJIT\s*Recycle\b/i,
+  },
+  TOCHIGI_CITY: {
+    slug: "tochigic",
+    display: "TOCHIGI CITY",
+    homeVenue: /^(?:CFS|CITY\s*FOOTBALL\s*STATION)$/i,
+  },
+};
+
+function j2OfficialCellText(value: string): string {
+  return value
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&#(x[0-9a-f]+|\d+);/gi, (_match, number: string) => {
+      const code = number.toLowerCase().startsWith("x")
+        ? parseInt(number.slice(1), 16) : parseInt(number, 10);
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : " ";
+    })
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&(?:#39|apos);/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseJ2OfficialClubRecord(
+  html: string,
+  club: (typeof J2_OFFICIAL_CLUB_PROFILES)[string],
+  selectedDate: string,
+): AnyObj[] {
+  const title = j2OfficialCellText(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "");
+  if (!title.toLowerCase().includes(club.display.toLowerCase()) || !/J\.?LEAGUE/i.test(title)) return [];
+
+  const monthIndex: Record<string, number> = {
+    jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+    jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+  };
+  const rows: AnyObj[] = [];
+  const usedDates = new Set<string>();
+  for (const rawRow of html.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
+    const cells = Array.from(
+      rawRow[1].matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi),
+      (match) => j2OfficialCellText(match[1]),
+    );
+    if (cells.length < 6 || cells[5].replace(/\s/g, "").toUpperCase() !== "J2") continue;
+    const dateMatch = cells[0].match(/(?:^|\s)(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(20\d{2})\b/i);
+    const scoreMatch = cells[4].match(/\b([WDL])\s+(\d{1,2})\s*[-–]\s*(\d{1,2})\b/i);
+    if (!dateMatch || !scoreMatch || !cells[2] || !cells[3]) continue;
+    const day = Number(dateMatch[1]), month = monthIndex[dateMatch[2].toLowerCase()];
+    const year = Number(dateMatch[3]);
+    if (!month || day < 1 || day > 31 || year < 2020) continue;
+    const d = new Date(Date.UTC(year, month - 1, day));
+    if (d.getUTCDate() !== day || d.getUTCMonth() !== month - 1) continue;
+    const playedDate = [String(year), String(month).padStart(2, "0"), String(day).padStart(2, "0")].join("-");
+    if (playedDate >= selectedDate || usedDates.has(playedDate)) continue;
+    const scored = Number(scoreMatch[2]), conceded = Number(scoreMatch[3]);
+    const outcome = scoreMatch[1].toUpperCase();
+    if ((outcome === "W" && scored <= conceded) ||
+        (outcome === "L" && scored >= conceded) ||
+        (outcome === "D" && scored !== conceded)) continue;
+    // The official club page lists its own home stadium (JIT/CFS).
+    // Non-home venues are treated as away for those strictly scoped teams.
+    const venue = club.homeVenue.test(cells[3]) ? "home" : "away";
+    const kick = /^\d{1,2}:\d{2}$/.test(cells[1]) ? cells[1] : "12:00";
+    const gameDateTime = playedDate + "T" + kick + ":00+09:00";
+    const opponent = cells[2];
+    usedDates.add(playedDate);
+    rows.push({
+      gameId: null, date: gameDateTime, startTime: gameDateTime,
+      home: venue === "home" ? club.display : opponent,
+      away: venue === "home" ? opponent : club.display,
+      homeScore: venue === "home" ? scored : conceded,
+      awayScore: venue === "home" ? conceded : scored,
+      score: {
+        home: venue === "home" ? scored : conceded,
+        away: venue === "home" ? conceded : scored,
+      },
+      teamSide: venue, venue, teamName: club.display,
+      source: "JLEAGUE_OFFICIAL_CLUB_RECORD", competition: "J2",
+      originalVenue: cells[3],
+    });
+  }
+  return rows.sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 20);
+}
+
+async function collectJ2OfficialClubRecent(selectedDateKey: string, team: string) {
+  const teamCode = normalizedFootballName(team, "J2_JP");
+  const club = teamCode ? J2_OFFICIAL_CLUB_PROFILES[teamCode] : null;
+  if (!club) return null;
+  const url = "https://www.jleague.jp/en/club/" + club.slug + "/";
+  const response = await fetch(url, {
+    cache: "no-store",
+    headers: { accept: "text/html", "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.12.20" },
+    signal: AbortSignal.timeout(6500),
+  });
+  if (!response.ok) return null;
+  const html = await response.text();
+  if (html.length > 2_000_000) return null;
+  const fixtures = parseJ2OfficialClubRecord(html, club, isoDate(selectedDateKey));
+  if (!fixtures.length) return null;
+  const firstFive = fixtures.slice(0, 5);
+  let wins = 0, draws = 0, losses = 0, scored = 0, conceded = 0;
+  for (const row of firstFive) {
+    const isHome = row.teamSide === "home";
+    const forGoals = isHome ? row.homeScore : row.awayScore;
+    const againstGoals = isHome ? row.awayScore : row.homeScore;
+    scored += forGoals;
+    conceded += againstGoals;
+    if (forGoals > againstGoals) wins++;
+    else if (forGoals < againstGoals) losses++;
+    else draws++;
+  }
+  return {
+    teamName: team,
+    form: { played: firstFive.length, wins, draws, losses, scored, conceded },
+    fixtures,
+    source: "JLEAGUE_OFFICIAL_CLUB_RECORD",
+  };
+}
+
 async function collectFootballRecentSummary(date: string, home: string, away: string, adapterId: FootballAdapterId) {
   const fromDate = isoDayOffset(date, -40);
   const toDate = isoDayOffset(date, -1);
@@ -1636,10 +1771,38 @@ async function collectFootballRecentSummary(date: string, home: string, away: st
     footballTeamMatches(String(g?.homeTeamName ?? g?.homeTeamShortName ?? g?.home ?? ""), team, adapterId) ||
     footballTeamMatches(String(g?.awayTeamName ?? g?.awayTeamShortName ?? g?.away ?? ""), team, adapterId)
   );
-  const recentSummary = {
+  let recentSummary = {
     home: summarizeFootballScheduleTeam(teamGames(home), home, adapterId),
     away: summarizeFootballScheduleTeam(teamGames(away), away, adapterId),
   };
+  // Independently fill only the sides actually missing from the Naver feed.
+  const officialJ2 = {
+    attempted: false,
+    homeSource: null as string | null,
+    awaySource: null as string | null,
+    homePlayed: 0,
+    awayPlayed: 0,
+  };
+  if (adapterId === "J2_JP" &&
+      (recentSummary.home.form.played === 0 || recentSummary.away.form.played === 0)) {
+    officialJ2.attempted = true;
+    const [officialHome, officialAway] = await Promise.all([
+      recentSummary.home.form.played === 0
+        ? collectJ2OfficialClubRecent(date, home).catch(() => null) : Promise.resolve(null),
+      recentSummary.away.form.played === 0
+        ? collectJ2OfficialClubRecent(date, away).catch(() => null) : Promise.resolve(null),
+    ]);
+    if (officialHome?.form?.played > 0) {
+      recentSummary.home = officialHome;
+      officialJ2.homeSource = officialHome.source;
+      officialJ2.homePlayed = officialHome.form.played;
+    }
+    if (officialAway?.form?.played > 0) {
+      recentSummary.away = officialAway;
+      officialJ2.awaySource = officialAway.source;
+      officialJ2.awayPlayed = officialAway.form.played;
+    }
+  }
   return {
     recentSummary,
     endpoint: endpointCandidates[0] ?? null,
@@ -1648,7 +1811,8 @@ async function collectFootballRecentSummary(date: string, home: string, away: st
     scheduleGames: rows.length,
     attempts,
     narrowWindowRetry,
-    build: "V13.12.19_J2_RECENT_WINDOWS",
+    officialJ2,
+    build: "V13.12.20_J2_OFFICIAL_RECENT_FALLBACK",
   };
 }
 function summarizeNaverScheduleTeam(rows: AnyObj[], teamName: string) {
