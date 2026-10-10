@@ -1,4 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
+// V13.12.20 J2 OFFICIAL RECENT: display independent J.LEAGUE club record provenance; do not imply Naver gameId or lineup READY.
 // V13.12.19 J2 KOFU/TOCHIGI SOURCE: verified Japanese team aliases + bounded historical Naver retry diagnostic; frozen PRE/OOS unchanged.
 // V13.12.17 FOOTBALL RECENT INDEPENDENT: current fixture/gameId failure no longer erases independently available recent-form data; RECENT_ONLY partial keeps real form while lineup stays empty. Urawa Naver aliases hardened.
 // V13.12.16 K/J RESOLVER ISOLATION: K/J football never accepts a Naver game by kickoff time alone; server/client both verify requested home/away identity, and recent-form collection merges all domestic schedule candidates before team filtering.
@@ -29140,6 +29141,12 @@ export default function Home() {
                             </div>
                             <div className="small">당일 일정 조회 · {attemptSummary(resolverAttempts)}</div>
                             <div className="small">과거 Form 조회 · {attemptSummary(recentAttempts)}</div>
+                            <div className="small">
+                              J리그 공식 구단기록 fallback · {recent?.officialJ2?.attempted ? "시도" : "미시도"}
+                              {" · "}홈 {recent?.officialJ2?.homePlayed ?? 0}경기
+                              {" / "}원정 {recent?.officialJ2?.awayPlayed ?? 0}경기
+                              {" · "}출처 {recent?.officialJ2?.homeSource || recent?.officialJ2?.awaySource || "미확보"}
+                            </div>
                             {candidates.length > 0 && (
                               <div className="small">
                                 당일 일정 예시 · {candidates.slice(0, 6).map((row: any) => `${row.home ?? "?"} - ${row.away ?? "?"}`).join(" / ")}
@@ -29147,7 +29154,7 @@ export default function Home() {
                             )}
                             {!live?.ok && live?.error && <div className="small">Naver 사유 · {String(live.error)}</div>}
                             <div className="small">
-                              실제 완료·점수·홈/원정 팀이 확인된 과거 경기만 Form에 사용합니다. 소스에서 데이터를 못 찾으면 PRIOR ONLY를 유지하며 PRE λ는 재작성하지 않습니다.
+                              Naver에 없을 경우 J리그 공식 구단기록(고후·도치기 시티)을 별도로 확인합니다. 기존 Naver gameId/현재 XI 매칭에는 사용하지 않습니다. 소스에서 실제 과거 점수를 못 찾으면 PRIOR ONLY를 유지하며 PRE λ는 재작성하지 않습니다.
                             </div>
                           </div>
                         );
