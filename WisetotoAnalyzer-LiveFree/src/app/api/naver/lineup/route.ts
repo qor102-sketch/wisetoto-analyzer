@@ -1792,12 +1792,12 @@ async function collectFootballRecentSummary(date: string, home: string, away: st
       recentSummary.away.form.played === 0
         ? collectJ2OfficialClubRecent(date, away).catch(() => null) : Promise.resolve(null),
     ]);
-    if (officialHome?.form?.played > 0) {
+    if (officialHome !== null && officialHome.form.played > 0) {
       recentSummary.home = officialHome;
       officialJ2.homeSource = officialHome.source;
       officialJ2.homePlayed = officialHome.form.played;
     }
-    if (officialAway?.form?.played > 0) {
+    if (officialAway !== null && officialAway.form.played > 0) {
       recentSummary.away = officialAway;
       officialJ2.awaySource = officialAway.source;
       officialJ2.awayPlayed = officialAway.form.played;
