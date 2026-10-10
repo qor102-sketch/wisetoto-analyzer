@@ -3957,6 +3957,46 @@ export async function GET(request: Request) {
     if (league !== "FOOTBALL" && detectedCategory === "kbo") league = "KBO";
     if (league !== "FOOTBALL" && detectedCategory === "mlb") league = "MLB";
 
+    let footballIdentityAudit: AnyObj | null = null;
+    if (league === "FOOTBALL") {
+      const resolvedHome = String(
+        game?.homeTeamName ??
+        game?.homeTeamShortName ??
+        resolverDebug?.selectedGame?.homeTeamName ??
+        ""
+      ).trim();
+      const resolvedAway = String(
+        game?.awayTeamName ??
+        game?.awayTeamShortName ??
+        resolverDebug?.selectedGame?.awayTeamName ??
+        ""
+      ).trim();
+      const homeMatch = footballTeamMatches(resolvedHome, home, footballAdapter);
+      const awayMatch = footballTeamMatches(resolvedAway, away, footballAdapter);
+      footballIdentityAudit = {
+        valid: homeMatch && awayMatch,
+        requestedHome: home,
+        requestedAway: away,
+        resolvedHome,
+        resolvedAway,
+        adapterId: footballAdapter,
+      };
+      if (!footballIdentityAudit.valid) {
+        return Response.json({
+          ok: false,
+          error: "네이버 축구 경기 identity 검증 실패 · 다른 경기 gameId 사용 차단",
+          debug: {
+            date,
+            requestedLeague,
+            footballAdapter,
+            gameId,
+            identity: footballIdentityAudit,
+            resolver: resolverDebug,
+          },
+        }, { status: 409 });
+      }
+    }
+
     let previewData: AnyObj | null = null;
     let previewEndpoint: string | null = null;
     let previewStatus: number | null = null;
@@ -4305,6 +4345,7 @@ export async function GET(request: Request) {
           String(game?.awayTeamName ?? away),
         ),
       } : null,
+      footballIdentity: footballIdentityAudit,
       footballPlayers: league === "FOOTBALL" ? {
         ok: footballPlayers.length > 0,
         status: footballPlayersStatus,
