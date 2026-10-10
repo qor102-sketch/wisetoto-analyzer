@@ -1,3 +1,5 @@
+// DEPLOY_MARKER_V13_12_19_J2_TEAM_IDENTITY_AND_RECENT_WINDOW_20261010
+// Resolve Kofu/Tochigi City Japanese aliases and retry 40-day J2 history in bounded windows only when actual completed samples are missing. No result or model changes.
 // DEPLOY_MARKER_V13_12_17_FOOTBALL_RECENT_INDEPENDENT_20261010
 // Current-fixture gameId failure must not erase independently available recent-form data. Football may return RECENT_ONLY partial safely with zero lineup.
 // DEPLOY_MARKER_V13_12_16_KJ_RESOLVER_ISOLATION_20261010
@@ -121,7 +123,7 @@ const FOOTBALL_ADAPTER_ALIASES: Record<FootballAdapterId, Record<string, string[
     IWAKI_FC: ["이와키fc", "이와키 FC", "iwaki fc"],
     JEF_CHIBA: ["제프유나이티드지바", "제프 지바", "jef united chiba", "jef chiba"],
     RB_OMIYA: ["rb오미야아르디자", "RB 오미야 아르디자", "오미야", "rb omiya ardija", "omiya ardija"],
-    VENTFORET_KOFU: ["반포레고후", "반포레 고후", "고후", "ventforet kofu"],
+    VENTFORET_KOFU: ["반포레고후", "반포레 고후", "고후", "ventforet kofu", "ヴァンフォーレ甲府", "甲府"],
     JUBILO_IWATA: ["주빌로이와타", "주빌로 이와타", "이와타", "jubilo iwata"],
     FUJIEDA: ["후지에다myfc", "후지에다 MYFC", "후지에다", "fujieda myfc"],
     RENOFA_YAMAGUCHI: ["레노파야마구치", "레노파 야마구치", "야마구치", "renofa yamaguchi"],
@@ -132,7 +134,8 @@ const FOOTBALL_ADAPTER_ALIASES: Record<FootballAdapterId, Record<string, string[
     OITA_TRINITA: ["오이타트리니타", "오이타 트리니타", "오이타", "oita trinita"],
     SAGAN_TOSU: ["사간도스", "사간 도스", "도스", "sagan tosu"],
     VANRAURE_HACHINOHE: ["반라우레하치노헤", "반라우레 하치노헤", "하치노헤", "vanraure hachinohe"],
-    TOCHIGI_CITY: ["도치기시티", "도치기 시티", "tochigi city"],
+    // J2 Tochigi City is NOT Tochigi SC. Do not add broad "도치기"/"栃木" aliases.
+    TOCHIGI_CITY: ["도치기시티", "도치기 시티", "도치기시티fc", "도치기 시티FC", "도치기C", "tochigi city", "tochigi city fc", "栃木シティ", "栃木シティFC", "栃木Ｃ", "栃木C"],
     KATALLER_TOYAMA: ["카타레르도야마", "카타레르 도야마", "도야마", "kataller toyama"],
     FC_IMABARI: ["fc이마바리", "FC 이마바리", "이마바리", "fc imabari"],
     TEGEVAJARO_MIYAZAKI: ["테게바자로미야자키", "테게바자로 미야자키", "미야자키", "tegevajaro miyazaki"],
@@ -1569,6 +1572,61 @@ async function collectFootballRecentSummary(date: string, home: string, away: st
     });
   }
 
+  /*
+   * V13.12.19 J2 source recovery: some schedule responses cover only a
+   * shorter window than the 40-day form query. Retry two strictly historical
+   * 20-day windows ONLY if a side still has no verified completed matches.
+   * Identity/score/completion checks below stay unchanged; do not import the
+   * current kickoff date or fabricate recent form.
+   */
+  const hasVerifiedRecentFor = (team: string) =>
+    Array.from(byId.values()).some((row) => {
+      const rowHome = String(row?.homeTeamName ?? row?.homeTeamShortName ?? row?.home ?? "");
+      const rowAway = String(row?.awayTeamName ?? row?.awayTeamShortName ?? row?.away ?? "");
+      return (footballTeamMatches(rowHome, team, adapterId) || footballTeamMatches(rowAway, team, adapterId)) &&
+        naverFootballGameCompleted(row) &&
+        naverScheduleFinalScore(row) !== null;
+    });
+  let narrowWindowRetry = false;
+  if (adapterId === "J2_JP" && (!hasVerifiedRecentFor(home) || !hasVerifiedRecentFor(away))) {
+    narrowWindowRetry = true;
+    const windows = [
+      { from: isoDayOffset(date, -40), to: isoDayOffset(date, -21) },
+      { from: isoDayOffset(date, -20), to: isoDayOffset(date, -1) },
+    ];
+    const narrowEndpoints = windows.flatMap((span) => [
+      ...categories.map((categoryId) =>
+        `${NAVER_API}?fields=${fields}&upperCategoryId=${upperCategoryId}&categoryId=${encodeURIComponent(categoryId)}&fromDate=${span.from}&toDate=${span.to}&roundCodes=&size=500`
+      ),
+      `${NAVER_API}?fields=${fields}&upperCategoryId=${upperCategoryId}&fromDate=${span.from}&toDate=${span.to}&roundCodes=&size=500`,
+      `${NAVER_API}?fields=${fields}&upperCategoryId=wfootball&fromDate=${span.from}&toDate=${span.to}&roundCodes=&size=500`,
+    ]).filter((v, i, all) => all.indexOf(v) === i);
+    const retries = await Promise.all(narrowEndpoints.map(async (endpoint) => ({
+      endpoint,
+      result: await fetchNaverJsonCached(
+        endpoint,
+        `https://m.sports.naver.com/kfootball/schedule/index?category=${encodeURIComponent(categories[0] ?? "")}&date=${encodeURIComponent(date)}`,
+        true,
+      ),
+    })));
+    for (const { endpoint, result } of retries) {
+      const direct = Array.isArray(result?.payload?.result?.games) ? result.payload.result.games : [];
+      const discovered = allObjects(result?.payload ?? {});
+      let accepted = 0;
+      for (const row of [...direct, ...discovered]) {
+        const gameId = String(row?.gameId ?? row?.game_id ?? "").trim();
+        if (!gameId || byId.has(gameId)) continue;
+        const rowDate = dateKey(String(row?.gameDateTime ?? row?.gameDate ?? row?.startTime ?? gameId.slice(0, 8) ?? ""));
+        if (!rowDate || rowDate >= date) continue;
+        byId.set(gameId, row);
+        accepted += 1;
+      }
+      anyCacheHit = anyCacheHit || Boolean(result?.cacheHit);
+      if (bestStatus === null || result?.status === 200) bestStatus = result?.status ?? bestStatus;
+      attempts.push({ endpoint, status: result?.status ?? null, scheduleCount: accepted, cacheHit: Boolean(result?.cacheHit) });
+    }
+  }
+
   const rows = Array.from(byId.values()).sort((a, b) =>
     String(b?.gameDateTime ?? b?.gameDate ?? b?.startTime ?? "").localeCompare(
       String(a?.gameDateTime ?? a?.gameDate ?? a?.startTime ?? "")
@@ -1589,7 +1647,8 @@ async function collectFootballRecentSummary(date: string, home: string, away: st
     cacheHit: anyCacheHit,
     scheduleGames: rows.length,
     attempts,
-    build: "V13.12.16_KJ_RECENT_MERGE",
+    narrowWindowRetry,
+    build: "V13.12.19_J2_RECENT_WINDOWS",
   };
 }
 function summarizeNaverScheduleTeam(rows: AnyObj[], teamName: string) {

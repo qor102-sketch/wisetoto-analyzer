@@ -1,4 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
+// V13.12.19 J2 KOFU/TOCHIGI SOURCE: verified Japanese team aliases + bounded historical Naver retry diagnostic; frozen PRE/OOS unchanged.
 // V13.12.17 FOOTBALL RECENT INDEPENDENT: current fixture/gameId failure no longer erases independently available recent-form data; RECENT_ONLY partial keeps real form while lineup stays empty. Urawa Naver aliases hardened.
 // V13.12.16 K/J RESOLVER ISOLATION: K/J football never accepts a Naver game by kickoff time alone; server/client both verify requested home/away identity, and recent-form collection merges all domestic schedule candidates before team filtering.
 // V13.12.15 K/J FOOTBALL LIVE CONNECTIVITY: server selected-mode now consumes full team aliases and dedicated K League 1/2 + J1/J2 Naver adapters; preserve V13.12.14 PRIOR ONLY only as a failure-safe fallback.
@@ -3576,6 +3577,7 @@ const SPORTS_API_TEAM_ALIASES: Record<string, string> = {
   "몬테디오야마가타": "Montedio Yamagata",
   "이와키fc": "Iwaki FC",
   "도치기시티": "Tochigi City",
+  "도치기시티fc": "Tochigi City",
   "rb오미야아르디자": "RB Omiya Ardija",
   "요코하마fc": "Yokohama FC",
   "반포레고후": "Ventforet Kofu",
@@ -3865,7 +3867,7 @@ const SPORTS_TEAM_ALIAS_GROUPS: string[][] = [
   ["자스파 군마","더스파 군마","군마","Thespakusatsu Gunma","Thespa Gunma"],
   ["제프 유나이티드 지바","제프 지바","지바","JEF United Chiba","JEF Chiba"],
   ["오미야 아르디자","RB 오미야 아르디자","오미야","RB Omiya Ardija","Omiya Ardija"],
-  ["반포레 고후","고후","Ventforet Kofu"],
+  ["반포레 고후","고후","Ventforet Kofu","ヴァンフォーレ甲府","甲府"],
   ["주빌로 이와타","이와타","Jubilo Iwata"],
   ["후지에다 MYFC","후지에다","Fujieda MYFC"],
   ["레노파 야마구치","야마구치","Renofa Yamaguchi"],
@@ -3877,7 +3879,8 @@ const SPORTS_TEAM_ALIAS_GROUPS: string[][] = [
   ["사간 도스","도스","Sagan Tosu"],
   // V13.12.12 · 2026 J1/J2 current roster aliases not covered above
   ["반라우레 하치노헤","반라레 하치노헤","하치노헤","Vanraure Hachinohe"],
-  ["도치기 시티","도치기CITY","Tochigi City","TOCHIGI CITY"],
+  // Tochigi City and Tochigi SC are different clubs. Never merge by the bare "도치기"/"栃木" token.
+  ["도치기 시티","도치기CITY","도치기 시티FC","도치기C","Tochigi City","TOCHIGI CITY","Tochigi City FC","栃木シティ","栃木シティFC","栃木Ｃ","栃木C"],
   ["카타레르 도야마","카탈레르 도야마","도야마","Kataller Toyama"],
   ["FC 이마바리","이마바리","FC Imabari"],
   ["테게바자로 미야자키","미야자키","Tegevajaro Miyazaki"],
@@ -29117,6 +29120,38 @@ export default function Home() {
                           <div className="small">실전 READY 표본을 먼저 축적한 뒤 포지션별 영향 검증</div>
                         </div>
                       </div>
+                      {currentDomesticSoccerAudit?.group === "JLEAGUE2" && (() => {
+                        const live = matched?.naverTodayLineup;
+                        const resolver = live?.debug?.resolver ?? null;
+                        const recent = live?.footballRecent ?? live?.debug?.recent ?? null;
+                        const resolverAttempts = Array.isArray(resolver?.attempts) ? resolver.attempts : [];
+                        const recentAttempts = Array.isArray(recent?.attempts) ? recent.attempts : [];
+                        const attemptSummary = (attempts: any[]) => attempts.length
+                          ? attempts.map((attempt: any, index: number) =>
+                              `#${index + 1} HTTP ${attempt?.status ?? "-"} / ${attempt?.scheduleCount ?? 0}경기`
+                            ).join(" · ")
+                          : "시도 상세 없음";
+                        const candidates = Array.isArray(resolver?.candidateTeams) ? resolver.candidateTeams : [];
+                        return (
+                          <div className="notice" style={{ margin: "8px 0" }}>
+                            <b>V13.12.19 J2 연결 진단</b> · Naver {live?.ok ? live?.recentOnly ? "RECENT_ONLY" : "매칭 성공" : "미매칭/오류"}
+                            <div className="small" style={{ marginTop: 4 }}>
+                              gameId {live?.gameId ?? "-"} · 일정 후보 {resolver?.scheduleCount ?? "-"}경기 · 팀일치 후보 {resolver?.candidateCount ?? "-"}경기 · 최근 일정 {recent?.scheduleGames ?? "-"}경기 · 20일 구간 재조회 {recent?.narrowWindowRetry ? "실행" : "미실행"}
+                            </div>
+                            <div className="small">당일 일정 조회 · {attemptSummary(resolverAttempts)}</div>
+                            <div className="small">과거 Form 조회 · {attemptSummary(recentAttempts)}</div>
+                            {candidates.length > 0 && (
+                              <div className="small">
+                                당일 일정 예시 · {candidates.slice(0, 6).map((row: any) => `${row.home ?? "?"} - ${row.away ?? "?"}`).join(" / ")}
+                              </div>
+                            )}
+                            {!live?.ok && live?.error && <div className="small">Naver 사유 · {String(live.error)}</div>}
+                            <div className="small">
+                              실제 완료·점수·홈/원정 팀이 확인된 과거 경기만 Form에 사용합니다. 소스에서 데이터를 못 찾으면 PRIOR ONLY를 유지하며 PRE λ는 재작성하지 않습니다.
+                            </div>
+                          </div>
+                        );
+                      })()}
                       {selectedFootballTrackerState && (
                         <div className="notice" style={{ margin: "8px 0" }}>
                           <b>V13.12.18 현재 경기 검증 흐름</b> · {selectedFootballTrackerState.stage === "WAITING_PRE"
