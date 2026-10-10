@@ -29177,7 +29177,11 @@ export default function Home() {
                         return (
                           <div style={{ marginTop: 8 }}>
                             <div className="notice" style={{ margin: "8px 0" }}>
-                              <b>LINEUP {lineupReady ? "READY ✓" : "PARTIAL"}</b> · 실제 선발 {homeLineup.length + awayLineup.length}/22 · playerId / 포지션 / 등번호 / formationPlace를 검증용으로 고정 저장합니다. 모델 반영 OFF.
+                              <b>{lineupReady
+                                ? selectedFootballTrackerState?.record?.footballLineup?.stage === "LINEUP_READY"
+                                  ? "LINEUP READY ✓ (PRE 검증잠금 완료)"
+                                  : "LIVE XI READY ✓ (PRE LINEUP 미잠금)"
+                                : "LIVE XI PARTIAL"}</b> · 실제 선발 {homeLineup.length + awayLineup.length}/22 · playerId / 포지션 / 등번호 / formationPlace를 검증용으로 고정 저장합니다. 모델 반영 OFF.
                             </div>
                             <div style={{ overflowX: "auto", border: "1px solid #e3e9f2", borderRadius: 9 }}>
                               <div style={{ display: "grid", gridTemplateColumns: "60px 55px minmax(120px,1fr) 55px 60px 90px", gap: 6, padding: "6px 8px", minWidth: 560, background: "#f5f8fc", fontSize: 9, fontWeight: 900 }}>
