@@ -1,3 +1,5 @@
+// DEPLOY_MARKER_V13_12_26_J2_SHONAN_NIIGATA_OFFICIAL_20261011
+// Extend verified J2 club Form only, do not rewrite the 17:28 frozen PRE or backfill current fixture/XI.
 // DEPLOY_MARKER_V13_12_25_J1_MITO_J2_IWAKI_AKITA_20261011
 // Restore independently verified pregame J1/J2 form; preserve frozen PRE, strict gameId identity and XI verification.
 // DEPLOY_MARKER_V13_12_24_J1_J2_KLEAGUE_FOOTBALL_20261011
@@ -127,6 +129,8 @@ const FOOTBALL_ADAPTER_ALIASES: Record<FootballAdapterId, Record<string, string[
     AVISPA_FUKUOKA: ["아비스파후쿠오카", "아비스파 후쿠오카", "후쿠오카", "avispa fukuoka"],
   },
   J2_JP: {
+    SHONAN_BELLMARE: ["쇼난벨마레", "쇼난 벨마레", "쇼난", "shonan bellmare"],
+    ALBIREX_NIIGATA: ["알비렉스니가타", "알비렉스 니가타", "니가타", "albirex niigata"],
     CONSADOLE_SAPPORO: ["콘사도레삿포로", "홋카이도 콘사도레 삿포로", "삿포로", "consadole sapporo", "hokkaido consadole sapporo"],
     VEGALTA_SENDAI: ["베갈타센다이", "베갈타 센다이", "센다이", "vegalta sendai"],
     BLAUBLITZ_AKITA: ["블라우블리츠아키타", "블라우블리츠 아키타", "아키타", "blaublitz akita"],
@@ -1632,6 +1636,19 @@ const J2_OFFICIAL_CLUB_PROFILES: Record<string, { slug: string; display: string;
     slug: "akita",
     display: "Blaublitz Akita",
     homeVenue: /^(?:SOYU\.S|SOYU STADIUM)$/i,
+    competition: "J2",
+  },
+  // 2026/27 official J2 club records: preserve exact separate J2 identities.
+  SHONAN_BELLMARE: {
+    slug: "shonan",
+    display: "Shonan Bellmare",
+    homeVenue: /^(?:LemonSHiratsuka|Lemon Gas Stadium Hiratsuka)$/i,
+    competition: "J2",
+  },
+  ALBIREX_NIIGATA: {
+    slug: "niigata",
+    display: "Albirex Niigata",
+    homeVenue: /^(?:DENKA BIG SWAN|DENKA BIG SWAN STADIUM)$/i,
     competition: "J2",
   },
 };
