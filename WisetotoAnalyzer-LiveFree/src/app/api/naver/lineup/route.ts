@@ -1,3 +1,5 @@
+// DEPLOY_MARKER_V13_12_23_J2_YAMAGATA_SENDAI_OFFICIAL_20261011
+// Actual 2026/27 J2 fixture is not in Naver J2 schedules (HTTP 400). Resolve verified historic J2 Form only, without manufacturing a Naver gameId or rewriting frozen PRE.
 // DEPLOY_MARKER_V13_12_21_MLS_RECENT_ESPN_INDEPENDENT_20261011
 // ESPN usa.1 scoreboard verified completed MLS matches only; keep source-specific XI/gameId, frozen PRE, prior and Poisson unchanged.
 // DEPLOY_MARKER_V13_12_20_J2_OFFICIAL_CLUB_RECORD_RECENT_20261010
@@ -1546,6 +1548,17 @@ const J2_OFFICIAL_CLUB_PROFILES: Record<string, { slug: string; display: string;
     display: "TOCHIGI CITY",
     homeVenue: /^(?:CFS|CITY\s*FOOTBALL\s*STATION)$/i,
   },
+  // Verified official J.LEAGUE 2026/27 J2 club records: ND.S / Yurtec.S.
+  MONTEDIO_YAMAGATA: {
+    slug: "yamagata",
+    display: "Montedio Yamagata",
+    homeVenue: /^(?:ND\.S|NDsoft\s*Stadium(?:\s*Yamagata)?)$/i,
+  },
+  VEGALTA_SENDAI: {
+    slug: "sendai",
+    display: "Vegalta Sendai",
+    homeVenue: /^(?:Yurtec\.S|Yurtec\s*Stadium(?:\s*Sendai)?)$/i,
+  },
 };
 
 function j2OfficialCellText(value: string): string {
@@ -1603,8 +1616,8 @@ function parseJ2OfficialClubRecord(
     if ((outcome === "W" && scored <= conceded) ||
         (outcome === "L" && scored >= conceded) ||
         (outcome === "D" && scored !== conceded)) continue;
-    // The official club page lists its own home stadium (JIT/CFS).
-    // Non-home venues are treated as away for those strictly scoped teams.
+    // The club record lists its actual home stadium (JIT/CFS/ND.S/Yurtec.S).
+    // Non-home venues are away for these exact, explicitly scoped clubs.
     const venue = club.homeVenue.test(cells[3]) ? "home" : "away";
     const kick = /^\d{1,2}:\d{2}$/.test(cells[1]) ? cells[1] : "12:00";
     const gameDateTime = playedDate + "T" + kick + ":00+09:00";
@@ -1635,7 +1648,7 @@ async function collectJ2OfficialClubRecent(selectedDateKey: string, team: string
   const url = "https://www.jleague.jp/en/club/" + club.slug + "/";
   const response = await fetch(url, {
     cache: "no-store",
-    headers: { accept: "text/html", "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.12.20" },
+    headers: { accept: "text/html", "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.12.23" },
     signal: AbortSignal.timeout(6500),
   });
   if (!response.ok) return null;
@@ -1894,6 +1907,8 @@ async function collectFootballRecentSummary(date: string, home: string, away: st
   // Independently fill only the sides actually missing from the Naver feed.
   const officialJ2 = {
     attempted: false,
+    homeProfileAvailable: Boolean(J2_OFFICIAL_CLUB_PROFILES[normalizedFootballName(home, adapterId) ?? ""]),
+    awayProfileAvailable: Boolean(J2_OFFICIAL_CLUB_PROFILES[normalizedFootballName(away, adapterId) ?? ""]),
     homeSource: null as string | null,
     awaySource: null as string | null,
     homePlayed: 0,
