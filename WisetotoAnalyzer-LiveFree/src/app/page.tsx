@@ -3836,12 +3836,12 @@ const SPORTS_TEAM_ALIAS_GROUPS: string[][] = [
   ["인터 마이애미","Inter Miami CF","Inter Miami"],
   ["LA 갤럭시","LA Galaxy"],
   ["시애틀 사운더스","Seattle Sounders FC","Seattle Sounders"],
-  ["미네소타 유나이티드FC","미네소타 유나이티드","Minnesota United FC","Minnesota United"],
-  ["휴스턴 다이너모FC","휴스턴 다이너모","Houston Dynamo FC","Houston Dynamo"],
-  ["스포팅 캔자스시티","스포팅캔자스시티","Sporting Kansas City","Sporting KC"],
-  ["포틀랜드 팀버스","포틀랜드팀버스","Portland Timbers"],
-  ["오스틴FC","오스틴 FC","Austin FC"],
-  ["내슈빌SC","내슈빌 SC","Nashville SC"],
+  ["미네소타 유나이티드FC","미네소타 유나이티드","미네소타","Minnesota United FC","Minnesota United"],
+  ["휴스턴 다이너모FC","휴스턴 다이너모","휴스턴","Houston Dynamo FC","Houston Dynamo"],
+  ["스포팅 캔자스시티","스포팅캔자스시티","스포팅 KC","Sporting Kansas City","Sporting KC"],
+  ["포틀랜드 팀버스","포틀랜드팀버스","포틀랜드","Portland Timbers"],
+  ["오스틴FC","오스틴 FC","오스틴","Austin FC"],
+  ["내슈빌SC","내슈빌 SC","내슈빌","내쉬빌","Nashville SC"],
 
   // V13.8.2 · 일본 축구 J1/J2 Betman 한글명 -> SportsAPI 영문 팀명
   ["미토 홀리호크","미토홀리호크","Mito HollyHock","Mito Hollyhock"],
