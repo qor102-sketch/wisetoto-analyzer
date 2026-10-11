@@ -1974,7 +1974,7 @@ async function collectFootballRecentSummary(date: string, home: string, away: st
     attempts,
     narrowWindowRetry,
     officialJ2,
-    build: "V13.12.21_MLS_RECENT_INDEPENDENT",
+    build: "V13.12.23_J2_OFFICIAL_YAMAGATA_SENDAI",
   };
 }
 function summarizeNaverScheduleTeam(rows: AnyObj[], teamName: string) {
@@ -4304,10 +4304,13 @@ export async function GET(request: Request) {
             ok: true,
             partial: true,
             recentOnly: true,
-            source: (footballRecentOnly as AnyObj)?.espnMls?.homeSource ||
-              (footballRecentOnly as AnyObj)?.espnMls?.awaySource
-              ? "ESPN_MLS_COMPLETED_SCOREBOARD"
-              : "sports.naver.com",
+            source: (footballRecentOnly as AnyObj)?.officialJ2?.homeSource ||
+              (footballRecentOnly as AnyObj)?.officialJ2?.awaySource
+              ? "JLEAGUE_OFFICIAL_CLUB_RECORD"
+              : (footballRecentOnly as AnyObj)?.espnMls?.homeSource ||
+                  (footballRecentOnly as AnyObj)?.espnMls?.awaySource
+                ? "ESPN_MLS_COMPLETED_SCOREBOARD"
+                : "sports.naver.com",
             league: "FOOTBALL",
             categoryId: null,
             capturedAt: Date.now(),
