@@ -1492,7 +1492,7 @@ function summarizeFootballScheduleTeam(rows: AnyObj[], teamName: string, adapter
       teamSide: isHome ? "home" : "away",
       venue: isHome ? "home" : "away",
       teamName,
-      source: "NAVER_FOOTBALL_SCHEDULE",
+      source: String(g?.source ?? "NAVER_FOOTBALL_SCHEDULE"),
     });
   }
   return {
