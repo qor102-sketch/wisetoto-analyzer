@@ -4283,7 +4283,8 @@ export async function GET(request: Request) {
             ok: true,
             partial: true,
             recentOnly: true,
-            source: footballRecentOnly?.espnMls?.homeSource || footballRecentOnly?.espnMls?.awaySource
+            source: (footballRecentOnly as AnyObj)?.espnMls?.homeSource ||
+              (footballRecentOnly as AnyObj)?.espnMls?.awaySource
               ? "ESPN_MLS_COMPLETED_SCOREBOARD"
               : "sports.naver.com",
             league: "FOOTBALL",
