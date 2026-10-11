@@ -148,12 +148,12 @@ const FOOTBALL_ADAPTER_ALIASES: Record<FootballAdapterId, Record<string, string[
   MLS_US: {
     REAL_SALT_LAKE: ["레알솔트레이크", "리얼솔트레이크", "레알솔트레이크fc", "realsaltlake", "realsaltlakefc", "rsl"],
     LAFC: ["lafc", "la fc", "로스앤젤레스fc", "losangelesfc", "losangelesfootballclub"],
-    MINNESOTA_UNITED: ["미네소타유나이티드fc", "미네소타유나이티드", "미네소타 유나이티드FC", "minnesota united fc", "minnesota united"],
-    HOUSTON_DYNAMO: ["휴스턴다이너모fc", "휴스턴다이너모", "휴스턴 다이너모FC", "houston dynamo fc", "houston dynamo"],
-    SPORTING_KANSAS_CITY: ["스포팅캔자스시티", "스포팅 캔자스시티", "sporting kansas city", "sporting kc"],
-    PORTLAND_TIMBERS: ["포틀랜드팀버스", "포틀랜드 팀버스", "portland timbers"],
-    AUSTIN_FC: ["오스틴fc", "오스틴 FC", "austin fc"],
-    NASHVILLE_SC: ["내슈빌sc", "내슈빌 SC", "nashville sc", "nashville soccer club"],
+    MINNESOTA_UNITED: ["미네소타유나이티드fc", "미네소타유나이티드", "미네소타 유나이티드FC", "미네소타", "minnesota united fc", "minnesota united"],
+    HOUSTON_DYNAMO: ["휴스턴다이너모fc", "휴스턴다이너모", "휴스턴 다이너모FC", "휴스턴", "houston dynamo fc", "houston dynamo"],
+    SPORTING_KANSAS_CITY: ["스포팅캔자스시티", "스포팅 캔자스시티", "스포팅 KC", "스포팅KC", "sporting kansas city", "sporting kc"],
+    PORTLAND_TIMBERS: ["포틀랜드팀버스", "포틀랜드 팀버스", "포틀랜드", "portland timbers"],
+    AUSTIN_FC: ["오스틴fc", "오스틴 FC", "오스틴", "austin fc"],
+    NASHVILLE_SC: ["내슈빌sc", "내슈빌 SC", "내슈빌", "내쉬빌", "nashville sc", "nashville soccer club"],
   },
   EUROPE_GENERIC: {
     FEYENOORD: ["페예노르트", "페예노르", "feyenoord", "feyenoordrotterdam"],
@@ -1670,16 +1670,21 @@ async function collectJ2OfficialClubRecent(selectedDateKey: string, team: string
  * Never infer the Naver gameId, current fixture, starting XI, or results.
  */
 async function collectEspnMlsRecent(date: string, home: string, away: string) {
-  const periods = [
-    { from: isoDayOffset(date, -42), to: isoDayOffset(date, -22) },
-    { from: isoDayOffset(date, -21), to: isoDayOffset(date, -1) },
-  ];
+  /*
+   * V13.12.22: ESPN scoreboard ceased accepting YYYYMMDD-YYYYMMDD
+   * date ranges (HTTP 400). Query distinct YYYYMM months instead,
+   * then keep only the verified completed pregame matches.
+   */
+  const months = Array.from(new Set([
+    isoDayOffset(date, -42).slice(0, 7).replace("-", ""),
+    isoDayOffset(date, -21).slice(0, 7).replace("-", ""),
+    isoDayOffset(date, -1).slice(0, 7).replace("-", ""),
+  ]));
   const attempts: Array<{ status: number | null; events: number; endpoint: string }> = [];
   const byEventId = new Map<string, AnyObj>();
-  const results = await Promise.all(periods.map(async (span) => {
-    const compactDate = (value: string) => value.replace(/-/g, "");
+  const results = await Promise.all(months.map(async (month) => {
     const endpoint = "https://site.api.espn.com/apis/site/v2/sports/soccer/usa.1/scoreboard"
-      + "?dates=" + compactDate(span.from) + "-" + compactDate(span.to) + "&limit=250";
+      + "?dates=" + month + "&limit=250";
     try {
       const response = await fetch(endpoint, {
         cache: "no-store",
@@ -1702,13 +1707,14 @@ async function collectEspnMlsRecent(date: string, home: string, away: string) {
   }
 
   const allRows: AnyObj[] = [];
+  const earliestDay = isoDayOffset(date, -42).replace(/-/g, "");
   for (const event of byEventId.values()) {
     const rawDate = String(event?.date ?? "").trim();
     // Strict pregame: no match on the selected KST calendar day, even if
     // the ESPN US-date scoreboard window happens to include that fixture.
     const localDay = dateKey(rawDate);
     const eventMs = Date.parse(rawDate);
-    if (!localDay || localDay >= date || !Number.isFinite(eventMs)) continue;
+    if (!localDay || localDay < earliestDay || localDay >= date || !Number.isFinite(eventMs)) continue;
     if (event?.status?.type?.completed !== true) continue;
     const competitions = Array.isArray(event?.competitions) ? event.competitions : [];
     if (competitions.length !== 1) continue;
