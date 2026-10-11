@@ -3846,7 +3846,7 @@ const SPORTS_TEAM_ALIAS_GROUPS: string[][] = [
   ["내슈빌SC","내슈빌 SC","내슈빌","내쉬빌","Nashville SC"],
 
   // V13.8.2 · 일본 축구 J1/J2 Betman 한글명 -> SportsAPI 영문 팀명
-  ["미토 홀리호크","미토홀리호크","Mito HollyHock","Mito Hollyhock"],
+  ["미토 홀리호크","미토홀리호크","미토","Mito HollyHock","Mito Hollyhock"],
   ["FC마치다 젤비아","마치다 젤비아","마치다","Machida Zelvia","FC Machida Zelvia"],
   ["가시마 앤틀러스","가시마","Kashima Antlers"],
   ["우라와 레드 다이아몬즈","우라와 레즈","우라와","Urawa Red Diamonds","Urawa Reds"],
@@ -29187,7 +29187,7 @@ export default function Home() {
                         const candidates = Array.isArray(resolver?.candidateTeams) ? resolver.candidateTeams : [];
                         return (
                           <div className="notice" style={{ margin: "8px 0" }}>
-                            <b>V13.12.24 {currentDomesticSoccerAudit?.group === "JLEAGUE1" ? "J1" : "J2"} 연결 진단</b> · Naver {live?.ok ? live?.recentOnly ? "RECENT_ONLY" : "매칭 성공" : "미매칭/오류"}
+                            <b>V13.12.25 {currentDomesticSoccerAudit?.group === "JLEAGUE1" ? "J1" : "J2"} 연결 진단</b> · Naver {live?.ok ? live?.recentOnly ? "RECENT_ONLY" : "매칭 성공" : "미매칭/오류"}
                             <div className="small" style={{ marginTop: 4 }}>
                               gameId {live?.gameId ?? "-"} · 일정 후보 {resolver?.scheduleCount ?? "-"}경기 · 팀일치 후보 {resolver?.candidateCount ?? "-"}경기 · 최근 일정 {recent?.scheduleGames ?? "-"}경기 · 20일 구간 재조회 {recent?.narrowWindowRetry ? "실행" : "미실행"}
                             </div>
@@ -29208,7 +29208,7 @@ export default function Home() {
                             )}
                             {!live?.ok && live?.error && <div className="small">Naver 사유 · {String(live.error)}</div>}
                             <div className="small">
-                              Naver J1/J2 일정에 기록이 부족하면 J리그 공식 구단기록(고후·도치기 시티·야마가타·센다이·도야마·미야자키·제프 치바·나가사키)의 완료된 해당 리그 과거 스코어만 개별 확인합니다. 컵대회 및 경기일 이후 기록은 사용하지 않으며, 구단기록을 현재 gameId나 XI로 간주하지 않습니다. 최초 frozen PRE λ는 재작성하지 않습니다.
+                              Naver J1/J2 일정에 기록이 부족하면 J리그 공식 구단기록(고후·도치기 시티·야마가타·센다이·도야마·미야자키·제프 치바·나가사키·미토·시미즈·이와키·아키타)의 완료된 해당 리그 과거 스코어만 개별 확인합니다. 컵대회 및 경기일 이후 기록은 사용하지 않으며, 구단기록을 현재 gameId나 XI로 간주하지 않습니다. 최초 frozen PRE λ는 재작성하지 않습니다.
                             </div>
                           </div>
                         );

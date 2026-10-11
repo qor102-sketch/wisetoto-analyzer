@@ -1,3 +1,5 @@
+// DEPLOY_MARKER_V13_12_25_J1_MITO_J2_IWAKI_AKITA_20261011
+// Restore independently verified pregame J1/J2 form; preserve frozen PRE, strict gameId identity and XI verification.
 // DEPLOY_MARKER_V13_12_24_J1_J2_KLEAGUE_FOOTBALL_20261011
 // Align exact Korean abbreviated fixture names and expand official J1/J2 club profiles; source verification only, immutable PRE and no post-kickoff XI backdating.
 // DEPLOY_MARKER_V13_12_23_J2_YAMAGATA_SENDAI_OFFICIAL_20261011
@@ -102,6 +104,7 @@ const FOOTBALL_ADAPTER_ALIASES: Record<FootballAdapterId, Record<string, string[
     PAJU: ["파주프런티어fc", "파주 프런티어 FC", "파주프론티어", "paju frontier fc"],
   },
   J1_JP: {
+    MITO_HOLLYHOCK: ["미토홀리호크", "미토 홀리호크", "미토", "mito hollyhock", "mito hollyhock fc"],
     VISSEL_KOBE: ["비셀고베", "비셀 고베", "visselkobe", "vissel kobe", "고베"],
     V_VAREN_NAGASAKI: ["v바렌나가사키", "v-바렌나가사키", "v바렌 나가사키", "vvaren nagasaki", "v-varennagasaki", "나가사키"],
     KASHIWA_REYSOL: ["가시와레이솔", "가시와 레이솔", "kashiwareysol", "kashiwa reysol", "가시와"],
@@ -1605,6 +1608,32 @@ const J2_OFFICIAL_CLUB_PROFILES: Record<string, { slug: string; display: string;
     homeVenue: /^PEACE STADIUM(?: Connected by SoftBank)?$/i,
     competition: "J1",
   },
+  // Official 2026/27 J1 club records; never substitute previous J2 seasons.
+  MITO_HOLLYHOCK: {
+    slug: "mito",
+    display: "Mito Hollyhock",
+    homeVenue: /^(?:MITOSHIN|Mito Shinkin Bank Stadium)$/i,
+    competition: "J1",
+  },
+  SHIMIZU_S_PULSE: {
+    slug: "shimizu",
+    display: "Shimizu S-Pulse",
+    homeVenue: /^(?:IAI\.S|IAI Stadium Nihondaira)$/i,
+    competition: "J1",
+  },
+  // Official 2026/27 J2 clubs, stadium exact match only.
+  IWAKI_FC: {
+    slug: "iwaki",
+    display: "IWAKI FC",
+    homeVenue: /^(?:Hawaiians\.Sta|Hawaiians Stadium Iwaki)$/i,
+    competition: "J2",
+  },
+  BLAUBLITZ_AKITA: {
+    slug: "akita",
+    display: "Blaublitz Akita",
+    homeVenue: /^(?:SOYU\.S|SOYU STADIUM)$/i,
+    competition: "J2",
+  },
 };
 
 function j2OfficialCellText(value: string): string {
@@ -1694,7 +1723,7 @@ async function collectJ2OfficialClubRecent(selectedDateKey: string, team: string
   const url = "https://www.jleague.jp/en/club/" + club.slug + "/";
   const response = await fetch(url, {
     cache: "no-store",
-    headers: { accept: "text/html", "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.12.23" },
+    headers: { accept: "text/html", "user-agent": "Mozilla/5.0 WisetotoAnalyzer/13.12.25" },
     signal: AbortSignal.timeout(6500),
   });
   if (!response.ok) return null;
