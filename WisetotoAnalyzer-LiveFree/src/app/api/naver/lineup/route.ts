@@ -1,3 +1,5 @@
+// DEPLOY_MARKER_V13_12_24_J1_J2_KLEAGUE_FOOTBALL_20261011
+// Align exact Korean abbreviated fixture names and expand official J1/J2 club profiles; source verification only, immutable PRE and no post-kickoff XI backdating.
 // DEPLOY_MARKER_V13_12_23_J2_YAMAGATA_SENDAI_OFFICIAL_20261011
 // Actual 2026/27 J2 fixture is not in Naver J2 schedules (HTTP 400). Resolve verified historic J2 Form only, without manufacturing a Naver gameId or rewriting frozen PRE.
 // DEPLOY_MARKER_V13_12_21_MLS_RECENT_ESPN_INDEPENDENT_20261011
@@ -68,12 +70,12 @@ type FootballAdapterId =
 
 const FOOTBALL_ADAPTER_ALIASES: Record<FootballAdapterId, Record<string, string[]>> = {
   KLEAGUE1_KR: {
-    ULSAN_HD: ["울산HD", "울산 HD", "울산현대", "ulsan hd", "ulsan hd fc", "ulsan hyundai"],
+    ULSAN_HD: ["울산HD", "울산 HD", "울산", "울산 HDFC", "울산현대", "ulsan hd", "ulsan hd fc", "ulsan hyundai"],
     JEONBUK: ["전북현대", "전북 현대", "전북 현대 모터스", "jeonbuk hyundai motors", "jeonbuk motors"],
     POHANG: ["포항스틸러스", "포항 스틸러스", "포항", "pohang steelers"],
     FC_SEOUL: ["fc서울", "FC 서울", "서울FC", "fc seoul"],
     DAEJEON: ["대전하나시티즌", "대전 하나 시티즌", "daejeon hana citizen"],
-    GWANGJU: ["광주fc", "광주 FC", "gwangju fc"],
+    GWANGJU: ["광주fc", "광주 FC", "광주", "gwangju fc"],
     GANGWON: ["강원fc", "강원 FC", "gangwon fc"],
     GIMCHEON: ["김천상무", "김천 상무", "gimcheon sangmu"],
     JEJU: ["제주sk", "제주 SK", "제주유나이티드", "jeju sk fc", "jeju united"],
@@ -83,7 +85,7 @@ const FOOTBALL_ADAPTER_ALIASES: Record<FootballAdapterId, Record<string, string[
     BUCHEON: ["부천fc1995", "부천 FC 1995", "부천fc", "bucheon fc 1995"],
   },
   KLEAGUE2_KR: {
-    SUWON_SAMSUNG: ["수원삼성블루윙즈", "수원 삼성 블루윙즈", "수원삼성", "suwon samsung bluewings"],
+    SUWON_SAMSUNG: ["수원삼성블루윙즈", "수원 삼성 블루윙즈", "수원삼성", "수원", "suwon samsung bluewings"],
     BUSAN_IPARK: ["부산아이파크", "부산 아이파크", "busan ipark"],
     SEOUL_ELAND: ["서울이랜드", "서울 이랜드", "seoul e-land fc", "seoul e land"],
     SEONGNAM: ["성남fc", "성남 FC", "seongnam fc"],
@@ -91,7 +93,7 @@ const FOOTBALL_ADAPTER_ALIASES: Record<FootballAdapterId, Record<string, string[
     GYEONGNAM: ["경남fc", "경남 FC", "gyeongnam fc"],
     CHUNGNAM_ASAN: ["충남아산", "충남 아산", "chungnam asan fc"],
     CHUNGBUK_CHEONGJU: ["충북청주", "충북 청주", "chungbuk cheongju fc"],
-    ANSAN: ["안산그리너스", "안산 그리너스", "ansan greeners"],
+    ANSAN: ["안산그리너스", "안산 그리너스", "안산", "ansan greeners"],
     CHEONAN: ["천안시티", "천안 시티", "cheonan city fc"],
     GIMPO: ["김포fc", "김포 FC", "gimpo fc"],
     HWASEONG: ["화성fc", "화성 FC", "hwaseong fc"],
@@ -106,7 +108,7 @@ const FOOTBALL_ADAPTER_ALIASES: Record<FootballAdapterId, Record<string, string[
     YOKOHAMA_F_MARINOS: ["요코하마f마리노스", "요코하마 f마리노스", "요코하마fm", "yokohamafmarinos", "yokohama f marinos", "fmarinos"],
     KASHIMA_ANTLERS: ["가시마앤틀러스", "가시마 앤틀러스", "kashimaantlers", "kashima antlers", "가시마"],
     URAWA_REDS: ["우라와레즈", "우라와 레즈", "우라와레드다이아몬즈", "우라와 레드 다이아몬즈", "우라와레드다이아몬드", "우라와 레드 다이아몬드", "urawareddiamonds", "urawa red diamonds", "urawa reds", "우라와"],
-    JEF_CHIBA: ["제프유나이티드지바", "제프 지바", "jefunitedchiba", "jef chiba", "지바"],
+    JEF_CHIBA: ["제프유나이티드지바", "제프 유나이티드", "제프 치바", "제프 지바", "jefunitedchiba", "jef chiba", "지바"],
     GAMBA_OSAKA: ["감바오사카", "감바 오사카", "gambaosaka", "gamba osaka"],
     NAGOYA_GRAMPUS: ["나고야그램퍼스", "나고야 그램퍼스", "nagoyagrampus", "nagoya grampus", "나고야"],
     MACHIDA_ZELVIA: ["마치다젤비아", "마치다 젤비아", "machidazelvia", "machida zelvia", "마치다"],
@@ -142,7 +144,7 @@ const FOOTBALL_ADAPTER_ALIASES: Record<FootballAdapterId, Record<string, string[
     VANRAURE_HACHINOHE: ["반라우레하치노헤", "반라우레 하치노헤", "하치노헤", "vanraure hachinohe"],
     // J2 Tochigi City is NOT Tochigi SC. Do not add broad "도치기"/"栃木" aliases.
     TOCHIGI_CITY: ["도치기시티", "도치기 시티", "도치기시티fc", "도치기 시티FC", "도치기C", "tochigi city", "tochigi city fc", "栃木シティ", "栃木シティFC", "栃木Ｃ", "栃木C"],
-    KATALLER_TOYAMA: ["카타레르도야마", "카타레르 도야마", "도야마", "kataller toyama"],
+    KATALLER_TOYAMA: ["카타레르도야마", "카타레르 도야마", "카탈레 도야마", "카탈레도야마", "도야마", "kataller toyama"],
     FC_IMABARI: ["fc이마바리", "FC 이마바리", "이마바리", "fc imabari"],
     TEGEVAJARO_MIYAZAKI: ["테게바자로미야자키", "테게바자로 미야자키", "미야자키", "tegevajaro miyazaki"],
     YOKOHAMA_FC: ["요코하마fc", "요코하마 FC", "yokohama fc"],
@@ -1537,7 +1539,7 @@ function naverVerifyGameCompleted(game: AnyObj) {
  * Do not resolve current fixture/gameId/LINEUP from club results. Club slugs
  * are distinct; TOCHIGI CITY must never fall back to Tochigi SC.
  */
-const J2_OFFICIAL_CLUB_PROFILES: Record<string, { slug: string; display: string; homeVenue: RegExp }> = {
+const J2_OFFICIAL_CLUB_PROFILES: Record<string, { slug: string; display: string; homeVenue: RegExp; competition?: "J1" | "J2" }> = {
   VENTFORET_KOFU: {
     slug: "kofu",
     display: "Ventforet Kofu",
@@ -1558,6 +1560,30 @@ const J2_OFFICIAL_CLUB_PROFILES: Record<string, { slug: string; display: string;
     slug: "sendai",
     display: "Vegalta Sendai",
     homeVenue: /^(?:Yurtec\.S|Yurtec\s*Stadium(?:\s*Sendai)?)$/i,
+  },
+  KATALLER_TOYAMA: {
+    slug: "toyama",
+    display: "Kataller Toyama",
+    homeVenue: /^(?:Toyama|Toyama Stadium)$/i,
+  },
+  TEGEVAJARO_MIYAZAKI: {
+    slug: "miyazaki",
+    display: "Tegevajaro Miyazaki",
+    homeVenue: /^(?:Ichigo|Ichigo Miyazaki Shintomi FB Stadium)$/i,
+  },
+  // J1-only: JEF Chiba and Nagasaki compete in J1 2026/27.
+  // Never substitute these J1 scorecards for a J2 form.
+  JEF_CHIBA: {
+    slug: "chiba",
+    display: "JEF United Chiba",
+    homeVenue: /^(?:Fukuda\.A|Fukuda Denshi Arena)$/i,
+    competition: "J1",
+  },
+  V_VAREN_NAGASAKI: {
+    slug: "nagasaki",
+    display: "V-Varen Nagasaki",
+    homeVenue: /^PEACE STADIUM(?: Connected by SoftBank)?$/i,
+    competition: "J1",
   },
 };
 
@@ -1600,7 +1626,7 @@ function parseJ2OfficialClubRecord(
       rawRow[1].matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi),
       (match) => j2OfficialCellText(match[1]),
     );
-    if (cells.length < 6 || cells[5].replace(/\s/g, "").toUpperCase() !== "J2") continue;
+    if (cells.length < 6 || cells[5].replace(/\s/g, "").toUpperCase() !== (club.competition ?? "J2")) continue;
     const dateMatch = cells[0].match(/(?:^|\s)(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(20\d{2})\b/i);
     const scoreMatch = cells[4].match(/\b([WDL])\s+(\d{1,2})\s*[-–]\s*(\d{1,2})\b/i);
     if (!dateMatch || !scoreMatch || !cells[2] || !cells[3]) continue;
@@ -1634,17 +1660,17 @@ function parseJ2OfficialClubRecord(
         away: venue === "home" ? conceded : scored,
       },
       teamSide: venue, venue, teamName: club.display,
-      source: "JLEAGUE_OFFICIAL_CLUB_RECORD", competition: "J2",
+      source: "JLEAGUE_OFFICIAL_CLUB_RECORD", competition: club.competition ?? "J2",
       originalVenue: cells[3],
     });
   }
   return rows.sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 20);
 }
 
-async function collectJ2OfficialClubRecent(selectedDateKey: string, team: string) {
-  const teamCode = normalizedFootballName(team, "J2_JP");
+async function collectJ2OfficialClubRecent(selectedDateKey: string, team: string, adapterId: FootballAdapterId = "J2_JP") {
+  const teamCode = normalizedFootballName(team, adapterId);
   const club = teamCode ? J2_OFFICIAL_CLUB_PROFILES[teamCode] : null;
-  if (!club) return null;
+  if (!club || (club.competition ?? "J2") !== (adapterId === "J1_JP" ? "J1" : "J2")) return null;
   const url = "https://www.jleague.jp/en/club/" + club.slug + "/";
   const response = await fetch(url, {
     cache: "no-store",
@@ -1907,28 +1933,28 @@ async function collectFootballRecentSummary(date: string, home: string, away: st
   // Independently fill only the sides actually missing from the Naver feed.
   const officialJ2 = {
     attempted: false,
-    homeProfileAvailable: Boolean(J2_OFFICIAL_CLUB_PROFILES[normalizedFootballName(home, adapterId) ?? ""]),
-    awayProfileAvailable: Boolean(J2_OFFICIAL_CLUB_PROFILES[normalizedFootballName(away, adapterId) ?? ""]),
+    homeProfileAvailable: ((club) => Boolean(club && (club.competition ?? "J2") === (adapterId === "J1_JP" ? "J1" : "J2")))(J2_OFFICIAL_CLUB_PROFILES[normalizedFootballName(home, adapterId) ?? ""]),
+    awayProfileAvailable: ((club) => Boolean(club && (club.competition ?? "J2") === (adapterId === "J1_JP" ? "J1" : "J2")))(J2_OFFICIAL_CLUB_PROFILES[normalizedFootballName(away, adapterId) ?? ""]),
     homeSource: null as string | null,
     awaySource: null as string | null,
     homePlayed: 0,
     awayPlayed: 0,
   };
-  if (adapterId === "J2_JP" &&
-      (recentSummary.home.form.played === 0 || recentSummary.away.form.played === 0)) {
+  if ((adapterId === "J1_JP" || adapterId === "J2_JP") &&
+      (recentSummary.home.form.played < 5 || recentSummary.away.form.played < 5)) {
     officialJ2.attempted = true;
     const [officialHome, officialAway] = await Promise.all([
-      recentSummary.home.form.played === 0
-        ? collectJ2OfficialClubRecent(date, home).catch(() => null) : Promise.resolve(null),
-      recentSummary.away.form.played === 0
-        ? collectJ2OfficialClubRecent(date, away).catch(() => null) : Promise.resolve(null),
+      recentSummary.home.form.played < 5
+        ? collectJ2OfficialClubRecent(date, home, adapterId).catch(() => null) : Promise.resolve(null),
+      recentSummary.away.form.played < 5
+        ? collectJ2OfficialClubRecent(date, away, adapterId).catch(() => null) : Promise.resolve(null),
     ]);
-    if (officialHome !== null && officialHome.form.played > 0) {
+    if (officialHome !== null && officialHome.form.played > recentSummary.home.form.played) {
       recentSummary.home = officialHome;
       officialJ2.homeSource = officialHome.source;
       officialJ2.homePlayed = officialHome.form.played;
     }
-    if (officialAway !== null && officialAway.form.played > 0) {
+    if (officialAway !== null && officialAway.form.played > recentSummary.away.form.played) {
       recentSummary.away = officialAway;
       officialJ2.awaySource = officialAway.source;
       officialJ2.awayPlayed = officialAway.form.played;
@@ -1974,7 +2000,7 @@ async function collectFootballRecentSummary(date: string, home: string, away: st
     attempts,
     narrowWindowRetry,
     officialJ2,
-    build: "V13.12.23_J2_OFFICIAL_YAMAGATA_SENDAI",
+    build: "V13.12.24_J1_J2_KLEAGUE_FOOTBALL",
   };
 }
 function summarizeNaverScheduleTeam(rows: AnyObj[], teamName: string) {
