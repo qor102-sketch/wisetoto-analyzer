@@ -1,4 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
+// V13.12.24 J1/J2/K1/K2: exact league identities and official prior-game source diagnostics; do not change frozen PRE.
 // V13.12.23 J2 OFFICIAL CLUB RECORD: include Yamagata & Sendai, display source profile and independent gameId diagnostics.
 // V13.12.21 MLS ESPN VERIFIED HISTORICAL FORM: independent per-side merge, RECENT_ONLY is not a current fixture.
 // V13.12.20 J2 OFFICIAL RECENT: display independent J.LEAGUE club record provenance; do not imply Naver gameId or lineup READY.
@@ -3736,12 +3737,12 @@ const SPORTS_TEAM_ALIAS_GROUPS: string[][] = [
   ["콜로라도 로키스","Colorado Rockies","Rockies"],
 
   // V13.11.00 · K리그 + 해외 프로축구 주요 클럽 aliases
-  ["울산 HD","울산HD","울산 현대","Ulsan HD FC","Ulsan Hyundai"],
+  ["울산 HD","울산HD","울산 현대","울산 HDFC","울산","Ulsan HD FC","Ulsan Hyundai"],
   ["전북 현대 모터스","전북 현대","전북현대","Jeonbuk Hyundai Motors","Jeonbuk Motors"],
   ["포항 스틸러스","포항","Pohang Steelers"],
   ["FC 서울","서울FC","FC Seoul"],
   ["대전 하나 시티즌","대전하나","Daejeon Hana Citizen"],
-  ["광주 FC","광주FC","Gwangju FC"],
+  ["광주 FC","광주FC","광주","Gwangju FC"],
   ["강원 FC","강원FC","Gangwon FC"],
   ["수원 FC","수원FC","Suwon FC"],
   ["김천 상무","김천상무","Gimcheon Sangmu"],
@@ -3757,7 +3758,7 @@ const SPORTS_TEAM_ALIAS_GROUPS: string[][] = [
   ["경남 FC","경남FC","Gyeongnam FC"],
   ["충남 아산","Chungnam Asan FC"],
   ["충북 청주","Chungbuk Cheongju FC"],
-  ["안산 그리너스","Ansan Greeners"],
+  ["안산 그리너스","안산","Ansan Greeners"],
   ["천안 시티","Cheonan City FC"],
   ["김포 FC","Gimpo FC"],
   ["화성 FC","Hwaseong FC"],
@@ -3874,7 +3875,7 @@ const SPORTS_TEAM_ALIAS_GROUPS: string[][] = [
   ["이와키 FC","이와키FC","Iwaki FC"],
   ["도치기 SC","도치기SC","Tochigi SC"],
   ["자스파 군마","더스파 군마","군마","Thespakusatsu Gunma","Thespa Gunma"],
-  ["제프 유나이티드 지바","제프 지바","지바","JEF United Chiba","JEF Chiba"],
+  ["제프 유나이티드 지바","제프 유나이티드","제프 치바","제프 지바","지바","JEF United Chiba","JEF Chiba"],
   ["오미야 아르디자","RB 오미야 아르디자","오미야","RB Omiya Ardija","Omiya Ardija"],
   ["반포레 고후","고후","Ventforet Kofu","ヴァンフォーレ甲府","甲府"],
   ["주빌로 이와타","이와타","Jubilo Iwata"],
@@ -3890,7 +3891,7 @@ const SPORTS_TEAM_ALIAS_GROUPS: string[][] = [
   ["반라우레 하치노헤","반라레 하치노헤","하치노헤","Vanraure Hachinohe"],
   // Tochigi City and Tochigi SC are different clubs. Never merge by the bare "도치기"/"栃木" token.
   ["도치기 시티","도치기CITY","도치기 시티FC","도치기C","Tochigi City","TOCHIGI CITY","Tochigi City FC","栃木シティ","栃木シティFC","栃木Ｃ","栃木C"],
-  ["카타레르 도야마","카탈레르 도야마","도야마","Kataller Toyama"],
+  ["카타레르 도야마","카탈레르 도야마","카탈레 도야마","도야마","Kataller Toyama"],
   ["FC 이마바리","이마바리","FC Imabari"],
   ["테게바자로 미야자키","미야자키","Tegevajaro Miyazaki"],
 
@@ -3976,6 +3977,15 @@ function naverFootballIdentityMatchesSelected(payload: any, game: any) {
   if (!requestedHome || !requestedAway || !resolvedHome || !resolvedAway) {
     return payload?.footballIdentity?.valid === true;
   }
+  if (
+    payload?.footballIdentity?.valid === true &&
+    payload?.footballIdentity?.adapterId === "KLEAGUE2_KR" &&
+    normalizeSportsTeamToken(requestedHome).replace(/\s/g, "").includes("수원삼성") &&
+    normalizeSportsTeamToken(resolvedHome) === "수원" &&
+    normalizeSportsTeamToken(payload?.footballIdentity?.requestedHome) === normalizeSportsTeamToken(requestedHome) &&
+    normalizeSportsTeamToken(payload?.footballIdentity?.requestedAway) === normalizeSportsTeamToken(requestedAway) &&
+    sportsAliasIdentityMatch(requestedAway, resolvedAway)
+  ) return true;
   return (
     sportsAliasIdentityMatch(requestedHome, resolvedHome) &&
     sportsAliasIdentityMatch(requestedAway, resolvedAway)
@@ -29163,7 +29173,7 @@ export default function Home() {
                           <div className="small">실전 READY 표본을 먼저 축적한 뒤 포지션별 영향 검증</div>
                         </div>
                       </div>
-                      {currentDomesticSoccerAudit?.group === "JLEAGUE2" && (() => {
+                      {(currentDomesticSoccerAudit?.group === "JLEAGUE2" || currentDomesticSoccerAudit?.group === "JLEAGUE1") && (() => {
                         const live = matched?.naverTodayLineup;
                         const resolver = live?.debug?.resolver ?? null;
                         const recent = live?.footballRecent ?? live?.debug?.recent ?? null;
@@ -29177,7 +29187,7 @@ export default function Home() {
                         const candidates = Array.isArray(resolver?.candidateTeams) ? resolver.candidateTeams : [];
                         return (
                           <div className="notice" style={{ margin: "8px 0" }}>
-                            <b>V13.12.19 J2 연결 진단</b> · Naver {live?.ok ? live?.recentOnly ? "RECENT_ONLY" : "매칭 성공" : "미매칭/오류"}
+                            <b>V13.12.24 {currentDomesticSoccerAudit?.group === "JLEAGUE1" ? "J1" : "J2"} 연결 진단</b> · Naver {live?.ok ? live?.recentOnly ? "RECENT_ONLY" : "매칭 성공" : "미매칭/오류"}
                             <div className="small" style={{ marginTop: 4 }}>
                               gameId {live?.gameId ?? "-"} · 일정 후보 {resolver?.scheduleCount ?? "-"}경기 · 팀일치 후보 {resolver?.candidateCount ?? "-"}경기 · 최근 일정 {recent?.scheduleGames ?? "-"}경기 · 20일 구간 재조회 {recent?.narrowWindowRetry ? "실행" : "미실행"}
                             </div>
@@ -29198,7 +29208,7 @@ export default function Home() {
                             )}
                             {!live?.ok && live?.error && <div className="small">Naver 사유 · {String(live.error)}</div>}
                             <div className="small">
-                              Naver J2 일정이 경기/과거 득실을 제공하지 않으면 J리그 공식 구단기록(고후·도치기 시티·야마가타·센다이)의 완료된 과거 J2 스코어를 팀별로 독립 조회합니다. 공식 구단기록은 Naver gameId나 현재 XI로 간주하지 않습니다. 경기일 이후 점수는 제외하고 기존 frozen PRE λ는 재작성하지 않습니다.
+                              Naver J1/J2 일정에 기록이 부족하면 J리그 공식 구단기록(고후·도치기 시티·야마가타·센다이·도야마·미야자키·제프 치바·나가사키)의 완료된 해당 리그 과거 스코어만 개별 확인합니다. 컵대회 및 경기일 이후 기록은 사용하지 않으며, 구단기록을 현재 gameId나 XI로 간주하지 않습니다. 최초 frozen PRE λ는 재작성하지 않습니다.
                             </div>
                           </div>
                         );
