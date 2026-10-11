@@ -1,3 +1,5 @@
+// DEPLOY_MARKER_V13_12_21_MLS_RECENT_ESPN_INDEPENDENT_20261011
+// ESPN usa.1 scoreboard verified completed MLS matches only; keep source-specific XI/gameId, frozen PRE, prior and Poisson unchanged.
 // DEPLOY_MARKER_V13_12_20_J2_OFFICIAL_CLUB_RECORD_RECENT_20261010
 // J2 official club record fallback only when Naver history unavailable; strict pregame cutoff, no model or lineup changes.
 // DEPLOY_MARKER_V13_12_19_J2_TEAM_IDENTITY_AND_RECENT_WINDOW_20261010
@@ -146,6 +148,12 @@ const FOOTBALL_ADAPTER_ALIASES: Record<FootballAdapterId, Record<string, string[
   MLS_US: {
     REAL_SALT_LAKE: ["레알솔트레이크", "리얼솔트레이크", "레알솔트레이크fc", "realsaltlake", "realsaltlakefc", "rsl"],
     LAFC: ["lafc", "la fc", "로스앤젤레스fc", "losangelesfc", "losangelesfootballclub"],
+    MINNESOTA_UNITED: ["미네소타유나이티드fc", "미네소타유나이티드", "미네소타 유나이티드FC", "minnesota united fc", "minnesota united"],
+    HOUSTON_DYNAMO: ["휴스턴다이너모fc", "휴스턴다이너모", "휴스턴 다이너모FC", "houston dynamo fc", "houston dynamo"],
+    SPORTING_KANSAS_CITY: ["스포팅캔자스시티", "스포팅 캔자스시티", "sporting kansas city", "sporting kc"],
+    PORTLAND_TIMBERS: ["포틀랜드팀버스", "포틀랜드 팀버스", "portland timbers"],
+    AUSTIN_FC: ["오스틴fc", "오스틴 FC", "austin fc"],
+    NASHVILLE_SC: ["내슈빌sc", "내슈빌 SC", "nashville sc", "nashville soccer club"],
   },
   EUROPE_GENERIC: {
     FEYENOORD: ["페예노르트", "페예노르", "feyenoord", "feyenoordrotterdam"],
@@ -1655,6 +1663,108 @@ async function collectJ2OfficialClubRecent(selectedDateKey: string, team: string
   };
 }
 
+/*
+ * V13.12.21: Independent ESPN MLS schedule fallback for PRE recent Form ONLY.
+ * Only MLS usa.1 events officially marked completed, strictly before the
+ * selected Korean calendar day, with two distinct identity-verified teams.
+ * Never infer the Naver gameId, current fixture, starting XI, or results.
+ */
+async function collectEspnMlsRecent(date: string, home: string, away: string) {
+  const periods = [
+    { from: isoDayOffset(date, -42), to: isoDayOffset(date, -22) },
+    { from: isoDayOffset(date, -21), to: isoDayOffset(date, -1) },
+  ];
+  const attempts: Array<{ status: number | null; events: number; endpoint: string }> = [];
+  const byEventId = new Map<string, AnyObj>();
+  const results = await Promise.all(periods.map(async (span) => {
+    const compactDate = (value: string) => value.replace(/-/g, "");
+    const endpoint = "https://site.api.espn.com/apis/site/v2/sports/soccer/usa.1/scoreboard"
+      + "?dates=" + compactDate(span.from) + "-" + compactDate(span.to) + "&limit=250";
+    try {
+      const response = await fetch(endpoint, {
+        cache: "no-store",
+        headers: { accept: "application/json", "user-agent": "WisetotoAnalyzer/13.12.21" },
+        signal: AbortSignal.timeout(7500),
+      });
+      const payload = response.ok ? await response.json().catch(() => null) : null;
+      const events = Array.isArray(payload?.events) ? payload.events : [];
+      return { endpoint, status: response.status, events };
+    } catch {
+      return { endpoint, status: null, events: [] as AnyObj[] };
+    }
+  }));
+  for (const result of results) {
+    attempts.push({ endpoint: result.endpoint, status: result.status, events: result.events.length });
+    for (const event of result.events) {
+      const id = String(event?.id ?? "").trim();
+      if (id && !byEventId.has(id)) byEventId.set(id, event);
+    }
+  }
+
+  const allRows: AnyObj[] = [];
+  for (const event of byEventId.values()) {
+    const rawDate = String(event?.date ?? "").trim();
+    // Strict pregame: no match on the selected KST calendar day, even if
+    // the ESPN US-date scoreboard window happens to include that fixture.
+    const localDay = dateKey(rawDate);
+    const eventMs = Date.parse(rawDate);
+    if (!localDay || localDay >= date || !Number.isFinite(eventMs)) continue;
+    if (event?.status?.type?.completed !== true) continue;
+    const competitions = Array.isArray(event?.competitions) ? event.competitions : [];
+    if (competitions.length !== 1) continue;
+    const competitors = Array.isArray(competitions[0]?.competitors) ? competitions[0].competitors : [];
+    if (competitors.length !== 2) continue;
+    const h = competitors.find((row: AnyObj) => row?.homeAway === "home");
+    const a = competitors.find((row: AnyObj) => row?.homeAway === "away");
+    if (!h || !a) continue;
+    const homeName = String(h?.team?.displayName ?? h?.team?.name ?? "").trim();
+    const awayName = String(a?.team?.displayName ?? a?.team?.name ?? "").trim();
+    const homeCode = normalizedFootballName(homeName, "MLS_US");
+    const awayCode = normalizedFootballName(awayName, "MLS_US");
+    if (!homeCode || !awayCode || homeCode === awayCode) continue;
+    // The score must come from a completed ESPN event, never an
+    // expected or in-progress game. Penalized-shootout or null scores
+    // are not filled by assumptions.
+    const homeScore = Number(h?.score);
+    const awayScore = Number(a?.score);
+    if (!Number.isInteger(homeScore) || !Number.isInteger(awayScore) ||
+        homeScore < 0 || awayScore < 0 || homeScore > 30 || awayScore > 30) continue;
+    allRows.push({
+      gameId: String(event?.id ?? "") || null,
+      gameDateTime: rawDate,
+      date: rawDate,
+      startTime: rawDate,
+      homeTeamName: homeName,
+      awayTeamName: awayName,
+      homeTeamScore: homeScore,
+      awayTeamScore: awayScore,
+      status: "final",
+      source: "ESPN_MLS_COMPLETED_SCOREBOARD",
+    });
+  }
+  allRows.sort((a, b) => String(b.gameDateTime).localeCompare(String(a.gameDateTime)));
+
+  const verifiedTeam = (team: string) => {
+    // Only associate a scoreboard row when its home/away identity
+    // independently matches the selected Betman club.
+    const rows = allRows.filter((row) =>
+      footballTeamMatches(String(row.homeTeamName), team, "MLS_US") ||
+      footballTeamMatches(String(row.awayTeamName), team, "MLS_US")
+    );
+    const recent = summarizeFootballScheduleTeam(rows, team, "MLS_US");
+    return recent.form.played > 0
+      ? { ...recent, source: "ESPN_MLS_COMPLETED_SCOREBOARD" }
+      : null;
+  };
+  return {
+    home: verifiedTeam(home),
+    away: verifiedTeam(away),
+    attempts,
+    completedEvents: allRows.length,
+    source: "ESPN_MLS_COMPLETED_SCOREBOARD",
+  };
+}
+
 async function collectFootballRecentSummary(date: string, home: string, away: string, adapterId: FootballAdapterId) {
   const fromDate = isoDayOffset(date, -40);
   const toDate = isoDayOffset(date, -1);
@@ -1803,8 +1913,39 @@ async function collectFootballRecentSummary(date: string, home: string, away: st
       officialJ2.awayPlayed = officialAway.form.played;
     }
   }
+  const espnMls = {
+    attempted: false,
+    homeSource: null as string | null,
+    awaySource: null as string | null,
+    homePlayed: 0,
+    awayPlayed: 0,
+    completedEvents: 0,
+    attempts: [] as Array<{ status: number | null; events: number; endpoint: string }>,
+  };
+  if (adapterId === "MLS_US" &&
+      (recentSummary.home.form.played < 5 || recentSummary.away.form.played < 5)) {
+    espnMls.attempted = true;
+    const espn = await collectEspnMlsRecent(date, home, away).catch(() => null);
+    if (espn) {
+      espnMls.attempts = espn.attempts;
+      espnMls.completedEvents = espn.completedEvents;
+      // Preserve valid Naver form unless independently verified ESPN
+      // actually provides a strictly larger completed pregame sample.
+      if (espn.home && espn.home.form.played > recentSummary.home.form.played) {
+        recentSummary.home = espn.home;
+        espnMls.homeSource = espn.source;
+        espnMls.homePlayed = espn.home.form.played;
+      }
+      if (espn.away && espn.away.form.played > recentSummary.away.form.played) {
+        recentSummary.away = espn.away;
+        espnMls.awaySource = espn.source;
+        espnMls.awayPlayed = espn.away.form.played;
+      }
+    }
+  }
   return {
     recentSummary,
+    espnMls,
     endpoint: endpointCandidates[0] ?? null,
     status: bestStatus,
     cacheHit: anyCacheHit,
@@ -1812,7 +1953,7 @@ async function collectFootballRecentSummary(date: string, home: string, away: st
     attempts,
     narrowWindowRetry,
     officialJ2,
-    build: "V13.12.20_J2_OFFICIAL_RECENT_FALLBACK",
+    build: "V13.12.21_MLS_RECENT_INDEPENDENT",
   };
 }
 function summarizeNaverScheduleTeam(rows: AnyObj[], teamName: string) {
@@ -4142,7 +4283,10 @@ export async function GET(request: Request) {
             ok: true,
             partial: true,
             recentOnly: true,
-            source: "sports.naver.com",
+            source: (footballRecentOnly as AnyObj)?.espnMls?.homeSource ||
+              (footballRecentOnly as AnyObj)?.espnMls?.awaySource
+              ? "ESPN_MLS_COMPLETED_SCOREBOARD"
+              : "sports.naver.com",
             league: "FOOTBALL",
             categoryId: null,
             capturedAt: Date.now(),

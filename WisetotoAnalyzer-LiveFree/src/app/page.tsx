@@ -1,4 +1,5 @@
 // DEPLOY_MARKER_V13_8_83_FIX3_TEAM_STRENGTH_NPB_CD_ACTIVE_20260919
+// V13.12.21 MLS ESPN VERIFIED HISTORICAL FORM: independent per-side merge, RECENT_ONLY is not a current fixture.
 // V13.12.20 J2 OFFICIAL RECENT: display independent J.LEAGUE club record provenance; do not imply Naver gameId or lineup READY.
 // V13.12.19 J2 KOFU/TOCHIGI SOURCE: verified Japanese team aliases + bounded historical Naver retry diagnostic; frozen PRE/OOS unchanged.
 // V13.12.17 FOOTBALL RECENT INDEPENDENT: current fixture/gameId failure no longer erases independently available recent-form data; RECENT_ONLY partial keeps real form while lineup stays empty. Urawa Naver aliases hardened.
@@ -3835,6 +3836,12 @@ const SPORTS_TEAM_ALIAS_GROUPS: string[][] = [
   ["인터 마이애미","Inter Miami CF","Inter Miami"],
   ["LA 갤럭시","LA Galaxy"],
   ["시애틀 사운더스","Seattle Sounders FC","Seattle Sounders"],
+  ["미네소타 유나이티드FC","미네소타 유나이티드","Minnesota United FC","Minnesota United"],
+  ["휴스턴 다이너모FC","휴스턴 다이너모","Houston Dynamo FC","Houston Dynamo"],
+  ["스포팅 캔자스시티","스포팅캔자스시티","Sporting Kansas City","Sporting KC"],
+  ["포틀랜드 팀버스","포틀랜드팀버스","Portland Timbers"],
+  ["오스틴FC","오스틴 FC","Austin FC"],
+  ["내슈빌SC","내슈빌 SC","Nashville SC"],
 
   // V13.8.2 · 일본 축구 J1/J2 Betman 한글명 -> SportsAPI 영문 팀명
   ["미토 홀리호크","미토홀리호크","Mito HollyHock","Mito Hollyhock"],
@@ -3938,6 +3945,23 @@ function sportsAliasIdentityMatch(left: unknown, right: unknown) {
     }
   }
   return false;
+}
+
+// PRE-only recent-form merge: verify home and away independently.
+// Never infer same-day fixture/LINEUP identity from historical football data.
+function independentlyVerifiedSoccerRecent(...sources: any[]): RecentSummary | null {
+  const selected = (side: "home" | "away"): RecentTeam | null => {
+    for (const source of sources) {
+      const team = source?.[side];
+      const played = Number(team?.form?.played ?? 0);
+      if (Number.isFinite(played) && played > 0 &&
+          Array.isArray(team?.fixtures) && team.fixtures.length > 0) return team;
+    }
+    return null;
+  };
+  const home = selected("home");
+  const away = selected("away");
+  return home || away ? { home, away } : null;
 }
 
 function naverFootballIdentityMatchesSelected(payload: any, game: any) {
@@ -25060,6 +25084,12 @@ export default function Home() {
                       naverTodayLineupFallback?.recentSummary?.away?.form?.played > 0
                     ? naverTodayLineupFallback.recentSummary
                     : null;
+              if (koreanSport(String((selectedBetman as any)?.sport ?? "")) === "축구") {
+                return independentlyVerifiedSoccerRecent(
+                  naverTodayLineupFallback?.recentSummary,
+                  wisetotoLiveFallback?.recentSummary,
+                ) ?? primaryRecent;
+              }
               if (koreanSport(String((selectedBetman as any)?.sport ?? "")) !== "농구") return primaryRecent;
               const history = courtTrackerRecentSummary(
                 liveTrackerRecords,
@@ -25369,6 +25399,13 @@ export default function Home() {
                 : naverTodayLineup?.recentSummary?.home?.form?.played > 0 && naverTodayLineup?.recentSummary?.away?.form?.played > 0
                   ? naverTodayLineup.recentSummary
                   : detailData?.recentSummary ?? data?.recentSummary ?? null;
+            if (koreanSport(String((selectedBetman as any)?.sport ?? "")) === "축구") {
+              return independentlyVerifiedSoccerRecent(
+                naverTodayLineup?.recentSummary,
+                detailData?.recentSummary,
+                data?.recentSummary,
+              ) ?? primaryRecent;
+            }
             if (koreanSport(String((selectedBetman as any)?.sport ?? "")) !== "농구") return primaryRecent;
             const history = courtTrackerRecentSummary(
               liveTrackerRecords,
@@ -29102,8 +29139,12 @@ export default function Home() {
                       <div className="cards">
                         <div className="card">
                           Naver 경기 매칭
-                          <b>{matched?.naverTodayLineup?.ok && matched?.naverTodayLineup?.league === "FOOTBALL" ? "✓ 수신" : "대기"}</b>
-                          <div className="small">{matched?.naverTodayLineup?.gameId ?? "gameId 대기"}</div>
+                          <b>{matched?.naverTodayLineup?.ok && matched?.naverTodayLineup?.gameId
+                            ? "✓ 현재 경기 매칭"
+                            : matched?.naverTodayLineup?.ok && matched?.naverTodayLineup?.recentOnly
+                              ? "과거 Form만 수신 · 현재 경기 미매칭"
+                              : "대기/미매칭"}</b>
+                          <div className="small">{matched?.naverTodayLineup?.gameId ?? "gameId 없음 · 선발 XI 미확인"}</div>
                         </div>
                         <div className="card">
                           실제 선발 라인업
@@ -29156,6 +29197,32 @@ export default function Home() {
                             <div className="small">
                               Naver에 없을 경우 J리그 공식 구단기록(고후·도치기 시티)을 별도로 확인합니다. 기존 Naver gameId/현재 XI 매칭에는 사용하지 않습니다. 소스에서 실제 과거 점수를 못 찾으면 PRIOR ONLY를 유지하며 PRE λ는 재작성하지 않습니다.
                             </div>
+                          </div>
+                        );
+                      })()}
+                      {analysisUiReady && isSoccerSport && currentSoccerProfile?.group === "MLS" && (() => {
+                        const live = matched?.naverTodayLineup;
+                        const recent = live?.footballRecent ?? live?.debug?.recent ?? null;
+                        const espn = recent?.espnMls ?? null;
+                        const attempts = Array.isArray(espn?.attempts) ? espn.attempts : [];
+                        return (
+                          <div className="notice" style={{ margin: "8px 0" }}>
+                            <b>V13.12.21 MLS 최근 Form 소스 진단</b> · Naver {live?.gameId ? "현재 경기 매칭" : live?.recentOnly ? "RECENT_ONLY" : "현재 경기 미매칭"}
+                            <div className="small">
+                              ESPN 완료경기 재조회 {espn?.attempted ? "시도" : "미시도"}
+                              {" · "}MLS 완료일정 {espn?.completedEvents ?? 0}건
+                              {" · "}ESPN 대체 홈 {espn?.homePlayed ?? 0} / 원정 {espn?.awayPlayed ?? 0}경기
+                            </div>
+                            <div className="small">
+                              ESPN 조회 · {attempts.length
+                                ? attempts.map((a: any, i: number) => `#${i + 1} HTTP ${a.status ?? "-"} / ${a.events ?? 0}건`).join(" · ")
+                                : "기록 없음"}
+                            </div>
+                            <div className="small">
+                              분석 최근표본 {analysisFactors.homeRecentSample}/{analysisFactors.awayRecentSample}
+                              {" · "}수신 Form {recent?.recentSummary?.home?.form?.played ?? 0}/{recent?.recentSummary?.away?.form?.played ?? 0}
+                            </div>
+                            <div className="small">완료된 경기의 과거 득실만 사용합니다. 현 경기 gameId·선발 XI 및 기존 frozen PRE는 별도로 보호합니다.</div>
                           </div>
                         );
                       })()}
