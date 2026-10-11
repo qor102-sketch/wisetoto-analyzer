@@ -1456,6 +1456,25 @@ function naverFootballGameCompleted(game: AnyObj) {
   return ms !== null && ms < Date.now() - 3 * 60 * 60 * 1000;
 }
 
+/*
+ * V13.12.24: A Naver upperCategoryId feed can include scores from other
+ * competitions (K1/K2/J1/J2/cups). Do NOT mix a different league's results
+ * into same-team recent Form, even when home/away names match.
+ * Official J.LEAGUE scorecards are handled independently with strict
+ * per-row J1/J2 competition tags, so this is Naver-only.
+ */
+function naverFootballRecentLeagueMatches(row: AnyObj, adapterId: FootballAdapterId) {
+  if (!isDomesticFootballAdapter(adapterId)) return true;
+  const category = String(row?.categoryId ?? row?.category ?? row?.league?.categoryId ?? "").toLowerCase().trim();
+  const accepted: Record<string, string[]> = {
+    KLEAGUE1_KR: ["kleague", "kleague1"],
+    KLEAGUE2_KR: ["kleague2"],
+    J1_JP: ["jleague", "jleague1"],
+    J2_JP: ["jleague2"],
+  };
+  return (accepted[adapterId] ?? []).includes(category);
+}
+
 function summarizeFootballScheduleTeam(rows: AnyObj[], teamName: string, adapterId: FootballAdapterId) {
   const fixtures: AnyObj[] = [];
   let wins = 0;
@@ -1497,6 +1516,7 @@ function summarizeFootballScheduleTeam(rows: AnyObj[], teamName: string, adapter
       venue: isHome ? "home" : "away",
       teamName,
       source: String(g?.source ?? "NAVER_FOOTBALL_SCHEDULE"),
+      categoryId: g?.categoryId ?? g?.category ?? null,
     });
   }
   return {
@@ -1922,7 +1942,9 @@ async function collectFootballRecentSummary(date: string, home: string, away: st
       String(a?.gameDateTime ?? a?.gameDate ?? a?.startTime ?? "")
     )
   );
-  const teamGames = (team: string) => rows.filter((g) =>
+  const leagueVerifiedRows = rows.filter((g) => naverFootballRecentLeagueMatches(g, adapterId));
+  const excludedCrossLeague = rows.length - leagueVerifiedRows.length;
+  const teamGames = (team: string) => leagueVerifiedRows.filter((g) =>
     footballTeamMatches(String(g?.homeTeamName ?? g?.homeTeamShortName ?? g?.home ?? ""), team, adapterId) ||
     footballTeamMatches(String(g?.awayTeamName ?? g?.awayTeamShortName ?? g?.away ?? ""), team, adapterId)
   );
@@ -1997,6 +2019,8 @@ async function collectFootballRecentSummary(date: string, home: string, away: st
     status: bestStatus,
     cacheHit: anyCacheHit,
     scheduleGames: rows.length,
+    leagueVerifiedGames: leagueVerifiedRows.length,
+    excludedCrossLeague,
     attempts,
     narrowWindowRetry,
     officialJ2,
