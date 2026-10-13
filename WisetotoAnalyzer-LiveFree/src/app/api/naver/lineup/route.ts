@@ -1,3 +1,5 @@
+// DEPLOY_MARKER_V13_12_27_EUROPE_FORM_LEAGUE_VALIDATION_20261013
+// OOS source correction only: reject non-league historical scores for EPL/Serie A/Ligue 1; never rewrite frozen PRE.
 // DEPLOY_MARKER_V13_12_26_J2_SHONAN_NIIGATA_OFFICIAL_20261011
 // Extend verified J2 club Form only, do not rewrite the 17:28 frozen PRE or backfill current fixture/XI.
 // DEPLOY_MARKER_V13_12_25_J1_MITO_J2_IWAKI_AKITA_20261011
@@ -1470,9 +1472,24 @@ function naverFootballGameCompleted(game: AnyObj) {
  * Official J.LEAGUE scorecards are handled independently with strict
  * per-row J1/J2 competition tags, so this is Naver-only.
  */
-function naverFootballRecentLeagueMatches(row: AnyObj, adapterId: FootballAdapterId) {
-  if (!isDomesticFootballAdapter(adapterId)) return true;
+function naverEuropeanLeagueRecentCategory(adapterId: FootballAdapterId, requestedLeague: string): string | null {
+  if (adapterId !== "EUROPE_GENERIC") return null;
+  const league = String(requestedLeague ?? "").toLowerCase().replace(/[\s_-]/g, "");
+  // Verified Naver category IDs: EPL=epl, Serie A=seria, Ligue 1=ligue1.
+  // Unknown competitions retain their previous behavior until individually audited.
+  if (/epl|프리미어|premierleague/.test(league)) return "epl";
+  if (/세리에a|세리에아|seriea/.test(league)) return "seria";
+  if (/리그1|ligue1/.test(league)) return "ligue1";
+  return null;
+}
+
+function naverFootballRecentLeagueMatches(row: AnyObj, adapterId: FootballAdapterId, requestedLeague: string) {
   const category = String(row?.categoryId ?? row?.category ?? row?.league?.categoryId ?? "").toLowerCase().trim();
+  const europeanCategory = naverEuropeanLeagueRecentCategory(adapterId, requestedLeague);
+  // Fail closed on missing categories: cups (carlingcup), UEFA (europa),
+  // and other domestic leagues must not become the selected league's Form.
+  if (europeanCategory) return category === europeanCategory;
+  if (!isDomesticFootballAdapter(adapterId)) return true;
   const accepted: Record<string, string[]> = {
     KLEAGUE1_KR: ["kleague", "kleague1"],
     KLEAGUE2_KR: ["kleague2"],
@@ -1876,7 +1893,7 @@ async function collectEspnMlsRecent(date: string, home: string, away: string) {
   };
 }
 
-async function collectFootballRecentSummary(date: string, home: string, away: string, adapterId: FootballAdapterId) {
+async function collectFootballRecentSummary(date: string, home: string, away: string, adapterId: FootballAdapterId, requestedLeague: string) {
   const fromDate = isoDayOffset(date, -40);
   const toDate = isoDayOffset(date, -1);
   const actualFields = "basic%2Cschedule%2CmatchRound%2CroundTournamentInfo%2CphaseCode%2CgroupName%2Cleg%2ChasPtSore%2ChomePtScore%2CawayPtScore%2Cleague%2CleagueName%2CaggregateWinner%2CneutralGround%2Cpostponed%2CmanualRelayUrl";
@@ -1988,7 +2005,7 @@ async function collectFootballRecentSummary(date: string, home: string, away: st
       String(a?.gameDateTime ?? a?.gameDate ?? a?.startTime ?? "")
     )
   );
-  const leagueVerifiedRows = rows.filter((g) => naverFootballRecentLeagueMatches(g, adapterId));
+  const leagueVerifiedRows = rows.filter((g) => naverFootballRecentLeagueMatches(g, adapterId, requestedLeague));
   const excludedCrossLeague = rows.length - leagueVerifiedRows.length;
   const teamGames = (team: string) => leagueVerifiedRows.filter((g) =>
     footballTeamMatches(String(g?.homeTeamName ?? g?.homeTeamShortName ?? g?.home ?? ""), team, adapterId) ||
@@ -2067,6 +2084,7 @@ async function collectFootballRecentSummary(date: string, home: string, away: st
     scheduleGames: rows.length,
     leagueVerifiedGames: leagueVerifiedRows.length,
     excludedCrossLeague,
+    expectedRecentCategory: naverEuropeanLeagueRecentCategory(adapterId, requestedLeague),
     attempts,
     narrowWindowRetry,
     officialJ2,
@@ -4383,7 +4401,7 @@ export async function GET(request: Request) {
         // V13.12.17: 현재 fixture/gameId 매칭 실패와 최근 Form 수집 실패를 분리한다.
         // 다른 경기 gameId를 억지로 쓰지 않으면서도, 홈/원정 최근 경기가 독립적으로 확인되면
         // RECENT_ONLY partial 응답으로 모델의 실제 최근득실 입력만 살린다. 선발 XI는 비운다.
-        const footballRecentOnly = await collectFootballRecentSummary(date, home, away, footballAdapter).catch((error: any) => ({
+        const footballRecentOnly = await collectFootballRecentSummary(date, home, away, footballAdapter, requestedLeague).catch((error: any) => ({
           recentSummary: null,
           endpoint: null,
           status: null,
@@ -4786,7 +4804,7 @@ export async function GET(request: Request) {
     }
 
     const footballRecent = league === "FOOTBALL"
-      ? await collectFootballRecentSummary(date, home, away, footballAdapter).catch((error: any) => ({
+      ? await collectFootballRecentSummary(date, home, away, footballAdapter, requestedLeague).catch((error: any) => ({
           recentSummary: null,
           endpoint: null,
           status: null,
