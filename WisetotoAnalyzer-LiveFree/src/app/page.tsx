@@ -12049,6 +12049,13 @@ function soccerContinuousTopTier(score: number): BaseballContinuousTopTier {
   return "관망";
 }
 
+// V13.12.27 display/eligibility gate only. Existing frozen PRE and probability are immutable.
+function soccerEligibleTopTier(score: number, pick: MarketPick): BaseballContinuousTopTier {
+  const ev = pick.expectedValue;
+  if (Boolean(pick.soccerPriorFallback) || typeof ev !== "number" || !Number.isFinite(ev) || ev <= 0) return "관망";
+  return soccerContinuousTopTier(score);
+}
+
 function soccerSlateScore(pick: MarketPick): number | null {
   if (!isSoccerSlateMarket(pick)) return null;
   const calibrated = Number(pick.probability);
@@ -12101,8 +12108,9 @@ function bestSoccerSlateCandidate(picks: MarketPick[]) {
 
 function promoteSoccerSlateTopPick(pick: MarketPick, rank: number, slateScore: number): MarketPick {
   const priorOnly = Boolean(pick.soccerPriorFallback);
-  const tier = priorOnly ? "관망" : soccerContinuousTopTier(slateScore);
-  const promote = !priorOnly && tier === "실전 추천";
+  const tier = soccerEligibleTopTier(slateScore, pick);
+  const evBlocked = typeof pick.expectedValue !== "number" || !Number.isFinite(pick.expectedValue) || pick.expectedValue <= 0;
+  const promote = tier === "실전 추천";
   const quality = Number(pick.soccerDataQuality);
   return {
     ...pick,
@@ -12110,7 +12118,7 @@ function promoteSoccerSlateTopPick(pick: MarketPick, rank: number, slateScore: n
     valueGradeScore: promote
       ? Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))
       : Math.min(77.9, Math.max(pick.valueGradeScore, Number(slateScore.toFixed(1)))),
-    valueGradeReason: `FOOTBALL GAME TOP${rank} · ${tier}${priorOnly ? " · PRIOR ONLY 공식추천 차단" : ""} · TOP1점수 ${slateScore.toFixed(1)} · ${String(pick.soccerLeagueGroup ?? "FOOTBALL")} · 순수모델 ${Number(pick.rawProbability ?? pick.probability).toFixed(1)}% · 최종 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
+    valueGradeReason: `FOOTBALL GAME TOP${rank} · ${tier}${priorOnly ? " · PRIOR ONLY 공식추천 차단" : ""}${evBlocked ? " · EV 비양수/미확인 추천 차단" : ""} · TOP1점수 ${slateScore.toFixed(1)} · ${String(pick.soccerLeagueGroup ?? "FOOTBALL")} · 순수모델 ${Number(pick.rawProbability ?? pick.probability).toFixed(1)}% · 최종 ${pick.probability.toFixed(1)}% · 시장 ${pick.marketProbability === null ? "-" : `${pick.marketProbability.toFixed(1)}%`} · 품질 ${Number.isFinite(quality) ? quality.toFixed(1) : "-"}`,
     stageGradeLabel: `FOOTBALL GAME TOP${rank} ${tier}${priorOnly ? " · PRIOR ONLY" : ""}`,
     recommendationScore: Number(slateScore.toFixed(1)),
     detail: `${pick.detail} · V13.12.02 FOOTBALL GAME TOP${rank} · ${tier} · MODEL-FIRST / MARKET-DEBIASED SCORE`,
@@ -19005,7 +19013,7 @@ export default function Home() {
           ? baseballContinuousTopTier(currentSlateCandidate.slateScore)
           : "관망")
       : isSoccerSport && currentSoccerCandidate
-        ? (Boolean(currentContinuousTopPick?.soccerPriorFallback) ? "관망" : soccerContinuousTopTier(currentSoccerCandidate.slateScore))
+        ? soccerEligibleTopTier(currentSoccerCandidate.slateScore, currentContinuousTopPick ?? currentSoccerCandidate.pick)
         : isCourtSport && currentCourtCandidate
           ? (Boolean(currentContinuousTopPick?.courtColdStart) || Boolean(currentContinuousTopPick?.courtHistoryWarmup) ? "관망" : courtContinuousTopTier(currentCourtCandidate.slateScore))
           : null;
