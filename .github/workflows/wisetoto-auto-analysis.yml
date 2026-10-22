@@ -1,7 +1,8 @@
 name: Wisetoto auto PRE and postmatch verification
 on:
   schedule:
-    - cron: "17,47 * * * *"
+    # Six scans an hour, UTC; GitHub schedule is best-effort and may be delayed.
+    - cron: "3,13,23,33,43,53 * * * *"
   workflow_dispatch:
   pull_request:
     branches: [main]

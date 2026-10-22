@@ -40,4 +40,29 @@ try{
  await page.getByText("113.6 : 110.4",{exact:true}).waitFor({timeout:30000});
  console.log("COURT PRE DISPLAY OK: legacy remains missing, new frozen NBA home/away score visible");
  console.log("DASHBOARD OK: history API + real published first 3 PRE visible, no raw model snapshots");
+
+ // All-sports scan must not silently follow the default UI sport filter.
+ // Feed four distinct real-looking offers, but DO NOT execute any prediction.
+ const now=Date.now();
+ const sportFeed=["soccer","basketball","baseball","volleyball"].map((sport,i)=>({
+   key:"mock:"+sport,gameKey:"mock:"+sport,gameDateMs:now+(60+i*2)*60_000,
+   gameDate:new Date(now+(60+i*2)*60_000).toISOString(),
+   sport,league:"MOCK",home:"HOME "+sport,away:"AWAY "+sport,
+   markets:[{type:"moneyline",matchSeq:i+1,selections:[{side:"home",odds:1.71},{side:"away",odds:2.11}]}]
+ }));
+ await page.unroute("**/api/betman");
+ await page.route("**/api/betman",route=>route.fulfill({
+   status:200,contentType:"application/json",body:JSON.stringify({
+     ok:true,games:sportFeed,diagnostics:{rawCompScheduleRows:4}
+   })
+ }));
+ await page.goto("http://127.0.0.1:3100/?automation=1",{waitUntil:"domcontentloaded",timeout:90_000});
+ await page.waitForFunction(()=>window.__wisetotoAutomation?.snapshot().dueCount===4,null,{timeout:50000});
+ const multi=await page.evaluate(()=>window.__wisetotoAutomation.snapshot());
+ for(const sport of ["축구","농구","야구","배구"]) {
+   if(multi.dueBySport?.[sport]!==1)throw Error("Missing "+sport+": "+JSON.stringify(multi));
+ }
+ if(multi.batchRunning||multi.trackerCount)throw Error("Scan alone must never freeze/mock a PRE");
+ console.log("ALL SPORTS SCAN OK: soccer/basketball/baseball/volleyball visible; none auto-executed by smoke");
+
 } finally {await browser.close();}

@@ -1,25 +1,26 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import {TRACKER_KEY,APPEND_KEY,STATE_FILE,getRecords,dueGames,dueVerifications,preserveFrozenRecords,auditChanges} from "./logic.mjs";
+import {TRACKER_KEY,APPEND_KEY,STATE_FILE,getRecords,dueGames,dueVerifications,preserveFrozenRecords,auditChanges,sportCounts} from "./logic.mjs";
 
 const base=(process.env.WISETOTO_URL||"https://wisetoto-analyzer.vercel.app").replace(/\/+$/,"");
 await fs.mkdir(path.dirname(STATE_FILE),{recursive:true});
 const old=await fs.readFile(STATE_FILE,"utf8").then(JSON.parse).catch(()=>({localStorage:{},meta:{}}));
 const previous=getRecords(old);
 const now=Date.now();
-let due=[],sourceError=null;
+let due=[],feedCounts={},sourceError=null;
 try {
   const response=await fetch(base+"/api/betman",{signal:AbortSignal.timeout(35000),cache:"no-store"});
   if(!response.ok)throw Error("Betman HTTP "+response.status);
   const payload=await response.json();
   if(!payload.ok||!Array.isArray(payload.games))throw Error("Invalid Betman game list");
+  feedCounts=sportCounts(payload.games);
   due=dueGames(payload.games,previous,now);
 } catch(e){sourceError=String(e);}
 const pending=dueVerifications(previous,now);
 const verifyDue=pending.length>0&&(now-Number(old.meta?.lastVerifyAttempt??0)>90*60_000);
 const runBrowser=due.length>0||verifyDue;
 if(process.argv.includes("--preflight")){
-  console.log(JSON.stringify({date:new Date(now).toISOString(),upcoming:due.length,verifyPending:pending.length,runBrowser,sourceError}));
+  console.log(JSON.stringify({date:new Date(now).toISOString(),frequency:"10 minutes (best effort)",feedSports:feedCounts,upcoming:due.length,dueSports:sportCounts(due),verifyPending:pending.length,runBrowser,sourceError}));
   if(process.env.GITHUB_OUTPUT)await fs.appendFile(process.env.GITHUB_OUTPUT,"run_browser="+String(runBrowser)+"\n");
   if(sourceError&&!pending.length)process.exitCode=1;
 }else{
@@ -35,11 +36,14 @@ if(process.argv.includes("--preflight")){
     console.log("Ready",JSON.stringify(await page.evaluate(()=>window.__wisetotoAutomation.snapshot())));
     const analysis=await page.evaluate(()=>window.__wisetotoAutomation.analyze());
     console.log("Analysis",JSON.stringify(analysis));
+    if(analysis.started && analysis.count < due.length)console.log("Later due games queued for following 10-minute scan:",due.length-analysis.count);
     if(analysis.started){
       await page.waitForTimeout(2000);
-      await page.waitForFunction(()=>!window.__wisetotoAutomation.snapshot().batchRunning,null,{timeout:480000});
+      await page.waitForFunction(()=>!window.__wisetotoAutomation.snapshot().batchRunning,null,{timeout:540000});
       await page.waitForTimeout(3000);
     }
+    const completeSnapshot=await page.evaluate(()=>window.__wisetotoAutomation.snapshot());
+    console.log("Batch result",JSON.stringify(completeSnapshot));
     const verify=await page.evaluate(()=>window.__wisetotoAutomation.verify());
     console.log("Result verification",JSON.stringify(verify));
     if(verify.started){
@@ -75,6 +79,9 @@ if(process.argv.includes("--preflight")){
       "- 이번 회차 PRE: "+report.created,"- 신규 종료검증: "+report.verified.length,
       "- 신규 TOP1 미적중: "+report.missed,"- 수집/등급 검토대상: "+report.suspicious.length,
       "- 전체 잠금: "+protectedRows.length,"- 브라우저 오류: "+errors.length,
+      "- 10분 주기 Betman 검색 종목별 경기 수: "+JSON.stringify(feedCounts),
+      "- 금회 분석대상: "+due.length+"건 · 브라우저 배치: "+String(analysis.count??0)+"건",
+      "- 배치 성공/실패: "+String(completeSnapshot.batchCompleted)+"/"+String(completeSnapshot.batchFailed),
       ...report.verified.slice(0,15).map(x=>"- "+x.game+" · "+x.actual+" · "+x.picks.map(p=>p.pick+":"+p.outcome).join(",")),
       "","Frozen PRE 불변, 모델 자동 튜닝 및 무승인 main 병합 금지."
     ];

@@ -3,6 +3,32 @@ export const TRACKER_KEY = "wisetoto_v13_8_1_live_tracker";
 export const APPEND_KEY = "wisetoto_v13_8_66_live_tracker_append_only";
 export const STATE_FILE = "automation-state/state.json";
 export const minute = 60_000;
+export const SUPPORTED_SPORTS = Object.freeze(["축구","농구","야구","배구"]);
+export function sportName(raw) {
+  const s=String(raw??"").trim().toLowerCase();
+  return ({soccer:"축구",football:"축구",basketball:"농구",baseball:"야구",volleyball:"배구"})[s] ??
+   (SUPPORTED_SPORTS.includes(raw)?raw:null);
+}
+export function sportCounts(games) {
+  const counts=Object.fromEntries(SUPPORTED_SPORTS.map(s=>[s,0]));
+  for(const g of Array.isArray(games)?games:[]) {
+    const s=sportName(g?.sport);
+    if(s)counts[s]++;
+  }
+  return counts;
+}
+export function eligibleAutoGame(game,now=Date.now()) {
+  const start=Number(game?.gameDateMs??new Date(game?.gameDate).getTime());
+  if(!sportName(game?.sport) || !Number.isFinite(start) ||
+     start-now<10*minute || start-now>100*minute)return false;
+  // Never match an undefined real team to another match at the same kickoff.
+  const names=[String(game?.home??"").trim(),String(game?.away??"").trim()];
+  if(names.some(v=>!v||/^(미정|tbd|tba|unknown|to be determined|-)$/i.test(v)))return false;
+  return Array.isArray(game?.markets) &&
+    game.markets.some(m=>Array.isArray(m?.selections) &&
+      m.selections.some(x=>Number(x?.odds)>1));
+}
+
 const matchKey = (value) => String(value ?? "").toLowerCase().replace(/[\s._\-]/g, "");
 export const getRecords = (state) => {
   try {
@@ -11,12 +37,15 @@ export const getRecords = (state) => {
   } catch { return []; }
 };
 export function dueGames(games, records, now = Date.now()) {
-  return (Array.isArray(games) ? games : []).filter((game) => {
-    const start = Number(game.gameDateMs ?? new Date(game.gameDate).getTime());
-    if (!Number.isFinite(start) || start - now < 10 * minute || start - now > 100 * minute) return false;
-    if (!Array.isArray(game.markets) || !game.markets.some(m => m.selections?.some(x => Number(x.odds) > 1))) return false;
-    return !records.some(r => Number(r.startMs) === start && matchKey(r.home) === matchKey(game.home) && matchKey(r.away) === matchKey(game.away) && Number(r.capturedAt) < start);
-  });
+  return (Array.isArray(games) ? games : []).filter(game => {
+    if(!eligibleAutoGame(game,now))return false;
+    const start=Number(game.gameDateMs??new Date(game.gameDate).getTime());
+    const sport=sportName(game.sport);
+    return !records.some(r=>Number(r.startMs)===start &&
+      sportName(r.sport)===sport && matchKey(r.home)===matchKey(game.home) &&
+      matchKey(r.away)===matchKey(game.away) && Number(r.capturedAt)<start);
+  }).sort((a,b)=>Number(a.gameDateMs??new Date(a.gameDate).getTime()) -
+    Number(b.gameDateMs??new Date(b.gameDate).getTime()));
 }
 export function dueVerifications(records, now = Date.now()) {
   return records.filter(r => r.verificationStatus === "PENDING" && Number(r.startMs) <= now - 2 * 60 * minute && Number(r.startMs) > now - 7 * 24 * 60 * minute);
