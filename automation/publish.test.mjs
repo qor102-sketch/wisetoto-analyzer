@@ -1,0 +1,27 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {publishProjection,summarizeRecord} from "./publish.mjs";
+import {TRACKER_KEY} from "./logic.mjs";
+test("public projection hides raw model snapshots and credentials",()=>{
+ const frozen={id:"g1",sport:"축구",home:"홈",away:"원정",startMs:1000,capturedAt:900,
+  footballPre:{expectedHome:1.4,expectedAway:1.2,homeRecentSample:2,awayRecentSample:5},
+  picks:[{key:"p",market:"H -1",pick:"패",probability:58.4,expectedValue:-3,grade:"WATCH",resultStatus:"PENDING",modelSnapshot:{secret:"omit"}}],
+  marketResults:[],verificationStatus:"PENDING",result:null};
+ const src={localStorage:{[TRACKER_KEY]:JSON.stringify([frozen])},meta:{lastRunAt:123}};
+ const projection=publishProjection(src);
+ assert.equal(projection.counts.total,1);
+ assert.equal(projection.records[0].top1.probability,58.4);
+ assert.equal(projection.records[0].pre.expectedHome,1.4);
+ assert.ok(projection.records[0].warnings[0].includes("최근 Form"));
+ assert.equal(JSON.stringify(projection).includes("secret"),false);
+ assert.equal(JSON.stringify(projection).includes("modelSnapshot"),false);
+ assert.equal(JSON.stringify(src.localStorage[TRACKER_KEY]),JSON.stringify(JSON.stringify([frozen])));
+});
+test("postmatch statuses preserve original confidence and calculate counts",()=>{
+ const record={id:"g2",sport:"농구",home:"A",away:"B",startMs:1000,capturedAt:900,decision:"PICK",picks:[{key:"p",probability:65,grade:"WATCH",resultStatus:"MISS"}],verificationStatus:"VERIFIED",result:{homeScore:70,awayScore:80}};
+ const projected=summarizeRecord(record);
+ assert.equal(projected.top1.probability,65);
+ assert.deepEqual(projected.result,{homeScore:70,awayScore:80,source:""});
+ const state={localStorage:{[TRACKER_KEY]:JSON.stringify([record])}};
+ assert.equal(publishProjection(state).counts.miss,1);
+});

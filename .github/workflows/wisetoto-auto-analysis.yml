@@ -11,7 +11,7 @@ on:
       - ".github/workflows/wisetoto-auto-analysis.yml"
 
 permissions:
-  contents: read
+  contents: write  # publish projected data to automation-data branch
   actions: read
   issues: write
 
@@ -30,7 +30,7 @@ jobs:
         with:
           node-version: "24"
       - name: Run immutable-record unit tests
-        run: node --test automation/logic.test.mjs
+        run: node --test automation/*.test.mjs
       - name: Install app and browser
         run: |
           cd WisetotoAnalyzer-LiveFree && npm install --no-audit --no-fund
@@ -84,6 +84,21 @@ jobs:
         env:
           WISETOTO_URL: https://wisetoto-analyzer.vercel.app
         run: node automation/runner.mjs
+      - name: Generate public read-only dashboard projection
+        if: steps.due.outputs.run_browser == 'true'
+        run: node automation/publish.mjs
+      - name: Publish site-readable history (no browser secrets)
+        if: steps.due.outputs.run_browser == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          encoded="$(base64 -w 0 automation-state/public-history.json)"
+          current_sha="$(gh api "/repos/$GITHUB_REPOSITORY/contents/automation-history.json?ref=automation-data" --jq .sha)"
+          gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/automation-history.json" \
+            -f message="Update read-only automation dashboard data" \
+            -f branch="automation-data" \
+            -f sha="$current_sha" \
+            -f content="$encoded" > /dev/null
       - name: Summarize OOS report
         if: steps.due.outputs.run_browser == 'true'
         run: cat automation-state/report.md >> "$GITHUB_STEP_SUMMARY"
@@ -109,5 +124,6 @@ jobs:
             automation-state/state.json
             automation-state/audit.json
             automation-state/report.md
+            automation-state/public-history.json
           retention-days: 90
           if-no-files-found: error
