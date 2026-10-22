@@ -9,7 +9,10 @@ export const revalidate = 0;
 
 export async function GET() {
   try {
-    const res = await fetch(SOURCE, {
+    // GitHub raw CDN can serve an old branch snapshot after Actions publishes.
+    // A per-request query key ensures refresh immediately follows branch updates.
+    const sourceUrl = SOURCE + "?refresh=" + Date.now();
+    const res = await fetch(sourceUrl, {
       cache: "no-store",
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(12000),
