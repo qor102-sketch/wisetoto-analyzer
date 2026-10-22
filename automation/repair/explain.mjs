@@ -13,12 +13,12 @@ for(const r of observations){
    r.warnings.includes("PRE_FORM_MISSING")?"DATA_COVERAGE_REVIEW":"NO_CONFIRMED_BUG",
    evidence:notes,requiresHumanReview:r.warnings.length>0});
 }
-if(observations.length&&process.env.GITHUB_TOKEN){
+if(observations.length&&process.env.OPENAI_API_KEY){
  try{
-  const res=await fetch("https://models.github.ai/inference/chat/completions",{
-   method:"POST",headers:{Authorization:"Bearer "+process.env.GITHUB_TOKEN,
-     Accept:"application/vnd.github+json","Content-Type":"application/json"},
-   body:JSON.stringify({model:"openai/gpt-4.1-mini",temperature:0,max_tokens:1800,
+  const res=await fetch("https://api.openai.com/v1/chat/completions",{
+   method:"POST",headers:{Authorization:"Bearer "+process.env.OPENAI_API_KEY,
+     Accept:"application/json","Content-Type":"application/json"},
+   body:JSON.stringify({model:"gpt-4.1-mini",temperature:0,max_tokens:1800,
     messages:[{role:"system",content:"Audit postmatch sports forecasts conservatively. You receive frozen prekickoff snapshots and final scores. Do not invent data, team history, causes, statistics, or guaranteed predictions. A missed TOP1 is not a defect. Mark observed data coverage, timestamp and settlement issues, distinguish hypotheses from verified bugs. No parameter tuning based on past outcomes. Answer in Korean concisely in plain text, one paragraph per game."},
       {role:"user",content:JSON.stringify({verifiedFixtures:observations,
         independentlyReproducedAlerts:triage.alerts})}]}),
@@ -37,7 +37,7 @@ if(observations.length&&process.env.GITHUB_TOKEN){
 }
 if(source==="DETERMINISTIC"){
  const lines=["# 종료 경기 사후 원인 분석 · 규칙 기반",
-  "GitHub Models 연결이 없거나 검증 대상이 없어 단정 없는 규칙 진단만 표시합니다."];
+  "OpenAI API 키가 미설정이거나 AI 호출을 완료할 수 없어 검증 가능한 규칙 진단만 표시합니다."];
  for(const item of analysis)lines.push("## "+item.game,
    "- 분류: "+item.classification,...item.evidence.map(x=>"- "+x));
  await fs.writeFile("automation-state/repair-ai-analysis.md",lines.join("\n")+"\n");
