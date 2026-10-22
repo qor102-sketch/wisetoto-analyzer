@@ -63,6 +63,18 @@ try{
    if(multi.dueBySport?.[sport]!==1)throw Error("Missing "+sport+": "+JSON.stringify(multi));
  }
  if(multi.batchRunning||multi.trackerCount)throw Error("Scan alone must never freeze/mock a PRE");
- console.log("ALL SPORTS SCAN OK: soccer/basketball/baseball/volleyball visible; none auto-executed by smoke");
+
+  console.log("ALL SPORTS SCAN OK: soccer/basketball/baseball/volleyball visible; none auto-executed by smoke");
+ // Result-only runs must still mount the bridge if fresh Betman list fails.
+ await page.unroute("**/api/betman");
+ await page.route("**/api/betman",route=>route.fulfill({
+   status:503,contentType:"application/json",body:JSON.stringify({ok:false,error:"source unavailable"})
+ }));
+ await page.goto("http://127.0.0.1:3100/?automation=1",{waitUntil:"domcontentloaded",timeout:90000});
+ await page.waitForFunction(()=>Boolean(window.__wisetotoAutomation),null,{timeout:30000});
+ const offline=await page.evaluate(()=>window.__wisetotoAutomation.snapshot());
+ if(offline.feedReady)throw Error("Unexpected feed ready in source outage");
+ console.log("RESULT-ONLY BRIDGE OK: loads without a Betman list, pending tracker can be verified independently");
+
 
 } finally {await browser.close();}
