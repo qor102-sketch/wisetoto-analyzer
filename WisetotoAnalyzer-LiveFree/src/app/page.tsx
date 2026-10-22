@@ -25684,6 +25684,75 @@ export default function Home() {
     visibleBetmanGames,
   ]);
 
+  /*
+   * V13.12.28: Headless scheduler bridge. Uses the existing EXACT browser
+   * analysis/verification engine (never an independent model implementation).
+   * Only available to the explicitly opted-in ?automation=1 page.
+   * State lives in LIVE TRACKER and is archived between Actions runs.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined" || new URLSearchParams(window.location.search).get("automation") !== "1") return;
+
+    const now = Date.now();
+    const pending = liveTrackerRecords.filter((record) =>
+      record.verificationStatus === "PENDING" &&
+      record.startMs > now - 7 * 24 * 60 * 60 * 1000 &&
+      record.startMs + 2 * 60 * 60 * 1000 < now
+    );
+    const bridge = {
+      snapshot: () => ({
+        feedReady: Boolean(betmanDiagnostics) || betmanGames.length > 0,
+        feedCount: betmanGames.length,
+        trackerCount: liveTrackerRecords.length,
+        pendingDue: pending.length,
+        batchRunning: liveBatchAnalysis.running,
+        batchCompleted: liveBatchAnalysis.completed,
+        batchFailed: liveBatchAnalysis.failed,
+        validationLoading,
+        status,
+      }),
+      analyze: () => {
+        if (loading || liveBatchAnalysis.running || backtestMode || recentVerifyMode) return { started: false, reason: "BUSY" };
+        const time = Date.now();
+        const selected = visibleBetmanGames.filter((game) => {
+          const start = gameTimeMs(game);
+          if (!Number.isFinite(start) || start - time < 10 * 60_000 || start - time > 100 * 60_000) return false;
+          const identity = actualGameIdentity(game);
+          return !liveTrackerRecords.some((row) =>
+            row.betmanIdentity === identity && row.startMs === start && row.capturedAt < start
+          );
+        }).slice(0, 5);
+        const keys = selected.map((game) => visibleGameKey(game));
+        if (!keys.length) return { started: false, reason: "NO_DUE_GAME", count: 0 };
+        setLiveBatchSelectedKeys(keys);
+        liveBatchWorkerRef.current = false;
+        setLiveBatchOutcomes({});
+        setLiveBatchAnalysis({
+          running: true, gameKeys: keys, index: 0,
+          phase: "SELECT", completed: 0, failed: 0,
+        });
+        setStatus("자동 경기 전 분석 시작 · " + keys.length + "경기 · 기존 PRE 불변");
+        return { started: true, count: keys.length };
+      },
+      verify: () => {
+        if (validationLoading || loading || liveBatchAnalysis.running || !pending.length) {
+          return { started: false, pendingDue: pending.length };
+        }
+        void verifyLiveTrackerResults();
+        return { started: true, pendingDue: pending.length };
+      },
+    };
+    (window as any).__wisetotoAutomation = bridge;
+    return () => {
+      if ((window as any).__wisetotoAutomation === bridge) {
+        delete (window as any).__wisetotoAutomation;
+      }
+    };
+  }, [
+    betmanDiagnostics, betmanGames, visibleBetmanGames, liveTrackerRecords,
+    liveBatchAnalysis, validationLoading, loading, backtestMode, recentVerifyMode, status,
+  ]);
+
   async function revealBacktestResult(): Promise<boolean> {
     if (!backtestMode || validationLoading || !actualMarketPicks.length) return false;
 
