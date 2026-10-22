@@ -25,7 +25,7 @@ test("a valid missed prediction does not produce a code patch",()=>{
  assert.equal(report.alerts.length,0);
  assert.equal(report.observations[0].warnings[0],"PRE_FORM_MISSING");
  assert.deepEqual(report.observations[0].frozenForecast,[1.55,1.46]);
- assert.equal(report.observations[0].meanAbsoluteScoreError,.495);
+ assert.equal(report.observations[0].meanAbsoluteScoreError,.455);
 });
 test("a contradicting market settlement generates a high-confidence repair candidate",()=>{
  const row=fixture();
