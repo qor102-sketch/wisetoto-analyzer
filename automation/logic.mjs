@@ -66,7 +66,7 @@ export function auditChanges(before, after, now = Date.now()) {
     if (isSoccer && pre && (Number(pre.homeRecentSample ?? 0) === 0 || Number(pre.awayRecentSample ?? 0) === 0)) {
       suspicious.push({ game: row.home + " vs " + row.away, reason: "경기 전 Form 부분/전체 미수신", stage: "DATA_SOURCE", at: row.capturedAt });
     }
-    if (row.picks?.some(p => (p.grade === "VALUE" || p.grade === "STRONG VALUE") && !(Number(p.expectedValue) > 0))) {
+    if (isSoccer && row.picks?.some(p => (p.grade === "VALUE" || p.grade === "STRONG VALUE") && !(Number(p.expectedValue) > 0))) {
       suspicious.push({ game: row.home + " vs " + row.away, reason: "비양수 EV인데 VALUE 등급", stage: "GRADE_GATE", at: row.capturedAt });
     }
   }
