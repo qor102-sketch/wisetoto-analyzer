@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dueGames, dueVerifications, preserveFrozenRecords, auditChanges, minute } from "./logic.mjs";
+import { dueGames, dueVerifications, preserveFrozenRecords, auditChanges, minute, sportName, sportCounts } from "./logic.mjs";
 test("window ignores kicked off and far future, preserves locked PRE", () => {
  const now = Date.parse("2026-10-22T00:00:00Z");
  const game = n => ({home:"A",away:"B",gameDateMs:now+n*minute,markets:[{selections:[{odds:1.5}]}]});
@@ -51,4 +51,47 @@ test("legacy NBA PRE without a saved score must not be retroactively invented",(
  const safe=preserveFrozenRecords([old],[later])[0];
  // Current preservation path must guard undefined old snapshot as well.
  assert.equal(safe.courtPre,null);
+});
+
+
+test("ten-minute scanner includes every supported Betman sport without single-sport filter",()=>{
+  const now=Date.parse("2026-10-22T03:00:00Z");
+  const sportFixtures=[
+    ["soccer","축구"],["basketball","농구"],["baseball","야구"],["volleyball","배구"]
+  ].map(([sport,alias],i)=>({sport,home:alias+" 홈",away:alias+" 원정",
+    gameDateMs:now+(70-i*12)*minute,
+    markets:[{selections:[{odds:1.64}]}]}));
+  const due=dueGames(sportFixtures,[],now);
+  assert.equal(due.length,4);
+  assert.deepEqual(due.map(x=>sportName(x.sport)),["배구","야구","농구","축구"]);
+  assert.deepEqual(sportCounts(sportFixtures),{"축구":1,"농구":1,"야구":1,"배구":1});
+  const saved={sport:"농구",home:"농구 홈",away:"농구 원정",
+    startMs:now+58*minute,capturedAt:now};
+  const remaining=dueGames(sportFixtures,[saved],now);
+  assert.equal(remaining.length,3);
+  assert.equal(remaining.some(g=>g.sport==="basketball"),false);
+});
+test("reject unknown sports, TBD identities, no odds, kickoffs and malformed dates",()=>{
+  const now=Date.parse("2026-10-22T03:00:00Z");
+  const good={sport:"soccer",home:"Home",away:"Away",
+    gameDateMs:now+50*minute,markets:[{selections:[{odds:1.9}]}]};
+  const bad=[
+    {...good,sport:"curling"},
+    {...good,home:"미정"},
+    {...good,away:"TBD"},
+    {...good,markets:[{selections:[]}]},
+    {...good,gameDateMs:now-5*minute},
+    {...good,gameDateMs:now+5*minute},
+    {...good,gameDateMs:now+120*minute},
+    {...good,gameDateMs:NaN,gameDate:"invalid"},
+  ];
+  assert.deepEqual(dueGames([good,...bad],[],now),[good]);
+});
+test("large same-time all-sports list is never silently truncated by discovery",()=>{
+ const now=Date.parse("2026-10-22T03:00:00Z");
+ const all=Array.from({length:40},(_,i)=>({sport:["soccer","basketball","baseball","volleyball"][i%4],
+   home:"home"+i,away:"away"+i,gameDateMs:now+30*minute,
+   markets:[{selections:[{odds:2}]}]}));
+ assert.equal(dueGames(all,[],now).length,40);
+ assert.equal(dueGames(all,all.slice(0,24).map(g=>({...g,startMs:g.gameDateMs,capturedAt:now})),now).length,16);
 });
