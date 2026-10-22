@@ -1,4 +1,4 @@
-name: Wisetoto OOS safe auto-repair
+name: Wisetoto OOS free review and manual repair kit
 on:
   workflow_run:
     workflows: ["Wisetoto auto PRE and postmatch verification"]
@@ -12,8 +12,8 @@ on:
         type: string
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
   issues: write
   actions: read
   checks: read
@@ -61,112 +61,46 @@ jobs:
         run: |
           node automation/repair/triage.mjs
           cat automation-state/repair-triage.md >> "$GITHUB_STEP_SUMMARY"
-      - name: Explain frozen PRE vs result (OpenAI if configured; otherwise deterministic)
+      - name: Explain frozen PRE vs result without paid AI
         if: steps.source.outputs.has_artifact == 'true'
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           node automation/repair/explain.mjs
           cat automation-state/repair-ai-analysis.md >> "$GITHUB_STEP_SUMMARY"
-      - name: Open deduplicated evidence review issues
-        if: steps.triage.outputs.has_alerts == 'true'
+
+      - name: Build free Korean manual repair package for confirmed investigation needs
+        if: steps.source.outputs.has_artifact == 'true'
+        id: manual
+        env:
+          SOURCE_AUDIT_RUN: ${{ steps.source.outputs.source_run }}
+        run: |
+          node automation/repair/manual-kit.mjs
+          cat automation-state/manual-kit-status.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open deduplicated repair review issues with download instructions
+        if: steps.manual.outputs.has_cases == 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          SOURCE_AUDIT_RUN: ${{ github.event.workflow_run.id || inputs.source_run_id }}
+          SOURCE_AUDIT_RUN: ${{ steps.source.outputs.source_run }}
         run: node automation/repair/issues.mjs
-      - name: OpenAI proposes a bounded settlement-only source repair
-        if: steps.triage.outputs.has_repairable == 'true'
-        id: patch
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: node automation/repair/propose.mjs
-      - name: Run model-invariance and settlement unit regression
-        if: steps.patch.outputs.has_patch == 'true'
-        run: node --test automation/*.test.mjs automation/repair/*.test.mjs
-      - name: TypeScript and Next.js production build of candidate
-        if: steps.patch.outputs.has_patch == 'true'
-        run: |
-          cd WisetotoAnalyzer-LiveFree
-          npm install --no-audit --no-fund
-          npm run build
-      - name: Real Chromium smoke test of candidate
-        if: steps.patch.outputs.has_patch == 'true'
-        run: |
-          npm install --no-save --no-audit --no-fund playwright@1.56.1
-          npx playwright install --with-deps chromium
-          cd WisetotoAnalyzer-LiveFree
-          npm run dev -- -p 3100 -H 127.0.0.1 > /tmp/wisetoto-safe-repair-dev.log 2>&1 &
-          for i in $(seq 1 90); do
-            if curl -fsS http://127.0.0.1:3100/ > /dev/null; then break; fi
-            if [ "$i" -eq 90 ]; then cat /tmp/wisetoto-safe-repair-dev.log; exit 1; fi
-            sleep 2
-          done
-          cd ..
-          node automation/smoke.mjs
-      - name: Open DRAFT PR without auto-merge
-        if: steps.patch.outputs.has_patch == 'true'
-        id: pr
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -eu
-          # Next 14 may rewrite tsconfig during a successful build; never ship it
-          # in an automatically generated patch.
-          git restore -- WisetotoAnalyzer-LiveFree/tsconfig.json WisetotoAnalyzer-LiveFree/next-env.d.ts
-          test "$(git diff --name-only)" = "WisetotoAnalyzer-LiveFree/src/app/page.tsx"
-          branch="auto/safe-repair-$GITHUB_RUN_ID"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$branch"
-          git add -- WisetotoAnalyzer-LiveFree/src/app/page.tsx
-          git commit -m "OOS: guarded settlement correction requiring owner approval"
-          git push origin "$branch"
-          echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          cat > /tmp/repair-pr.md <<'EOF'
-          ## OOS correction — DRAFT, HUMAN APPROVAL REQUIRED
 
-          Independently reproducible final-score vs full-time market settlement mismatch.
-          A guarded source patch was proposed by GitHub Models and restricted to the
-          existing settlement functions. Automated unit tests, Next.js production build,
-          and Chromium smoke passed prior to creating this draft.
-
-          Frozen PRE, Poisson/lambda, TOP1 and model parameters have not been rewritten.
-          A missed bet alone never authorizes a patch. Do not merge to main until the
-          owner reviews source evidence, regression and Vercel Preview.
-          EOF
-          gh pr create --draft --base main --head "$branch" \
-            --title "[OOS Auto Repair] settlement candidate $GITHUB_RUN_ID" \
-            --body-file /tmp/repair-pr.md > /tmp/repair-pr-url.txt
-          echo "pr_url=$(cat /tmp/repair-pr-url.txt)" >> "$GITHUB_OUTPUT"
-          echo "Draft PR: $(cat /tmp/repair-pr-url.txt)" >> "$GITHUB_STEP_SUMMARY"
-      - name: Verify exact-commit Vercel Preview READY and API
-        if: steps.pr.outputs.commit_sha != ''
-        id: preview
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          REPAIR_SHA: ${{ steps.pr.outputs.commit_sha }}
-        run: node automation/repair/check-preview.mjs
-      - name: Comment Preview approval gate on draft PR
-        if: steps.pr.outputs.pr_url != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_URL: ${{ steps.pr.outputs.pr_url }}
-          PREVIEW_VERIFIED: ${{ steps.preview.outputs.preview_verified }}
-        run: |
-          cat automation-state/repair-preview.json >> "$GITHUB_STEP_SUMMARY"
-          gh pr comment "$PR_URL" --body "Automated tests passed. Vercel Preview verified: $PREVIEW_VERIFIED. Production merge requires human review and approval. If Preview is unverified, this PR MUST remain draft."
+      - name: Upload downloadable manual fix kit (no AI API required)
+        if: steps.manual.outputs.has_cases == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wisetoto-manual-fix-kit
+          path: automation-state/manual-fix-kit/
+          retention-days: 90
+          if-no-files-found: error
       - name: Retain transparent diagnosis, patch and Preview evidence
         if: always() && steps.source.outputs.has_artifact == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: wisetoto-safe-repair-audit
+          name: wisetoto-free-oos-audit
           path: |
             automation-state/repair-triage.json
             automation-state/repair-triage.md
             automation-state/repair-ai-analysis.md
             automation-state/repair-analysis.json
-            automation-state/repair-proposal.json
-            automation-state/repair-proposal.md
-            automation-state/repair-preview.json
+            automation-state/manual-kit-status.json
           retention-days: 90
           if-no-files-found: warn
