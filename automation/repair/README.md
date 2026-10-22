@@ -10,7 +10,7 @@ auto PRE/postmatch workflow completes successfully.
 3. Independently compare full-time 3-way handicaps and explicit total-goal
    lines with verified scores. Record data coverage, identity and prekickoff
    timestamp defects separately.
-4. With GitHub Models (models:read permission), perform cautious Korean
+4. With the OpenAI API (optional repository secret OPENAI_API_KEY), perform cautious Korean
    postmatch analysis with hypotheses explicitly separated from verified
    facts. Deterministic analysis remains available if AI is unavailable.
 5. For independently reproduced settlement mismatches only, ask the model
@@ -51,3 +51,14 @@ TOP1 or snapshots are ever rewritten. No outcome-fitted weight changes.
 - Review the draft PR and manually merge only if all of the above pass
 
 **Never auto-merge or release a model change from a single game result.**
+
+## Required AI connector setup (October 2026)
+
+GitHub Models inference ended July 30, 2026. The workflow now uses the
+supported OpenAI Chat Completions endpoint only when OPENAI_API_KEY exists
+in GitHub repository Actions secrets. Go to repository Settings > Secrets
+and variables > Actions > New repository secret. Name: OPENAI_API_KEY.
+Keep the value secret. Without this key, postmatch deterministic audit and
+issue creation run normally, but AI explanations and automatic draft PR
+proposals are not enabled. API usage is separately billed and is not
+included with ChatGPT Plus.
