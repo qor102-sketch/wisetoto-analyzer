@@ -25733,10 +25733,38 @@ export default function Home() {
       record.startMs > now - 7 * 24 * 60 * 60 * 1000 &&
       record.startMs + 2 * 60 * 60 * 1000 < now
     );
+    const automationDueGames = () => {
+      const time = Date.now();
+      // Scan *all* sports in the unfiltered Betman list; no UI sport selection.
+      const supported = new Set(["축구", "농구", "야구", "배구"]);
+      const supportedRaw = new Set(["축구","농구","야구","배구","soccer","football",
+        "basketball","baseball","volleyball","sc","bs","bk","bb","vl","vb","1","2","3","4"]);
+      return visibleBetmanGames.filter((game) => {
+        const start = gameTimeMs(game);
+        if (!supportedRaw.has(String((game as any)?.sport ?? "").trim().toLowerCase()) ||
+            !supported.has(koreanSport(String((game as any)?.sport ?? ""))) ||
+            !Number.isFinite(start) || start - time < 10 * 60_000 || start - time > 100 * 60_000) return false;
+        if ([game.home,game.away].some(name =>
+          !String(name ?? "").trim() || /^(미정|tbd|tba|unknown|to be determined|-)$/i.test(String(name ?? "").trim())
+        )) return false;
+        const markets = Array.isArray(game.markets) ? game.markets : [];
+        if (!markets.some((m:any) => Array.isArray(m.selections) &&
+            m.selections.some((v:any) => Number(v.odds) > 1))) return false;
+        const identity = actualGameIdentity(game);
+        return !liveTrackerRecords.some((row) =>
+          row.betmanIdentity === identity && row.startMs === start &&
+          row.sport === koreanSport(String((game as any)?.sport ?? "")) && row.capturedAt < start
+        );
+      }).sort((a,b) => gameTimeMs(a) - gameTimeMs(b));
+    };
     const bridge = {
       snapshot: () => ({
         feedReady: Boolean(betmanDiagnostics) || betmanGames.length > 0,
         feedCount: betmanGames.length,
+        dueCount: automationDueGames().length,
+        dueBySport: Object.fromEntries(["축구","농구","야구","배구"].map(
+          s => [s, automationDueGames().filter(g => koreanSport(String((g as any)?.sport ?? "")) === s).length]
+        )),
         trackerCount: liveTrackerRecords.length,
         pendingDue: pending.length,
         batchRunning: liveBatchAnalysis.running,
@@ -25747,15 +25775,8 @@ export default function Home() {
       }),
       analyze: () => {
         if (loading || liveBatchAnalysis.running || backtestMode || recentVerifyMode) return { started: false, reason: "BUSY" };
-        const time = Date.now();
-        const selected = visibleBetmanGames.filter((game) => {
-          const start = gameTimeMs(game);
-          if (!Number.isFinite(start) || start - time < 10 * 60_000 || start - time > 100 * 60_000) return false;
-          const identity = actualGameIdentity(game);
-          return !liveTrackerRecords.some((row) =>
-            row.betmanIdentity === identity && row.startMs === start && row.capturedAt < start
-          );
-        }).slice(0, 5);
+        const due = automationDueGames();
+        const selected = due.slice(0, 24);
         const keys = selected.map((game) => visibleGameKey(game));
         if (!keys.length) return { started: false, reason: "NO_DUE_GAME", count: 0 };
         setLiveBatchSelectedKeys(keys);
@@ -25766,7 +25787,9 @@ export default function Home() {
           phase: "SELECT", completed: 0, failed: 0,
         });
         setStatus("자동 경기 전 분석 시작 · " + keys.length + "경기 · 기존 PRE 불변");
-        return { started: true, count: keys.length };
+        return { started: true, count: keys.length, dueTotal: due.length,
+          remainingAfterBatch: due.length - keys.length,
+          sports: Array.from(new Set(selected.map(g => koreanSport(String((g as any)?.sport ?? ""))))) };
       },
       verify: () => {
         if (validationLoading || loading || liveBatchAnalysis.running || !pending.length) {
