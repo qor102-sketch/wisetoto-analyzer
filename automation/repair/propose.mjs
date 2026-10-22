@@ -6,7 +6,7 @@ const cases=triage.alerts.filter(x=>x.stage==="SETTLEMENT_MISMATCH"&&x.autoPatch
 let status="NO_REPRODUCIBLE_BUG",proposal=null;
 if(cases.length){
  const original=await fs.readFile(SETTLEMENT_PATH,"utf8");
- if(!process.env.GITHUB_TOKEN)status="GITHUB_MODELS_TOKEN_MISSING";
+ if(!process.env.OPENAI_API_KEY)status="OPENAI_API_KEY_NOT_CONFIGURED";
  else{
   const messages=[
    {role:"system",content:"You are a conservative code repair reviewer. Return exactly one JSON object with action NO_PATCH or PATCH plus path, search, replace, rationale. "+
@@ -18,10 +18,10 @@ if(cases.length){
      note:"If the source is already mathematically correct, choose NO_PATCH. Never alter past records."})}
   ];
   try{
-   const response=await fetch("https://models.github.ai/inference/chat/completions",{
-    method:"POST",headers:{Authorization:"Bearer "+process.env.GITHUB_TOKEN,
-      Accept:"application/vnd.github+json","Content-Type":"application/json"},
-    body:JSON.stringify({model:"openai/gpt-4.1-mini",messages,max_tokens:1700,temperature:0}),
+   const response=await fetch("https://api.openai.com/v1/chat/completions",{
+    method:"POST",headers:{Authorization:"Bearer "+process.env.OPENAI_API_KEY,
+      Accept:"application/json","Content-Type":"application/json"},
+    body:JSON.stringify({model:"gpt-4.1-mini",messages,max_tokens:1700,temperature:0}),
     signal:AbortSignal.timeout(45000)});
    if(!response.ok)throw Error("Models HTTP "+response.status);
    const data=await response.json();
