@@ -25,3 +25,15 @@ test("postmatch statuses preserve original confidence and calculate counts",()=>
  const state={localStorage:{[TRACKER_KEY]:JSON.stringify([record])}};
  assert.equal(publishProjection(state).counts.miss,1);
 });
+
+test("projection reveals authentic frozen NBA points but not the model snapshot",()=>{
+ const record={id:"court",sport:"농구",home:"A",away:"B",startMs:5000,capturedAt:2000,
+  courtPre:{stage:"PRE",capturedAt:2000,expectedHome:117.4,expectedAway:110.6,homeRecentSample:5,awayRecentSample:4},
+  picks:[{key:"p",probability:72,expectedValue:-3,resultStatus:"PENDING",modelSnapshot:{internal:"hidden"}}],
+  verificationStatus:"PENDING"};
+ const projected=summarizeRecord(record);
+ assert.deepEqual(projected.courtPre,{expectedHome:117.4,expectedAway:110.6,homeRecentSample:5,awayRecentSample:4,homeVenueSample:null,awayVenueSample:null});
+ assert.equal(projected.pre,null);
+ assert.equal(JSON.stringify(projected).includes("internal"),false);
+ assert.equal(summarizeRecord({...record,courtPre:null}).courtPre,null);
+});
