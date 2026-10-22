@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { dueGames, dueVerifications, preserveFrozenRecords, auditChanges, minute, sportName, sportCounts } from "./logic.mjs";
 test("window ignores kicked off and far future, preserves locked PRE", () => {
  const now = Date.parse("2026-10-22T00:00:00Z");
- const game = n => ({home:"A",away:"B",gameDateMs:now+n*minute,markets:[{selections:[{odds:1.5}]}]});
+ const game = n => ({sport:"soccer",home:"A",away:"B",gameDateMs:now+n*minute,markets:[{selections:[{odds:1.5}]}]});
  assert.equal(dueGames([game(-1),game(5),game(40),game(101)],[],now).length,1);
- assert.equal(dueGames([game(40)],[{home:"A",away:"B",startMs:now+40*minute,capturedAt:now}],now).length,0);
+ assert.equal(dueGames([game(40)],[{sport:"축구",home:"A",away:"B",startMs:now+40*minute,capturedAt:now}],now).length,0);
 });
 test("result verification is 2h after kickoff only",()=>{
  const now=Date.now();
