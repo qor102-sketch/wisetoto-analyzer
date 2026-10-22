@@ -30,9 +30,9 @@ TOP1 or snapshots are ever rewritten. No outcome-fitted weight changes.
 
 - GitHub Settings > Actions > General > Workflow permissions must allow
   GitHub Actions to create pull requests for automatic draft creation.
-- GitHub Models must be available to the repository/account. The workflow
-  uses the built-in token with models:read; no extra API key is assumed.
-  If unavailable, only deterministic diagnostics run.
+- OpenAI API usage requires the OPENAI_API_KEY repository Actions secret.
+  Without it, deterministic review works, but AI-authored patches are disabled.
+  The API has separate usage billing from ChatGPT.
 - A bot-created PR may require a human to approve its PR Actions checks.
 - Existing GitHub→Vercel integration must publish deployment status.
   If Preview is unavailable or protection blocks testing, the PR remains
