@@ -1,7 +1,7 @@
 {
   "schema": "wisetoto-public-history-v1",
-  "publishedAt": "2026-10-22T09:29:55.129Z",
-  "lastRunAt": 1792661394892,
+  "publishedAt": "2026-10-22T14:38:20.597Z",
+  "lastRunAt": 1792679900506,
   "source": "GitHub Actions 자동 LIVE TRACKER (수동 분석 기록과 별개)",
   "counts": {
     "total": 6,
