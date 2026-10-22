@@ -912,6 +912,17 @@ type FootballPreValidationResult = {
   marginAbsError: number;
 };
 
+type CourtPreSnapshot = {
+  stage: "PRE";
+  capturedAt: number;
+  expectedHome: number;
+  expectedAway: number;
+  homeRecentSample: number;
+  awayRecentSample: number;
+  homeVenueSample: number;
+  awayVenueSample: number;
+};
+
 type LiveTrackerRecord = {
   id: string;
   fixtureId: number | null;
@@ -941,6 +952,8 @@ type LiveTrackerRecord = {
   baseballChallenger?: BaseballChallengerSnapshot | null;
   footballLineup?: FootballLineupSnapshot | null;
   footballPre?: FootballPreValidationSnapshot | null;
+  // Captured ONLY at the original pre-kickoff analysis; never backfill from outcomes.
+  courtPre?: CourtPreSnapshot | null;
   footballPreResult?: FootballPreValidationResult | null;
   verifyWaitReason?: "BETMAN_MATCH_WAIT" | "BETMAN_FINAL_WAIT" | "FALLBACK_TIME_WAIT" | "FIXTURE_ID_MISSING" | "RESULT_NOT_FOUND" | null;
   verifyLastCheckedAt?: number | null;
@@ -20229,6 +20242,24 @@ export default function Home() {
             }
           : null;
 
+      const courtPreSnapshot: CourtPreSnapshot | null =
+        currentSport === "농구" &&
+        analysisFactors.expectedHomeScore !== null &&
+        analysisFactors.expectedAwayScore !== null &&
+        Number.isFinite(analysisFactors.expectedHomeScore) &&
+        Number.isFinite(analysisFactors.expectedAwayScore)
+          ? {
+              stage: "PRE",
+              capturedAt: Date.now(),
+              expectedHome: analysisFactors.expectedHomeScore,
+              expectedAway: analysisFactors.expectedAwayScore,
+              homeRecentSample: analysisFactors.homeRecentSample,
+              awayRecentSample: analysisFactors.awayRecentSample,
+              homeVenueSample: analysisFactors.homeVenueSample,
+              awayVenueSample: analysisFactors.awayVenueSample,
+            }
+          : null;
+
       const baseballChallengerSnapshot: BaseballChallengerSnapshot | null =
         currentBaseballChallenger;
 
@@ -20481,6 +20512,7 @@ export default function Home() {
         baseballChallenger: baseballChallengerSnapshot,
         footballLineup: footballLineupSnapshot,
         footballPre: footballPreSnapshot,
+        courtPre: courtPreSnapshot,
         footballPreResult: null,
         verificationStatus: "PENDING" as const,
         verifiedAt: null,
@@ -20513,6 +20545,8 @@ export default function Home() {
                     picks: nextRecord.picks,
                     marketResults: nextRecord.marketResults,
                     footballPre: existingRecord.footballPre ?? nextRecord.footballPre ?? null,
+                    // Never manufacture a PRE court score for a legacy frozen record.
+                    courtPre: existingRecord.courtPre ?? null,
                     footballPreResult: null,
                     verificationStatus: "PENDING" as const,
                     verifiedAt: null,
