@@ -37,6 +37,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - name: Check free postmatch regression tests (no API calls)
+        run: node --test automation/*.test.mjs automation/repair/*.test.mjs
+
       - name: Restore frozen PRE and OOS audit from successful run
         id: source
         env:
