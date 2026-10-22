@@ -62,6 +62,13 @@ jobs:
         run: |
           node automation/repair/triage.mjs
           cat automation-state/repair-triage.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Explain frozen PRE vs result (AI when available, deterministic otherwise)
+        if: steps.source.outputs.has_artifact == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node automation/repair/explain.mjs
+          cat automation-state/repair-ai-analysis.md >> "$GITHUB_STEP_SUMMARY"
       - name: Open deduplicated evidence review issues
         if: steps.triage.outputs.has_alerts == 'true'
         env:
@@ -154,6 +161,8 @@ jobs:
           path: |
             automation-state/repair-triage.json
             automation-state/repair-triage.md
+            automation-state/repair-ai-analysis.md
+            automation-state/repair-analysis.json
             automation-state/repair-proposal.json
             automation-state/repair-proposal.md
             automation-state/repair-preview.json
