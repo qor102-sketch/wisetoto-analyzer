@@ -88,7 +88,7 @@ jobs:
         if: steps.patch.outputs.has_patch == 'true'
         run: |
           cd WisetotoAnalyzer-LiveFree
-          npm ci --no-audit --no-fund
+          npm install --no-audit --no-fund
           npm run build
       - name: Real Chromium smoke test of candidate
         if: steps.patch.outputs.has_patch == 'true'
