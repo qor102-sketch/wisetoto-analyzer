@@ -14,3 +14,21 @@ runs maintain their own independent tracker in GitHub Actions artifacts.
 Artifacts expire after 90 days; archive them for permanent backtests.
 Scheduled GitHub jobs are not precise and may be delayed or skipped. Do not
 backdate any missed PRE.
+
+
+## V13.12.29 — public site results
+
+- Dashboard: `https://wisetoto-analyzer.vercel.app/automation`.
+- App API: `/api/automation/results` (read-only, no GitHub credentials).
+- Automatic workflow publishes **only projected, non-sensitive records** to
+  `automation-data:automation-history.json` (public branch). Full detailed
+  automated PRE data still lives in private-to-automation Actions artifacts.
+- This publishing step runs only after real headless-browser analysis or
+  postmatch verification; during quiet periods, dashboard correctly shows
+  the timestamp of the last completed run.
+- Initial public records were seeded from the first *actual* successful run.
+- The dashboard never merges into your browser's manual LIVE TRACKER.
+- Only Actions' `main` workflow writes the data branch; site viewers can
+  fetch it, but cannot mutate forecasts.
+- **Caution:** GitHub branch history is durable but public. It contains
+  fixture/pick summaries, not authentication tokens or raw localStorage.
