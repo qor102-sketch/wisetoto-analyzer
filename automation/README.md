@@ -32,3 +32,27 @@ backdate any missed PRE.
   fetch it, but cannot mutate forecasts.
 - **Caution:** GitHub branch history is durable but public. It contains
   fixture/pick summaries, not authentication tokens or raw localStorage.
+
+
+## V13.12.31 — every ten minutes, all supported sports
+
+- GitHub Actions cron: `3,13,23,33,43,53 * * * *` UTC (every 10 minutes,
+  six times per hour, best effort; GitHub can delay or drop scheduled jobs).
+- Each pass reads Betman's **entire** released game list and independently
+  inspects football/soccer, basketball, baseball and volleyball; it does
+  **not** follow the interactive page's single-sport filter.
+- Candidates need real teams, actual decimal odds, 10–100 minutes before
+  kickoff and no already-frozen pregame tracker record.
+- Preflight logs the per-sport total and due counts even when no browser
+  analysis is required. The automation bridge exposes live due counts per
+  sport for browser regression checks.
+- Analyze up to 24 upcoming fixtures per browser run, earliest kickoff
+  first. Anything remaining is picked up at the **next** scheduled scan
+  if still before kickoff. It is never backdated after kickoff.
+- Betman may not publish some competitions or prices. Such unavailable
+  fixtures are not fabricated or counted as captured predictions.
+- Each run remains single-flight via Actions concurrency group to protect
+  the immutable PRE archive. OOS result verification and public site
+  `/automation` remain unchanged.
+- New sports not supported by the prediction engine are excluded until
+  the engine has verified identity/data handling.
