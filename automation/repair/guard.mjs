@@ -21,9 +21,16 @@ export function applySafePatch(original,proposal){
   const before=original.slice(0,pos);
   const line=before.split("\n").length;
   // Require the proposed hunk to overlap a known *settlement-only* function.
-  const area=original.slice(Math.max(0,pos-9000),Math.min(original.length,pos+9000));
-  if(!/settleBetmanHomeHandicap|validateBacktestMarket|validateBacktest|settledMarketResults|settleMarket/i.test(area))
-    return {ok:false,reason:"NOT_SETTLEMENT_CONTEXT"};
+  // The edit must be located INSIDE a known settlement function body.
+  const anchors=["function settleBetmanHomeHandicap(","function validateBacktestMarket("];
+  const valid=anchors.some(anchor=>{
+    const start=original.indexOf(anchor);
+    if(start<0)return false;
+    const next=original.indexOf("\nfunction ",start+anchor.length);
+    const end=next<0?Math.min(original.length,start+7500):next;
+    return pos>=start && pos+search.length<=end && end-start<7500;
+  });
+  if(!valid)return {ok:false,reason:"NOT_SETTLEMENT_CONTEXT"};
   if(Math.abs(replace.split("\n").length-search.split("\n").length)>12)
     return {ok:false,reason:"TOO_MANY_LINE_CHANGES"};
   if(/(?:<script|https?:\/\/|child_process|execSync|spawn\(|DELETE\s+FROM)/i.test(replace))
