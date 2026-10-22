@@ -50,5 +50,5 @@ test("legacy NBA PRE without a saved score must not be retroactively invented",(
  const later={...old,courtPre:{expectedHome:117,expectedAway:110},verificationStatus:"VERIFIED"};
  const safe=preserveFrozenRecords([old],[later])[0];
  // Current preservation path must guard undefined old snapshot as well.
- assert.equal(safe.courtPre,undefined);
+ assert.equal(safe.courtPre,null);
 });
