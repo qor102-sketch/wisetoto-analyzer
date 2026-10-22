@@ -111,6 +111,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
+          # Next 14 may rewrite tsconfig during a successful build; never ship it
+          # in an automatically generated patch.
+          git restore -- WisetotoAnalyzer-LiveFree/tsconfig.json
           test "$(git diff --name-only)" = "WisetotoAnalyzer-LiveFree/src/app/page.tsx"
           branch="auto/safe-repair-$GITHUB_RUN_ID"
           git config user.name "github-actions[bot]"
