@@ -32,7 +32,17 @@ if(process.argv.includes("--preflight")){
   const errors=[];page.on("pageerror",e=>errors.push(String(e)));
   try{
     await page.goto(base+"/?automation=1",{waitUntil:"domcontentloaded",timeout:90000});
-    await page.waitForFunction(()=>!!window.__wisetotoAutomation?.snapshot().feedReady,null,{timeout:120000});
+    // A result-only verification must not require the live Betman list UI to load.
+    // The archived tracker is the authority for pending results, while fresh
+    // Betman offers are required only for *new* prekickoff analysis.
+    await page.waitForFunction(()=>Boolean(window.__wisetotoAutomation),null,{timeout:90000});
+    await page.waitForFunction(expected => {
+      const state=window.__wisetotoAutomation?.snapshot();
+      return !!state && state.trackerCount >= expected;
+    },previous.length,{timeout:45000});
+    if(due.length>0){
+      await page.waitForFunction(()=>!!window.__wisetotoAutomation?.snapshot().feedReady,null,{timeout:90000});
+    }
     console.log("Ready",JSON.stringify(await page.evaluate(()=>window.__wisetotoAutomation.snapshot())));
     const analysis=await page.evaluate(()=>window.__wisetotoAutomation.analyze());
     console.log("Analysis",JSON.stringify(analysis));
