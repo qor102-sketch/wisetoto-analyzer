@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  diagnose-and-draft:
+  diagnose-and-manual-kit:
     if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -94,7 +94,7 @@ jobs:
           path: automation-state/manual-fix-kit/
           retention-days: 90
           if-no-files-found: error
-      - name: Retain transparent diagnosis, patch and Preview evidence
+      - name: Retain transparent free diagnosis and manual-fix-kit status
         if: always() && steps.source.outputs.has_artifact == 'true'
         uses: actions/upload-artifact@v4
         with:
