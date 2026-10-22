@@ -1,0 +1,77 @@
+name: Wisetoto auto PRE and postmatch verification
+on:
+  schedule:
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: wisetoto-automatic-pre-post
+  cancel-in-progress: false
+
+jobs:
+  auto-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Restore latest automation state artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p automation-state
+          artifact_id="$(gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts?name=wisetoto-auto-state&per_page=15" --jq '.artifacts | map(select(.expired == false)) | .[0].id // empty' || true)"
+          if [ -n "$artifact_id" ]; then
+            if curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
+              -o /tmp/wisetoto-auto-state.zip; then
+              unzip -oq /tmp/wisetoto-auto-state.zip -d automation-state
+            fi
+          fi
+      - name: Due match and verification preflight
+        id: due
+        run: node automation/runner.mjs --preflight
+      - name: Install browser only when work is due
+        if: steps.due.outputs.run_browser == 'true'
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Run exact production model and verify results
+        if: steps.due.outputs.run_browser == 'true'
+        env:
+          WISETOTO_URL: https://wisetoto-analyzer.vercel.app
+        run: node automation/runner.mjs
+      - name: Summarize OOS report
+        if: steps.due.outputs.run_browser == 'true'
+        run: cat automation-state/report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Open review issue for source/grade problems
+        if: steps.due.outputs.run_browser == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -s automation-state/review.md ]; then
+            title="$(cat automation-state/review-title.txt)"
+            issue="$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --json title,number \
+              --jq ".[] | select(.title == \"$title\") | .number" | head -n 1)"
+            if [ -z "$issue" ]; then
+              gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file automation-state/review.md
+            fi
+          fi
+      - name: Archive frozen tracker and OOS report
+        if: always() && steps.due.outputs.run_browser == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wisetoto-auto-state
+          path: |
+            automation-state/state.json
+            automation-state/audit.json
+            automation-state/report.md
+          retention-days: 90
+          if-no-files-found: error
