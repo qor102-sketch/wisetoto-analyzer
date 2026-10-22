@@ -3,6 +3,12 @@ on:
   schedule:
     - cron: "17,47 * * * *"
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/wisetoto-auto-analysis.yml"
 
 permissions:
   contents: read
@@ -14,7 +20,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  smoke:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Run immutable-record unit tests
+        run: node --test automation/logic.test.mjs
+      - name: Install app and browser
+        run: |
+          cd WisetotoAnalyzer-LiveFree && npm install --no-audit --no-fund
+          cd .. && npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Launch Next.js browser test server
+        run: |
+          cd WisetotoAnalyzer-LiveFree
+          npm run dev -- -p 3100 -H 127.0.0.1 > /tmp/wisetoto-dev.log 2>&1 &
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:3100/ > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat /tmp/wisetoto-dev.log
+          exit 1
+      - name: Verify automation bridge without fabricated game
+        run: node automation/smoke.mjs
+
   auto-audit:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
