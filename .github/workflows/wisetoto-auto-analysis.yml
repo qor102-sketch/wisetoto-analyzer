@@ -31,7 +31,7 @@ jobs:
         with:
           node-version: "24"
       - name: Run immutable-record unit tests
-        run: node --test automation/*.test.mjs
+        run: node --test automation/*.test.mjs automation/repair/*.test.mjs
       - name: Install app and browser
         run: |
           cd WisetotoAnalyzer-LiveFree && npm install --no-audit --no-fund
