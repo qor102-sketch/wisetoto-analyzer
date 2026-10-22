@@ -1,47 +1,32 @@
 import fs from "node:fs/promises";
 const triage=JSON.parse(await fs.readFile("automation-state/repair-triage.json","utf8"));
-const observations=triage.observations.slice(0,20);
-let source="DETERMINISTIC",analysis=[];
+const observations=(triage.observations??[]).slice(0,30);
+const lines=["# 종료 경기 무료 자동 원인분석 (규칙 기반)",
+  "AI API 호출 없음 · 모델 재학습 없음 · 데이터 확실성 분리",
+  "","미적중 단독으로는 버그를 단정하지 않습니다. frozen PRE는 절대 수정하지 않습니다.",""];
+const analysis=[];
 for(const r of observations){
  const notes=[];
- if(r.top1Status==="MISS")notes.push("TOP1 mispredicted; this alone is expected model variance, not a bug.");
- if(r.warnings.includes("PRE_FORM_MISSING"))notes.push("Historical recent Form coverage was incomplete in the original PRE; investigate independently verified league-only completed fixtures.");
- if(r.warnings.includes("PRE_TIME_INTEGRITY"))notes.push("PRE capture timestamp violates prekickoff lock requirement.");
- if(typeof r.meanAbsoluteScoreError==="number")notes.push("Frozen expected-versus-actual mean absolute score error "+r.meanAbsoluteScoreError+". This cannot establish causality.");
- if(!notes.length)notes.push("No reproducible source or settlement defect established.");
- analysis.push({id:r.id,game:r.match,classification:r.warnings.includes("PRE_TIME_INTEGRITY")?"DATA_INTEGRITY_REVIEW":
-   r.warnings.includes("PRE_FORM_MISSING")?"DATA_COVERAGE_REVIEW":"NO_CONFIRMED_BUG",
-   evidence:notes,requiresHumanReview:r.warnings.length>0});
+ if(r.top1Status==="MISS")notes.push("TOP1 미적중: 예측 불확실성에 포함되며 단독 수정 근거가 아님");
+ if(r.warnings.includes("PRE_FORM_MISSING"))notes.push("당시 실제 최근 Form 표본 부족: 과거 원본 소스/대상 리그/동일팀을 조사해야 함");
+ if(r.warnings.includes("PRE_TIME_INTEGRITY"))notes.push("PRE 잠금 시각이 킥오프 이상: 무결성 점검 필요");
+ if(r.warnings.includes("NEGATIVE_EV_GRADE_REVIEW"))notes.push("등급/EV 규칙 검토 필요: 마켓/배당/당시 정책 재확인");
+ if(typeof r.meanAbsoluteScoreError==="number")
+   notes.push("고정 PRE와 실제 점수의 평균 절대오차 "+r.meanAbsoluteScoreError+" (원인 증명 아님)");
+ if(!notes.length)notes.push("재현 가능한 오류가 확인되지 않음");
+ const code=r.warnings.includes("PRE_TIME_INTEGRITY")?"DATA_INTEGRITY_REVIEW":
+  r.warnings.includes("PRE_FORM_MISSING")?"DATA_COVERAGE_REVIEW":
+  r.warnings.includes("NEGATIVE_EV_GRADE_REVIEW")?"GRADE_GATE_REVIEW":"NO_CONFIRMED_BUG";
+ analysis.push({id:r.id,game:r.match,classification:code,evidence:notes,requiresHumanReview:r.warnings.length>0});
+ lines.push("## "+r.match,"- 분류: "+code,...notes.map(x=>"- "+x),"");
 }
-if(observations.length&&process.env.OPENAI_API_KEY){
- try{
-  const res=await fetch("https://api.openai.com/v1/chat/completions",{
-   method:"POST",headers:{Authorization:"Bearer "+process.env.OPENAI_API_KEY,
-     Accept:"application/json","Content-Type":"application/json"},
-   body:JSON.stringify({model:"gpt-4.1-mini",temperature:0,max_tokens:1800,
-    messages:[{role:"system",content:"Audit postmatch sports forecasts conservatively. You receive frozen prekickoff snapshots and final scores. Do not invent data, team history, causes, statistics, or guaranteed predictions. A missed TOP1 is not a defect. Mark observed data coverage, timestamp and settlement issues, distinguish hypotheses from verified bugs. No parameter tuning based on past outcomes. Answer in Korean concisely in plain text, one paragraph per game."},
-      {role:"user",content:JSON.stringify({verifiedFixtures:observations,
-        independentlyReproducedAlerts:triage.alerts})}]}),
-   signal:AbortSignal.timeout(45000)
-  });
-  if(!res.ok)throw Error("AI HTTP "+res.status);
-  const j=await res.json();
-  const text=String(j.choices?.[0]?.message?.content??"").slice(0,12000).trim();
-  if(text){
-    source="GITHUB_MODELS";
-    await fs.writeFile("automation-state/repair-ai-analysis.md",
-     "# 종료 경기 사후 원인 분석 (AI 보조 · 미확정 가설 구분)\n\n"+text+
-     "\n\n검증 가능한 코드 오류만 PR로 제안합니다. 원본 PRE/λ/TOP1은 유지합니다.\n");
-  }
- }catch(e){console.warn("AI postmatch analysis unavailable; deterministic analysis retained",String(e).slice(0,150));}
-}
-if(source==="DETERMINISTIC"){
- const lines=["# 종료 경기 사후 원인 분석 · 규칙 기반",
-  "OpenAI API 키가 미설정이거나 AI 호출을 완료할 수 없어 검증 가능한 규칙 진단만 표시합니다."];
- for(const item of analysis)lines.push("## "+item.game,
-   "- 분류: "+item.classification,...item.evidence.map(x=>"- "+x));
- await fs.writeFile("automation-state/repair-ai-analysis.md",lines.join("\n")+"\n");
-}
-await fs.writeFile("automation-state/repair-analysis.json",JSON.stringify({schema:"oos-safe-review-v1",source,
- analysed:analysis,modelTuned:false,mainMerged:false},null,2));
-console.log("Postmatch diagnosis",JSON.stringify({source,analysed:analysis.length}));
+lines.push("## 독립 검증 이상 신호",
+  ...(triage.alerts??[]).map(a=>"- ["+a.stage+"] "+a.match+": "+a.evidence),
+  ...(triage.alerts?.length?[]:["- 별도 정산/데이터 무결성 오류 없음"]),
+  "","검증이 필요한 경기에는 무료 수동 수정 키트가 별도로 생성됩니다.");
+await fs.writeFile("automation-state/repair-ai-analysis.md",lines.join("\n")+"\n");
+await fs.writeFile("automation-state/repair-analysis.json",JSON.stringify({
+ schema:"wisetoto-no-paid-ai-oos-v1",source:"FREE_DETERMINISTIC",
+ analysed:analysis,modelTuned:false,mainMerged:false,paidAiCalls:0
+},null,2)+"\n");
+console.log("FREE POSTMATCH ANALYSIS",JSON.stringify({observations:analysis.length,alerts:triage.alerts?.length??0}));
