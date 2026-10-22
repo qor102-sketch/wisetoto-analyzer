@@ -26,7 +26,7 @@ function immutablePick(p) {
 }
 function freezeRecord(before, after) {
   // Results/verification fields may change; original PRE fields must not.
-  const immutable = ["id","fixtureId","fixtureKey","betmanIdentity","home","away","league","sport","startMs","capturedAt","gateVersion","recommendationEngineVersion","decision","footballPre","baseballReadyHold"];
+  const immutable = ["id","fixtureId","fixtureKey","betmanIdentity","home","away","league","sport","startMs","capturedAt","gateVersion","recommendationEngineVersion","decision","footballPre","courtPre","baseballReadyHold"];
   const protectedRecord = { ...after };
   for (const key of immutable) if (key in before) protectedRecord[key] = before[key];
   for (const key of ["picks","marketResults"]) {
