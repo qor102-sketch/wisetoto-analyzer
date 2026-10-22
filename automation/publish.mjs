@@ -21,6 +21,7 @@ export function summarizePick(p){
 }
 export function summarizeRecord(r){
  const pre=r.footballPre&&typeof r.footballPre==="object"?r.footballPre:null;
+ const court=r.courtPre&&typeof r.courtPre==="object"?r.courtPre:null;
  const result=r.result&&typeof r.result==="object"?r.result:null;
  const picks=(Array.isArray(r.picks)?r.picks:[]).map(summarizePick).filter(Boolean);
  const markets=(Array.isArray(r.marketResults)?r.marketResults:[]).map(summarizePick).filter(Boolean);
@@ -48,6 +49,12 @@ export function summarizeRecord(r){
      expectedHome:firstNumeric(pre.expectedHome),expectedAway:firstNumeric(pre.expectedAway),
      homeRecentSample:firstNumeric(pre.homeRecentSample),awayRecentSample:firstNumeric(pre.awayRecentSample),
      homeVenueSample:firstNumeric(pre.homeVenueSample),awayVenueSample:firstNumeric(pre.awayVenueSample)
+   }:null,
+   // Court PRE is a first-capture snapshot, never a value recomputed after results.
+   courtPre:court?{
+     expectedHome:firstNumeric(court.expectedHome),expectedAway:firstNumeric(court.expectedAway),
+     homeRecentSample:firstNumeric(court.homeRecentSample),awayRecentSample:firstNumeric(court.awayRecentSample),
+     homeVenueSample:firstNumeric(court.homeVenueSample),awayVenueSample:firstNumeric(court.awayVenueSample)
    }:null,
    lineup:r.footballLineup?{
      stage:String(r.footballLineup.stage??""),capturedAt:firstNumeric(r.footballLineup.capturedAt)

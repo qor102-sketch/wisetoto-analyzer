@@ -29,3 +29,26 @@ test("positive-EV grade alert applies only to soccer policy",()=>{
  assert.equal(audit.suspicious[0].stage,"GRADE_GATE");
  assert.equal(audit.suspicious[0].game,"A vs B");
 });
+
+test("existing NBA PRE scores cannot be rewritten after result verification",()=>{
+ const old={id:"nba",sport:"농구",startMs:5000,capturedAt:2000,verificationStatus:"PENDING",
+   courtPre:{stage:"PRE",capturedAt:2000,expectedHome:113.2,expectedAway:109.7,homeRecentSample:5,awayRecentSample:5},
+   picks:[{key:"p",probability:71,expectedValue:-3,resultStatus:"PENDING"}]};
+ const later={...old,capturedAt:6500,verificationStatus:"VERIFIED",
+   courtPre:{stage:"PRE",capturedAt:6500,expectedHome:999,expectedAway:999},
+   picks:[{key:"p",probability:99,expectedValue:20,resultStatus:"HIT"}],result:{homeScore:120,awayScore:110}};
+ const safe=preserveFrozenRecords([old],[later])[0];
+ assert.equal(safe.courtPre.expectedHome,113.2);
+ assert.equal(safe.courtPre.expectedAway,109.7);
+ assert.equal(safe.courtPre.capturedAt,2000);
+ assert.equal(safe.capturedAt,2000);
+ assert.equal(safe.picks[0].probability,71);
+ assert.equal(safe.picks[0].resultStatus,"HIT");
+});
+test("legacy NBA PRE without a saved score must not be retroactively invented",()=>{
+ const old={id:"legacy",sport:"농구",startMs:5000,capturedAt:2000,verificationStatus:"PENDING",picks:[]};
+ const later={...old,courtPre:{expectedHome:117,expectedAway:110},verificationStatus:"VERIFIED"};
+ const safe=preserveFrozenRecords([old],[later])[0];
+ // Current preservation path must guard undefined old snapshot as well.
+ assert.equal(safe.courtPre,null);
+});

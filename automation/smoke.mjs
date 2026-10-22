@@ -24,5 +24,20 @@ try{
  const body=await response.json();
  if(!response.ok()||!body.ok||body.data?.records?.length<3)throw Error("Dashboard API unavailable or first frozen PRE missing");
  if(JSON.stringify(body).includes("modelSnapshot")||JSON.stringify(body).includes("localStorage"))throw Error("Dashboard leaked raw private tracker");
+ // Historical basketball PRE had no standalone expected points.
+ await page.getByRole("button",{name:/Los Angeles Clippers/}).first().click();
+ await page.getByText("농구 PRE 예상점수",{exact:true}).waitFor({timeout:30000});
+ await page.getByText("과거 PRE 예상점수 미저장",{exact:true}).waitFor({timeout:30000});
+ if(await page.getByText("축구 λ 없음",{exact:true}).count()) throw Error("Basketball still shows football lambda");
+ // Future newly-frozen NBA rows will have their true court PRE projected.
+ const future=structuredClone(body);
+ const nba=future.data.records.find(r=>r.sport==="농구");
+ nba.courtPre={expectedHome:113.6,expectedAway:110.4,homeRecentSample:5,awayRecentSample:5,homeVenueSample:2,awayVenueSample:3};
+ await page.route("**/api/automation/results",route=>route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(future)}));
+ await page.reload({waitUntil:"domcontentloaded"});
+ await page.getByText("Los Angeles Clippers",{exact:false}).first().waitFor({timeout:30000});
+ await page.getByRole("button",{name:/Los Angeles Clippers/}).first().click();
+ await page.getByText("113.6 : 110.4",{exact:true}).waitFor({timeout:30000});
+ console.log("COURT PRE DISPLAY OK: legacy remains missing, new frozen NBA home/away score visible");
  console.log("DASHBOARD OK: history API + real published first 3 PRE visible, no raw model snapshots");
 } finally {await browser.close();}
