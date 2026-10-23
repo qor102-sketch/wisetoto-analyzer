@@ -56,3 +56,19 @@ backdate any missed PRE.
   `/automation` remain unchanged.
 - New sports not supported by the prediction engine are excluded until
   the engine has verified identity/data handling.
+
+## V13.12.34 — Recover missed 10-minute scans and Betman 502
+
+Incident: only four schedule runs occurred between Oct 22 18:26 KST and Oct 23 07:03 KST.
+Three subsequent runs got HTTP 502 from Betman and silently reported zero due matches.
+
+- After each main-branch run, schedule the next workflow_dispatch at approximately 10 minutes.
+- GitHub GITHUB_TOKEN is authorized to create workflow_dispatch; keep cron as backup.
+- Check for newer main runs to avoid duplicate self-dispatch chains.
+- Retrying source fetch up to 3 attempts; do not consider HTTP 502 an empty schedule.
+- Reuse a freshly fetched official Betman feed for the analysis browser, never a stale feed.
+- Publish automation-health.json after every preflight, even on Betman source failure.
+- Show latest real scan, source status, per-sport feed and due counts on site.
+- Runner time is free on standard GitHub-hosted runners in PUBLIC repos, but uses more resources.
+- GitHub cannot guarantee dispatch on time and source outages can still occur.
+- Do not fabricate missed/late PRE or modify frozen model, lambda or TOP1.
