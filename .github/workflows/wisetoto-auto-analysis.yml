@@ -13,7 +13,7 @@ on:
 
 permissions:
   contents: write  # publish projected data to automation-data branch
-  actions: read
+  actions: write  # self-dispatch recovery when GitHub drops scheduled events
   issues: write
 
 concurrency:
@@ -53,7 +53,7 @@ jobs:
   auto-audit:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -128,3 +128,20 @@ jobs:
             automation-state/public-history.json
           retention-days: 90
           if-no-files-found: error
+
+  scan-heartbeat:
+    # GitHub schedule can be dropped; GITHUB_TOKEN workflow_dispatch chains
+    # the next run at approximately 10-minute intervals. No PR dispatch.
+    if: ${{ always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+    needs: [auto-audit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Queue next scan unless a newer main run exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node automation/chain.mjs
