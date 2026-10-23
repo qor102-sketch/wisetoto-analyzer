@@ -27,6 +27,12 @@ const pending=dueVerifications(previous,now);
 const verifyDue=pending.length>0&&(now-Number(old.meta?.lastVerifyAttempt??0)>90*60_000);
 const runBrowser=due.length>0||verifyDue;
 if(process.argv.includes("--preflight")){
+  const health={schema:"wisetoto-auto-scan-health-v1",scannedAt:new Date(now).toISOString(),
+    expectedIntervalMinutes:10,sourceOk:!sourceError,sourceError:sourceError?sourceError.slice(0,300):null,
+    feedSports:feedCounts,eligibleForPregame:due.length,eligibleBySport:sportCounts(due),
+    awaitingPostmatch:pending.length,feedOrigin,
+    note:"A completed scan is not proof that every Betman game was captured before kickoff."};
+  await fs.writeFile("automation-state/scan-health.json",JSON.stringify(health,null,2)+"\n");
   console.log(JSON.stringify({date:new Date(now).toISOString(),frequency:"10 minutes (best effort)",feedSports:feedCounts,feedOrigin,upcoming:due.length,dueSports:sportCounts(due),verifyPending:pending.length,runBrowser,sourceError}));
   if(process.env.GITHUB_OUTPUT)await fs.appendFile(process.env.GITHUB_OUTPUT,"run_browser="+String(runBrowser)+"\n");
   if(sourceError&&!pending.length)process.exitCode=1;
