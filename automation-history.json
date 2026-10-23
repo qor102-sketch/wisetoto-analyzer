@@ -1,12 +1,12 @@
 {
   "schema": "wisetoto-public-history-v1",
-  "publishedAt": "2026-10-23T18:22:40.369Z",
-  "lastRunAt": 1792779760241,
+  "publishedAt": "2026-10-23T19:54:09.535Z",
+  "lastRunAt": 1792785249413,
   "source": "GitHub Actions 자동 LIVE TRACKER (수동 분석 기록과 별개)",
   "counts": {
     "total": 17,
-    "pending": 9,
-    "verified": 8,
+    "pending": 6,
+    "verified": 11,
     "void": 0,
     "hit": 1,
     "miss": 1,
@@ -198,9 +198,13 @@
       "startMs": 1792782000000,
       "capturedAt": 1792776154373,
       "decision": "PASS",
-      "status": "PENDING",
-      "verifiedAt": null,
-      "result": null,
+      "status": "VERIFIED",
+      "verifiedAt": 1792785244219,
+      "result": {
+        "homeScore": 0,
+        "awayScore": 1,
+        "source": ""
+      },
       "pre": {
         "expectedHome": 1.34,
         "expectedAway": 1.24,
@@ -224,9 +228,9 @@
           "edge": -9.9,
           "grade": "PASS",
           "score": 26.8,
-          "resultStatus": "PENDING",
-          "actualLabel": null,
-          "resultNote": null
+          "resultStatus": "MISS",
+          "actualLabel": "패",
+          "resultNote": "최종 경기결과 검증"
         },
         {
           "key": "seq:53",
@@ -239,9 +243,9 @@
           "edge": 13,
           "grade": "WATCH",
           "score": 58.9,
-          "resultStatus": "PENDING",
-          "actualLabel": null,
-          "resultNote": null
+          "resultStatus": "MISS",
+          "actualLabel": "원정 +1",
+          "resultNote": "최종 경기결과 검증"
         },
         {
           "key": "seq:54",
@@ -254,9 +258,9 @@
           "edge": -0.8,
           "grade": "PASS",
           "score": 52.3,
-          "resultStatus": "PENDING",
-          "actualLabel": null,
-          "resultNote": null
+          "resultStatus": "MISS",
+          "actualLabel": "UNDER",
+          "resultNote": "최종 경기결과 검증"
         },
         {
           "key": "seq:55",
@@ -269,9 +273,9 @@
           "edge": 0,
           "grade": "PASS",
           "score": 51.3,
-          "resultStatus": "PENDING",
-          "actualLabel": null,
-          "resultNote": null
+          "resultStatus": "MISS",
+          "actualLabel": "홀",
+          "resultNote": "최종 경기결과 검증"
         }
       ],
       "warnings": [
@@ -569,9 +573,13 @@
       "startMs": 1792780200000,
       "capturedAt": 1792775364481,
       "decision": "PASS",
-      "status": "PENDING",
-      "verifiedAt": null,
-      "result": null,
+      "status": "VERIFIED",
+      "verifiedAt": 1792784000080,
+      "result": {
+        "homeScore": 1,
+        "awayScore": 1,
+        "source": ""
+      },
       "pre": {
         "expectedHome": 1.73,
         "expectedAway": 1.39,
@@ -595,9 +603,9 @@
           "edge": -12,
           "grade": "PASS",
           "score": 24.5,
-          "resultStatus": "PENDING",
-          "actualLabel": null,
-          "resultNote": null
+          "resultStatus": "MISS",
+          "actualLabel": "무",
+          "resultNote": "최종 경기결과 검증"
         },
         {
           "key": "seq:30",
@@ -610,9 +618,9 @@
           "edge": 14.6,
           "grade": "WATCH",
           "score": 62.8,
-          "resultStatus": "PENDING",
-          "actualLabel": null,
-          "resultNote": null
+          "resultStatus": "MISS",
+          "actualLabel": "원정 +1",
+          "resultNote": "최종 경기결과 검증"
         },
         {
           "key": "seq:31",
@@ -625,9 +633,9 @@
           "edge": 16,
           "grade": "WATCH",
           "score": 72.6,
-          "resultStatus": "PENDING",
-          "actualLabel": null,
-          "resultNote": null
+          "resultStatus": "MISS",
+          "actualLabel": "원정 +2",
+          "resultNote": "최종 경기결과 검증"
         },
         {
           "key": "seq:32",
@@ -640,9 +648,9 @@
           "edge": 8.4,
           "grade": "WATCH",
           "score": 72.5,
-          "resultStatus": "PENDING",
-          "actualLabel": null,
-          "resultNote": null
+          "resultStatus": "MISS",
+          "actualLabel": "원정 +3.5",
+          "resultNote": "최종 경기결과 검증"
         },
         {
           "key": "seq:33",
@@ -655,9 +663,9 @@
           "edge": 9.4,
           "grade": "WATCH",
           "score": 63.2,
-          "resultStatus": "PENDING",
-          "actualLabel": null,
-          "resultNote": null
+          "resultStatus": "MISS",
+          "actualLabel": "UNDER",
+          "resultNote": "최종 경기결과 검증"
         },
         {
           "key": "seq:34",
@@ -670,9 +678,9 @@
           "edge": 0.1,
           "grade": "PASS",
           "score": 50.4,
-          "resultStatus": "PENDING",
-          "actualLabel": null,
-          "resultNote": null
+          "resultStatus": "HIT",
+          "actualLabel": "짝",
+          "resultNote": "최종 경기결과 검증"
         }
       ],
       "warnings": [
@@ -688,9 +696,13 @@
       "startMs": 1792778400000,
       "capturedAt": 1792772925002,
       "decision": "PASS",
-      "status": "PENDING",
-      "verifiedAt": null,
-      "result": null,
+      "status": "VERIFIED",
+      "verifiedAt": 1792782116944,
+      "result": {
+        "homeScore": 2,
+        "awayScore": 0,
+        "source": ""
+      },
       "pre": {
         "expectedHome": 1.46,
         "expectedAway": 1.38,
@@ -714,9 +726,9 @@
           "edge": -8.5,
           "grade": "PASS",
           "score": 25.2,
-          "resultStatus": "PENDING",
-          "actualLabel": null,
-          "resultNote": null
+          "resultStatus": "HIT",
+          "actualLabel": "승",
+          "resultNote": "최종 경기결과 검증"
         },
         {
           "key": "seq:26",
@@ -729,9 +741,9 @@
           "edge": 10.6,
           "grade": "WATCH",
           "score": 54,
-          "resultStatus": "PENDING",
-          "actualLabel": null,
-          "resultNote": null
+          "resultStatus": "MISS",
+          "actualLabel": "홈 -1",
+          "resultNote": "최종 경기결과 검증"
         },
         {
           "key": "seq:27",
@@ -744,9 +756,9 @@
           "edge": 7.3,
           "grade": "WATCH",
           "score": 39.9,
-          "resultStatus": "PENDING",
-          "actualLabel": null,
-          "resultNote": null
+          "resultStatus": "MISS",
+          "actualLabel": "UNDER",
+          "resultNote": "최종 경기결과 검증"
         },
         {
           "key": "seq:28",
@@ -759,9 +771,9 @@
           "edge": 0.1,
           "grade": "PASS",
           "score": 45.7,
-          "resultStatus": "PENDING",
-          "actualLabel": null,
-          "resultNote": null
+          "resultStatus": "HIT",
+          "actualLabel": "짝",
+          "resultNote": "최종 경기결과 검증"
         }
       ],
       "warnings": [
