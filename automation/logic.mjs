@@ -29,6 +29,25 @@ export function eligibleAutoGame(game,now=Date.now()) {
       m.selections.some(x=>Number(x?.odds)>1));
 }
 
+// Explain why a valid source feed yields no PRE work; counts are mutually exclusive.
+// These are scan-time classifications, NOT historic missed-PRE claims.
+export function pregameDiagnostics(games,records,now=Date.now()){
+ const counts={total:0,unsupportedSport:0,invalidKickoff:0,alreadyStartedOrTooClose:0,beyondWindow:0,invalidTeams:0,noUsableOdds:0,alreadyFrozen:0,eligible:0};
+ for(const g of Array.isArray(games)?games:[]){
+  counts.total++;
+  const start=Number(g?.gameDateMs??new Date(g?.gameDate).getTime());
+  if(!sportName(g?.sport)){counts.unsupportedSport++;continue;}
+  if(!Number.isFinite(start)){counts.invalidKickoff++;continue;}
+  if(start-now<10*minute){counts.alreadyStartedOrTooClose++;continue;}
+  if(start-now>100*minute){counts.beyondWindow++;continue;}
+  const names=[String(g?.home??"").trim(),String(g?.away??"").trim()];
+  if(names.some(v=>!v||/^(미정|tbd|tba|unknown|to be determined|-)$/i.test(v))){counts.invalidTeams++;continue;}
+  if(!Array.isArray(g?.markets)||!g.markets.some(m=>Array.isArray(m?.selections)&&m.selections.some(x=>Number(x?.odds)>1))){counts.noUsableOdds++;continue;}
+  if((Array.isArray(records)?records:[]).some(r=>Number(r.startMs)===start&&sportName(r.sport)===sportName(g.sport)&&matchKey(r.home)===matchKey(g.home)&&matchKey(r.away)===matchKey(g.away)&&Number(r.capturedAt)<start)){counts.alreadyFrozen++;continue;}
+  counts.eligible++;
+ }
+ return counts;
+}
 const matchKey = (value) => String(value ?? "").toLowerCase().replace(/[\s._\-]/g, "");
 export const getRecords = (state) => {
   try {

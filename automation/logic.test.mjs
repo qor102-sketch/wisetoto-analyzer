@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dueGames, dueVerifications, preserveFrozenRecords, auditChanges, minute, sportName, sportCounts } from "./logic.mjs";
+import { dueGames, dueVerifications, preserveFrozenRecords, auditChanges, minute, sportName, sportCounts, pregameDiagnostics } from "./logic.mjs";
 test("window ignores kicked off and far future, preserves locked PRE", () => {
  const now = Date.parse("2026-10-22T00:00:00Z");
  const game = n => ({sport:"soccer",home:"A",away:"B",gameDateMs:now+n*minute,markets:[{selections:[{odds:1.5}]}]});
@@ -94,4 +94,20 @@ test("large same-time all-sports list is never silently truncated by discovery",
    markets:[{selections:[{odds:2}]}]}));
  assert.equal(dueGames(all,[],now).length,40);
  assert.equal(dueGames(all,all.slice(0,24).map(g=>({...g,startMs:g.gameDateMs,capturedAt:now})),now).length,16);
+});
+
+test("scan diagnostics reconcile every source offer and agree with dueGames",()=>{
+ const now=Date.parse("2026-10-23T00:00:00Z");
+ const valid={sport:"soccer",home:"Home",away:"Away",gameDateMs:now+45*minute,markets:[{selections:[{odds:1.8}]}]};
+ const already={...valid,home:"Frozen"};
+ const records=[{sport:"축구",home:"Frozen",away:"Away",startMs:already.gameDateMs,capturedAt:now}];
+ const games=[valid,already,{...valid,home:"TBD"},{...valid,markets:[]},{...valid,gameDateMs:now-2*minute},{...valid,gameDateMs:now+120*minute},{...valid,gameDateMs:NaN,gameDate:"invalid"},{...valid,sport:"unknown"}];
+ const diagnostic=pregameDiagnostics(games,records,now);
+ assert.deepEqual(diagnostic,{total:8,unsupportedSport:1,invalidKickoff:1,alreadyStartedOrTooClose:1,beyondWindow:1,invalidTeams:1,noUsableOdds:1,alreadyFrozen:1,eligible:1});
+ assert.equal(diagnostic.eligible,dueGames(games,records,now).length);
+ assert.equal(Object.entries(diagnostic).filter(([key])=>key!=="total").reduce((n,[,value])=>n+value,0),diagnostic.total);
+});
+test("diagnostics never counts an unconfirmed source outage as zero offers",()=>{
+ assert.deepEqual(pregameDiagnostics([],[],Date.now()).total,0);
+ // Source outages are handled separately by runner.sourceError/sourceOk.
 });
