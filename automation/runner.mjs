@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import {TRACKER_KEY,APPEND_KEY,STATE_FILE,getRecords,dueGames,dueVerifications,preserveFrozenRecords,auditChanges,sportCounts} from "./logic.mjs";
+import {TRACKER_KEY,APPEND_KEY,STATE_FILE,getRecords,dueGames,dueVerifications,preserveFrozenRecords,auditChanges,sportCounts,pregameDiagnostics} from "./logic.mjs";
 import {liveFeed,loadFeed,saveFeed,validFeed} from "./feed.mjs";
 
 const base=(process.env.WISETOTO_URL||"https://wisetoto-analyzer.vercel.app").replace(/\/+$/,"");
@@ -8,7 +8,7 @@ await fs.mkdir(path.dirname(STATE_FILE),{recursive:true});
 const old=await fs.readFile(STATE_FILE,"utf8").then(JSON.parse).catch(()=>({localStorage:{},meta:{}}));
 const previous=getRecords(old);
 const now=Date.now();
-let due=[],feedCounts={},sourceError=null,feedPayload=null,feedOrigin="none";
+let due=[],feedCounts={},eligibility=null,sourceError=null,feedPayload=null,feedOrigin="none";
 try {
   // The preflight and browser MUST share the same verified offers. A second
   // upstream request is both unreliable and can silently lose valid fixtures.
@@ -22,6 +22,7 @@ try {
   }
   feedCounts=sportCounts(feedPayload.games);
   due=dueGames(feedPayload.games,previous,now);
+  eligibility=pregameDiagnostics(feedPayload.games,previous,now);
 } catch(e){sourceError=String(e); console.error("SOURCE_ERROR: "+sourceError);}
 const pending=dueVerifications(previous,now);
 const verifyDue=pending.length>0&&(now-Number(old.meta?.lastVerifyAttempt??0)>90*60_000);
@@ -29,11 +30,11 @@ const runBrowser=due.length>0||verifyDue;
 if(process.argv.includes("--preflight")){
   const health={schema:"wisetoto-auto-scan-health-v1",scannedAt:new Date(now).toISOString(),
     expectedIntervalMinutes:10,sourceOk:!sourceError,sourceError:sourceError?sourceError.slice(0,300):null,
-    feedSports:feedCounts,eligibleForPregame:due.length,eligibleBySport:sportCounts(due),
+    feedSports:feedCounts,eligibility,eligibleForPregame:due.length,eligibleBySport:sportCounts(due),
     awaitingPostmatch:pending.length,feedOrigin,
     note:"A completed scan is not proof that every Betman game was captured before kickoff."};
   await fs.writeFile("automation-state/scan-health.json",JSON.stringify(health,null,2)+"\n");
-  console.log(JSON.stringify({date:new Date(now).toISOString(),frequency:"10 minutes (best effort)",feedSports:feedCounts,feedOrigin,upcoming:due.length,dueSports:sportCounts(due),verifyPending:pending.length,runBrowser,sourceError}));
+  console.log(JSON.stringify({date:new Date(now).toISOString(),frequency:"10 minutes (best effort)",feedSports:feedCounts,eligibility,feedOrigin,upcoming:due.length,dueSports:sportCounts(due),verifyPending:pending.length,runBrowser,sourceError}));
   if(process.env.GITHUB_OUTPUT)await fs.appendFile(process.env.GITHUB_OUTPUT,"run_browser="+String(runBrowser)+"\n");
   if(sourceError&&!pending.length)process.exitCode=1;
 }else{
