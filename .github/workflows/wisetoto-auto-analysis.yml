@@ -75,6 +75,23 @@ jobs:
       - name: Due match and verification preflight
         id: due
         run: node automation/runner.mjs --preflight
+      - name: Publish transparent scan health even if Betman is down
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -s automation-state/scan-health.json ]; then exit 0; fi
+          encoded="$(base64 -w 0 automation-state/scan-health.json)"
+          current="$(gh api "/repos/$GITHUB_REPOSITORY/contents/automation-health.json?ref=automation-data" --jq .sha 2>/dev/null || true)"
+          if [ -n "$current" ]; then
+            gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/automation-health.json" \
+              -f branch="automation-data" -f message="Scan health heartbeat" \
+              -f sha="$current" -f content="$encoded" >/dev/null
+          else
+            gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/automation-health.json" \
+              -f branch="automation-data" -f message="Initialize scan health heartbeat" \
+              -f content="$encoded" >/dev/null
+          fi
       - name: Install browser only when work is due
         if: steps.due.outputs.run_browser == 'true'
         run: |
