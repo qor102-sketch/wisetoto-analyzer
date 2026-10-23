@@ -31,7 +31,8 @@ try{
  if(await page.getByText("축구 λ 없음",{exact:true}).count()) throw Error("Basketball still shows football lambda");
  // Future newly-frozen NBA rows will have their true court PRE projected.
  const future=structuredClone(body);
- const nba=future.data.records.find(r=>r.sport==="농구");
+ const nba=future.data.records.find(r=>r.home==="Los Angeles Clippers"&&r.sport==="농구");
+ if(!nba)throw Error("Clippers test fixture missing from public history");
  nba.courtPre={expectedHome:113.6,expectedAway:110.4,homeRecentSample:5,awayRecentSample:5,homeVenueSample:2,awayVenueSample:3};
  await page.route("**/api/automation/results",route=>route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(future)}));
  await page.reload({waitUntil:"domcontentloaded"});

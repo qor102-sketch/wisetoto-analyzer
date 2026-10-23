@@ -32,7 +32,24 @@ export async function GET() {
     if (payload.records.length > 500) {
       return NextResponse.json({ ok: false, error: "자동분석 기록 개수 검증 실패" }, { status: 502 });
     }
-    return NextResponse.json({ ok: true, data }, { headers: { "Cache-Control": "no-store, max-age=0" } });
+    let scanHealth: Record<string, unknown> | null = null;
+    try {
+      const healthUrl = "https://raw.githubusercontent.com/qor102-sketch/wisetoto-analyzer/automation-data/automation-health.json?refresh=" + Date.now();
+      const healthRes = await fetch(healthUrl, {
+        cache:"no-store",headers:{Accept:"application/json"},signal:AbortSignal.timeout(8000)
+      });
+      if(healthRes.ok){
+        const candidate: unknown = await healthRes.json();
+        if(candidate && typeof candidate === "object" &&
+          (candidate as Record<string,unknown>).schema === "wisetoto-auto-scan-health-v1")
+          scanHealth = candidate as Record<string,unknown>;
+      }
+    } catch {
+      // Legacy dashboards remain readable if the health file is not published yet.
+    }
+    return NextResponse.json({ ok: true, data: { ...(data as Record<string,unknown>), scanHealth } }, {
+      headers: { "Cache-Control": "no-store, max-age=0" }
+    });
   } catch {
     return NextResponse.json(
       { ok: false, error: "자동분석 이력 연결에 실패했습니다. 잠시 후 다시 조회해 주세요." },

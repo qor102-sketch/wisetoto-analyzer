@@ -3,7 +3,8 @@ import {useEffect,useMemo,useState} from "react";
 import "./dashboard.css";
 type Pick={key:string;market:string;pick:string;probability:number|null;odds:number|null;expectedValue:number|null;edge:number|null;grade:string;score:number|null;resultStatus:string;actualLabel:string|null;resultNote:string|null};
 type Match={id:string;sport:string;league:string;home:string;away:string;startMs:number;capturedAt:number;status:string;verifiedAt:number|null;decision:string;result:{homeScore:number|null;awayScore:number|null;source:string}|null;pre:{expectedHome:number|null;expectedAway:number|null;homeRecentSample:number|null;awayRecentSample:number|null;homeVenueSample:number|null;awayVenueSample:number|null}|null;courtPre:{expectedHome:number|null;expectedAway:number|null;homeRecentSample:number|null;awayRecentSample:number|null;homeVenueSample:number|null;awayVenueSample:number|null}|null;lineup:{stage:string;capturedAt:number|null}|null;top1:Pick|null;markets:Pick[];warnings:string[]};
-type History={schema:string;publishedAt:string;lastRunAt:number|null;source:string;counts:{total:number;pending:number;verified:number;void:number;hit:number;miss:number;warnings:number};records:Match[]};
+type ScanHealth={schema:string;scannedAt:string;expectedIntervalMinutes:number;sourceOk:boolean;sourceError:string|null;feedSports:Record<string,number>;eligibleForPregame:number;awaitingPostmatch:number;feedOrigin:string};
+type History={scanHealth?:ScanHealth|null;schema:string;publishedAt:string;lastRunAt:number|null;source:string;counts:{total:number;pending:number;verified:number;void:number;hit:number;miss:number;warnings:number};records:Match[]};
 function date(ms:number|null|undefined){return typeof ms==="number"&&Number.isFinite(ms)?new Date(ms).toLocaleString("ko-KR",{timeZone:"Asia/Seoul",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}):"—";}
 function num(v:number|null|undefined,d=1){return typeof v==="number"&&Number.isFinite(v)?v.toFixed(d):"—";}
 function stateText(r:Match){if(r.status==="VOID")return "취소 / 무효";if(r.status==="VERIFIED")return "결과 검증 완료";return Date.now()<r.startMs?"경기 전 PRE 잠금":"종료 결과 검증 대기";}
@@ -27,12 +28,25 @@ export default function AutomationDashboard(){
  ),[data,sport,filter,query]);
  return <main className="auto-page"><div className="auto-background" aria-hidden="true"/><div className="auto-container">
   <nav className="auto-nav"><a className="auto-logo" href="/"><span>W</span> WISETOTO <small>ANALYZER</small></a><a href="/">← 실전 분석으로</a></nav>
-  <header className="auto-header"><div className="auto-eyebrow"><i/> AUTOMATED MATCH INTELLIGENCE · V13.12.29</div>
+  <header className="auto-header"><div className="auto-eyebrow"><i/> AUTOMATED MATCH INTELLIGENCE · V13.12.34</div>
     <div className="auto-heading"><div><h1>자동분석 결과</h1><p>경기 전 최초 예측을 고정하고, 종료 결과·TOP1·오차와 데이터 품질을 추적합니다.</p></div><button onClick={()=>void reload()} disabled={loading}>{loading?"조회 중…":"↻ 새로고침"}</button></div>
     <aside className="auto-explainer">이 화면은 <strong>GitHub Actions 자동 LIVE TRACKER</strong> 기록입니다. 브라우저에서 수동으로 분석한 기록과는 별도로 저장되며, 사후 검증으로 기존 λ·확률·TOP1을 변경하지 않습니다.</aside>
   </header>
   {error&&<div className="auto-error" role="alert">{error} <button onClick={()=>void reload()}>재시도</button></div>}
   {data&&<><div className="auto-meta"><span><i/> 마지막 자동실행 {date(data.lastRunAt)} KST</span><span>공개 이력 갱신 {new Date(data.publishedAt).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</span><a target="_blank" rel="noopener noreferrer" href="https://github.com/qor102-sketch/wisetoto-analyzer/actions/workflows/wisetoto-auto-analysis.yml">실행 로그 ↗</a></div>
+   <section className="auto-scan-health" aria-label="최근 자동 경기검색 상태">
+    {data.scanHealth?(()=>{
+      const h=data.scanHealth;
+      const last=Date.parse(h.scannedAt),gap=Date.now()-last;
+      const stale=!Number.isFinite(last)||gap>25*60_000;
+      return <div className={"scan-health-box "+(!h.sourceOk||stale?"scan-alert":"scan-success")}>
+        <div className="scan-head"><strong>{stale?"⚠ 자동 경기검색 지연":h.sourceOk?"✓ 자동 경기검색 정상":"⚠ 경기목록 수집 실패"}</strong><span>마지막 검색 {Number.isFinite(last)?date(last)+" KST":"미확인"}</span></div>
+        <div className="scan-metrics"><span>축구 {h.feedSports?.["축구"]??0}</span><span>농구 {h.feedSports?.["농구"]??0}</span><span>야구 {h.feedSports?.["야구"]??0}</span><span>배구 {h.feedSports?.["배구"]??0}</span><span>경기 전 분석 대상 {h.eligibleForPregame??0}</span></div>
+        {!h.sourceOk&&<p>Betman 조회 실패. 신규 PRE 저장이 중단될 수 있습니다. <a target="_blank" rel="noopener noreferrer" href="https://github.com/qor102-sketch/wisetoto-analyzer/actions/workflows/wisetoto-auto-analysis.yml">오류 로그 확인 ↗</a></p>}
+        {stale&&<p>최근 25분 이상 정상적인 검색 기록이 없습니다. GitHub Actions 예약 실행 상태를 확인하세요.</p>}
+      </div>;
+    })():<div className="scan-health-box scan-alert">검색 상태 초기화 대기 — 자동 실행 기록을 확인하세요.</div>}
+   </section>
    <section className="auto-stats" aria-label="자동분석 요약">{[
     ["고정 PRE",data.counts.total,"최초 경기 전 예측"],["종료 검증",data.counts.verified,"결과 연결 완료"],["TOP1 적중",data.counts.hit,"검증된 픽"],["TOP1 미적중",data.counts.miss,"원인 분석 대상"],["검토 신호",data.counts.warnings,"수집 품질 확인"]
    ].map(([title,value,desc])=><div key={String(title)} className="auto-stat"><span>{title}</span><strong>{value}</strong><small>{desc}</small></div>)}</section>

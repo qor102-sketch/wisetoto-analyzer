@@ -1,26 +1,39 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import {TRACKER_KEY,APPEND_KEY,STATE_FILE,getRecords,dueGames,dueVerifications,preserveFrozenRecords,auditChanges,sportCounts} from "./logic.mjs";
+import {liveFeed,loadFeed,saveFeed,validFeed} from "./feed.mjs";
 
 const base=(process.env.WISETOTO_URL||"https://wisetoto-analyzer.vercel.app").replace(/\/+$/,"");
 await fs.mkdir(path.dirname(STATE_FILE),{recursive:true});
 const old=await fs.readFile(STATE_FILE,"utf8").then(JSON.parse).catch(()=>({localStorage:{},meta:{}}));
 const previous=getRecords(old);
 const now=Date.now();
-let due=[],feedCounts={},sourceError=null;
+let due=[],feedCounts={},sourceError=null,feedPayload=null,feedOrigin="none";
 try {
-  const response=await fetch(base+"/api/betman",{signal:AbortSignal.timeout(35000),cache:"no-store"});
-  if(!response.ok)throw Error("Betman HTTP "+response.status);
-  const payload=await response.json();
-  if(!payload.ok||!Array.isArray(payload.games))throw Error("Invalid Betman game list");
-  feedCounts=sportCounts(payload.games);
-  due=dueGames(payload.games,previous,now);
-} catch(e){sourceError=String(e);}
+  // The preflight and browser MUST share the same verified offers. A second
+  // upstream request is both unreliable and can silently lose valid fixtures.
+  feedPayload=process.argv.includes("--preflight")?null:await loadFeed(now);
+  if(feedPayload){feedOrigin="preflight-fresh-snapshot";}
+  else{
+    const fetched=await liveFeed(base);
+    feedPayload=fetched.payload;
+    feedOrigin="fresh-fetch-attempt-"+fetched.attempt;
+    await saveFeed(fetched);
+  }
+  feedCounts=sportCounts(feedPayload.games);
+  due=dueGames(feedPayload.games,previous,now);
+} catch(e){sourceError=String(e); console.error("SOURCE_ERROR: "+sourceError);}
 const pending=dueVerifications(previous,now);
 const verifyDue=pending.length>0&&(now-Number(old.meta?.lastVerifyAttempt??0)>90*60_000);
 const runBrowser=due.length>0||verifyDue;
 if(process.argv.includes("--preflight")){
-  console.log(JSON.stringify({date:new Date(now).toISOString(),frequency:"10 minutes (best effort)",feedSports:feedCounts,upcoming:due.length,dueSports:sportCounts(due),verifyPending:pending.length,runBrowser,sourceError}));
+  const health={schema:"wisetoto-auto-scan-health-v1",scannedAt:new Date(now).toISOString(),
+    expectedIntervalMinutes:10,sourceOk:!sourceError,sourceError:sourceError?sourceError.slice(0,300):null,
+    feedSports:feedCounts,eligibleForPregame:due.length,eligibleBySport:sportCounts(due),
+    awaitingPostmatch:pending.length,feedOrigin,
+    note:"A completed scan is not proof that every Betman game was captured before kickoff."};
+  await fs.writeFile("automation-state/scan-health.json",JSON.stringify(health,null,2)+"\n");
+  console.log(JSON.stringify({date:new Date(now).toISOString(),frequency:"10 minutes (best effort)",feedSports:feedCounts,feedOrigin,upcoming:due.length,dueSports:sportCounts(due),verifyPending:pending.length,runBrowser,sourceError}));
   if(process.env.GITHUB_OUTPUT)await fs.appendFile(process.env.GITHUB_OUTPUT,"run_browser="+String(runBrowser)+"\n");
   if(sourceError&&!pending.length)process.exitCode=1;
 }else{
@@ -31,6 +44,15 @@ if(process.argv.includes("--preflight")){
   const page=await context.newPage();
   const errors=[];page.on("pageerror",e=>errors.push(String(e)));
   try{
+    if(feedPayload&&validFeed(feedPayload)){
+      // Serve the *fresh preflight Betman offer snapshot* to the original
+      // frontend model. No synthetic games; no post-kickoff backdating.
+      await page.route("**/api/betman*",route=>route.fulfill({
+        status:200,contentType:"application/json",
+        body:JSON.stringify(feedPayload),
+        headers:{"cache-control":"no-store"}
+      }));
+    }
     await page.goto(base+"/?automation=1",{waitUntil:"domcontentloaded",timeout:90000});
     // A result-only verification must not require the live Betman list UI to load.
     // The archived tracker is the authority for pending results, while fresh
@@ -89,6 +111,7 @@ if(process.argv.includes("--preflight")){
       "- 이번 회차 PRE: "+report.created,"- 신규 종료검증: "+report.verified.length,
       "- 신규 TOP1 미적중: "+report.missed,"- 수집/등급 검토대상: "+report.suspicious.length,
       "- 전체 잠금: "+protectedRows.length,"- 브라우저 오류: "+errors.length,
+      "- Betman 원본 조회: "+(sourceError?"실패 — "+sourceError:"정상 ("+feedOrigin+")"),
       "- 10분 주기 Betman 검색 종목별 경기 수: "+JSON.stringify(feedCounts),
       "- 금회 분석대상: "+due.length+"건 · 브라우저 배치: "+String(analysis.count??0)+"건",
       "- 배치 성공/실패: "+String(completeSnapshot.batchCompleted)+"/"+String(completeSnapshot.batchFailed),
@@ -105,6 +128,9 @@ if(process.argv.includes("--preflight")){
         "수정은 테스트/Preview API를 거친 별도 PR에서 수동 승인 후 병합합니다."
       ].join("\n")+"\n");
     }
-    console.log("Completed",JSON.stringify({newPredictions:report.created,newVerified:report.verified.length,anomalies:report.suspicious.length}));
+    console.log("Completed",JSON.stringify({newPredictions:report.created,newVerified:report.verified.length,anomalies:report.suspicious.length,sourceError}));
+    if(sourceError)process.exitCode=1; // never call a source-outage scan SUCCESS
+    if(due.length>0&&analysis.count===0){console.error("DUE_GAMES_NOT_ANALYZED:",due.length);process.exitCode=1;}
+    if(completeSnapshot.batchFailed>0){console.error("BATCH_FAILURES:",completeSnapshot.batchFailed);process.exitCode=1;}
   }finally{await browser.close();}
 }

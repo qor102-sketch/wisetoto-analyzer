@@ -13,7 +13,7 @@ on:
 
 permissions:
   contents: write  # publish projected data to automation-data branch
-  actions: read
+  actions: write  # self-dispatch recovery when GitHub drops scheduled events
   issues: write
 
 concurrency:
@@ -53,7 +53,7 @@ jobs:
   auto-audit:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -75,6 +75,23 @@ jobs:
       - name: Due match and verification preflight
         id: due
         run: node automation/runner.mjs --preflight
+      - name: Publish transparent scan health even if Betman is down
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -s automation-state/scan-health.json ]; then exit 0; fi
+          encoded="$(base64 -w 0 automation-state/scan-health.json)"
+          current="$(gh api "/repos/$GITHUB_REPOSITORY/contents/automation-health.json?ref=automation-data" --jq .sha 2>/dev/null || true)"
+          if [ -n "$current" ]; then
+            gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/automation-health.json" \
+              -f branch="automation-data" -f message="Scan health heartbeat" \
+              -f sha="$current" -f content="$encoded" >/dev/null
+          else
+            gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/automation-health.json" \
+              -f branch="automation-data" -f message="Initialize scan health heartbeat" \
+              -f content="$encoded" >/dev/null
+          fi
       - name: Install browser only when work is due
         if: steps.due.outputs.run_browser == 'true'
         run: |
@@ -128,3 +145,20 @@ jobs:
             automation-state/public-history.json
           retention-days: 90
           if-no-files-found: error
+
+  scan-heartbeat:
+    # GitHub schedule can be dropped; GITHUB_TOKEN workflow_dispatch chains
+    # the next run at approximately 10-minute intervals. No PR dispatch.
+    if: ${{ always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+    needs: [auto-audit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Queue next scan unless a newer main run exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node automation/chain.mjs
