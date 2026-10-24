@@ -1,7 +1,7 @@
 {
   "schema": "wisetoto-public-history-v1",
-  "publishedAt": "2026-10-24T07:25:57.685Z",
-  "lastRunAt": 1792826757231,
+  "publishedAt": "2026-10-24T07:45:45.582Z",
+  "lastRunAt": 1792827945453,
   "source": "GitHub Actions 자동 LIVE TRACKER (수동 분석 기록과 별개)",
   "counts": {
     "total": 29,
@@ -20,7 +20,7 @@
       "home": "멜버른 빅토리",
       "away": "멜버른 시티",
       "startMs": 1792831200000,
-      "capturedAt": 1792826747582,
+      "capturedAt": 1792827936991,
       "decision": "PASS",
       "status": "PENDING",
       "verifiedAt": null,
