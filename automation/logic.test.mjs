@@ -95,3 +95,24 @@ test("large same-time all-sports list is never silently truncated by discovery",
  assert.equal(dueGames(all,[],now).length,40);
  assert.equal(dueGames(all,all.slice(0,24).map(g=>({...g,startMs:g.gameDateMs,capturedAt:now})),now).length,16);
 });
+
+test("preflight recognizes the same locked PRE as the browser despite annotations and Unicode",()=>{
+ const now=Date.parse("2026-10-24T00:00:00Z");
+ const start=now+50*minute;
+ const game={sport:"basketball",home:"LA Clippers (NBA)",away:"Kings [club]",
+  gameDateMs:start,markets:[{selections:[{odds:1.71}]}]};
+ const existing={id:"saved",sport:"농구",home:"LA Clippers",away:"Kings",startMs:start,
+  capturedAt:now,betmanIdentity:["laclippers","kings",String(start),"농구"].join("|")};
+ assert.equal(dueGames([game],[existing],now).length,0);
+ assert.equal(dueGames([game],[],now).length,1);
+ assert.equal(dueGames([game],[{...existing,startMs:start+minute}],now).length,1);
+ assert.equal(dueGames([game],[{...existing,capturedAt:start}],now).length,1);
+});
+test("preflight browser identity protects an earlier frozen PRE even when display aliases differ",()=>{
+ const now=Date.parse("2026-10-24T00:00:00Z"),start=now+80*minute;
+ const game={sport:"soccer",home:"Brest FC",away:"OGC Nice",gameDateMs:start,
+  markets:[{selections:[{odds:1.9}]}]};
+ const frozen={sport:"축구",home:"브레스트",away:"니스",startMs:start,capturedAt:now,
+  betmanIdentity:"brest|ogcnice|"+start+"|축구"};
+ assert.equal(dueGames([game],[frozen],now).length,0);
+});
