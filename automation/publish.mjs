@@ -19,6 +19,22 @@ export function summarizePick(p){
     resultNote:p.resultNote==null?null:String(p.resultNote)
   };
 }
+// Observational evidence only. Do not claim the model's exact PASS gate from
+// archived rows; those reasons were not frozen with the original decision.
+export function passEvidence(r){
+ if(String(r?.decision??"")!=="PASS")return [];
+ const sport=String(r?.sport??""), pre=sport==="축구"?r?.footballPre:sport==="농구"?r?.courtPre:null;
+ const out=[];
+ if(!Array.isArray(r?.picks)||r.picks.length===0)out.push("NO_SELECTED_TOP1");
+ if(!Array.isArray(r?.marketResults)||r.marketResults.length===0)out.push("NO_MARKET_EVALUATIONS");
+ if(pre&&typeof pre==="object"){
+  const h=firstNumeric(pre.homeRecentSample),a=firstNumeric(pre.awayRecentSample);
+  if(h===0||a===0)out.push("ZERO_RECENT_FORM_SAMPLE");
+  else if(h!==null&&a!==null&&(h<5||a<5))out.push("LIMITED_RECENT_FORM_SAMPLE");
+ }else if(sport==="축구"||sport==="농구")out.push("NO_SAVED_MODEL_SNAPSHOT");
+ if(sport==="배구"||sport==="야구")out.push("MODEL_REASON_NOT_ARCHIVED");
+ return out;
+}
 export function summarizeRecord(r){
  const pre=r.footballPre&&typeof r.footballPre==="object"?r.footballPre:null;
  const court=r.courtPre&&typeof r.courtPre==="object"?r.courtPre:null;
@@ -59,7 +75,7 @@ export function summarizeRecord(r){
    lineup:r.footballLineup?{
      stage:String(r.footballLineup.stage??""),capturedAt:firstNumeric(r.footballLineup.capturedAt)
    }:null,
-   top1:best,markets,warnings
+   top1:best,markets,warnings,passEvidence:passEvidence(r)
  };
 }
 export function publishProjection(state){
