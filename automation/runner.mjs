@@ -65,7 +65,11 @@ if(process.argv.includes("--preflight")){
     if(due.length>0){
       await page.waitForFunction(()=>!!window.__wisetotoAutomation?.snapshot().feedReady,null,{timeout:90000});
     }
-    console.log("Ready",JSON.stringify(await page.evaluate(()=>window.__wisetotoAutomation.snapshot())));
+    const uiReady=await page.evaluate(()=>window.__wisetotoAutomation.snapshot());
+    console.log("Ready",JSON.stringify(uiReady));
+    if(due.length>0 && Number(uiReady.dueCount)===0){
+      console.error("PREFLIGHT_BROWSER_DUE_MISMATCH",JSON.stringify({preflightDue:due.map(g=>({sport:g.sport,home:g.home,away:g.away,start:g.gameDateMs,marketCount:g.markets?.length})),browserFeedCount:uiReady.feedCount,browserDueCount:uiReady.dueCount,preflightFeedCount:feedPayload?.games?.length,at:new Date().toISOString()}));
+    }
     const analysis=await page.evaluate(()=>window.__wisetotoAutomation.analyze());
     console.log("Analysis",JSON.stringify(analysis));
     if(analysis.started && analysis.count < due.length)console.log("Later due games queued for following 10-minute scan:",due.length-analysis.count);
