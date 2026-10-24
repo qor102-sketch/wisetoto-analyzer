@@ -29,7 +29,14 @@ export function eligibleAutoGame(game,now=Date.now()) {
       m.selections.some(x=>Number(x?.odds)>1));
 }
 
-const matchKey = (value) => String(value ?? "").toLowerCase().replace(/[\s._\-]/g, "");
+// Mirror the existing browser's normalizeTeamName/actualGameIdentity
+// for duplicate-PRE detection. This does not change live model decisions.
+const matchKey = (value) => String(value ?? "").toLowerCase().normalize("NFKC")
+  .replace(/\([^)]*\)/g,"").replace(/\[[^\]]*\]/g,"")
+  .replace(/\b(fc|cf|bc|bk|sc|club)\b/gi,"")
+  .replace(/[^a-z0-9가-힣]/g,"");
+const browserIdentity=(game,start,sport)=>
+  [matchKey(game.home),matchKey(game.away),String(game.gameDateMs??game.gameDate??""),sport].join("|");
 export const getRecords = (state) => {
   try {
     const v = JSON.parse(state?.localStorage?.[TRACKER_KEY] ?? "[]");
@@ -41,9 +48,12 @@ export function dueGames(games, records, now = Date.now()) {
     if(!eligibleAutoGame(game,now))return false;
     const start=Number(game.gameDateMs??new Date(game.gameDate).getTime());
     const sport=sportName(game.sport);
+    const identity=browserIdentity(game,start,sport);
     return !records.some(r=>Number(r.startMs)===start &&
-      sportName(r.sport)===sport && matchKey(r.home)===matchKey(game.home) &&
-      matchKey(r.away)===matchKey(game.away) && Number(r.capturedAt)<start);
+      sportName(r.sport)===sport && Number(r.capturedAt)<start &&
+      (r.betmanIdentity===identity ||
+       (matchKey(r.home)===matchKey(game.home) &&
+        matchKey(r.away)===matchKey(game.away))));
   }).sort((a,b)=>Number(a.gameDateMs??new Date(a.gameDate).getTime()) -
     Number(b.gameDateMs??new Date(b.gameDate).getTime()));
 }

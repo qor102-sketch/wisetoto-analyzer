@@ -37,3 +37,20 @@ test("projection reveals authentic frozen NBA points but not the model snapshot"
  assert.equal(JSON.stringify(projected).includes("internal"),false);
  assert.equal(summarizeRecord({...record,courtPre:null}).courtPre,null);
 });
+
+test("PASS evidence describes incomplete frozen sample, not an invented rejection gate",()=>{
+ const input={id:"p",sport:"농구",decision:"PASS",startMs:2000,capturedAt:1000,
+  courtPre:{expectedHome:110,expectedAway:109,homeRecentSample:2,awayRecentSample:0},
+  picks:[],marketResults:[{key:"m",market:"U/O",grade:"PASS",probability:55}]};
+ const before=JSON.stringify(input),out=summarizeRecord(input);
+ assert.deepEqual(out.passEvidence,["NO_SELECTED_TOP1","ZERO_RECENT_FORM_SAMPLE"]);
+ assert.equal(out.markets.length,1);
+ assert.equal(out.top1,null);
+ assert.equal(JSON.stringify(input),before);
+});
+test("volleyball and baseball PASS report unavailable archived decision reason",()=>{
+ for(const sport of ["배구","야구"]){
+  assert.deepEqual(summarizeRecord({sport,decision:"PASS",picks:[],marketResults:[]}).passEvidence,
+   ["NO_SELECTED_TOP1","NO_MARKET_EVALUATIONS","MODEL_REASON_NOT_ARCHIVED"]);
+ }
+});
