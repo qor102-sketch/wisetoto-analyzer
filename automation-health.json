@@ -1,6 +1,6 @@
 {
   "schema": "wisetoto-auto-scan-health-v1",
-  "scannedAt": "2026-10-24T16:11:02.037Z",
+  "scannedAt": "2026-10-24T16:21:01.616Z",
   "expectedIntervalMinutes": 10,
   "sourceOk": true,
   "sourceError": null,
@@ -10,14 +10,14 @@
     "야구": 9,
     "배구": 3
   },
-  "eligibleForPregame": 5,
+  "eligibleForPregame": 2,
   "eligibleBySport": {
-    "축구": 5,
+    "축구": 2,
     "농구": 0,
     "야구": 0,
     "배구": 0
   },
-  "awaitingPostmatch": 13,
+  "awaitingPostmatch": 14,
   "feedOrigin": "fresh-fetch-attempt-1",
   "note": "A completed scan is not proof that every Betman game was captured before kickoff."
 }
