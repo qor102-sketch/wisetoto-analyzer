@@ -25776,7 +25776,8 @@ export default function Home() {
       analyze: () => {
         if (loading || liveBatchAnalysis.running || backtestMode || recentVerifyMode) return { started: false, reason: "BUSY" };
         const due = automationDueGames();
-        const selected = due.slice(0, 24);
+        // Keep each free Actions run bounded; later eligible games are handled by the next scan.
+        const selected = due.slice(0, 3);
         const keys = selected.map((game) => visibleGameKey(game));
         if (!keys.length) return { started: false, reason: "NO_DUE_GAME", count: 0 };
         setLiveBatchSelectedKeys(keys);

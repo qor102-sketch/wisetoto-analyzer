@@ -69,14 +69,22 @@ if(process.argv.includes("--preflight")){
     const analysis=await page.evaluate(()=>window.__wisetotoAutomation.analyze());
     console.log("Analysis",JSON.stringify(analysis));
     if(analysis.started && analysis.count < due.length)console.log("Later due games queued for following 10-minute scan:",due.length-analysis.count);
+    let batchTimedOut=false;
     if(analysis.started){
       await page.waitForTimeout(2000);
-      await page.waitForFunction(()=>!window.__wisetotoAutomation.snapshot().batchRunning,null,{timeout:540000});
-      await page.waitForTimeout(3000);
+      try{
+        await page.waitForFunction(()=>!window.__wisetotoAutomation.snapshot().batchRunning,null,{timeout:240000});
+      }catch(e){
+        batchTimedOut=true;
+        console.error("BATCH_WATCHDOG_TIMEOUT: preserving only records already frozen before closing browser",String(e));
+      }
+      if(!batchTimedOut)await page.waitForTimeout(3000);
     }
     const completeSnapshot=await page.evaluate(()=>window.__wisetotoAutomation.snapshot());
     console.log("Batch result",JSON.stringify(completeSnapshot));
-    const verify=await page.evaluate(()=>window.__wisetotoAutomation.verify());
+    const verify=(!completeSnapshot.batchRunning && !batchTimedOut)
+      ? await page.evaluate(()=>window.__wisetotoAutomation.verify())
+      : {started:false,reason:"BATCH_STILL_RUNNING"};
     console.log("Result verification",JSON.stringify(verify));
     if(verify.started){
       old.meta={...old.meta,lastVerifyAttempt:Date.now()};
@@ -129,6 +137,7 @@ if(process.argv.includes("--preflight")){
       ].join("\n")+"\n");
     }
     console.log("Completed",JSON.stringify({newPredictions:report.created,newVerified:report.verified.length,anomalies:report.suspicious.length,sourceError}));
+    if(batchTimedOut){console.error("BATCH_INCOMPLETE_CHECKPOINTED");process.exitCode=1;}
     if(sourceError)process.exitCode=1; // never call a source-outage scan SUCCESS
     if(due.length>0&&analysis.count===0){console.error("DUE_GAMES_NOT_ANALYZED:",due.length);process.exitCode=1;}
     if(completeSnapshot.batchFailed>0){console.error("BATCH_FAILURES:",completeSnapshot.batchFailed);process.exitCode=1;}

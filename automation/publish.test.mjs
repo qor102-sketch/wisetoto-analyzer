@@ -37,3 +37,37 @@ test("projection reveals authentic frozen NBA points but not the model snapshot"
  assert.equal(JSON.stringify(projected).includes("internal"),false);
  assert.equal(summarizeRecord({...record,courtPre:null}).courtPre,null);
 });
+
+test("mixed-success Actions batch must publish all already-frozen PRE even when overall scan failed",()=>{
+ // Reproduces 2026-10-24 20:25 KST incident: 29 previously published,
+ // 31 frozen in the run artifact, but one browser item failed.
+ const now=Date.parse("2026-10-24T11:25:00Z");
+ const previous=Array.from({length:29},(_,i)=>({
+  id:"locked-"+i,sport:"축구",home:"HOME-"+i,away:"AWAY-"+i,
+  startMs:now+100000+i*1000,capturedAt:now-100000,
+  decision:"PASS",picks:[],marketResults:[{key:"m-"+i,grade:"PASS",probability:55}],
+  verificationStatus:"PENDING"
+ }));
+ const newlyFrozen=[0,1].map(i=>({
+  id:"new-"+i,sport:"축구",home:"NewHome-"+i,away:"NewAway-"+i,
+  startMs:now+1800000+i*1000,capturedAt:now-60000,
+  decision:"PASS",picks:[],marketResults:[{key:"eval-"+i,grade:"WATCH",expectedValue:-2}],
+  verificationStatus:"PENDING"
+ }));
+ const state={schema:"wisetoto-auto-v1",meta:{lastRunAt:now},
+  localStorage:{[TRACKER_KEY]:JSON.stringify([...previous,...newlyFrozen])}};
+ const result=publishProjection(state);
+ assert.equal(result.counts.total,31);
+ assert.equal(result.lastRunAt,now);
+ assert.equal(result.records.filter(r=>r.id.startsWith("new-")).length,2);
+ assert.equal(result.records.filter(r=>r.id.startsWith("new-")&&r.top1===null).length,2);
+ assert.equal(JSON.parse(state.localStorage[TRACKER_KEY]).length,31);
+ assert.ok(result.records.every(r=>r.capturedAt<r.startMs));
+});
+test("failed browser scans still publish state checkpoints, but not missing state",async()=>{
+ const {readFile}=await import("node:fs/promises");
+ const workflow=await readFile(new URL("../.github/workflows/wisetoto-auto-analysis.yml",import.meta.url),"utf8");
+ assert.match(workflow,/- name: Generate public read-only dashboard projection\s+if: always\(\) && steps\.due\.outputs\.run_browser == 'true'/);
+ assert.match(workflow,/- name: Publish site-readable history \(no browser secrets\)\s+if: always\(\) && steps\.due\.outputs\.run_browser == 'true'/);
+ assert.match(workflow,/if \[ ! -s automation-state\/public-history\.json \]; then exit 0; fi/);
+});
