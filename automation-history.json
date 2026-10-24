@@ -1,11 +1,11 @@
 {
   "schema": "wisetoto-public-history-v1",
-  "publishedAt": "2026-10-24T02:30:10.463Z",
-  "lastRunAt": 1792809010253,
+  "publishedAt": "2026-10-24T03:00:35.139Z",
+  "lastRunAt": 1792810835018,
   "source": "GitHub Actions 자동 LIVE TRACKER (수동 분석 기록과 별개)",
   "counts": {
-    "total": 27,
-    "pending": 11,
+    "total": 28,
+    "pending": 12,
     "verified": 16,
     "void": 0,
     "hit": 1,
@@ -13,6 +13,71 @@
     "warnings": 9
   },
   "records": [
+    {
+      "id": "live:705808:1792816200000",
+      "sport": "배구",
+      "league": "KOVO Cup, Men",
+      "home": "Incheon Korean Air Jumbos",
+      "away": "Seoul Woori Card Wibee",
+      "startMs": 1792816200000,
+      "capturedAt": 1792810820707,
+      "decision": "PASS",
+      "status": "PENDING",
+      "verifiedAt": null,
+      "result": null,
+      "pre": null,
+      "courtPre": null,
+      "lineup": null,
+      "top1": null,
+      "markets": [
+        {
+          "key": "seq:108",
+          "market": "승패",
+          "pick": "승",
+          "probability": 68.1,
+          "odds": 1.08,
+          "marketProbability": 80.5,
+          "expectedValue": -26.5,
+          "edge": -12.4,
+          "grade": "WATCH",
+          "score": 59.7,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        },
+        {
+          "key": "seq:109",
+          "market": "H -2.5",
+          "pick": "원정 +2.5",
+          "probability": 73.8,
+          "odds": 1.46,
+          "marketProbability": 59.6,
+          "expectedValue": 7.7,
+          "edge": 14.2,
+          "grade": "WATCH",
+          "score": 68,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        },
+        {
+          "key": "seq:111",
+          "market": "SUM",
+          "pick": "홀",
+          "probability": 57.2,
+          "odds": 1.8,
+          "marketProbability": 50,
+          "expectedValue": 3,
+          "edge": 7.2,
+          "grade": "PASS",
+          "score": 56.9,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        }
+      ],
+      "warnings": []
+    },
     {
       "id": "live:betman:뉴캐슬제츠|맥아서|1792814400000|축구:1792814400000",
       "sport": "축구",
