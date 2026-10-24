@@ -78,4 +78,34 @@ try{
  console.log("RESULT-ONLY BRIDGE OK: loads without a Betman list, pending tracker can be verified independently");
 
 
+ // Regression: original Betman Korean identity and frozen English display name
+ // must refer to the SAME prekickoff PRE, never a duplicate recommendation.
+ const lockedStart=Date.now()+70*60_000;
+ await page.addInitScript(({start})=>{
+   localStorage.setItem("wisetoto_v13_8_1_live_tracker",JSON.stringify([{
+     id:"smoke-locked-nba",sport:"농구",home:"Los Angeles Lakers",
+     away:"Golden State Warriors",startMs:start,capturedAt:start-60*60_000,
+     betmanIdentity:"la레이커스|골든스테이트워리어스|"+start+"|농구",
+     verificationStatus:"PENDING",decision:"PASS",picks:[],marketResults:[]
+   }]));
+ },{start:lockedStart});
+ await page.unroute("**/api/betman");
+ await page.route("**/api/betman",route=>route.fulfill({
+   status:200,contentType:"application/json",body:JSON.stringify({
+     ok:true,source:"Betman",
+     diagnostics:{rawCompScheduleRows:1},
+     games:[{sport:"basketball",home:"LA레이커스",away:"골든스테이트워리어스",
+       gameDateMs:lockedStart,gameDate:new Date(lockedStart).toISOString(),
+       markets:[{type:"moneyline",matchSeq:900000,
+         selections:[{side:"win",odds:1.75},{side:"lose",odds:2.04}]}]}]
+   })
+ }));
+ await page.goto("http://127.0.0.1:3100/?automation=1",{waitUntil:"domcontentloaded",timeout:90_000});
+ await page.waitForFunction(()=>window.__wisetotoAutomation?.snapshot().feedReady &&
+   window.__wisetotoAutomation?.snapshot().trackerCount===1,null,{timeout:90_000});
+ const locked=await page.evaluate(()=>window.__wisetotoAutomation.snapshot());
+ if(locked.dueCount!==0)throw Error("Frozen NBA game rediscovered as PRE: "+JSON.stringify(locked));
+ console.log("FROZEN NBA IDENTITY OK: original Betman alias is not a second PRE");
+
+
 } finally {await browser.close();}
