@@ -116,3 +116,14 @@ test("preflight browser identity protects an earlier frozen PRE even when displa
   betmanIdentity:"brest|ogcnice|"+start+"|축구"};
  assert.equal(dueGames([game],[frozen],now).length,0);
 });
+
+test("archived NBA English display name must not duplicate Betman Korean identity",()=>{
+ const now=Date.parse("2026-10-24T00:00:00Z"),start=now+80*minute;
+ const raw={sport:"basketball",home:"LA레이커스",away:"골든스테이트워리어스",
+   gameDateMs:start,markets:[{selections:[{odds:1.8}]}]};
+ const frozen={sport:"농구",home:"Los Angeles Lakers",away:"Golden State Warriors",
+   betmanIdentity:"la레이커스|골든스테이트워리어스|"+start+"|농구",
+   startMs:start,capturedAt:now};
+ assert.equal(dueGames([raw],[],now).length,1);
+ assert.equal(dueGames([raw],[frozen],now).length,0);
+});
