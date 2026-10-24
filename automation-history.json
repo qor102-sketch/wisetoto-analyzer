@@ -1,18 +1,107 @@
 {
   "schema": "wisetoto-public-history-v1",
-  "publishedAt": "2026-10-24T03:00:35.139Z",
-  "lastRunAt": 1792810835018,
+  "publishedAt": "2026-10-24T07:25:57.685Z",
+  "lastRunAt": 1792826757231,
   "source": "GitHub Actions 자동 LIVE TRACKER (수동 분석 기록과 별개)",
   "counts": {
-    "total": 28,
-    "pending": 12,
+    "total": 29,
+    "pending": 13,
     "verified": 16,
     "void": 0,
     "hit": 1,
     "miss": 1,
-    "warnings": 9
+    "warnings": 10
   },
   "records": [
+    {
+      "id": "live:betman:멜버른빅토리|멜버른시티|1792831200000|축구:1792831200000",
+      "sport": "축구",
+      "league": "호주 A리그",
+      "home": "멜버른 빅토리",
+      "away": "멜버른 시티",
+      "startMs": 1792831200000,
+      "capturedAt": 1792826747582,
+      "decision": "PASS",
+      "status": "PENDING",
+      "verifiedAt": null,
+      "result": null,
+      "pre": {
+        "expectedHome": 1.46,
+        "expectedAway": 1.38,
+        "homeRecentSample": 0,
+        "awayRecentSample": 0,
+        "homeVenueSample": 0,
+        "awayVenueSample": 0
+      },
+      "courtPre": null,
+      "lineup": null,
+      "top1": null,
+      "markets": [
+        {
+          "key": "seq:259",
+          "market": "승무패",
+          "pick": "승",
+          "probability": 38,
+          "odds": 2.35,
+          "marketProbability": 37,
+          "expectedValue": -10.7,
+          "edge": 1,
+          "grade": "PASS",
+          "score": 41.5,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        },
+        {
+          "key": "seq:260",
+          "market": "H -1",
+          "pick": "패",
+          "probability": 60.3,
+          "odds": 1.45,
+          "marketProbability": 60,
+          "expectedValue": -12.6,
+          "edge": 0.3,
+          "grade": "WATCH",
+          "score": 37.7,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        },
+        {
+          "key": "seq:261",
+          "market": "U/O 2.5",
+          "pick": "오버",
+          "probability": 53.4,
+          "odds": 1.64,
+          "marketProbability": 53,
+          "expectedValue": -12.4,
+          "edge": 0.4,
+          "grade": "PASS",
+          "score": 47.4,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        },
+        {
+          "key": "seq:262",
+          "market": "SUM",
+          "pick": "짝",
+          "probability": 50.2,
+          "odds": 1.79,
+          "marketProbability": 50.3,
+          "expectedValue": -10.1,
+          "edge": -0.1,
+          "grade": "PASS",
+          "score": 45.4,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        }
+      ],
+      "warnings": [
+        "경기 전 최근 Form 부족 (0/0)"
+      ]
+    },
     {
       "id": "live:705808:1792816200000",
       "sport": "배구",
