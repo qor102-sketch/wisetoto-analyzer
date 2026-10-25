@@ -118,7 +118,10 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now)
    // Never overwrite earlier real odds; retain at most a 30-min cadence.
    if(!last||observedAt-last.at>=30*MINUTE){
      f.snapshots.push({at:observedAt,market});
-     f.snapshots=f.snapshots.slice(-MAX_SNAPSHOTS);
+     // Preserve the original opening quote permanently within the bounded
+     // per-fixture history; evict intermediate points, never the opener.
+     if(f.snapshots.length>MAX_SNAPSHOTS)
+       f.snapshots=[f.snapshots[0],...f.snapshots.slice(-(MAX_SNAPSHOTS-1))];
      captured++;
    }
    f.lastSeenAt=observedAt;
