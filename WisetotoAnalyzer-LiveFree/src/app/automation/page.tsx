@@ -7,12 +7,12 @@ type ScanHealth={schema:string;scannedAt:string;expectedIntervalMinutes:number;s
 type EvidencePick={side:string;label:string;odds:number;marketProbability:number;openProbability:number;shift:number;marketHold:number;asOf:number};
 type EvidenceRow={id:string;sport:string;league:string;home:string;away:string;startMs:number;firstSeenAt:number;lastSeenAt:number;observations:number;stage:string;reason:string;top1:EvidencePick|null;calibration:{samples:number;qualified:boolean;probability?:number;conservativeEV?:number}|null};
 type ResearchEvidence={generatedAt:string;counts:{future:number;observed:number;researchTop1:number;insufficient:number};records:EvidenceRow[]};
-type History={scanHealth?:ScanHealth|null;schema:string;publishedAt:string;lastRunAt:number|null;source:string;counts:{total:number;pending:number;verified:number;void:number;hit:number;miss:number;warnings:number;overdue?:number};records:Match[]};
+type History={scanHealth?:ScanHealth|null;schema:string;publishedAt:string;lastRunAt:number|null;source:string;counts:{total:number;pending:number;verified:number;review?:number;void:number;hit:number;miss:number;warnings:number;overdue?:number};records:Match[]};
 function date(ms:number|null|undefined){return typeof ms==="number"&&Number.isFinite(ms)?new Date(ms).toLocaleString("ko-KR",{timeZone:"Asia/Seoul",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}):"—";}
 function num(v:number|null|undefined,d=1){return typeof v==="number"&&Number.isFinite(v)?v.toFixed(d):"—";}
-function stateText(r:Match){if(r.status==="VOID")return "취소 / 무효";if(r.status==="VERIFIED")return "결과 검증 완료";return Date.now()<r.startMs?"경기 전 PRE 잠금":Date.now()-r.startMs>6*60*60_000?"결과 확인 지연":"종료 결과 검증 대기";}
+function stateText(r:Match){if(r.status==="VOID")return "취소 / 무효";if(r.status==="REVIEW_REQUIRED")return "검증 오류 · 재검토";if(r.status==="VERIFIED")return "결과 검증 완료";return Date.now()<r.startMs?"경기 전 PRE 잠금":Date.now()-r.startMs>6*60*60_000?"결과 확인 지연":"종료 결과 검증 대기";}
 function pickText(p:Pick|null){if(!p)return "PASS";if(p.resultStatus==="HIT")return "적중";if(p.resultStatus==="MISS")return "미적중";if(p.resultStatus==="VOID")return "무효";return "검증 대기";}
-function statusClass(t:string){return t==="HIT"||t==="VERIFIED"?"good":t==="MISS"||t==="VOID"?"bad":"neutral";}
+function statusClass(t:string){return t==="HIT"||t==="VERIFIED"?"good":t==="MISS"||t==="VOID"||t==="REVIEW_REQUIRED"?"bad":"neutral";}
 export default function AutomationDashboard(){
  const [data,setData]=useState<History|null>(null);
  const [loading,setLoading]=useState(true);
@@ -31,7 +31,7 @@ export default function AutomationDashboard(){
  const records=data?.records||[];
  const sports=useMemo(()=>Array.from(new Set(records.map(r=>r.sport))),[data]);
  const visible=useMemo(()=>records.filter(r=>(sport==="all"||r.sport===sport)&&
-  (filter==="all"||(filter==="pending"&&r.status==="PENDING")||(filter==="verified"&&r.status==="VERIFIED")||(filter==="miss"&&r.top1?.resultStatus==="MISS")||(filter==="issues"&&r.warnings?.length>0))&&
+  (filter==="all"||(filter==="pending"&&r.status==="PENDING")||(filter==="verified"&&r.status==="VERIFIED")||(filter==="miss"&&r.top1?.resultStatus==="MISS")||(filter==="issues"&&(r.warnings?.length>0||r.status==="REVIEW_REQUIRED")))&&
   (r.home+" "+r.away+" "+r.league).toLowerCase().includes(query.toLowerCase())
  ),[data,sport,filter,query]);
  return <main className="auto-page"><div className="auto-background" aria-hidden="true"/><div className="auto-container">
@@ -56,7 +56,7 @@ export default function AutomationDashboard(){
     })():<div className="scan-health-box scan-alert">검색 상태 초기화 대기 — 자동 실행 기록을 확인하세요.</div>}
    </section>
    <section className="auto-stats" aria-label="자동분석 요약">{[
-    ["고정 PRE",data.counts.total,"최초 경기 전 예측"],["종료 검증",data.counts.verified,"결과 연결 완료"],["TOP1 적중",data.counts.hit,"검증된 픽"],["TOP1 미적중",data.counts.miss,"원인 분석 대상"],["결과 확인 지연",data.counts.overdue??records.filter(r=>r.status==="PENDING"&&r.startMs<Date.now()-6*60*60_000).length,"시작 6시간 후에도 결과 미확인"],["검토 신호",data.counts.warnings,"수집 품질 확인"]
+    ["고정 PRE",data.counts.total,"최초 경기 전 예측"],["종료 검증",data.counts.verified,"점수 유효성 통과"],["검증 재검토",data.counts.review??0,"종목 규칙과 결과 불일치"],["TOP1 적중",data.counts.hit,"검증된 픽"],["TOP1 미적중",data.counts.miss,"원인 분석 대상"],["결과 확인 지연",data.counts.overdue??records.filter(r=>r.status==="PENDING"&&r.startMs<Date.now()-6*60*60_000).length,"시작 6시간 후에도 결과 미확인"],["검토 신호",data.counts.warnings,"수집 품질 확인"]
    ].map(([title,value,desc])=><div key={String(title)} className="auto-stat"><span>{title}</span><strong>{value}</strong><small>{desc}</small></div>)}</section>
    <section className="auto-results" aria-label="경기 전 배당 축적 연구" style={{marginBottom:20}}>
     <div className="auto-section-title"><div>
