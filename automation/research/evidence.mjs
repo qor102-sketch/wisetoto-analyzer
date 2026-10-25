@@ -18,7 +18,7 @@ export function normalizeMoneyline(game) {
  const sport=sportName(game.sport);
  const allowed=sport==="축구"?["win","draw","lose"]:["win","lose"];
  const markets=(Array.isArray(game.markets)?game.markets:[]).filter(m=>
-   m?.type==="moneyline" && /승패/.test(String(m.betName??"")) &&
+   m?.type==="moneyline" && /승무패|승패/.test(String(m.betName??"")) &&
    !/승5패|승1패|핸디|전반|후반|세트|연장/.test(String(m.betName??"")));
  for(const m of markets){
    const arr=m.selections;
