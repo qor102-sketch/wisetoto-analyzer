@@ -75,6 +75,22 @@ jobs:
       - name: Due match and verification preflight
         id: due
         run: node automation/runner.mjs --preflight
+      - name: Seed no-deploy config on automation-data branch
+        # Vercel reads vercel.json FROM THE COMMITTED BRANCH. Without this,
+        # 10-minute health commits create >100 Hobby preview deployments/day.
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for f in "WisetotoAnalyzer-LiveFree/vercel.json" "WisetotoAnalyzer-LiveFree/WisetotoAnalyzer-LiveFree/vercel.json"; do
+            if gh api "/repos/$GITHUB_REPOSITORY/contents/$f?ref=automation-data" >/dev/null 2>&1; then
+              continue
+            fi
+            encoded="$(printf '%s' '{"framework":"nextjs","git":{"deploymentEnabled":{"automation-data":false}}}' | base64 -w0)"
+            gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$f" \
+              -f branch="automation-data" -f message="Disable Vercel deploys for data-only branch" \
+              -f content="$encoded" >/dev/null
+          done
       - name: Publish transparent scan health even if Betman is down
         if: always()
         env:
