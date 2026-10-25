@@ -1,18 +1,107 @@
 {
   "schema": "wisetoto-public-history-v1",
-  "publishedAt": "2026-10-25T09:29:32.735Z",
-  "lastRunAt": 1792920572613,
+  "publishedAt": "2026-10-25T09:40:12.244Z",
+  "lastRunAt": 1792921212093,
   "source": "GitHub Actions 자동 LIVE TRACKER (수동 분석 기록과 별개)",
   "counts": {
-    "total": 34,
-    "pending": 18,
+    "total": 35,
+    "pending": 19,
     "verified": 16,
     "void": 0,
     "hit": 1,
     "miss": 1,
-    "warnings": 15
+    "warnings": 16
   },
   "records": [
+    {
+      "id": "live:betman:포르튀나시타르트|엑셀시오르로테르담|1792926900000|축구:1792926900000",
+      "sport": "축구",
+      "league": "네덜란드 에레디비시",
+      "home": "포르튀나 시타르트",
+      "away": "엑셀시오르 로테르담",
+      "startMs": 1792926900000,
+      "capturedAt": 1792921196736,
+      "decision": "PASS",
+      "status": "PENDING",
+      "verifiedAt": null,
+      "result": null,
+      "pre": {
+        "expectedHome": 1.57,
+        "expectedAway": 1.33,
+        "homeRecentSample": 2,
+        "awayRecentSample": 2,
+        "homeVenueSample": 1,
+        "awayVenueSample": 1
+      },
+      "courtPre": null,
+      "lineup": null,
+      "top1": null,
+      "markets": [
+        {
+          "key": "seq:626",
+          "market": "승무패",
+          "pick": "승",
+          "probability": 41.6,
+          "odds": 2.18,
+          "marketProbability": 39.9,
+          "expectedValue": -9.3,
+          "edge": 1.7,
+          "grade": "PASS",
+          "score": 49.3,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        },
+        {
+          "key": "seq:627",
+          "market": "H -1",
+          "pick": "패",
+          "probability": 57.1,
+          "odds": 1.52,
+          "marketProbability": 57.2,
+          "expectedValue": -13.2,
+          "edge": -0.1,
+          "grade": "WATCH",
+          "score": 56.7,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        },
+        {
+          "key": "seq:628",
+          "market": "U/O 2.5",
+          "pick": "오버",
+          "probability": 56.7,
+          "odds": 1.49,
+          "marketProbability": 58.4,
+          "expectedValue": -15.5,
+          "edge": -1.7,
+          "grade": "PASS",
+          "score": 50.2,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        },
+        {
+          "key": "seq:629",
+          "market": "SUM",
+          "pick": "짝",
+          "probability": 50.1,
+          "odds": 1.8,
+          "marketProbability": 50,
+          "expectedValue": -9.8,
+          "edge": 0.1,
+          "grade": "PASS",
+          "score": 49.8,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        }
+      ],
+      "warnings": [
+        "경기 전 최근 Form 부족 (2/2)"
+      ]
+    },
     {
       "id": "live:betman:시드니|애들레이드유나이티드|1792900800000|축구:1792900800000",
       "sport": "축구",
