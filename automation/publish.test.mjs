@@ -71,3 +71,30 @@ test("failed browser scans still publish state checkpoints, but not missing stat
  assert.match(workflow,/- name: Publish site-readable history \(no browser secrets\)\s+if: always\(\) && steps\.due\.outputs\.run_browser == 'true'/);
  assert.match(workflow,/if \[ ! -s automation-state\/public-history\.json \]; then exit 0; fi/);
 });
+
+test("public output distinguishes a delayed result without fabricating final score",()=>{
+ const now=Date.now(),r={id:"pending",sport:"축구",home:"A",away:"B",
+   startMs:now-8*60*60_000,capturedAt:now-10*60*60_000,decision:"PASS",
+   picks:[],marketResults:[],verificationStatus:"PENDING",
+   verifyWaitReason:"NAVER_FIXTURE_UNMATCHED",verifyLastCheckedAt:now-60_000};
+ const projection=publishProjection({localStorage:{[TRACKER_KEY]:JSON.stringify([r])}});
+ assert.equal(projection.counts.overdue,1);
+ assert.equal(projection.counts.verified,0);
+ assert.equal(projection.records[0].status,"PENDING");
+ assert.equal(projection.records[0].result,null);
+ assert.equal(projection.records[0].verifyWaitReason,"NAVER_FIXTURE_UNMATCHED");
+ assert.ok(projection.records[0].capturedAt<projection.records[0].startMs);
+});
+test("Actions always reconciles results independently of PRE batch and publishes fresh checkpoint",async()=>{
+ const {readFile}=await import("node:fs/promises");
+ const workflow=await readFile(new URL("../.github/workflows/wisetoto-auto-analysis.yml",import.meta.url),"utf8");
+ const runner=await readFile(new URL("./runner.mjs",import.meta.url),"utf8");
+ const page=await readFile(new URL("../WisetotoAnalyzer-LiveFree/src/app/page.tsx",import.meta.url),"utf8");
+ assert.match(workflow,/name: Reconcile ended games independently of PRE batch outcome\s+if: always\(\) && steps\.due\.outputs\.verify_due == 'true'/);
+ assert.match(workflow,/node automation\/runner\.mjs --verify-only/);
+ assert.match(workflow,/if \[ ! -s automation-state\/public-history\.json \] \|\| \[ ! -s automation-state\/checkpoint-ready \]/);
+ assert.match(runner,/const verifyOnly=process\.argv\.includes\("--verify-only"\)/);
+ assert.match(runner,/verificationTimedOut/);
+ assert.match(page,/Fair queue: do not keep retrying the same failed first 10 records/);
+ assert.match(page,/session auto-court hook must not consume the bridge's verification lock/);
+});
