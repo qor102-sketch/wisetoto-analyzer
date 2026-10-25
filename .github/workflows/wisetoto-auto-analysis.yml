@@ -37,6 +37,10 @@ jobs:
           cd WisetotoAnalyzer-LiveFree && npm install --no-audit --no-fund
           cd .. && npm install --no-save --no-audit --no-fund playwright@1.56.1
           npx playwright install --with-deps chromium
+      - name: Compile and typecheck Next.js production build (Preview quota fallback)
+        run: |
+          cd WisetotoAnalyzer-LiveFree
+          npm run build
       - name: Launch Next.js browser test server
         run: |
           cd WisetotoAnalyzer-LiveFree
