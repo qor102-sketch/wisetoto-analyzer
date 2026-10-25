@@ -4,6 +4,9 @@ import "./dashboard.css";
 type Pick={key:string;market:string;pick:string;probability:number|null;odds:number|null;expectedValue:number|null;edge:number|null;grade:string;score:number|null;resultStatus:string;actualLabel:string|null;resultNote:string|null};
 type Match={id:string;sport:string;league:string;home:string;away:string;startMs:number;capturedAt:number;status:string;verifiedAt:number|null;decision:string;result:{homeScore:number|null;awayScore:number|null;source:string}|null;pre:{expectedHome:number|null;expectedAway:number|null;homeRecentSample:number|null;awayRecentSample:number|null;homeVenueSample:number|null;awayVenueSample:number|null}|null;courtPre:{expectedHome:number|null;expectedAway:number|null;homeRecentSample:number|null;awayRecentSample:number|null;homeVenueSample:number|null;awayVenueSample:number|null}|null;lineup:{stage:string;capturedAt:number|null}|null;top1:Pick|null;markets:Pick[];warnings:string[];verifyWaitReason?:string|null;verifyLastCheckedAt?:number|null};
 type ScanHealth={schema:string;scannedAt:string;expectedIntervalMinutes:number;sourceOk:boolean;sourceError:string|null;feedSports:Record<string,number>;eligibleForPregame:number;awaitingPostmatch:number;feedOrigin:string};
+type EvidencePick={side:string;label:string;odds:number;marketProbability:number;openProbability:number;shift:number;marketHold:number;asOf:number};
+type EvidenceRow={id:string;sport:string;league:string;home:string;away:string;startMs:number;firstSeenAt:number;lastSeenAt:number;observations:number;stage:string;reason:string;top1:EvidencePick|null;calibration:{samples:number;qualified:boolean;probability?:number;conservativeEV?:number}|null};
+type ResearchEvidence={generatedAt:string;counts:{future:number;observed:number;researchTop1:number;insufficient:number};records:EvidenceRow[]};
 type History={scanHealth?:ScanHealth|null;schema:string;publishedAt:string;lastRunAt:number|null;source:string;counts:{total:number;pending:number;verified:number;void:number;hit:number;miss:number;warnings:number;overdue?:number};records:Match[]};
 function date(ms:number|null|undefined){return typeof ms==="number"&&Number.isFinite(ms)?new Date(ms).toLocaleString("ko-KR",{timeZone:"Asia/Seoul",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}):"—";}
 function num(v:number|null|undefined,d=1){return typeof v==="number"&&Number.isFinite(v)?v.toFixed(d):"—";}
@@ -13,6 +16,7 @@ function statusClass(t:string){return t==="HIT"||t==="VERIFIED"?"good":t==="MISS
 export default function AutomationDashboard(){
  const [data,setData]=useState<History|null>(null);
  const [loading,setLoading]=useState(true);
+ const [evidence,setEvidence]=useState<ResearchEvidence|null>(null);
  const [error,setError]=useState("");
  const [filter,setFilter]=useState("all");
  const [sport,setSport]=useState("all");
@@ -20,6 +24,10 @@ export default function AutomationDashboard(){
  const [open,setOpen]=useState<string|null>(null);
  async function reload(){setLoading(true);setError("");try{const res=await fetch("/api/automation/results",{cache:"no-store"});const json=await res.json();if(!res.ok||!json.ok||!Array.isArray(json.data?.records))throw Error(json.error||"기록이 없습니다.");setData(json.data);}catch(e){setError(e instanceof Error?e.message:"데이터 연결 오류");}finally{setLoading(false);}}
  useEffect(()=>{void reload();},[]);
+ useEffect(()=>{let alive=true;void fetch("/api/automation/research",{cache:"no-store"})
+   .then(async r=>{if(!r.ok)throw Error("research archive not yet published");return r.json();})
+   .then(json=>{if(alive&&json?.ok&&Array.isArray(json?.data?.records))setEvidence(json.data as ResearchEvidence);})
+   .catch(()=>{});return ()=>{alive=false;};},[]);
  const records=data?.records||[];
  const sports=useMemo(()=>Array.from(new Set(records.map(r=>r.sport))),[data]);
  const visible=useMemo(()=>records.filter(r=>(sport==="all"||r.sport===sport)&&
@@ -50,6 +58,27 @@ export default function AutomationDashboard(){
    <section className="auto-stats" aria-label="자동분석 요약">{[
     ["고정 PRE",data.counts.total,"최초 경기 전 예측"],["종료 검증",data.counts.verified,"결과 연결 완료"],["TOP1 적중",data.counts.hit,"검증된 픽"],["TOP1 미적중",data.counts.miss,"원인 분석 대상"],["결과 확인 지연",data.counts.overdue??records.filter(r=>r.status==="PENDING"&&r.startMs<Date.now()-6*60*60_000).length,"시작 6시간 후에도 결과 미확인"],["검토 신호",data.counts.warnings,"수집 품질 확인"]
    ].map(([title,value,desc])=><div key={String(title)} className="auto-stat"><span>{title}</span><strong>{value}</strong><small>{desc}</small></div>)}</section>
+   <section className="auto-results" aria-label="경기 전 배당 축적 연구" style={{marginBottom:20}}>
+    <div className="auto-section-title"><div>
+      <h2>경기 전 축적 자료 · 실험 TOP1 연구</h2>
+      <p>공식 LIVE TRACKER TOP1과 완전히 별개입니다. 10분 검색 → 시점별 배당 기록 → 과거 확정 결과로 보정합니다.</p>
+    </div><strong>{evidence?evidence.counts.future+"경기 수집":"첫 관측 데이터 대기"}</strong></div>
+    <div className="auto-explainer">WATCH는 배당 변화 관찰 후보일 뿐 추천이 아닙니다. '연구 TOP1'은 이전에 검증된 충분한 표본과 보수적 EV를 통과해야만 표시됩니다. 과거 PRE 예측은 바꾸지 않습니다.</div>
+    {evidence&&<div className="auto-scan-health"><div className="scan-health-box scan-success">
+      <div className="scan-metrics"><span>관찰 대상 {evidence.counts.future}</span><span>시장 변화 후보 {evidence.counts.observed}</span><span>검증 기준 통과 TOP1 {evidence.counts.researchTop1}</span><span>근거 부족·HOLD {evidence.counts.insufficient}</span></div>
+    </div></div>}
+    <div className="auto-game-list">{(evidence?.records||[]).slice(0,12).map(r=><article className="auto-game" key={r.id} style={{padding:14}}>
+      <div className="auto-game-identity">
+        <span className="auto-game-meta">{r.sport} · {r.league} · {date(r.startMs)} KST · 경기 전 관측 {r.observations}회</span>
+        <strong>{r.home} <em>vs</em> {r.away}</strong>
+        <small>{r.stage==="RESEARCH_TOP1"?"연구 TOP1 조건 충족":r.top1?"WATCH · 배당 이동 관찰":"HOLD · 자료 축적 중"} · {r.reason}</small>
+        {r.top1&&<small>관찰 방향: {r.top1.label} · 배당 {r.top1.odds.toFixed(2)} · 시장 환산확률 {(100*r.top1.marketProbability).toFixed(1)}% · 최초 대비 {(100*r.top1.shift).toFixed(1)}%p · {date(r.top1.asOf)} KST</small>}
+        {r.calibration&&<small>선행 종료 검증표본 {r.calibration.samples}건 · {r.calibration.qualified?"보정 모델 가동":"확률/EV 모델 보정 기준 미충족"}</small>}
+      </div>
+    </article>)}
+      {!evidence&&<div className="auto-empty">독립 연구 기록은 Production 승인 후 첫 경기 전 수집부터 생성됩니다. 기존 PASS에서 픽을 사후 생성하지 않습니다.</div>}
+    </div>
+   </section>
    <section className="auto-results"><div className="auto-section-title"><div><h2>경기별 추적 기록</h2><p>PRE 원본과 종료 후 검증 결과를 따로 표시</p></div><strong>{visible.length} / {records.length} 경기</strong></div>
     <div className="auto-filters"><div className="auto-tabs">{[["all","전체"],["pending","검증 대기"],["verified","검증 완료"],["miss","미적중"],["issues","수집 점검"]].map(([k,label])=><button key={k} onClick={()=>setFilter(k)} aria-pressed={filter===k} className={filter===k?"active":""}>{label}</button>)}</div><div className="auto-fields"><select aria-label="종목" value={sport} onChange={e=>setSport(e.target.value)}><option value="all">모든 종목</option>{sports.map(x=><option key={x} value={x}>{x}</option>)}</select><input aria-label="팀 검색" value={query} onChange={e=>setQuery(e.target.value)} placeholder="팀명 · 리그 검색"/></div></div>
     <div className="auto-game-list">{visible.length===0?<div className="auto-empty">해당 조건의 자동분석 기록이 없습니다.</div>:visible.map(r=>{
