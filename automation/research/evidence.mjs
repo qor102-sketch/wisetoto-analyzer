@@ -98,7 +98,7 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[]){
  if(!feed?.ok||!Array.isArray(feed.games))throw Error("official feed required");
  const existing=Array.isArray(state?.fixtures)?state.fixtures:[];
  const byId=new Map(existing.filter(f=>f?.id&&Number.isFinite(f.startMs)).map(f=>[f.id,{...f,snapshots:[...(f.snapshots||[])]}]));
- let captured=0,examined=0;
+ let captured=0,examined=0,settled=0;
  for(const g of feed.games){
    const id=fixtureId(g),start=Number(g.gameDateMs??new Date(g.gameDate).getTime());
    if(!id||start-now<10*MINUTE||start-now>7*DAY)continue;
@@ -133,6 +133,7 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[]){
    if(!winner||(winner==="draw"&&f.sport!=="축구"))continue;
    const frozen=f.frozenCandidate;
    f.truth={winner,verifiedAt:Number(record.verifiedAt),source:"verified-tracker"};
+   settled++;
    // Never create or re-select historic TOP1 using known final outcome.
    if(!frozen)f.truth={...f.truth,untrained:true};
  }
@@ -145,7 +146,7 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[]){
    }
    if(f.startMs>now)f.lastEvidence=decideEvidence(f,fixtures,now);
  }
- const stats={total:fixtures.length,captured,examined,with2Snapshots:fixtures.filter(f=>f.snapshots.length>=2).length,
+ const stats={total:fixtures.length,captured,settled,examined,with2Snapshots:fixtures.filter(f=>f.snapshots.length>=2).length,
    observed:fixtures.filter(f=>f.startMs>now&&f.lastEvidence?.top1).length,
    researchTop1:fixtures.filter(f=>f.startMs>now&&f.lastEvidence?.stage==="RESEARCH_TOP1").length,
    verified:fixtures.filter(f=>f.truth&&!f.truth.untrained).length};
