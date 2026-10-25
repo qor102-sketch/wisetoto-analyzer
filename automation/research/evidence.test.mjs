@@ -80,3 +80,27 @@ test("fixture identity is stable across annotations but never team/time swaps",(
  assert.notEqual(normalized,fixtureId({...game,away:"OTHER"}));
  assert.notEqual(normalized,fixtureId({...game,gameDateMs:game.gameDateMs+MIN}));
 });
+
+test("only prior verified research wins can qualify conservative experimental TOP1",()=>{
+ const kickoff=T+300*MIN,now=T+70*MIN;
+ const initial=ingestEvidence(init,feed([betman("soccer",kickoff)]),T).state;
+ const later=ingestEvidence(initial,feed([betman("soccer",kickoff,[1.73,3.1,4.2])]),T+35*MIN).state;
+ const current=later.fixtures[0],observed=decideEvidence(current,[],now);
+ assert.equal(observed.stage,"WATCH");
+ const winningPrior=Array.from({length:40},(_,i)=>({
+   id:"prior-"+i,sport:"축구",startMs:T-(30+i)*60*MIN,
+   truth:{winner:observed.top1.side,verifiedAt:T-(20+i)*60*MIN},
+   frozenCandidate:{...observed.top1,asOf:T-(80+i)*60*MIN}
+ }));
+ const qualified=decideEvidence(current,winningPrior,now);
+ assert.equal(qualified.stage,"RESEARCH_TOP1");
+ assert.ok(qualified.calibration.samples>=40&&qualified.calibration.conservativeEV>0.03);
+ const noLookahead=winningPrior.map(x=>({...x,truth:{...x.truth,verifiedAt:now+MIN}}));
+ assert.equal(decideEvidence(current,noLookahead,now).stage,"WATCH");
+ assert.equal(decideEvidence(current,winningPrior.slice(0,39),now).stage,"WATCH");
+});
+test("a delayed cached prekickoff feed cannot create research after the wall-clock cutoff",()=>{
+ const kickoff=T+40*MIN,g=betman("soccer",kickoff);
+ assert.equal(ingestEvidence(init,feed([g]),T+35*MIN,[],T+31*MIN).stats.captured,0);
+ assert.throws(()=>ingestEvidence(init,feed([g]),T+50*MIN,[],T+40*MIN),/Never backdate/);
+});
