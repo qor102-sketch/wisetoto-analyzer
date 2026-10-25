@@ -1,7 +1,7 @@
 {
   "schema": "wisetoto-public-history-v1",
-  "publishedAt": "2026-10-25T02:26:19.322Z",
-  "lastRunAt": 1792895179161,
+  "publishedAt": "2026-10-25T02:36:16.814Z",
+  "lastRunAt": 1792895776608,
   "source": "GitHub Actions 자동 LIVE TRACKER (수동 분석 기록과 별개)",
   "counts": {
     "total": 34,
@@ -20,7 +20,7 @@
       "home": "시드니FC",
       "away": "애들레이드 유나이티드",
       "startMs": 1792900800000,
-      "capturedAt": 1792895164532,
+      "capturedAt": 1792895763230,
       "decision": "PASS",
       "status": "PENDING",
       "verifiedAt": null,
