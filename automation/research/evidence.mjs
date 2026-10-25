@@ -70,7 +70,7 @@ function confidence(candidate,fixtures,sport,now){
  for(const f of fixtures){
    // Only previously finished, independently verified research fixtures.
    if(f.sport!==sport||!f.truth||f.startMs>=now||!Number.isFinite(f.truth.verifiedAt)||
-      f.truth.verifiedAt<=f.startMs||f.startMs>now-3*HOUR)continue;
+      f.truth.verifiedAt<=f.startMs||f.truth.verifiedAt>now||f.startMs>now-3*HOUR)continue;
    const c=f.frozenCandidate; // archived strictly before kickoff
    if(!c||Math.floor(c.marketProbability*5)/5!==binMin)continue;
    sample.push(f.truth.winner===c.side?1:0);
@@ -126,6 +126,7 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now)
  const records=Array.isArray(verifiedRecords)?verifiedRecords:[];
  for(const record of records){
    if(record?.verificationStatus!=="VERIFIED"||!Number.isFinite(Number(record?.verifiedAt))||
+     Number(record.verifiedAt)>now||
      !Number.isFinite(Number(record?.capturedAt))||
      Number(record.capturedAt)>=Number(record.startMs))continue;
    const id=fixtureId({sport:record.sport,home:record.home,away:record.away,gameDateMs:record.startMs});
