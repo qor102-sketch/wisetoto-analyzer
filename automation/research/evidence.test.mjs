@@ -38,7 +38,7 @@ test("markets with 5-point special, 1-point special, invalid odds or phantom cho
  assert.equal(normalizeMoneyline(f),null);
  assert.equal(normalizeMoneyline({...f,markets:[{...f.markets[0],betName:"농구 승1패"}]}),null);
  assert.equal(normalizeMoneyline(betman("basketball",T+80*MIN,[1,1.8],"농구 승패")),null);
- assert.equal(normalizeMoneyline(betman("soccer",T+80*MIN,[2,2,2],"축구 승무패")).choices.length,3);
+ assert.equal(normalizeMoneyline(betman("soccer",T+80*MIN,[2.65,3,2.85],"축구 승무패")).choices.length,3);
 });
 test("after kickoff no new evidence, no retroactive TOP1 and no mutation of frozen PRE",()=>{
  const game=betman("basketball",T+40*MIN,[2.1,1.58],"농구 승패");
