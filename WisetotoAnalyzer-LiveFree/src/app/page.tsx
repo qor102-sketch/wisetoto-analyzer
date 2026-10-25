@@ -20919,7 +20919,7 @@ export default function Home() {
         sport: koreanSport(record.sport),
         league: record.league,
       });
-      const response = await fetch(`/api/naver/lineup?${params.toString()}`, { cache: "no-store" });
+      const response = await fetch(`/api/naver/lineup?${params.toString()}`, { cache: "no-store", signal: AbortSignal.timeout(20000) });
       const payload = await readApiResponse(response, `Naver VERIFY · ${record.home} vs ${record.away}`);
       if (!response.ok || !payload?.ok) {
         return { truth: null, audit: `HTTP ${response.status} · ${String(payload?.error ?? "Naver resolve 실패")}`, voidReason: null };
@@ -21019,7 +21019,7 @@ export default function Home() {
       /* V13.8.47: SportsAPI fixtureId가 없는 Naver 독립 PRE도 Betman 종료점수로 검증한다. */
       let betmanFinishedGames: BetmanMatch[] = [];
       try {
-        const betmanResponse = await fetch("/api/betman?scope=all", { cache: "no-store" });
+        const betmanResponse = await fetch("/api/betman?scope=all", { cache: "no-store", signal: AbortSignal.timeout(20000) });
         const betmanPayload = await readApiResponse(betmanResponse, "Betman 종료 결과 검증 API");
         if (betmanResponse.ok && betmanPayload?.ok) {
           betmanFinishedGames = getBetmanGames(betmanPayload);
@@ -21148,7 +21148,7 @@ export default function Home() {
           if (!truth && fallbackEligible && record.fixtureId !== null && Number.isFinite(Number(record.fixtureId))) {
             const response = await fetch(
               `/api/fixture/result?id=${encodeURIComponent(String(record.fixtureId))}`,
-              { cache: "no-store" }
+              { cache: "no-store", signal: AbortSignal.timeout(20000) }
             );
             const payload = await readApiResponse(
               response,
@@ -25656,6 +25656,20 @@ export default function Home() {
     }
 
     if (liveBatchAnalysis.phase === "SELECT") {
+      // Headless PRE must never start a queued game after kickoff.
+      if (typeof window !== "undefined" &&
+          new URLSearchParams(window.location.search).get("automation")==="1" &&
+          gameTimeMs(game) <= Date.now()) {
+        setLiveBatchOutcomes((previous) => ({
+          ...previous, [key]: {status:"FAIL",message:"킥오프 경과 — PRE 생성 금지"}
+        }));
+        setLiveBatchAnalysis((previous) => {
+          const nextIndex=previous.index+1,done=nextIndex>=previous.gameKeys.length;
+          return {...previous,failed:previous.failed+1,index:nextIndex,
+            phase:done?"IDLE":"SELECT",running:!done};
+        });
+        return;
+      }
       const index = visibleBetmanGames.indexOf(game);
       chooseGame(game, index >= 0 ? index : 0);
       setLiveBatchAnalysis((previous) => ({
@@ -25752,7 +25766,7 @@ export default function Home() {
         const start = gameTimeMs(game);
         if (!supportedRaw.has(String((game as any)?.sport ?? "").trim().toLowerCase()) ||
             !supported.has(koreanSport(String((game as any)?.sport ?? ""))) ||
-            !Number.isFinite(start) || start - time < 10 * 60_000 || start - time > 100 * 60_000) return false;
+            !Number.isFinite(start) || start - time < 10 * 60_000 || start - time > 180 * 60_000) return false;
         if ([game.home,game.away].some(name =>
           !String(name ?? "").trim() || /^(미정|tbd|tba|unknown|to be determined|-)$/i.test(String(name ?? "").trim())
         )) return false;
