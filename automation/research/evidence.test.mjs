@@ -141,3 +141,15 @@ test("bounded evidence archive always retains authentic opening odds",()=>{
  assert.equal(snap[0].market.choices.find(x=>x.side==="win").odds,2.15);
  assert.equal(snap[snap.length-1].at,T+27*30*MIN);
 });
+
+test("public card limit never understates full seven-day fixture coverage",()=>{
+ const fixtures=Array.from({length:161},(_,i)=>({
+  id:"f-"+i,sport:"농구",league:"NBA",home:"A"+i,away:"B"+i,
+  startMs:T+(i+20)*MIN,firstSeenAt:T,lastSeenAt:T,snapshots:[{at:T}],
+  lastEvidence:{stage:"COLLECTING",reason:"first scan",top1:null}
+ }));
+ const output=publicEvidence({schema:SCHEMA,fixtures},T);
+ assert.equal(output.records.length,150);
+ assert.equal(output.counts.future,161);
+ assert.equal(output.counts.insufficient,161);
+});
