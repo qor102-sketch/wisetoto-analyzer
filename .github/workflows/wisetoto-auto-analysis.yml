@@ -31,7 +31,7 @@ jobs:
         with:
           node-version: "24"
       - name: Run immutable-record unit tests
-        run: node --test automation/*.test.mjs automation/repair/*.test.mjs
+        run: node --test automation/*.test.mjs automation/repair/*.test.mjs automation/research/*.test.mjs
       - name: Install app and browser
         run: |
           cd WisetotoAnalyzer-LiveFree && npm install --no-audit --no-fund
@@ -72,6 +72,15 @@ jobs:
               unzip -oq /tmp/wisetoto-auto-state.zip -d automation-state
             fi
           fi
+      - name: Restore persistent pregame market evidence
+        # GitHub automation-data holds durable odds snapshots; no paid database.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "/repos/$GITHUB_REPOSITORY/contents/research-state.json?ref=automation-data" \
+              > /tmp/wisetoto-evidence-ref.json 2>/dev/null; then
+            jq -r '.content' /tmp/wisetoto-evidence-ref.json | base64 -d > automation-state/research-state.json
+          fi
       - name: Due match and verification preflight
         id: due
         run: node automation/runner.mjs --preflight
@@ -91,6 +100,41 @@ jobs:
               -f branch="automation-data" -f message="Disable Vercel deploys for data-only branch" \
               -f content="$encoded" >/dev/null
           done
+      - name: Collect longitudinal prekickoff evidence without Chromium
+        # Separate observational lane: starts even if a previous/main PRE failed.
+        if: always()
+        run: node automation/research/run.mjs
+      - name: Publish evidence archive and experimental read-only candidates
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -s automation-state/research-public.json ]; then exit 0; fi
+          for pair in "research-state.json:research-state.json" "research-public.json:research-public.json"; do
+            local_file="${pair%%:*}"
+            remote_file="${pair#*:}"
+            content="$(base64 -w 0 "automation-state/$local_file")"
+            sha="$(gh api "/repos/$GITHUB_REPOSITORY/contents/$remote_file?ref=automation-data" --jq .sha 2>/dev/null || true)"
+            if [ -n "$sha" ]; then
+              gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$remote_file" \
+                -f branch="automation-data" -f message="Prekickoff evidence observation" \
+                -f sha="$sha" -f content="$content" >/dev/null
+            else
+              gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$remote_file" \
+                -f branch="automation-data" -f message="Initialize prekickoff evidence archive" \
+                -f content="$content" >/dev/null
+            fi
+          done
+      - name: Archive research snapshot for recovery
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wisetoto-market-evidence
+          path: |
+            automation-state/research-state.json
+            automation-state/research-public.json
+          retention-days: 90
+          if-no-files-found: ignore
       - name: Publish transparent scan health even if Betman is down
         if: always()
         env:
