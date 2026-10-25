@@ -88,9 +88,9 @@ test("only prior verified research wins can qualify conservative experimental TO
  const current=later.fixtures[0],observed=decideEvidence(current,[],now);
  assert.equal(observed.stage,"WATCH");
  const winningPrior=Array.from({length:40},(_,i)=>({
-   id:"prior-"+i,sport:"축구",startMs:T-(30+i)*60*MIN,
-   truth:{winner:observed.top1.side,verifiedAt:T-(20+i)*60*MIN},
-   frozenCandidate:{...observed.top1,asOf:T-(80+i)*60*MIN}
+   id:"prior-"+i,sport:"축구",startMs:T-(300+i)*MIN,
+   truth:{winner:observed.top1.side,verifiedAt:T-(260+i)*MIN},
+   frozenCandidate:{...observed.top1,asOf:T-(350+i)*MIN}
  }));
  const qualified=decideEvidence(current,winningPrior,now);
  assert.equal(qualified.stage,"RESEARCH_TOP1");
