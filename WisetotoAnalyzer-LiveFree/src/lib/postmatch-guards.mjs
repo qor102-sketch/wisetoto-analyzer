@@ -3,6 +3,7 @@ const FINALS=new Set(["FT","AET","PEN","FINAL","FINISHED","COMPLETED","COMPLETE"
 const normal=v=>String(v??"").trim().toUpperCase().replace(/[\s\-]+/g,"_");
 const text=v=>v && typeof v==="object" && !Array.isArray(v) ? v : {};
 export function scorePlausibility(sport,home,away){
+ if([home,away].some(v=>v===null||v===undefined||String(v).trim()===""))return {ok:false,reason:"INVALID_SCORE"};
  const h=Number(home),a=Number(away);
  if(!Number.isSafeInteger(h)||!Number.isSafeInteger(a)||h<0||a<0)return {ok:false,reason:"INVALID_SCORE"};
  const type=String(sport??"").toLowerCase();
