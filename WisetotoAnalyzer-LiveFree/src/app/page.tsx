@@ -20351,7 +20351,9 @@ export default function Home() {
             marketProbability: pick.marketProbability,
             edge: pick.edge,
             expectedValue: pick.expectedValue,
-            grade: pick.valueGrade,
+            // Frozen new tracker output must never claim VALUE on <=0 EV.
+            grade: positiveValueCandidate(pick) ? pick.valueGrade :
+              ["VALUE","STRONG VALUE"].includes(pick.valueGrade) ? "PASS" : pick.valueGrade,
             confidenceGrade: pick.confidenceGrade,
             recommendationScore: pick.recommendationScore,
             modelSnapshot: { ...pick },
@@ -20384,7 +20386,9 @@ export default function Home() {
             marketProbability: pick.marketProbability,
             edge: pick.edge,
             expectedValue: pick.expectedValue,
-            grade: pick.valueGrade,
+            // Frozen new tracker output must never claim VALUE on <=0 EV.
+            grade: positiveValueCandidate(pick) ? pick.valueGrade :
+              ["VALUE","STRONG VALUE"].includes(pick.valueGrade) ? "PASS" : pick.valueGrade,
             confidenceGrade: pick.confidenceGrade,
             recommendationScore: pick.recommendationScore,
             modelSnapshot: { ...pick },
