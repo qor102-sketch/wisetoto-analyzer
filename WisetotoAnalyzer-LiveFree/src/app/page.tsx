@@ -20976,7 +20976,12 @@ export default function Home() {
             trackerRecordCourtGroup(record) !== "EXCLUDED"
           ))
       )
-      .slice(0, 10);
+      // Fair queue: do not keep retrying the same failed first 10 records.
+      // Never mark PENDING as VERIFIED without a final-score source.
+      .sort((a,b) => Number(a.verifyLastCheckedAt ?? 0)-Number(b.verifyLastCheckedAt ?? 0) ||
+        Number(a.startMs)-Number(b.startMs))
+      .slice(0, typeof window !== "undefined" &&
+        new URLSearchParams(window.location.search).get("automation")==="1" ? 3 : 10);
     // FIX9 migration: old Naver VERIFY could misread cancelled games as 0:0 RESULT.
     // Recheck only legacy Naver 0:0 VERIFIED rows once; genuine 0:0 finals remain VERIFIED.
     const legacyVoidRepairCandidates = courtAutoOnly
@@ -21304,6 +21309,10 @@ export default function Home() {
   // V13.12.05: 수동 VERIFY를 누르지 않아도 종료 후 2시간이 지난 지원 농구 결과를 세션당 1회 확인해
   // 다음 경기 분석에서 VERIFIED HISTORY가 자동으로 recent/venue 표본으로 들어오게 한다.
   useEffect(() => {
+    // On Actions, explicit postmatch reconciliation owns this phase; the
+    // session auto-court hook must not consume the bridge's verification lock.
+    if (typeof window !== "undefined" &&
+        new URLSearchParams(window.location.search).get("automation")==="1") return;
     if (!liveTrackerHydratedRef.current || validationLoading || !liveTrackerRecords.length) return;
     const cutoff = Date.now() - 2 * 60 * 60 * 1000;
     const dueCourt = liveTrackerRecords
