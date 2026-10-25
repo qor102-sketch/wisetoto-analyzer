@@ -18,7 +18,7 @@ if(feed){
  if(state.schema!==SCHEMA)throw Error("Research state schema mismatch: refuse to overwrite archive");
  let tracker;
  try{tracker=JSON.parse(await fs.readFile(STATE_FILE,"utf8"))}catch{tracker={localStorage:{}}}
- const result=ingestEvidence(state,feed,observedAt,getRecords(tracker));
+ const result=ingestEvidence(state,feed,now,getRecords(tracker),observedAt);
  if(result.stats.captured>0||result.stats.settled>0){
    await fs.writeFile(ROOT+"research-state.json",JSON.stringify(result.state)+"\n","utf8");
    await fs.writeFile(ROOT+"research-public.json",JSON.stringify(publicEvidence(result.state,now))+"\n","utf8");
