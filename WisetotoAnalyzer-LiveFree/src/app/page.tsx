@@ -34,6 +34,7 @@
 // DEPLOY_MARKER_V13_8_34_NAVER_RECENT_BATTING_V1_20260903
 
 import { useEffect, useMemo, useState, useRef } from "react";
+import {positiveValueCandidate,scorePlausibility} from "../lib/postmatch-guards.mjs";
 
 type Sport =
   | "전체"
@@ -955,7 +956,7 @@ type LiveTrackerRecord = {
   // Captured ONLY at the original pre-kickoff analysis; never backfill from outcomes.
   courtPre?: CourtPreSnapshot | null;
   footballPreResult?: FootballPreValidationResult | null;
-  verifyWaitReason?: "BETMAN_MATCH_WAIT" | "BETMAN_FINAL_WAIT" | "FALLBACK_TIME_WAIT" | "FIXTURE_ID_MISSING" | "RESULT_NOT_FOUND" | null;
+  verifyWaitReason?: "BETMAN_MATCH_WAIT" | "BETMAN_FINAL_WAIT" | "FALLBACK_TIME_WAIT" | "FIXTURE_ID_MISSING" | "RESULT_NOT_FOUND" | "INVALID_FINAL_SCORE" | null;
   verifyLastCheckedAt?: number | null;
   verifyMatchMethod?: "IDENTITY_EXACT" | "MARKET_ID" | "TEAM_TIME_EXACT" | "TEAM_TIME_FUZZY" | null;
   verifyMatchAudit?: string | null;
@@ -11655,6 +11656,10 @@ function evaluateValueGrade(input: {
 }
 
 function pickValueStatus(pick: MarketPick) {
+  // The grade is insufficient if a slate promotion bypassed positive EV.
+  if (["VALUE","STRONG VALUE"].includes(pick.valueGrade) && !positiveValueCandidate(pick)) {
+    return {label:"PASS · EV/배당/확률 정합성 실패",eligible:false};
+  }
   if (pick.valueGrade === "STRONG VALUE") {
     return {
       label: "STRONG VALUE",
@@ -20317,7 +20322,7 @@ export default function Home() {
        * 전체 마켓은 marketResults에 계속 저장해 학습/검증 표본은 잃지 않는다.
        */
       const trackerPicks: LiveTrackerPick[] =
-        (bestActualPick ? [bestActualPick] : []).map((pick) => {
+        (bestActualPick && positiveValueCandidate(bestActualPick) ? [bestActualPick] : []).map((pick) => {
           const marketIndex = markets.findIndex(
             (market: any, index: number) =>
               marketStableKey(market, index) === pick.key
@@ -20613,7 +20618,7 @@ export default function Home() {
         promoteBaseballSlateTopPick(candidate.pick, 1, candidate.slateScore),
         baseballReadyFreshness(record, null, now)
       );
-      if (promoted.valueGrade !== "VALUE" && promoted.valueGrade !== "STRONG VALUE") {
+      if (!positiveValueCandidate(promoted)) {
         desired.set(record.id, null);
         continue;
       }
@@ -20691,7 +20696,7 @@ export default function Home() {
         continue;
       }
       const promoted = promoteSoccerSlateTopPick(candidate.pick, 1, candidate.slateScore);
-      if (promoted.valueGrade !== "VALUE" && promoted.valueGrade !== "STRONG VALUE") {
+      if (!positiveValueCandidate(promoted)) {
         desired.set(record.id, null);
         continue;
       }
@@ -20774,7 +20779,7 @@ export default function Home() {
         continue;
       }
       const promoted = promoteCourtSlateTopPick(candidate.pick, 1, candidate.slateScore);
-      if (promoted.valueGrade !== "VALUE" && promoted.valueGrade !== "STRONG VALUE") {
+      if (!positiveValueCandidate(promoted)) {
         desired.set(record.id, null);
         continue;
       }
@@ -21147,7 +21152,7 @@ export default function Home() {
           // SportsAPI result는 VERIFY 전용 최종 fallback이며 경기 시작 +2시간 이후에만 호출한다.
           if (!truth && fallbackEligible && record.fixtureId !== null && Number.isFinite(Number(record.fixtureId))) {
             const response = await fetch(
-              `/api/fixture/result?id=${encodeURIComponent(String(record.fixtureId))}`,
+              `/api/fixture/result?id=${encodeURIComponent(String(record.fixtureId))}&sport=${encodeURIComponent(koreanSport(record.sport))}`,
               { cache: "no-store", signal: AbortSignal.timeout(20000) }
             );
             const payload = await readApiResponse(
@@ -21155,7 +21160,7 @@ export default function Home() {
               `실전 추적 Fixture #${record.fixtureId}`
             );
 
-            if (response.ok && payload?.ok && payload?.result) {
+            if (response.ok && payload?.ok && payload?.result && payload?.finalConfirmed === true) {
               truth = {
                 homeScore: Number(payload.result.homeScore),
                 awayScore: Number(payload.result.awayScore),
@@ -21168,6 +21173,11 @@ export default function Home() {
                 sourceLabel: `SportsAPI Fixture #${record.fixtureId} · 실전 PRE 잠금 후 검증`,
               };
             } else if (response.status === 429) {
+              // Keep the rate limit visible and avoid retry starvation.
+              next=next.map(candidate=>candidate.id===record.id ? {
+                ...candidate,verifyWaitReason:"RESULT_NOT_FOUND" as const,
+                verifyLastCheckedAt:Date.now(),verifyMatchAudit:"SportsAPI HTTP 429 · rate limited"
+              }:candidate);
               unavailable += 1;
               break;
             } else {
@@ -21181,6 +21191,16 @@ export default function Home() {
             waitReason = koreanSport(record.sport) === "농구" ? "RESULT_NOT_FOUND" : "FIXTURE_ID_MISSING";
           }
 
+          // A score is not FINAL if it violates the sport rules.
+          // Previously archived VERIFIED rows are never silently rewritten.
+          if (truth) {
+            const plausibility=scorePlausibility(koreanSport(record.sport),truth.homeScore,truth.awayScore);
+            if (!plausibility.ok) {
+              waitReason="INVALID_FINAL_SCORE";
+              naverVerifyAudit=[naverVerifyAudit,plausibility.reason].filter(Boolean).join(" · ");
+              truth=null;
+            }
+          }
           if (!truth || !Number.isFinite(truth.homeScore) || !Number.isFinite(truth.awayScore)) {
             const checkedAt = Date.now();
             next = next.map((candidate) =>
