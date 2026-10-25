@@ -1,3 +1,4 @@
+import {finalStatusProof,scorePlausibility} from "../../../lib/postmatch-guards.mjs";
 // V13.4.1 validation-only result endpoint with object score parser and safe diagnostics. PRE prediction must be locked before this route is called.
 // This route is intentionally separate from the prediction path and is called
 // only after the user explicitly locks the prediction and opens validation.
@@ -275,6 +276,11 @@ export async function GET(req: Request) {
       return Response.json({ ok: false, error: `SportsAPI fixture 결과 조회 실패 · HTTP ${response.status}` }, { status: response.status || 502 });
     }
 
+    const finalProof=finalStatusProof(payload);
+    if(!finalProof.ok){
+      return Response.json({ok:false,error:"결과 API의 경기 종료 상태 미확인",fixtureId:id,
+        waitReason:"FINAL_STATUS_UNCONFIRMED"},{status:409});
+    }
     const score = findFinalScore(payload);
     if (!score) {
       const rootKeys =
@@ -301,8 +307,15 @@ export async function GET(req: Request) {
       }, { status: 422 });
     }
 
+    const sport=new URL(req.url).searchParams.get("sport")??"";
+    const valid=scorePlausibility(sport,score.homeScore,score.awayScore);
+    if(!valid.ok){
+      return Response.json({ok:false,error:"종목별 종료 점수 검증 실패",fixtureId:id,
+        waitReason:valid.reason},{status:409});
+    }
     return Response.json({
       ok: true,
+      finalConfirmed: true,
       fixtureId: id,
       result: {
         homeScore: score.homeScore,
@@ -314,6 +327,7 @@ export async function GET(req: Request) {
         validationOnly: true,
         resultReadAfterExplicitUserAction: true,
         scorePath: score.path,
+        finalStatusEvidence: finalProof.evidence,
       },
     });
   } catch (error: any) {
