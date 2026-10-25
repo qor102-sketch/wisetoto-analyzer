@@ -120,6 +120,7 @@ if(process.argv.includes("--preflight")){
     await fs.writeFile(STATE_FILE,JSON.stringify({schema:"wisetoto-auto-v1",localStorage:storage,meta:{
       ...old.meta,lastRunAt:Date.now(),lastBase:base,browserErrors:errors.slice(0,5)
     }},null,2));
+    await fs.writeFile("automation-state/checkpoint-ready",new Date().toISOString()+"\n");
     await fs.writeFile("automation-state/audit.json",JSON.stringify(report,null,2));
     const lines=[
       "## Wisetoto 자동 PRE/사후검증","- 실행: "+report.generatedAt,
