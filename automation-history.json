@@ -1,7 +1,7 @@
 {
   "schema": "wisetoto-public-history-v1",
-  "publishedAt": "2026-10-25T09:40:12.244Z",
-  "lastRunAt": 1792921212093,
+  "publishedAt": "2026-10-25T09:49:59.303Z",
+  "lastRunAt": 1792921799156,
   "source": "GitHub Actions 자동 LIVE TRACKER (수동 분석 기록과 별개)",
   "counts": {
     "total": 35,
@@ -20,7 +20,7 @@
       "home": "포르튀나 시타르트",
       "away": "엑셀시오르 로테르담",
       "startMs": 1792926900000,
-      "capturedAt": 1792921196736,
+      "capturedAt": 1792921783625,
       "decision": "PASS",
       "status": "PENDING",
       "verifiedAt": null,
