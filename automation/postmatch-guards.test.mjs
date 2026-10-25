@@ -16,7 +16,7 @@ test("never settle invalid set scores or basketball ties, preserve legitimate so
  assert.equal(scorePlausibility("농구",103,103).ok,false);
  assert.equal(scorePlausibility("축구",0,0).ok,true);
  assert.equal(scorePlausibility("야구",2,2).ok,true);
- assert.equal(scorePlausibility("축구","",0).ok,true); // Score from parsed API should not be blank: see explicit guard below.
+ assert.equal(scorePlausibility("축구","",0).ok,false);
  assert.equal(scorePlausibility("축구",NaN,0).ok,false);
 });
 test("VALUE requires consistently positive stored and recomputed EV",()=>{
