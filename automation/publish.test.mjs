@@ -112,3 +112,26 @@ test("no Vercel build is requested for the data-only automation branch",async()=
  assert.match(workflow,/name: Seed no-deploy config on automation-data branch/);
  assert.match(workflow,/Disable Vercel deploys for data-only branch/);
 });
+
+test("quarantine historical false volleyball VERIFIED and flag negative-EV VALUE without rewriting PRE",()=>{
+ const rows=[
+  {id:"invalid-old-final",sport:"배구",home:"Woori",away:"KEPCO",startMs:10000,
+   capturedAt:9000,verificationStatus:"VERIFIED",verifiedAt:12000,
+   result:{homeScore:2,awayScore:2},picks:[],marketResults:[]},
+  {id:"invalid-old-value",sport:"농구",home:"Clippers",away:"Kings",startMs:11000,
+   capturedAt:9500,verificationStatus:"VERIFIED",verifiedAt:16000,
+   result:{homeScore:113,awayScore:93},decision:"PICK",
+   picks:[{key:"p",grade:"VALUE",market:"승패",probability:72.2,odds:1.33,
+    expectedValue:-4,resultStatus:"HIT"}],marketResults:[]}
+ ];
+ const before=JSON.stringify(rows),state={localStorage:{[TRACKER_KEY]:before}};
+ const projection=publishProjection(state),invalid=projection.records.find(x=>x.id==="invalid-old-final");
+ assert.equal(projection.counts.total,2);
+ assert.equal(projection.counts.verified,1);
+ assert.equal(projection.counts.review,1);
+ assert.equal(invalid.status,"REVIEW_REQUIRED");
+ assert.ok(invalid.warnings.some(w=>w.includes("종목 규칙")));
+ assert.ok(projection.records.find(x=>x.id==="invalid-old-value").warnings.some(w=>w.includes("EV")));
+ assert.equal(projection.records.find(x=>x.id==="invalid-old-value").top1.resultStatus,"HIT");
+ assert.equal(state.localStorage[TRACKER_KEY],before);
+});
