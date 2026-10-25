@@ -108,4 +108,7 @@ test("no Vercel build is requested for the data-only automation branch",async()=
   assert.equal(settings.git.deploymentEnabled["automation-data"],false);
   assert.notEqual(settings.git.deploymentEnabled.main,false);
  }
+ const workflow=await readFile(new URL("../.github/workflows/wisetoto-auto-analysis.yml",import.meta.url),"utf8");
+ assert.match(workflow,/name: Seed no-deploy config on automation-data branch/);
+ assert.match(workflow,/Disable Vercel deploys for data-only branch/);
 });
