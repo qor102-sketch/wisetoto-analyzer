@@ -104,3 +104,26 @@ test("a delayed cached prekickoff feed cannot create research after the wall-clo
  assert.equal(ingestEvidence(init,feed([g]),T+35*MIN,[],T+31*MIN).stats.captured,0);
  assert.throws(()=>ingestEvidence(init,feed([g]),T+50*MIN,[],T+40*MIN),/Never backdate/);
 });
+
+test("node-only collector writes a durable state and public summary without Chromium",async()=>{
+ const {mkdtemp,mkdir,writeFile,readFile,rm,stat}=await import("node:fs/promises");
+ const {tmpdir}=await import("node:os");
+ const {join}=await import("node:path");
+ const {spawnSync}=await import("node:child_process");
+ const root=await mkdtemp(join(tmpdir(),"wisetoto-research-"));
+ try{
+  const dir=join(root,"automation-state");await mkdir(dir,{recursive:true});
+  const now=Date.now(),g=betman("basketball",now+5*60*MIN,[1.9,1.8],"농구 승패");
+  await writeFile(join(dir,"betman-feed.json"),JSON.stringify({fetchedAt:now,payload:feed([g])}));
+  const out=spawnSync(process.execPath,[new URL("./run.mjs",import.meta.url).pathname],
+    {cwd:root,encoding:"utf8",timeout:15000});
+  assert.equal(out.status,0,out.stderr||out.stdout);
+  const state=JSON.parse(await readFile(join(dir,"research-state.json"),"utf8"));
+  const summary=JSON.parse(await readFile(join(dir,"research-public.json"),"utf8"));
+  assert.equal(state.fixtures.length,1);
+  assert.equal(summary.counts.future,1);
+  assert.equal(summary.counts.researchTop1,0);
+  assert.equal(summary.records[0].stage,"COLLECTING");
+  await assert.rejects(stat(join(dir,"state.json")),{code:"ENOENT"});
+ }finally{await rm(root,{recursive:true,force:true});}
+});
