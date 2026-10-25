@@ -2,6 +2,7 @@
 // Never publish browser localStorage or rewrite original frozen records.
 import fs from "node:fs/promises";
 import {getRecords,STATE_FILE} from "./logic.mjs";
+import {scorePlausibility,positiveValueCandidate} from "../WisetotoAnalyzer-LiveFree/src/lib/postmatch-guards.mjs";
 export const firstNumeric=(...values)=>{
   for(const v of values) if(typeof v==="number"&&Number.isFinite(v))return v;
   return null;
@@ -28,6 +29,11 @@ export function summarizeRecord(r){
  const startMs=firstNumeric(r.startMs);
  const capturedAt=firstNumeric(r.capturedAt);
  const warnings=[];
+ if(r.verificationStatus==="VERIFIED" && result && !scorePlausibility(r.sport,result.homeScore,result.awayScore).ok)
+   warnings.push("기존 종료 검증 점수가 종목 규칙에 맞지 않음 — 원본 재검토 필요");
+ if(picks.some(p=>["VALUE","STRONG VALUE"].includes(p.grade)&&!positiveValueCandidate(p)))
+   warnings.push("과거 잠금 VALUE의 EV/배당/확률 불일치 — 신규 후보는 차단, 원본 보존");
+
  if(startMs!==null&&capturedAt!==null&&capturedAt>=startMs)warnings.push("킥오프 이후 캡처 — PRE 유효성 점검");
  if(pre){
    const h=firstNumeric(pre.homeRecentSample),a=firstNumeric(pre.awayRecentSample);
