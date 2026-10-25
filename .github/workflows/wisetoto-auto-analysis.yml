@@ -85,20 +85,34 @@ jobs:
         id: due
         run: node automation/runner.mjs --preflight
       - name: Seed no-deploy config on automation-data branch
-        # Vercel reads vercel.json FROM THE COMMITTED BRANCH. Without this,
-        # 10-minute health commits create >100 Hobby preview deployments/day.
-        if: github.ref == 'refs/heads/main'
+        # Vercel reads vercel.json FROM THE DATA BRANCH itself.
+        # Existing minimal configs must also be updated, not skipped.
+        if: always() && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           for f in "WisetotoAnalyzer-LiveFree/vercel.json" "WisetotoAnalyzer-LiveFree/WisetotoAnalyzer-LiveFree/vercel.json"; do
-            if gh api "/repos/$GITHUB_REPOSITORY/contents/$f?ref=automation-data" >/dev/null 2>&1; then
-              continue
+            current_sha=""
+            if gh api "/repos/$GITHUB_REPOSITORY/contents/$f?ref=automation-data" > /tmp/data-vercel-config.json 2>/dev/null; then
+              current_sha="$(jq -r '.sha' /tmp/data-vercel-config.json)"
+              current_json="$(jq -r '.content' /tmp/data-vercel-config.json | base64 -d)"
+              if printf '%s' "$current_json" | jq -e '.git.deploymentEnabled["automation-data"] == false' > /dev/null; then
+                continue
+              fi
+              updated_json="$(printf '%s' "$current_json" | jq -c '.git.deploymentEnabled["automation-data"] = false')"
+            else
+              updated_json='{"framework":"nextjs","git":{"deploymentEnabled":{"automation-data":false}}}'
             fi
-            encoded="$(printf '%s' '{"framework":"nextjs","git":{"deploymentEnabled":{"automation-data":false}}}' | base64 -w0)"
-            gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$f" \
-              -f branch="automation-data" -f message="Disable Vercel deploys for data-only branch" \
-              -f content="$encoded" >/dev/null
+            encoded="$(printf '%s' "$updated_json" | base64 -w0)"
+            if [ -n "$current_sha" ]; then
+              gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$f" \
+                -f branch="automation-data" -f message="Disable Vercel deploys for data-only branch" \
+                -f sha="$current_sha" -f content="$encoded" >/dev/null
+            else
+              gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$f" \
+                -f branch="automation-data" -f message="Disable Vercel deploys for data-only branch" \
+                -f content="$encoded" >/dev/null
+            fi
           done
       - name: Collect longitudinal prekickoff evidence without Chromium
         # Separate observational lane: starts even if a previous/main PRE failed.
