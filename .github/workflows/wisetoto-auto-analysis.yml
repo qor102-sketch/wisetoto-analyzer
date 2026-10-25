@@ -93,7 +93,7 @@ jobs:
               -f content="$encoded" >/dev/null
           fi
       - name: Install browser only when work is due
-        if: steps.due.outputs.run_browser == 'true'
+        if: always() && steps.due.outputs.run_browser == 'true'
         run: |
           npm install --no-save --no-audit --no-fund playwright@1.56.1
           npx playwright install chromium
@@ -111,13 +111,13 @@ jobs:
       - name: Generate public read-only dashboard projection
         if: always() && steps.due.outputs.run_browser == 'true'
         run: |
-          if [ -s automation-state/state.json ]; then node automation/publish.mjs; fi
+          if [ -s automation-state/state.json ] && [ -s automation-state/checkpoint-ready ]; then node automation/publish.mjs; fi
       - name: Publish site-readable history (no browser secrets)
         if: always() && steps.due.outputs.run_browser == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ ! -s automation-state/public-history.json ]; then exit 0; fi
+          if [ ! -s automation-state/public-history.json ] || [ ! -s automation-state/checkpoint-ready ]; then exit 0; fi
           encoded="$(base64 -w 0 automation-state/public-history.json)"
           current_sha="$(gh api "/repos/$GITHUB_REPOSITORY/contents/automation-history.json?ref=automation-data" --jq .sha)"
           gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/automation-history.json" \
