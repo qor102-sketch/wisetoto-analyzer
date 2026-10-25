@@ -4,7 +4,7 @@ import { dueGames, dueVerifications, preserveFrozenRecords, auditChanges, minute
 test("window ignores kicked off and far future, preserves locked PRE", () => {
  const now = Date.parse("2026-10-22T00:00:00Z");
  const game = n => ({sport:"soccer",home:"A",away:"B",gameDateMs:now+n*minute,markets:[{selections:[{odds:1.5}]}]});
- assert.equal(dueGames([game(-1),game(5),game(40),game(101)],[],now).length,1);
+ assert.equal(dueGames([game(-1),game(5),game(40),game(181)],[],now).length,1);
  assert.equal(dueGames([game(40)],[{sport:"축구",home:"A",away:"B",startMs:now+40*minute,capturedAt:now}],now).length,0);
 });
 test("result verification is 2h after kickoff only",()=>{
@@ -82,7 +82,7 @@ test("reject unknown sports, TBD identities, no odds, kickoffs and malformed dat
     {...good,markets:[{selections:[]}]},
     {...good,gameDateMs:now-5*minute},
     {...good,gameDateMs:now+5*minute},
-    {...good,gameDateMs:now+120*minute},
+    {...good,gameDateMs:now+181*minute},
     {...good,gameDateMs:NaN,gameDate:"invalid"},
   ];
   assert.deepEqual(dueGames([good,...bad],[],now),[good]);
@@ -94,4 +94,11 @@ test("large same-time all-sports list is never silently truncated by discovery",
    markets:[{selections:[{odds:2}]}]}));
  assert.equal(dueGames(all,[],now).length,40);
  assert.equal(dueGames(all,all.slice(0,24).map(g=>({...g,startMs:g.gameDateMs,capturedAt:now})),now).length,16);
+});
+
+test("extended 180-minute scan admits four sports without postkickoff capture",()=>{
+ const now=Date.parse("2026-10-25T00:00:00Z");
+ const fixture=(sport,mins)=>({sport,home:"Home",away:"Away",gameDateMs:now+mins*minute,markets:[{selections:[{odds:1.7}]}]});
+ assert.equal(dueGames(["soccer","basketball","baseball","volleyball"].map(s=>fixture(s,175)),[],now).length,4);
+ assert.equal(dueGames([fixture("soccer",181),fixture("soccer",-1),fixture("soccer",5)],[],now).length,0);
 });
