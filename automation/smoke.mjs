@@ -16,6 +16,15 @@ try{
  if(result.start.started || result.start.reason!=="NO_DUE_GAME")throw Error("Automation launched a bogus prediction: "+JSON.stringify(result));
  if(result.snapshot.trackerCount!==0)throw Error("Expected fresh clean localStorage");
   console.log("SMOKE OK: browser bridge registered, empty feed safe, zero fabricated PRE");
+ // Research route stays independent of the frozen LIVE TRACKER.
+ // Before first approved production data collection, no TOP1 may be fabricated.
+ const researchResponse=await page.request.get("http://127.0.0.1:3100/api/automation/research",{timeout:35000});
+ const researchBody=await researchResponse.json();
+ if(![200,503].includes(researchResponse.status()) ||
+    (researchResponse.ok() && (!researchBody.ok || researchBody.data?.schema!=="wisetoto-public-evidence-v1")) ||
+    (!researchResponse.ok() && researchBody.ok))
+   throw Error("Research API schema/first-scan fallback failed: "+JSON.stringify(researchBody));
+ console.log("RESEARCH API OK: sanitized schema or explicit first-collection pending");
  // Dashboard is a separate read-only page and uses actual published records.
  await page.goto("http://127.0.0.1:3100/automation",{waitUntil:"domcontentloaded",timeout:90_000});
  await page.getByRole("heading",{name:"자동분석 결과"}).waitFor({timeout:30000});
