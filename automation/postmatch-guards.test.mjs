@@ -25,3 +25,28 @@ test("VALUE requires consistently positive stored and recomputed EV",()=>{
  assert.equal(positiveValueCandidate({valueGrade:"VALUE",expectedValue:8,probability:62,odds:1.90}),true);
  assert.equal(positiveValueCandidate({valueGrade:"WATCH",expectedValue:33,probability:70,odds:2}),false);
 });
+
+test("real SportsAPI result handler refuses LIVE scores, volleyball 2:2 and accepts proven FT",async()=>{
+ const {GET}=await import("../WisetotoAnalyzer-LiveFree/src/app/api/fixture/result/route.ts");
+ const oldKey=process.env.SPORTSAPI_KEY,originalFetch=globalThis.fetch;
+ process.env.SPORTSAPI_KEY="ci-fixture-only";
+ try{
+  const call=async(status,home,away,sport)=>{
+   globalThis.fetch=async()=>Response.json({fixture:{status:{short:status},
+      score:{homeScore:home,awayScore:away}}});
+   const r=await GET(new Request("http://localhost/api/fixture/result?id=645692&sport="+encodeURIComponent(sport)));
+   return {status:r.status,body:await r.json()};
+  };
+  let z=await call("LIVE",2,2,"배구");
+  assert.equal(z.status,409);assert.equal(z.body.waitReason,"FINAL_STATUS_UNCONFIRMED");
+  z=await call("FT",2,2,"배구");
+  assert.equal(z.status,409);assert.equal(z.body.waitReason,"VOLLEYBALL_NONFINAL_SET_SCORE");
+  z=await call("FT",3,2,"배구");
+  assert.equal(z.status,200);assert.equal(z.body.finalConfirmed,true);
+  z=await call("FT",1,1,"축구");
+  assert.equal(z.status,200);
+ }finally{
+  globalThis.fetch=originalFetch;
+  if(oldKey===undefined)delete process.env.SPORTSAPI_KEY;else process.env.SPORTSAPI_KEY=oldKey;
+ }
+});
