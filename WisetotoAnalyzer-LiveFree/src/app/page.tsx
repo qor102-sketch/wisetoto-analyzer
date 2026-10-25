@@ -956,7 +956,7 @@ type LiveTrackerRecord = {
   // Captured ONLY at the original pre-kickoff analysis; never backfill from outcomes.
   courtPre?: CourtPreSnapshot | null;
   footballPreResult?: FootballPreValidationResult | null;
-  verifyWaitReason?: "BETMAN_MATCH_WAIT" | "BETMAN_FINAL_WAIT" | "FALLBACK_TIME_WAIT" | "FIXTURE_ID_MISSING" | "RESULT_NOT_FOUND" | "INVALID_FINAL_SCORE" | null;
+  verifyWaitReason?: "BETMAN_MATCH_WAIT" | "BETMAN_FINAL_WAIT" | "FALLBACK_TIME_WAIT" | "FIXTURE_ID_MISSING" | "RESULT_NOT_FOUND" | "INVALID_FINAL_SCORE" | "SPORTSAPI_RATE_LIMIT" | null;
   verifyLastCheckedAt?: number | null;
   verifyMatchMethod?: "IDENTITY_EXACT" | "MARKET_ID" | "TEAM_TIME_EXACT" | "TEAM_TIME_FUZZY" | null;
   verifyMatchAudit?: string | null;
@@ -21175,7 +21175,7 @@ export default function Home() {
             } else if (response.status === 429) {
               // Keep the rate limit visible and avoid retry starvation.
               next=next.map(candidate=>candidate.id===record.id ? {
-                ...candidate,verifyWaitReason:"RESULT_NOT_FOUND" as const,
+                ...candidate,verifyWaitReason:"SPORTSAPI_RATE_LIMIT" as const,
                 verifyLastCheckedAt:Date.now(),verifyMatchAudit:"SportsAPI HTTP 429 · rate limited"
               }:candidate);
               unavailable += 1;
@@ -21299,7 +21299,14 @@ export default function Home() {
               : candidate
           );
           verified += 1;
-        } catch {
+        } catch (error) {
+          // A transient provider/network failure must not retry this same
+          // first fixture forever and starve the remainder of the queue.
+          next=next.map(candidate=>candidate.id===record.id ? {
+            ...candidate,verifyWaitReason:"RESULT_NOT_FOUND" as const,
+            verifyLastCheckedAt:Date.now(),
+            verifyMatchAudit:"검증 요청 실패 · 재시도 예정: "+(error instanceof Error?error.message.slice(0,100):"unknown")
+          }:candidate);
           unavailable += 1;
         }
       }
