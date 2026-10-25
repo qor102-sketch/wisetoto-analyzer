@@ -78,4 +78,36 @@ try{
  console.log("RESULT-ONLY BRIDGE OK: loads without a Betman list, pending tracker can be verified independently");
 
 
+ // Isolated postmatch regression: an aged frozen PRE must be checked without
+ // the NBA auto-hook, and a missing final source must NEVER become VERIFIED.
+ const past=Date.now()-8*60*60_000;
+ const frozen={id:"ci-verification-pending",fixtureId:null,sport:"축구",
+   home:"CI Home",away:"CI Away",league:"CI_TEST",
+   startMs:past,capturedAt:past-70*60_000,
+   verificationStatus:"PENDING",decision:"PASS",picks:[],marketResults:[],result:null};
+ const key="wisetoto_v13_8_1_live_tracker";
+ await page.addInitScript(({key,frozen})=>localStorage.setItem(key,JSON.stringify([frozen])),{key,frozen});
+ await page.route("**/api/betman?scope=all",route=>route.fulfill({
+   status:200,contentType:"application/json",body:JSON.stringify({ok:true,games:[]})
+ }));
+ await page.route("**/api/naver/lineup?*",route=>route.fulfill({
+   status:404,contentType:"application/json",body:JSON.stringify({ok:false,error:"fixture not found"})
+ }));
+ await page.goto("http://127.0.0.1:3100/?automation=1",{waitUntil:"domcontentloaded",timeout:90_000});
+ await page.waitForFunction(()=>window.__wisetotoAutomation?.snapshot().pendingDue===1 &&
+   !window.__wisetotoAutomation.snapshot().validationLoading,null,{timeout:45000});
+ const verificationStart=await page.evaluate(()=>window.__wisetotoAutomation.verify());
+ if(!verificationStart.started)throw Error("Independent result verification did not start: "+JSON.stringify(verificationStart));
+ await page.waitForFunction((key)=>{
+   try{const row=JSON.parse(localStorage.getItem(key)||"[]")[0];
+     return row?.id==="ci-verification-pending" && Number(row?.verifyLastCheckedAt)>0 &&
+       !window.__wisetotoAutomation?.snapshot().validationLoading;
+   }catch{return false;}
+ },key,{timeout:45000});
+ const verifiedCheck=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)||"[]")[0],key);
+ if(verifiedCheck.verificationStatus!=="PENDING" || verifiedCheck.result!==null)
+   throw Error("Missing final source incorrectly VERIFIED test fixture: "+JSON.stringify(verifiedCheck));
+ console.log("INDEPENDENT VERIFY OK: aged pending checked; missing final source remains PENDING");
+
+
 } finally {await browser.close();}
