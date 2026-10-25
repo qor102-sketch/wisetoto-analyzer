@@ -127,3 +127,17 @@ test("node-only collector writes a durable state and public summary without Chro
   await assert.rejects(stat(join(dir,"state.json")),{code:"ENOENT"});
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test("bounded evidence archive always retains authentic opening odds",()=>{
+ const start=T+6*24*60*MIN,g=betman("soccer",start);
+ let state=init;
+ for(let i=0;i<28;i++){
+  const now=T+i*30*MIN;
+  state=ingestEvidence(state,feed([betman("soccer",start,[2.15-0.005*i,3,2.85+0.005*i])]),now).state;
+ }
+ const snap=state.fixtures[0].snapshots;
+ assert.equal(snap.length,24);
+ assert.equal(snap[0].at,T);
+ assert.equal(snap[0].market.choices.find(x=>x.side==="win").odds,2.15);
+ assert.equal(snap[snap.length-1].at,T+27*30*MIN);
+});
