@@ -14,7 +14,8 @@ try{
 }catch(e){console.error("MARKET_EVIDENCE_SKIPPED: "+String(e));}
 if(feed){
  let state;
- try{state=JSON.parse(await fs.readFile(ROOT+"research-state.json","utf8"))}catch{state={schema:SCHEMA,fixtures:[]}}
+ try{state=JSON.parse(await fs.readFile(ROOT+"research-state.json","utf8"))}
+ catch(e){if(e?.code==="ENOENT")state={schema:SCHEMA,fixtures:[]};else throw e;}
  if(state.schema!==SCHEMA)throw Error("Research state schema mismatch: refuse to overwrite archive");
  let tracker;
  try{tracker=JSON.parse(await fs.readFile(STATE_FILE,"utf8"))}catch{tracker={localStorage:{}}}
