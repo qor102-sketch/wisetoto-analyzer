@@ -159,8 +159,9 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now)
  return {state:{schema:SCHEMA,updatedAt:now,fixtures},stats};
 }
 export function publicEvidence(state,now=Date.now()){
- const rows=(state?.fixtures||[]).filter(f=>f.startMs>now&&f.startMs<now+7*DAY)
-   .sort((a,b)=>a.startMs-b.startMs).slice(0,150).map(f=>({
+ const upcoming=(state?.fixtures||[]).filter(f=>f.startMs>now&&f.startMs<now+7*DAY)
+   .sort((a,b)=>a.startMs-b.startMs);
+ const rows=upcoming.slice(0,150).map(f=>({
      id:f.id,sport:f.sport,league:f.league,home:f.home,away:f.away,
      startMs:f.startMs,firstSeenAt:f.firstSeenAt,lastSeenAt:f.lastSeenAt,
      observations:f.snapshots.length,stage:f.lastEvidence?.stage??"COLLECTING",
@@ -169,7 +170,7 @@ export function publicEvidence(state,now=Date.now()){
    }));
  return {schema:"wisetoto-public-evidence-v1",generatedAt:new Date(now).toISOString(),
    disclaimer:"독립 연구 후보. 기존 frozen PRE 및 공식 TOP1과 별개. 배당 이동만으로 적중/수익을 보장하지 않음.",
-   counts:{future:rows.length,observed:rows.filter(r=>r.top1).length,
-     researchTop1:rows.filter(r=>r.stage==="RESEARCH_TOP1").length,
-     insufficient:rows.filter(r=>r.stage!=="RESEARCH_TOP1").length},records:rows};
+   counts:{future:upcoming.length,observed:upcoming.filter(r=>r.lastEvidence?.top1).length,
+     researchTop1:upcoming.filter(r=>r.lastEvidence?.stage==="RESEARCH_TOP1").length,
+     insufficient:upcoming.filter(r=>r.lastEvidence?.stage!=="RESEARCH_TOP1").length},records:rows};
 }
