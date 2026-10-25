@@ -98,3 +98,14 @@ test("Actions always reconciles results independently of PRE batch and publishes
  assert.match(page,/Fair queue: do not keep retrying the same failed first 10 records/);
  assert.match(page,/session auto-court hook must not consume the bridge's verification lock/);
 });
+
+test("no Vercel build is requested for the data-only automation branch",async()=>{
+ const {readFile}=await import("node:fs/promises");
+ for(const relative of ["../WisetotoAnalyzer-LiveFree/vercel.json",
+   "../WisetotoAnalyzer-LiveFree/WisetotoAnalyzer-LiveFree/vercel.json"]){
+  const settings=JSON.parse(await readFile(new URL(relative,import.meta.url),"utf8"));
+  assert.equal(settings.framework,"nextjs");
+  assert.equal(settings.git.deploymentEnabled["automation-data"],false);
+  assert.notEqual(settings.git.deploymentEnabled.main,false);
+ }
+});
