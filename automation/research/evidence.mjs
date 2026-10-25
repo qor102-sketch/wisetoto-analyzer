@@ -94,8 +94,10 @@ export function decideEvidence(fixture,fixtures,now){
    return {...observed,stage:"RESEARCH_TOP1",reason:"선행 검증표본과 보수적 +EV 기준 충족 (실험)",calibration:conf};
  return {...observed,reason:"보수적 EV 기준 미충족 — 관찰 후보만 표시",calibration:conf};
 }
-export function ingestEvidence(state,feed,now,verifiedRecords=[]){
+export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now){
  if(!feed?.ok||!Array.isArray(feed.games))throw Error("official feed required");
+ if(!Number.isFinite(observedAt)||observedAt>now||now-observedAt>5*MINUTE)
+   throw Error("Never backdate a stale research feed");
  const existing=Array.isArray(state?.fixtures)?state.fixtures:[];
  const byId=new Map(existing.filter(f=>f?.id&&Number.isFinite(f.startMs)).map(f=>[f.id,{...f,snapshots:[...(f.snapshots||[])]}]));
  let captured=0,examined=0,settled=0;
@@ -114,12 +116,12 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[]){
    }
    const last=f.snapshots[f.snapshots.length-1];
    // Never overwrite earlier real odds; retain at most a 30-min cadence.
-   if(!last||now-last.at>=30*MINUTE){
-     f.snapshots.push({at:now,market});
+   if(!last||observedAt-last.at>=30*MINUTE){
+     f.snapshots.push({at:observedAt,market});
      f.snapshots=f.snapshots.slice(-MAX_SNAPSHOTS);
      captured++;
    }
-   f.lastSeenAt=now;
+   f.lastSeenAt=observedAt;
  }
  const records=Array.isArray(verifiedRecords)?verifiedRecords:[];
  for(const record of records){
