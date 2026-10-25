@@ -44,6 +44,8 @@ export function summarizeRecord(r){
    decision:String(r.decision??"PASS"),
    status:String(r.verificationStatus??"PENDING"),
    verifiedAt:firstNumeric(r.verifiedAt),
+   verifyWaitReason:r.verificationStatus==="PENDING" && r.verifyWaitReason ? String(r.verifyWaitReason).slice(0,64) : null,
+   verifyLastCheckedAt:firstNumeric(r.verifyLastCheckedAt),
    result:result?{homeScore:firstNumeric(result.homeScore),awayScore:firstNumeric(result.awayScore),source:String(result.source??"")} :null,
    pre:pre?{
      expectedHome:firstNumeric(pre.expectedHome),expectedAway:firstNumeric(pre.expectedAway),
@@ -77,7 +79,8 @@ export function publishProjection(state){
     void:records.filter(r=>r.status==="VOID").length,
     hit:records.filter(r=>r.top1?.resultStatus==="HIT").length,
     miss:records.filter(r=>r.top1?.resultStatus==="MISS").length,
-    warnings:records.filter(r=>r.warnings.length).length
+    warnings:records.filter(r=>r.warnings.length).length,
+    overdue:records.filter(r=>r.status==="PENDING" && r.startMs!==null && r.startMs<Date.now()-6*60*60_000).length
   },
   records
  };
