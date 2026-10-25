@@ -1,4 +1,4 @@
-import {finalStatusProof,scorePlausibility} from "../../../lib/postmatch-guards.mjs";
+import {finalStatusProof,scorePlausibility} from "../../../../lib/postmatch-guards.mjs";
 // V13.4.1 validation-only result endpoint with object score parser and safe diagnostics. PRE prediction must be locked before this route is called.
 // This route is intentionally separate from the prediction path and is called
 // only after the user explicitly locks the prediction and opens validation.
