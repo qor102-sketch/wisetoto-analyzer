@@ -77,9 +77,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh api "/repos/$GITHUB_REPOSITORY/contents/research-state.json?ref=automation-data" \
+          if gh api "/repos/$GITHUB_REPOSITORY/contents/research-state.json.gz?ref=automation-data" \
               > /tmp/wisetoto-evidence-ref.json 2>/dev/null; then
-            jq -r '.content' /tmp/wisetoto-evidence-ref.json | base64 -d > automation-state/research-state.json
+            jq -r '.content' /tmp/wisetoto-evidence-ref.json | base64 -d > /tmp/wisetoto-evidence-state.json.gz
+            gzip -dc /tmp/wisetoto-evidence-state.json.gz > automation-state/research-state.json
           fi
       - name: Due match and verification preflight
         id: due
@@ -124,10 +125,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ ! -s automation-state/research-public.json ]; then exit 0; fi
-          for pair in "research-state.json:research-state.json" "research-public.json:research-public.json"; do
-            local_file="${pair%%:*}"
-            remote_file="${pair#*:}"
-            content="$(base64 -w 0 "automation-state/$local_file")"
+          # Preserve the full 120-day research sample while staying well below
+          # GitHub Contents API's 1 MiB inline-content limit.
+          gzip -cn automation-state/research-state.json > /tmp/research-state.json.gz
+          for remote_file in "research-state.json.gz" "research-public.json"; do
+            if [ "$remote_file" = "research-state.json.gz" ]; then
+              local_file="/tmp/research-state.json.gz"
+            else
+              local_file="automation-state/research-public.json"
+            fi
+            content="$(base64 -w 0 "$local_file")"
             sha="$(gh api "/repos/$GITHUB_REPOSITORY/contents/$remote_file?ref=automation-data" --jq .sha 2>/dev/null || true)"
             if [ -n "$sha" ]; then
               gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$remote_file" \
@@ -139,16 +146,6 @@ jobs:
                 -f content="$content" >/dev/null
             fi
           done
-      - name: Archive research snapshot for recovery
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: wisetoto-market-evidence
-          path: |
-            automation-state/research-state.json
-            automation-state/research-public.json
-          retention-days: 90
-          if-no-files-found: ignore
       - name: Publish transparent scan health even if Betman is down
         if: always()
         env:
