@@ -1,7 +1,7 @@
 {
   "schema": "wisetoto-public-history-v1",
-  "publishedAt": "2026-10-26T00:02:46.349Z",
-  "lastRunAt": 1792972966168,
+  "publishedAt": "2026-10-26T00:12:50.403Z",
+  "lastRunAt": 1792973570234,
   "source": "GitHub Actions 자동 LIVE TRACKER (수동 분석 기록과 별개)",
   "counts": {
     "total": 37,
@@ -107,7 +107,7 @@
       "home": "LAFC",
       "away": "LA 갤럭시",
       "startMs": 1792976400000,
-      "capturedAt": 1792972949781,
+      "capturedAt": 1792973553080,
       "decision": "PASS",
       "status": "PENDING",
       "verifiedAt": null,
@@ -999,7 +999,7 @@
       "capturedAt": 1792801302210,
       "decision": "PASS",
       "status": "VERIFIED",
-      "verifiedAt": 1792972913461,
+      "verifiedAt": 1792973518218,
       "result": {
         "homeScore": 125,
         "awayScore": 117,
@@ -1090,7 +1090,7 @@
       "capturedAt": 1792801259695,
       "decision": "PASS",
       "status": "VERIFIED",
-      "verifiedAt": 1792972913939,
+      "verifiedAt": 1792973519446,
       "result": {
         "homeScore": 108,
         "awayScore": 111,
@@ -1272,7 +1272,7 @@
       "capturedAt": 1792800064488,
       "decision": "PASS",
       "status": "VERIFIED",
-      "verifiedAt": 1792972914895,
+      "verifiedAt": 1792973520425,
       "result": {
         "homeScore": 110,
         "awayScore": 114,
@@ -1363,7 +1363,7 @@
       "capturedAt": 1792800106610,
       "decision": "PASS",
       "status": "VERIFIED",
-      "verifiedAt": 1792972914438,
+      "verifiedAt": 1792973519926,
       "result": {
         "homeScore": 120,
         "awayScore": 119,
