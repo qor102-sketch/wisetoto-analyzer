@@ -1,7 +1,7 @@
 {
   "schema": "wisetoto-public-history-v1",
-  "publishedAt": "2026-10-26T07:56:55.669Z",
-  "lastRunAt": 1793001415554,
+  "publishedAt": "2026-10-26T08:06:57.886Z",
+  "lastRunAt": 1793002017747,
   "source": "GitHub Actions 자동 LIVE TRACKER (수동 분석 기록과 별개)",
   "counts": {
     "total": 38,
@@ -20,7 +20,7 @@
       "home": "Samsung Lions",
       "away": "Kia Tigers",
       "startMs": 1793007000000,
-      "capturedAt": 1793001397652,
+      "capturedAt": 1793001999744,
       "decision": "PASS",
       "status": "PENDING",
       "verifiedAt": null,
@@ -163,7 +163,7 @@
       "capturedAt": 1792972841462,
       "decision": "PASS",
       "status": "VERIFIED",
-      "verifiedAt": 1793001345322,
+      "verifiedAt": 1793001950095,
       "result": {
         "homeScore": 112,
         "awayScore": 123,
