@@ -1,18 +1,107 @@
 {
   "schema": "wisetoto-public-history-v1",
-  "publishedAt": "2026-10-26T11:35:41.362Z",
-  "lastRunAt": 1793014541063,
+  "publishedAt": "2026-10-26T12:17:43.389Z",
+  "lastRunAt": 1793017063198,
   "source": "GitHub Actions 자동 LIVE TRACKER (수동 분석 기록과 별개)",
   "counts": {
-    "total": 38,
-    "pending": 14,
+    "total": 39,
+    "pending": 15,
     "verified": 24,
     "void": 0,
     "hit": 1,
     "miss": 1,
-    "warnings": 17
+    "warnings": 18
   },
   "records": [
+    {
+      "id": "live:betman:네프치페르가나|s알이티하드|1793022300000|축구:1793022300000",
+      "sport": "축구",
+      "league": "AFC 챔피언스리그 엘리트",
+      "home": "네프치 페르가나",
+      "away": "S알이티하드",
+      "startMs": 1793022300000,
+      "capturedAt": 1793016992780,
+      "decision": "PASS",
+      "status": "PENDING",
+      "verifiedAt": null,
+      "result": null,
+      "pre": {
+        "expectedHome": 1.48,
+        "expectedAway": 1.55,
+        "homeRecentSample": 0,
+        "awayRecentSample": 0,
+        "homeVenueSample": 0,
+        "awayVenueSample": 0
+      },
+      "courtPre": null,
+      "lineup": null,
+      "top1": null,
+      "markets": [
+        {
+          "key": "seq:809",
+          "market": "승무패",
+          "pick": "패",
+          "probability": 47.5,
+          "odds": 1.63,
+          "marketProbability": 53.3,
+          "expectedValue": -22.6,
+          "edge": -5.8,
+          "grade": "PASS",
+          "score": 30.3,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        },
+        {
+          "key": "seq:810",
+          "market": "H +1",
+          "pick": "승",
+          "probability": 52.6,
+          "odds": 1.86,
+          "marketProbability": 46.8,
+          "expectedValue": -2.2,
+          "edge": 5.8,
+          "grade": "PASS",
+          "score": 52.2,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        },
+        {
+          "key": "seq:811",
+          "market": "U/O 3.5",
+          "pick": "언더",
+          "probability": 61.9,
+          "odds": 1.44,
+          "marketProbability": 60.4,
+          "expectedValue": -10.9,
+          "edge": 1.5,
+          "grade": "WATCH",
+          "score": 39.4,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        },
+        {
+          "key": "seq:812",
+          "market": "SUM",
+          "pick": "짝",
+          "probability": 50,
+          "odds": 1.8,
+          "marketProbability": 50,
+          "expectedValue": -10,
+          "edge": 0,
+          "grade": "PASS",
+          "score": 45.6,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        }
+      ],
+      "warnings": [
+        "경기 전 최근 Form 부족 (0/0)"
+      ]
+    },
     {
       "id": "live:752539:1793007000000",
       "sport": "야구",
