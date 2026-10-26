@@ -1,18 +1,158 @@
 {
   "schema": "wisetoto-public-history-v1",
-  "publishedAt": "2026-10-26T07:45:51.801Z",
-  "lastRunAt": 1793000751649,
+  "publishedAt": "2026-10-26T07:56:55.669Z",
+  "lastRunAt": 1793001415554,
   "source": "GitHub Actions 자동 LIVE TRACKER (수동 분석 기록과 별개)",
   "counts": {
-    "total": 37,
+    "total": 38,
     "pending": 14,
-    "verified": 23,
+    "verified": 24,
     "void": 0,
     "hit": 1,
     "miss": 1,
     "warnings": 17
   },
   "records": [
+    {
+      "id": "live:752539:1793007000000",
+      "sport": "야구",
+      "league": "KBO",
+      "home": "Samsung Lions",
+      "away": "Kia Tigers",
+      "startMs": 1793007000000,
+      "capturedAt": 1793001397652,
+      "decision": "PASS",
+      "status": "PENDING",
+      "verifiedAt": null,
+      "result": null,
+      "pre": null,
+      "courtPre": null,
+      "lineup": null,
+      "top1": null,
+      "markets": [
+        {
+          "key": "seq:796",
+          "market": "승패",
+          "pick": "패",
+          "probability": 55.4,
+          "odds": 1.53,
+          "marketProbability": 56.9,
+          "expectedValue": -15.2,
+          "edge": -1.5,
+          "grade": "PASS",
+          "score": 45.2,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        },
+        {
+          "key": "seq:797",
+          "market": "승1패",
+          "pick": "1",
+          "probability": 29.3,
+          "odds": 3.55,
+          "marketProbability": 24.5,
+          "expectedValue": 4,
+          "edge": 4.8,
+          "grade": "WATCH",
+          "score": 41.9,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        },
+        {
+          "key": "seq:798",
+          "market": "H +2.5",
+          "pick": "홈 +2.5",
+          "probability": 68.9,
+          "odds": 1.37,
+          "marketProbability": 63.5,
+          "expectedValue": -5.6,
+          "edge": 5.4,
+          "grade": "PASS",
+          "score": 59.5,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        },
+        {
+          "key": "seq:799",
+          "market": "U/O 8.5",
+          "pick": "OVER",
+          "probability": 52.7,
+          "odds": 1.75,
+          "marketProbability": 49.7,
+          "expectedValue": -7.8,
+          "edge": 3,
+          "grade": "PASS",
+          "score": 51.1,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        },
+        {
+          "key": "seq:800",
+          "market": "SUM",
+          "pick": "홀",
+          "probability": 54,
+          "odds": 1.61,
+          "marketProbability": 55.9,
+          "expectedValue": -13.1,
+          "edge": -1.9,
+          "grade": "PASS",
+          "score": 42.6,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        },
+        {
+          "key": "seq:801",
+          "market": "전반 승무패",
+          "pick": "패",
+          "probability": 45.4,
+          "odds": 1.88,
+          "marketProbability": 46.3,
+          "expectedValue": -14.6,
+          "edge": -0.9,
+          "grade": "PASS",
+          "score": 41.5,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        },
+        {
+          "key": "seq:802",
+          "market": "전반 H +1.5",
+          "pick": "홈 +1.5",
+          "probability": 64.7,
+          "odds": 1.42,
+          "marketProbability": 61.3,
+          "expectedValue": -8.1,
+          "edge": 3.4,
+          "grade": "PASS",
+          "score": 55,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        },
+        {
+          "key": "seq:803",
+          "market": "전반 U/O 4.5",
+          "pick": "OVER",
+          "probability": 51.7,
+          "odds": 1.77,
+          "marketProbability": 49.1,
+          "expectedValue": -8.5,
+          "edge": 2.6,
+          "grade": "PASS",
+          "score": 48.8,
+          "resultStatus": "PENDING",
+          "actualLabel": null,
+          "resultNote": null
+        }
+      ],
+      "warnings": []
+    },
     {
       "id": "live:636029:1792976400000",
       "sport": "농구",
@@ -22,9 +162,13 @@
       "startMs": 1792976400000,
       "capturedAt": 1792972841462,
       "decision": "PASS",
-      "status": "PENDING",
-      "verifiedAt": null,
-      "result": null,
+      "status": "VERIFIED",
+      "verifiedAt": 1793001345322,
+      "result": {
+        "homeScore": 112,
+        "awayScore": 123,
+        "source": ""
+      },
       "pre": null,
       "courtPre": {
         "expectedHome": 114.32,
@@ -48,9 +192,9 @@
           "edge": -6,
           "grade": "WATCH",
           "score": 52.5,
-          "resultStatus": "PENDING",
-          "actualLabel": null,
-          "resultNote": null
+          "resultStatus": "HIT",
+          "actualLabel": "패",
+          "resultNote": "최종 경기결과 검증"
         },
         {
           "key": "seq:793",
@@ -63,9 +207,9 @@
           "edge": 6.1,
           "grade": "WATCH",
           "score": 56.5,
-          "resultStatus": "PENDING",
-          "actualLabel": null,
-          "resultNote": null
+          "resultStatus": "MISS",
+          "actualLabel": "원정 -4.5",
+          "resultNote": "최종 경기결과 검증"
         },
         {
           "key": "seq:794",
@@ -78,9 +222,9 @@
           "edge": 9.6,
           "grade": "WATCH",
           "score": 54.7,
-          "resultStatus": "PENDING",
-          "actualLabel": null,
-          "resultNote": null
+          "resultStatus": "HIT",
+          "actualLabel": "UNDER",
+          "resultNote": "최종 경기결과 검증"
         },
         {
           "key": "seq:795",
@@ -93,9 +237,9 @@
           "edge": 0,
           "grade": "PASS",
           "score": 50,
-          "resultStatus": "PENDING",
-          "actualLabel": null,
-          "resultNote": null
+          "resultStatus": "HIT",
+          "actualLabel": "홀",
+          "resultNote": "최종 경기결과 검증"
         }
       ],
       "warnings": []
