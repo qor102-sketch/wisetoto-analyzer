@@ -37,7 +37,12 @@ function score(g,side){
  }
  return null;
 }
-function dateKST(ms){return new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(ms));}
+function dateKST(ms){
+ const parts=new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Seoul",
+   year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date(ms));
+ const p=Object.fromEntries(parts.map(x=>[x.type,x.value]));
+ return p.year+"-"+p.month+"-"+p.day;
+}
 function dateOnly(value){
  const s=String(value??"");
  const m=/(20\d\d)[-.\/]?(\d\d)[-.\/]?(\d\d)/.exec(s);
