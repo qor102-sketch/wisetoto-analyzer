@@ -39,7 +39,7 @@ if(feed){
  const result=ingestEvidence(state,feed,now,verifiedRecords,observedAt);
  console.log("RESEARCH_CONFIRMED_INPUT",JSON.stringify({tracker:getRecords(tracker).length,
    collectFirst:collected.length,excludedResultOnly:true}));
- if(result.stats.captured>0||result.stats.settled>0){
+ if(result.stats.captured>0||result.stats.settled>0||result.stats.pilotMilestone){
    await fs.writeFile(ROOT+"research-state.json",JSON.stringify(result.state)+"\n","utf8");
    await fs.writeFile(ROOT+"research-public.json",JSON.stringify(publicEvidence(result.state,now))+"\n","utf8");
    console.log("MARKET_EVIDENCE_SAVED "+JSON.stringify(result.stats));
