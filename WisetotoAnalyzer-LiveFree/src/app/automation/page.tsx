@@ -7,8 +7,8 @@ type ScanHealth={schema:string;scannedAt:string;expectedIntervalMinutes:number;s
 type EvidencePick={side:string;label:string;odds:number;marketProbability:number;openProbability:number;shift:number;marketHold:number;asOf:number};
 type EvidenceRow={id:string;sport:string;league:string;home:string;away:string;startMs:number;firstSeenAt:number;lastSeenAt:number;observations:number;stage:string;reason:string;top1:EvidencePick|null;calibration:{samples:number;qualified:boolean;probability?:number;conservativeEV?:number}|null};
 type ResearchEvidence={generatedAt:string;counts:{future:number;observed:number;researchTop1:number;insufficient:number};records:EvidenceRow[]};
-type CollectedRow={key:string;sport:string;league:string;home:string;away:string;startMs:number;firstSeenAt:number;pregameCapturedAt:number|null;seenCount:number;oddsCount:number;verdict:string;final:{homeScore:number;awayScore:number}|null;checkReason:string|null};
-type CollectedLedger={generatedAt:string;counts:{collected:number;verified:number;pending:number;pregameCaptured:number;verifiedWithPregame:number;resultOnly:number;missingFixtureId:number};records:CollectedRow[]};
+type CollectedRow={key:string;sport:string;league:string;home:string;away:string;startMs:number;firstSeenAt:number;pregameCapturedAt:number|null;firstOddsAt?:number|null;latestOddsAt?:number|null;seenCount:number;oddsCount:number;verdict:string;final:{homeScore:number;awayScore:number}|null;checkReason:string|null};
+type CollectedLedger={generatedAt:string;source?:{lastFeedAt:number|null;ok:boolean;error:string|null;lastCaptureSummary?:{listed:number;window:number;new:number;noOdds:number;missingIdentity:number;missedWindow:number}|null};counts:{collected:number;verified:number;pending:number;pregameCaptured:number;verifiedWithPregame:number;resultOnly:number;missingFixtureId:number};records:CollectedRow[]};
 type History={scanHealth?:ScanHealth|null;schema:string;publishedAt:string;lastRunAt:number|null;source:string;counts:{total:number;pending:number;verified:number;review?:number;void:number;hit:number;miss:number;warnings:number;overdue?:number};records:Match[]};
 function date(ms:number|null|undefined){return typeof ms==="number"&&Number.isFinite(ms)?new Date(ms).toLocaleString("ko-KR",{timeZone:"Asia/Seoul",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}):"—";}
 function num(v:number|null|undefined,d=1){return typeof v==="number"&&Number.isFinite(v)?v.toFixed(d):"—";}
@@ -70,8 +70,13 @@ export default function AutomationDashboard(){
       <p>예측과 별도 저장 · 경기 전 관측만 기록 · 공식 최종 결과 확인 전에는 PENDING 유지</p>
     </div><strong>{collection?collection.counts.collected+"경기 수집":"수집 시작 대기"}</strong></div>
     {collection?<><div className="auto-explainer">등록된 경기 {collection.counts.collected} · 30분 전 자료 수집 {collection.counts.pregameCaptured??0} · 종료 검증 {collection.counts.verified} · 사전 수집+종료 검증 표본 {collection.counts.verifiedWithPregame??0}/40 · 검증 대기 {collection.counts.pending} · 사전 수집 누락(결과만) {collection.counts.resultOnly??0} · 외부 경기 ID 부족 {collection.counts.missingFixtureId}</div>
+      {collection.source&&<div className="auto-explainer">
+        Betman 최신 상태: {collection.source.ok?"정상":"수집 오류 · 이전 장부 유지"} · 마지막 정상 목록 조회 {date(collection.source.lastFeedAt)} KST
+        {!collection.source.ok&&<strong> · 오류: {collection.source.error||"원인 확인 필요"}</strong>}
+        {collection.source.lastCaptureSummary&&<span> · 직전 정상 스캔 {collection.source.lastCaptureSummary.listed}경기 중 30분 창 {collection.source.lastCaptureSummary.window}건 · 신규 사전 수집 {collection.source.lastCaptureSummary.new}건 · 배당 없음 {collection.source.lastCaptureSummary.noOdds}건 · 식별 불가 {collection.source.lastCaptureSummary.missingIdentity}건 · 창 경과 경기 {collection.source.lastCaptureSummary.missedWindow}건</span>}
+      </div>}
       <div className="auto-game-list">{collection.records.slice(0,20).map(r=><article className="auto-game" key={r.key} style={{padding:12}}>
-        <div className="auto-game-identity"><span className="auto-game-meta">{r.sport} · {r.league} · {date(r.startMs)} KST · 관측 {r.seenCount}회 · 배당 항목 {r.oddsCount}개</span>
+        <div className="auto-game-identity"><span className="auto-game-meta">{r.sport} · {r.league} · {date(r.startMs)} KST · 관측 {r.seenCount}회 · 배당 항목 {r.oddsCount}개 · 최초 배당 {date(r.firstOddsAt)} KST · 최신 배당 {date(r.latestOddsAt)} KST</span>
           <strong>{r.home} <em>vs</em> {r.away}</strong><small>{r.verdict==="VERIFIED"?"결과 확인 "+r.final?.homeScore+" : "+r.final?.awayScore:r.pregameCapturedAt===null?"경기 목록 등록 · 30분 전 수집 대기 또는 시간 경과 · "+(r.checkReason||"결과 조회 예정"):"30분 전 수집 완료 · 검증 대기 · "+(r.checkReason||"최종점수 조회 예정")}</small>
         </div>
       </article>)}</div></>:<div className="auto-empty">신규 30분 전 수집 기록은 기능 승인 및 첫 GitHub 스캔 후 표시됩니다. 기존 PRE를 소급 생성하지 않습니다.</div>}
