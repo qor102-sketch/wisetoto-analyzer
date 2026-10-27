@@ -167,14 +167,14 @@ jobs:
             import fs from "node:fs";
             let rows=[];
             try{rows=JSON.parse(fs.readFileSync("automation-state/collect-first-state.json","utf8")).records??[]}catch{}
-            const verified=rows.filter(x=>x.verdict==="VERIFIED").length;
+            const verified=rows.filter(x=>x.verdict==="VERIFIED" &&\n              Number.isFinite(x.pregameCapturedAt) && x.pregameCapturedAt<x.startMs).length;
             const ready=verified>=40;
             const browserNeeded=process.env.VERIFY_DUE==="true" ||
               (ready&&process.env.PREGAME_DUE==="true");
             fs.appendFileSync(process.env.GITHUB_OUTPUT,
               "prediction_ready="+ready+"\n"+"browser_needed="+browserNeeded+"\n");
             console.log("COLLECT_FIRST_STAGE",JSON.stringify({verified,required:40,
-              stage:ready?"PREDICT_AND_VALIDATE":"COLLECT_AND_VERIFY_ONLY"}));
+              stage:ready?"PREDICT_AND_VALIDATE":"COLLECT_AND_VERIFY_ONLY",\n              excludeRetrospective:true}));
           '
       - name: Collect longitudinal prekickoff evidence without Chromium
         # Separate observational lane: starts even if a previous/main PRE failed.
