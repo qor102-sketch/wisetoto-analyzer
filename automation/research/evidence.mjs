@@ -1,6 +1,7 @@
 // Separate pregame market-evidence research. This is NOT the existing PRE engine.
 // Never backfill past kickoff, never use final scores as pregame features.
 import {sportName} from "../logic.mjs";
+import {buildPilotReport,selectPostPilotTop1} from "./pilot-top1.mjs";
 export const SCHEMA="wisetoto-market-evidence-v1";
 const MINUTE=60_000,HOUR=60*MINUTE,DAY=24*HOUR;
 const MAX_SNAPSHOTS=24;
@@ -186,11 +187,19 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now)
    }
    if(f.startMs>now)f.lastEvidence=decideEvidence(f,fixtures,now);
  }
+ const priorPilot=state?.pilot??null;
+ // Start only from the first actual fresh nonempty provider observation.
+ // Never backdate to PR creation or data already present in frozen PRE.
+ const startedAt=Number.isFinite(priorPilot?.startedAt)?priorPilot.startedAt:
+   (feed.games.length?observedAt:null);
+ const milestone=startedAt===null?0:Math.min(4,Math.max(0,Math.floor((now-startedAt)/(7*DAY))));
+ const pilot=startedAt===null?null:{startedAt,lastReportedWeek:milestone};
  const stats={total:fixtures.length,captured,settled,examined,with2Snapshots:fixtures.filter(f=>f.snapshots.length>=2).length,
    observed:fixtures.filter(f=>f.startMs>now&&f.lastEvidence?.top1).length,
    researchTop1:fixtures.filter(f=>f.startMs>now&&f.lastEvidence?.stage==="RESEARCH_TOP1").length,
-   verified:fixtures.filter(f=>f.truth&&!f.truth.untrained).length};
- return {state:{schema:SCHEMA,updatedAt:now,fixtures},stats};
+   verified:fixtures.filter(f=>f.truth&&!f.truth.untrained).length,
+   pilotMilestone:startedAt!==null&&(!priorPilot||priorPilot.lastReportedWeek!==milestone)};
+ return {state:{...state,schema:SCHEMA,updatedAt:now,fixtures,pilot},stats};
 }
 export function publicEvidence(state,now=Date.now()){
  const upcoming=(state?.fixtures||[]).filter(f=>f.startMs>now&&f.startMs<now+7*DAY)
@@ -203,7 +212,8 @@ export function publicEvidence(state,now=Date.now()){
      calibration:f.lastEvidence?.calibration??null
    }));
  return {schema:"wisetoto-public-evidence-v1",generatedAt:new Date(now).toISOString(),
-   disclaimer:"독립 연구 후보. 기존 frozen PRE 및 공식 TOP1과 별개. 배당 이동만으로 적중/수익을 보장하지 않음.",
+   disclaimer:"4주 연구 그림자 TOP1과 기존 frozen PRE 및 공식 TOP1은 별개. 소표본 성과는 수익 보장이 아님.",
+   pilot:buildPilotReport(state,now),pilotTop1:selectPostPilotTop1(state,now),
    counts:{future:upcoming.length,observed:upcoming.filter(r=>r.lastEvidence?.top1).length,
      researchTop1:upcoming.filter(r=>r.lastEvidence?.stage==="RESEARCH_TOP1").length,
      insufficient:upcoming.filter(r=>r.lastEvidence?.stage!=="RESEARCH_TOP1").length},records:rows};
