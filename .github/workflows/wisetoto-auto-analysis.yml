@@ -222,6 +222,9 @@ jobs:
         # Separate observational lane: starts even if a previous/main PRE failed.
         if: always()
         run: node automation/research/run.mjs
+      - name: Evaluate weekly 28-day pilot, including feed outage days
+        if: always() && steps.ledger_restore.outcome == 'success'
+        run: node automation/research/run-pilot-review.mjs
       - name: Archive old study odds snapshots before rolling research file
         id: evidence_archive
         if: always() && steps.ledger_restore.outcome == 'success'
@@ -255,6 +258,26 @@ jobs:
                 -f content="$content" >/dev/null
             fi
           done
+      - name: Open 4-week research TOP1 review issue for manual iteration
+        if: always() && steps.evidence_archive.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ ! -s automation-state/pilot-top1-review.md ]; then exit 0; fi
+          title="$(node --input-type=module -e '
+            import fs from "node:fs";
+            const s=JSON.parse(fs.readFileSync("automation-state/research-state.json","utf8"));
+            console.log("[Wisetoto 28일 TOP1 연구] "+new Date(s.pilot.startedAt).toISOString().slice(0,10)+" 시작 코호트")
+          ')"
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --json title,number \
+            --jq ".[] | select(.title == \"$title\") | .number" | head -n 1)"
+          if [ -z "$existing" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
+              --body-file automation-state/pilot-top1-review.md
+          else
+            echo "PILOT_REVIEW_ALREADY_CREATED #$existing — preserve manual review history"
+          fi
       - name: Publish transparent scan health even if Betman is down
         if: always()
         env:
