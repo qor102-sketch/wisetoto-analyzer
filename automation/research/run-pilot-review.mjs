@@ -20,10 +20,11 @@ export async function writePilotReview({root="automation-state/",now=Date.now()}
    await fs.writeFile(root+"research-state.json.next",JSON.stringify(state)+"\n");
    await fs.rename(root+"research-state.json.next",root+"research-state.json");
  }
- if(changed||report.status==="FOUR_WEEK_REVIEW_READY"){
+ if(changed){
    await fs.writeFile(root+"research-public.json",
      JSON.stringify(publicEvidence(state,now))+"\n");
-   if(report.status==="FOUR_WEEK_REVIEW_READY"){
+ }
+ if(report.status==="FOUR_WEEK_REVIEW_READY"){
      const p=report;
      const line=metric=>metric.decisions+"경기 / 적중 "+metric.hits+
       " / 단위 수익 "+(metric.unitProfit??"—")+
@@ -63,7 +64,6 @@ export async function writePilotReview({root="automation-state/",now=Date.now()}
      console.log("PILOT_4WEEK_REVIEW",JSON.stringify({
       verified:p.counts.verified,shadow:p.shadowTop1.decisions,grade:p.grade}));
    }
- }
  return {status:report.status,week,changed,verified:report.counts.verified};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)
