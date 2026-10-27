@@ -64,31 +64,63 @@ export function observeCandidate(fixture){
      shift:Number(leader.shift.toFixed(5)),
      marketHold:last.hold,asOf:latest.at}};
 }
-function confidence(candidate,fixtures,sport,now){
- const p=candidate.marketProbability,binMin=Math.floor(p*5)/5;
- const sample=[];
- for(const f of fixtures){
-   // Only previously finished, independently verified research fixtures.
-   if(f.sport!==sport||!f.truth||f.startMs>=now||!Number.isFinite(f.truth.verifiedAt)||
-      f.truth.verifiedAt<=f.startMs||f.truth.verifiedAt>now||f.startMs>now-3*HOUR)continue;
-   const c=f.frozenCandidate; // archived strictly before kickoff
-   if(!c||Math.floor(c.marketProbability*5)/5!==binMin)continue;
-   sample.push(f.truth.winner===c.side?1:0);
+// Time-ordered, league-specific experimental calibration. No current fixture
+// result or later provider verification may enter the training/backtest window.
+function confidence(candidate,fixtures,sport,league,now){
+ const cutoff=Math.min(now,Number(candidate.asOf));
+ const sameLeague=x=>String(x??"").normalize("NFKC").toLowerCase().replace(/\\s/g,"")===
+   String(league??"").normalize("NFKC").toLowerCase().replace(/\\s/g,"");
+ const eligible=(fixtures??[]).filter(f=>f.sport===sport&&f.truth&&!f.truth.untrained
+   &&f.startMs<cutoff&&Number.isFinite(f.truth.verifiedAt)
+   &&f.truth.verifiedAt>f.startMs&&f.truth.verifiedAt<cutoff
+   &&f.frozenCandidate&&Number.isFinite(f.frozenCandidate.asOf)
+   &&f.frozenCandidate.asOf<f.startMs
+   &&Number.isFinite(f.frozenCandidate.marketProbability)
+   &&Number.isFinite(f.frozenCandidate.odds)
+   &&["win","draw","lose"].includes(f.frozenCandidate.side));
+ const leagueHistory=eligible.filter(f=>sameLeague(f.league))
+   .sort((a,b)=>a.frozenCandidate.asOf-b.frozenCandidate.asOf);
+ const history=leagueHistory.filter(f=>Math.abs(f.frozenCandidate.marketProbability-candidate.marketProbability)<=0.15);
+ const insufficient=(reason,backtest=null)=>({samples:history.length,sportSamples:eligible.length,
+    leagueSamples:leagueHistory.length,qualified:false,reason,backtest});
+ if(eligible.length<80||leagueHistory.length<60||history.length<50)
+   return insufficient("종목 80·리그 60·유사확률 50 경기 이상 검증표본 필요");
+ const test=[];
+ // For each archived prediction, only outcomes VERIFIED by THAT prediction timestamp
+ // can be used. This avoids leakage from delayed results or hindsight research.
+ for(const row of leagueHistory){
+   const at=row.frozenCandidate.asOf;
+   const prior=leagueHistory.filter(f=>f.startMs<at&&f.truth.verifiedAt<at
+     &&f.frozenCandidate.asOf<at
+     &&Math.abs(f.frozenCandidate.marketProbability-row.frozenCandidate.marketProbability)<=0.15);
+   if(prior.length<20)continue;
+   const y=row.truth.winner===row.frozenCandidate.side?1:0;
+   const p=row.frozenCandidate.marketProbability;
+   const wins=prior.filter(f=>f.truth.winner===f.frozenCandidate.side).length;
+   const estimate=(wins+40*p)/(prior.length+40);
+   test.push({market:(p-y)**2,model:(estimate-y)**2});
  }
- if(sample.length<40)return {samples:sample.length,qualified:false,reason:"종목별 확정된 선행 검증표본 40경기 미만"};
- const wins=sample.reduce((a,b)=>a+b,0),priorWeight=40;
- const calibrated=(wins+priorWeight*p)/(sample.length+priorWeight);
- const sd=Math.sqrt(calibrated*(1-calibrated)/(sample.length+priorWeight+1));
- const lower=Math.max(0,calibrated-1.645*sd); // one-sided 90% conservative bound
- return {samples:sample.length,qualified:true,probability:Number(calibrated.toFixed(5)),
+ if(test.length<20)return insufficient("시간순 외부 검증 20건 미만",{samples:test.length});
+ const marketBrier=test.reduce((x,y)=>x+y.market,0)/test.length;
+ const modelBrier=test.reduce((x,y)=>x+y.model,0)/test.length;
+ const backtest={samples:test.length,marketBrier:Number(marketBrier.toFixed(5)),
+   modelBrier:Number(modelBrier.toFixed(5)),improved:modelBrier+0.002<marketBrier};
+ if(!backtest.improved)return insufficient("시간순 Brier 점수 개선 확인되지 않음",backtest);
+ const wins=history.filter(f=>f.truth.winner===f.frozenCandidate.side).length;
+ const p=candidate.marketProbability,priorWeight=40;
+ const calibrated=(wins+priorWeight*p)/(history.length+priorWeight);
+ const sd=Math.sqrt(calibrated*(1-calibrated)/(history.length+priorWeight+1));
+ const lower=Math.max(0,calibrated-1.645*sd);
+ return {samples:history.length,sportSamples:eligible.length,leagueSamples:leagueHistory.length,
+   qualified:true,probability:Number(calibrated.toFixed(5)),
    conservativeProbability:Number(lower.toFixed(5)),
-   conservativeEV:Number((lower*candidate.odds-1).toFixed(5)),
-   reason:"종목별 선행 결과 보수적 보정(90% 단측 근사)"};
+   conservativeEV:Number((lower*candidate.odds-1).toFixed(5)),backtest,
+   reason:"동일 리그 선행 종료 결과·시간순 OOS 검증·90% 단측 보수적 EV"};
 }
 export function decideEvidence(fixture,fixtures,now){
  const observed=observeCandidate(fixture);
  if(!observed.top1)return observed;
- const conf=confidence(observed.top1,fixtures,fixture.sport,now);
+ const conf=confidence(observed.top1,fixtures,fixture.sport,fixture.league,now);
  if(!conf.qualified)return {...observed,reason:conf.reason,calibration:conf};
  if(conf.conservativeEV>0.03)
    return {...observed,stage:"RESEARCH_TOP1",reason:"선행 검증표본과 보수적 +EV 기준 충족 (실험)",calibration:conf};
