@@ -170,7 +170,7 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now)
    const winner=resultSide(f,record);
    if(!winner||(winner==="draw"&&f.sport!=="축구"))continue;
    const frozen=f.frozenCandidate;
-   f.truth={winner,verifiedAt:Number(record.verifiedAt),source:"verified-tracker"};
+   f.truth={winner,verifiedAt:Number(record.verifiedAt),source:String(record.result?.source??"verified-tracker")};
    settled++;
    // Never create or re-select historic TOP1 using known final outcome.
    if(!frozen)f.truth={...f.truth,untrained:true};
