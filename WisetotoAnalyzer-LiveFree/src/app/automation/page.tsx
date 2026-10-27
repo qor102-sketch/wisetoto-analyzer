@@ -6,7 +6,15 @@ type Match={id:string;sport:string;league:string;home:string;away:string;startMs
 type ScanHealth={schema:string;scannedAt:string;expectedIntervalMinutes:number;sourceOk:boolean;sourceError:string|null;feedSports:Record<string,number>;eligibleForPregame:number;awaitingPostmatch:number;feedOrigin:string};
 type EvidencePick={side:string;label:string;odds:number;marketProbability:number;openProbability:number;shift:number;marketHold:number;asOf:number};
 type EvidenceRow={id:string;sport:string;league:string;home:string;away:string;startMs:number;firstSeenAt:number;lastSeenAt:number;observations:number;stage:string;reason:string;top1:EvidencePick|null;calibration:{samples:number;qualified:boolean;probability?:number;conservativeEV?:number;sportSamples?:number;leagueSamples?:number;backtest?:{samples:number;marketBrier?:number;modelBrier?:number;improved?:boolean}}|null};
-type ResearchEvidence={generatedAt:string;counts:{future:number;observed:number;researchTop1:number;insufficient:number};records:EvidenceRow[]};
+type PilotMetric={decisions:number;hits:number;misses:number;hitRate:number|null;unitProfit:number|null;unitROI:number|null;marketBrier:number|null;hitLower90:number|null};
+type PilotReport={status:string;startedAt:number|null;endsAt:number|null;completedDays:number;durationDays:number;grade?:string;
+ counts?:{listed:number;pregameCandidates:number;verified:number;pendingFinal:number;shadowDays:number};
+ all?:PilotMetric;shadowTop1?:PilotMetric;bySport?:Record<string,PilotMetric>;
+ walkForward?:{decisions:number;marketBrier:number|null;modelBrier:number|null;improved:boolean};
+ weeks?:Array<{week:number;complete:boolean;observed:number;frozen:number;metrics:PilotMetric}>;
+ proposals?:string[];shadowHistory?:Array<{date:string;id:string;sport:string;home:string;away:string;side:string;odds:number;result:string}>};
+type ResearchEvidence={generatedAt:string;counts:{future:number;observed:number;researchTop1:number;insufficient:number};records:EvidenceRow[];
+ pilot?:PilotReport;pilotTop1?:{id:string;sport:string;league:string;home:string;away:string;startMs:number;side:string;label:string;odds:number;marketProbability:number;shift:number;observedAt:number;grade:string;note:string}|null};
 type CollectedRow={key:string;sport:string;league:string;home:string;away:string;startMs:number;firstSeenAt:number;pregameCapturedAt:number|null;firstOddsAt?:number|null;latestOddsAt?:number|null;seenCount:number;oddsCount:number;resultChecks?:number;resultErrors?:Array<{at:number;reasons:string[]}>;captureIssue?:string|null;verdict:string;final:{homeScore:number;awayScore:number}|null;checkReason:string|null};
 type CollectedLedger={generatedAt:string;source?:{lastFeedAt:number|null;ok:boolean;error:string|null;lastCaptureSummary?:{listed:number;window:number;new:number;noOdds:number;missingIdentity:number;missedWindow:number;watchlistMissing?:number;delayedScan?:boolean;sinceLastScanMs?:number|null}|null};counts:{collected:number;active?:number;archived?:number;verified:number;pending:number;pregameCaptured:number;verifiedWithPregame:number;resultOnly:number;missingFixtureId:number};records:CollectedRow[]};
 type History={scanHealth?:ScanHealth|null;schema:string;publishedAt:string;lastRunAt:number|null;source:string;counts:{total:number;pending:number;verified:number;review?:number;void:number;hit:number;miss:number;warnings:number;overdue?:number};records:Match[]};
@@ -90,7 +98,38 @@ export default function AutomationDashboard(){
       <h2>경기 전 축적 자료 · 실험 TOP1 연구</h2>
       <p>공식 LIVE TRACKER TOP1과 완전히 별개입니다. 10분 검색 → 시점별 배당 기록 → 과거 확정 결과로 보정합니다.</p>
     </div><strong>{evidence?evidence.counts.future+"경기 수집":"첫 관측 데이터 대기"}</strong></div>
-    <div className="auto-explainer">WATCH는 배당 변화 관찰 후보일 뿐 추천이 아닙니다. '연구 TOP1'은 이전에 검증된 충분한 표본과 보수적 EV를 통과해야만 표시됩니다. 과거 PRE 예측은 바꾸지 않습니다.</div>
+    <div className="auto-explainer">4주간 사전 잠금한 그림자 TOP1 성적과 미래 경기의 탐색 TOP1을 구분해 표시합니다. 소표본 분석은 검증된 실전 추천이 아니며, 공식 PRE·TOP1은 바꾸지 않습니다.</div>
+    {evidence?.pilot&&<div className="scan-health-box" style={{marginBottom:14}}>
+      <div className="scan-head"><strong>28일 TOP1 연구 파일럿 · {evidence.pilot.status==="NOT_STARTED"?"실제 수집 시작 대기":evidence.pilot.status==="FOUR_WEEK_REVIEW_READY"?"4주 분석 보고서 생성":"데이터 검증 중"}</strong>
+      <span>{evidence.pilot.startedAt?date(evidence.pilot.startedAt)+" 시작 · "+date(evidence.pilot.endsAt)+" 종료 기준":"첫 정상 실제 수집 이후 28일"}</span></div>
+      <div className="scan-metrics"><span>진행 {evidence.pilot.completedDays??0}/28일</span>
+        <span>경기 전 후보 {evidence.pilot.counts?.pregameCandidates??0}</span>
+        <span>검증 완료 {evidence.pilot.counts?.verified??0}</span>
+        <span>종료 확인 대기 {evidence.pilot.counts?.pendingFinal??0}</span>
+        <span>하루 1건 사전 선정 그림자 TOP1 {evidence.pilot.shadowTop1?.decisions??0}건</span>
+        <span>적중 {evidence.pilot.shadowTop1?.hits??0}건</span></div>
+      {evidence.pilot.status==="FOUR_WEEK_REVIEW_READY"&&<>
+        <p>연구 평가 등급: {evidence.pilot.grade==="PROMISING_RESEARCH"?"후속 그림자 검증 가능":"탐색적 결과 · 추가 검증 필요"}
+        {" · "}그림자 TOP1 가상 ROI: {evidence.pilot.shadowTop1?.unitROI==null?"표본 부족":(evidence.pilot.shadowTop1.unitROI*100).toFixed(1)+"%"}
+        {" · "}시간순 OOS: {evidence.pilot.walkForward?.decisions??0}건
+        {" · "}시장확률 대비 Brier 개선: {evidence.pilot.walkForward?.improved?"관찰됨":"입증되지 않음"}</p>
+        {evidence.pilot.proposals?.map((p,i)=><p key={i}>· {p}</p>)}
+        <p>측정값은 실제 결과 확인 경기 기준입니다. 미확정·사후 발견 경기는 적중률에 포함하지 않습니다.</p>
+      </>}
+      {evidence.pilot.weeks&&<div className="scan-metrics">
+        {evidence.pilot.weeks.map(w=><span key={w.week}>{w.week}주 {w.complete?"완료":"진행 중"} · 사전 후보 {w.frozen} · 검증 {w.metrics.decisions}</span>)}
+      </div>}
+    </div>}
+    {evidence?.pilotTop1&&<div className="scan-health-box" style={{marginBottom:14}}>
+      <div className="scan-head"><strong>4주 이후 미래 경기 연구 TOP1 · {evidence.pilotTop1.grade==="EXPLORATORY_TOP1"?"탐색적 후보":"연구 후보"}</strong>
+        <span>사전 관측 {date(evidence.pilotTop1.observedAt)} KST</span></div>
+      <p>{evidence.pilotTop1.sport} · {evidence.pilotTop1.league} · {evidence.pilotTop1.home} vs {evidence.pilotTop1.away}
+        {" · "}시작 {date(evidence.pilotTop1.startMs)} KST
+        {" · "}방향 {evidence.pilotTop1.label} · 배당 {evidence.pilotTop1.odds.toFixed(2)}
+        {" · "}시장 환산확률 {(evidence.pilotTop1.marketProbability*100).toFixed(1)}%
+        {" · "}배당 확률 이동 {(evidence.pilotTop1.shift*100).toFixed(1)}%p</p>
+      <p>{evidence.pilotTop1.note}</p>
+    </div>}
     {evidence&&<div className="auto-scan-health"><div className="scan-health-box scan-success">
       <div className="scan-metrics"><span>관찰 대상 {evidence.counts.future}</span><span>시장 변화 후보 {evidence.counts.observed}</span><span>검증 기준 통과 TOP1 {evidence.counts.researchTop1}</span><span>근거 부족·HOLD {evidence.counts.insufficient}</span></div>
     </div></div>}
