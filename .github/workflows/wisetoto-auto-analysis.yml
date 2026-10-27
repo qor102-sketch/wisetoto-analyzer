@@ -222,8 +222,14 @@ jobs:
         # Separate observational lane: starts even if a previous/main PRE failed.
         if: always()
         run: node automation/research/run.mjs
+      - name: Archive old study odds snapshots before rolling research file
+        id: evidence_archive
+        if: always() && steps.ledger_restore.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node automation/research/archive-evidence.mjs
       - name: Publish evidence archive and experimental read-only candidates
-        if: always()
+        if: always() && steps.evidence_archive.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
