@@ -25,6 +25,14 @@ try{
     (!researchResponse.ok() && researchBody.ok))
    throw Error("Research API schema/first-scan fallback failed: "+JSON.stringify(researchBody));
  console.log("RESEARCH API OK: sanitized schema or explicit first-collection pending");
+ const collectionResponse=await page.request.get("http://127.0.0.1:3100/api/automation/collection",{timeout:35000});
+ const collectionBody=await collectionResponse.json();
+ if(![200,503].includes(collectionResponse.status())||
+   (collectionResponse.ok()&&(!collectionBody.ok||
+      collectionBody.data?.schema!=="wisetoto-collect-first-public-v1"))||
+   (!collectionResponse.ok()&&collectionBody.ok))
+   throw Error("Collect-first read-only API must show real schema or explicit first-scan pending: "+JSON.stringify(collectionBody));
+ console.log("COLLECT FIRST API OK: verified data schema or honest first-scan pending");
  // Dashboard is a separate read-only page and uses actual published records.
  await page.goto("http://127.0.0.1:3100/automation",{waitUntil:"domcontentloaded",timeout:90_000});
  await page.getByRole("heading",{name:"자동분석 결과"}).waitFor({timeout:30000});
