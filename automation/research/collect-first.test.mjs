@@ -156,3 +156,41 @@ test("real Node collector preserves a past fixture and settles Naver after Sport
   assert.equal(publicData.source.ok,true);
  }finally{await new Promise(resolve=>srv.close(()=>resolve()));await rm(root,{recursive:true,force:true});}
 });
+
+test("collection ledger restore fails closed on GitHub HTTP 503 or untrusted 404",async()=>{
+ const {readFile,mkdtemp,mkdir,writeFile,rm}=await import("node:fs/promises");
+ const {tmpdir}=await import("node:os");
+ const {join}=await import("node:path");
+ const {spawnSync}=await import("node:child_process");
+ const workflow=await readFile(new URL("../../.github/workflows/wisetoto-auto-analysis.yml",import.meta.url),"utf8");
+ const block=workflow.split("      - name: Restore 30-minute collection ledger\n")[1]
+   ?.split("      - name: Due match and verification preflight")[0];
+ assert.ok(block,"restore step must exist");
+ const restoreScript=block.split("        run: |\n")[1]
+   ?.split("\n").map(x=>x.replace(/^          /,"")).join("\n");
+ assert.ok(restoreScript,"shell script must exist");
+ assert.match(workflow,/id: ledger_restore/);
+ assert.match(workflow,/steps\.ledger_restore\.outcome == 'success'/);
+ assert.match(workflow,/steps\.ledger_capture\.outcome == 'success'/);
+ const root=await mkdtemp(join(tmpdir(),"ledger-restore-failclosed-"));
+ try{
+   await mkdir(join(root,"bin"));await mkdir(join(root,"automation-state"));
+   for(const code of [503,404]){
+     await writeFile(join(root,"bin","curl"),"#!/bin/sh\necho "+code+"\n",{mode:0o755});
+     await writeFile(join(root,"bin","gh"),"#!/bin/sh\nexit 1\n",{mode:0o755});
+     const run=spawnSync("bash",["-c",restoreScript],{
+       cwd:root,encoding:"utf8",env:{...process.env,PATH:join(root,"bin")+":"+process.env.PATH,
+         GH_TOKEN:"synthetic-test-token",GITHUB_REPOSITORY:"test/project"}});
+     assert.notEqual(run.status,0,"HTTP "+code+" must block restore: "+run.stdout);
+     assert.match(run.stderr,code===503?/COLLECT_LEDGER_RESTORE_FAILED/:/./);
+   }
+ }finally{await rm(root,{recursive:true,force:true})}
+});
+test("40 samples alone cannot automatically restart heavy PRE",async()=>{
+ const {readFile}=await import("node:fs/promises");
+ const w=await readFile(new URL("../../.github/workflows/wisetoto-auto-analysis.yml",import.meta.url),"utf8");
+ assert.match(w,/WISETOTO_PREDICTION_RESTART_APPROVED/);
+ assert.match(w,/const sampleReady=verified>=40/);
+ assert.match(w,/const ready=sampleReady&&restartApproved/);
+ assert.match(w,/const browserNeeded=process\.env\.VERIFY_DUE==="true"/);
+});
