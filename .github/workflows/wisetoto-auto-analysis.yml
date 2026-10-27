@@ -108,7 +108,10 @@ jobs:
             404)
               # First-run absence is safe only if the archive branch itself is readable.
               # An authorization/branch failure must never initialize an empty ledger.
-              gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/automation-data" >/dev/null
+              if ! gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/automation-data" >/dev/null; then
+                echo "COLLECT_LEDGER_BRANCH_UNAVAILABLE: cannot establish safe first-run baseline" >&2
+                exit 1
+              fi
               echo "COLLECT_LEDGER_FIRST_RUN: file absent, archive branch confirmed"
               ;;
             *)
