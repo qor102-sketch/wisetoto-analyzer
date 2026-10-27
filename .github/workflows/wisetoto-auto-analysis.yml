@@ -87,12 +87,35 @@ jobs:
             gzip -dc /tmp/wisetoto-evidence-state.json.gz > automation-state/research-state.json
           fi
       - name: Restore 30-minute collection ledger
+        id: ledger_restore
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh api "/repos/$GITHUB_REPOSITORY/contents/collect-first-state.json.gz?ref=automation-data" > /tmp/collect-ledger-ref.json 2>/dev/null; then
-            jq -r '.content' /tmp/collect-ledger-ref.json | base64 -d | gzip -dc > automation-state/collect-first-state.json
-          fi
+          set -euo pipefail
+          status="$(curl -sSL -w '%{http_code}' -o /tmp/collect-ledger-ref.json \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/collect-first-state.json.gz?ref=automation-data")"
+          case "$status" in
+            200)
+              jq -er '.content' /tmp/collect-ledger-ref.json | base64 -d | gzip -dc > automation-state/collect-first-state.json
+              node --input-type=module -e '
+                import fs from "node:fs";
+                const state=JSON.parse(fs.readFileSync("automation-state/collect-first-state.json","utf8"));
+                if(state.schema!=="wisetoto-collect-first-v1"||!Array.isArray(state.records))
+                  throw Error("Existing collection ledger has invalid schema; refusing replacement");
+              '
+              ;;
+            404)
+              # First-run absence is safe only if the archive branch itself is readable.
+              # An authorization/branch failure must never initialize an empty ledger.
+              gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/automation-data" >/dev/null
+              echo "COLLECT_LEDGER_FIRST_RUN: file absent, archive branch confirmed"
+              ;;
+            *)
+              echo "COLLECT_LEDGER_RESTORE_FAILED: GitHub HTTP $status; refusing to overwrite prior data" >&2
+              exit 1
+              ;;
+          esac
       - name: Due match and verification preflight
         id: due
         run: node automation/runner.mjs --preflight
@@ -127,16 +150,21 @@ jobs:
             fi
           done
       - name: Capture 30-minute fixtures and reconcile verified results without browser
-        if: always()
+        id: ledger_capture
+        if: always() && steps.ledger_restore.outcome == 'success'
         env:
           WISETOTO_URL: https://wisetoto-analyzer.vercel.app
         run: node automation/research/run-collect-first.mjs
       - name: Persist collection-first ledger and public status
-        if: always()
+        if: always() && steps.ledger_restore.outcome == 'success' && steps.ledger_capture.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ ! -s automation-state/collect-first-state.json ]; then exit 0; fi
+          set -euo pipefail
+          if [ ! -s automation-state/collect-first-state.json ] || [ ! -s automation-state/collect-first-public.json ]; then
+            echo "COLLECT_LEDGER_PUBLISH_BLOCKED: missing complete state/public pair" >&2
+            exit 1
+          fi
           gzip -cn automation-state/collect-first-state.json > /tmp/collect-first-state.json.gz
           for remote_file in collect-first-state.json.gz collect-first-public.json; do
             if [ "$remote_file" = "collect-first-state.json.gz" ]; then
