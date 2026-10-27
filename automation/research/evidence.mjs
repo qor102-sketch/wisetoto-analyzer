@@ -68,8 +68,8 @@ export function observeCandidate(fixture){
 // result or later provider verification may enter the training/backtest window.
 function confidence(candidate,fixtures,sport,league,now){
  const cutoff=Math.min(now,Number(candidate.asOf));
- const sameLeague=x=>String(x??"").normalize("NFKC").toLowerCase().replace(/\\s/g,"")===
-   String(league??"").normalize("NFKC").toLowerCase().replace(/\\s/g,"");
+ const sameLeague=x=>String(x??"").normalize("NFKC").toLowerCase().replace(/\s/g,"")===
+   String(league??"").normalize("NFKC").toLowerCase().replace(/\s/g,"");
  const eligible=(fixtures??[]).filter(f=>f.sport===sport&&f.truth&&!f.truth.untrained
    &&f.startMs<cutoff&&Number.isFinite(f.truth.verifiedAt)
    &&f.truth.verifiedAt>f.startMs&&f.truth.verifiedAt<cutoff
