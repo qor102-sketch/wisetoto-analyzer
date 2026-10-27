@@ -138,3 +138,16 @@ test("quarantine historical false volleyball VERIFIED and flag negative-EV VALUE
  assert.equal(projection.records.find(x=>x.id==="invalid-old-value").top1.resultStatus,"HIT");
  assert.equal(state.localStorage[TRACKER_KEY],before);
 });
+
+test("every archived raw tracker row remains visible even when metadata is incomplete",()=>{
+ const raw=[
+   {id:"valid",sport:"축구",home:"A",away:"B",startMs:3000,capturedAt:1000,verificationStatus:"PENDING"},
+   {id:"missing-capture",sport:"배구",home:"C",away:"D",startMs:4000,verificationStatus:"PENDING"},
+   {sport:"농구",home:"E",away:"F",startMs:5000,capturedAt:2000,verificationStatus:"PENDING"}
+ ];
+ const state={localStorage:{[TRACKER_KEY]:JSON.stringify(raw)}};
+ const projected=publishProjection(state);
+ assert.equal(projected.counts.total,raw.length);
+ assert.equal(projected.records.filter(r=>r.status==="REVIEW_REQUIRED").length,2);
+ assert.equal(JSON.stringify(JSON.parse(state.localStorage[TRACKER_KEY])),JSON.stringify(raw));
+});
