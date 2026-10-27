@@ -211,3 +211,25 @@ test("missing initial odds are not assigned a fake first-odds timestamp",()=>{
  assert.equal(second.state.records[0].odds.length,1);
  assert.equal(projection(second.state,T+10*M).source.lastCaptureSummary.new,0);
 });
+
+test("watchlisted fixture disappearing inside capture window remains visible, never synthetic PRE",()=>{
+ const first=collect({schema:SCHEMA,records:[]},{ok:true,games:[g("soccer",60)]},T).state;
+ const second=collect(first,{ok:true,games:[]},T+35*M);
+ assert.equal(second.summary.watchlistMissing,1);
+ assert.equal(second.summary.delayedScan,true);
+ assert.equal(second.state.records[0].pregameCapturedAt,null);
+ assert.equal(second.state.records[0].captureIssue,"BETMAN_WATCHLIST_DISAPPEARED_IN_CAPTURE_WINDOW");
+ const third=collect(second.state,{ok:true,games:[]},T+62*M);
+ assert.equal(third.state.records[0].verdict,"PENDING");
+ assert.equal(third.state.records[0].pregameCapturedAt,null);
+ assert.ok(third.state.records[0].missedWindowAt>0);
+});
+test("collection no longer silently trims more than 4000 records",()=>{
+ const start=T+25*M;
+ const games=Array.from({length:4020},(_,i)=>({
+  ...g("basketball",25),home:"H"+i,away:"A"+i,gameDateMs:start+i
+ }));
+ const c=collect({schema:SCHEMA,records:[]},{ok:true,games},T);
+ assert.equal(c.state.records.length,4020);
+ assert.equal(c.summary.new,4020);
+});
