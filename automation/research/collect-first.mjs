@@ -70,8 +70,10 @@ export function collect(state,feed,now=Date.now(),observedAt=now){
    }
  }
  // Important: older pending results are retained long enough for retries.
- const records=[...by.values()].filter(r=>r.startMs>now-120*D)
-   .sort((a,b)=>b.startMs-a.startMs||a.key.localeCompare(b.key)).slice(0,4000);
+ // Do not truncate here. Archive export must persist expired rows FIRST.
+ // The workflow archives, verifies and then removes old rows from the active ledger.
+ const records=[...by.values()]
+   .sort((a,b)=>b.startMs-a.startMs||a.key.localeCompare(b.key));
  return {state:{...state,schema:SCHEMA,updatedAt:now,lastFeedAt:observedAt,
    lastFeedOk:true,lastFeedError:null,lastCaptureSummary:summary,records},summary};
 }
@@ -137,12 +139,14 @@ export function projection(state,now=Date.now()){
  return {schema:"wisetoto-collect-first-public-v1",generatedAt:new Date(now).toISOString(),
    source:{lastFeedAt:state?.lastFeedAt??null,ok:state?.lastFeedOk===true,error:state?.lastFeedError??null,
      lastCaptureSummary:state?.lastCaptureSummary??null},
-   counts:{collected:all.length,verified:all.filter(x=>x.verdict==="VERIFIED").length,
-     pending:all.filter(x=>x.verdict==="PENDING").length,
-     pregameCaptured:all.filter(x=>Number.isFinite(x.pregameCapturedAt)).length,
+   counts:{collected:all.length+(state.archiveCounts?.collected??0),
+     active:all.length,archived:state.archiveCounts?.collected??0,
+     verified:all.filter(x=>x.verdict==="VERIFIED").length+(state.archiveCounts?.verified??0),
+     pending:all.filter(x=>x.verdict==="PENDING").length+(state.archiveCounts?.pending??0),
+     pregameCaptured:all.filter(x=>Number.isFinite(x.pregameCapturedAt)).length+(state.archiveCounts?.pregameCaptured??0),
      verifiedWithPregame:all.filter(x=>x.verdict==="VERIFIED"&&
-       Number.isFinite(x.pregameCapturedAt)&&x.pregameCapturedAt<x.startMs).length,
-     resultOnly:all.filter(x=>x.startMs<=now&&!Number.isFinite(x.pregameCapturedAt)).length,
-     missingFixtureId:all.filter(x=>x.fixtureId===null).length},
+       Number.isFinite(x.pregameCapturedAt)&&x.pregameCapturedAt<x.startMs).length+(state.archiveCounts?.verifiedWithPregame??0),
+     resultOnly:all.filter(x=>x.startMs<=now&&!Number.isFinite(x.pregameCapturedAt)).length+(state.archiveCounts?.resultOnly??0),
+     missingFixtureId:all.filter(x=>x.fixtureId===null).length+(state.archiveCounts?.missingFixtureId??0)},
    records};
 }
