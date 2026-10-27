@@ -7,7 +7,7 @@ type ScanHealth={schema:string;scannedAt:string;expectedIntervalMinutes:number;s
 type EvidencePick={side:string;label:string;odds:number;marketProbability:number;openProbability:number;shift:number;marketHold:number;asOf:number};
 type EvidenceRow={id:string;sport:string;league:string;home:string;away:string;startMs:number;firstSeenAt:number;lastSeenAt:number;observations:number;stage:string;reason:string;top1:EvidencePick|null;calibration:{samples:number;qualified:boolean;probability?:number;conservativeEV?:number}|null};
 type ResearchEvidence={generatedAt:string;counts:{future:number;observed:number;researchTop1:number;insufficient:number};records:EvidenceRow[]};
-type CollectedRow={key:string;sport:string;league:string;home:string;away:string;startMs:number;firstSeenAt:number;pregameCapturedAt:number|null;firstOddsAt?:number|null;latestOddsAt?:number|null;seenCount:number;oddsCount:number;verdict:string;final:{homeScore:number;awayScore:number}|null;checkReason:string|null};
+type CollectedRow={key:string;sport:string;league:string;home:string;away:string;startMs:number;firstSeenAt:number;pregameCapturedAt:number|null;firstOddsAt?:number|null;latestOddsAt?:number|null;seenCount:number;oddsCount:number;resultChecks?:number;resultErrors?:Array<{at:number;reasons:string[]}>;verdict:string;final:{homeScore:number;awayScore:number}|null;checkReason:string|null};
 type CollectedLedger={generatedAt:string;source?:{lastFeedAt:number|null;ok:boolean;error:string|null;lastCaptureSummary?:{listed:number;window:number;new:number;noOdds:number;missingIdentity:number;missedWindow:number}|null};counts:{collected:number;verified:number;pending:number;pregameCaptured:number;verifiedWithPregame:number;resultOnly:number;missingFixtureId:number};records:CollectedRow[]};
 type History={scanHealth?:ScanHealth|null;schema:string;publishedAt:string;lastRunAt:number|null;source:string;counts:{total:number;pending:number;verified:number;review?:number;void:number;hit:number;miss:number;warnings:number;overdue?:number};records:Match[]};
 function date(ms:number|null|undefined){return typeof ms==="number"&&Number.isFinite(ms)?new Date(ms).toLocaleString("ko-KR",{timeZone:"Asia/Seoul",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}):"—";}
@@ -78,6 +78,7 @@ export default function AutomationDashboard(){
       <div className="auto-game-list">{collection.records.slice(0,20).map(r=><article className="auto-game" key={r.key} style={{padding:12}}>
         <div className="auto-game-identity"><span className="auto-game-meta">{r.sport} · {r.league} · {date(r.startMs)} KST · 관측 {r.seenCount}회 · 배당 항목 {r.oddsCount}개 · 최초 배당 {date(r.firstOddsAt)} KST · 최신 배당 {date(r.latestOddsAt)} KST</span>
           <strong>{r.home} <em>vs</em> {r.away}</strong><small>{r.verdict==="VERIFIED"?"결과 확인 "+r.final?.homeScore+" : "+r.final?.awayScore:r.pregameCapturedAt===null?"경기 목록 등록 · 30분 전 수집 대기 또는 시간 경과 · "+(r.checkReason||"결과 조회 예정"):"30분 전 수집 완료 · 검증 대기 · "+(r.checkReason||"최종점수 조회 예정")}</small>
+          {r.resultErrors?.length?<small>결과 확인 오류 이력 · 총 조회 {r.resultChecks??0}회 · 최근 {r.resultErrors[r.resultErrors.length-1].reasons.join(" / ")}</small>:null}
         </div>
       </article>)}</div></>:<div className="auto-empty">신규 30분 전 수집 기록은 기능 승인 및 첫 GitHub 스캔 후 표시됩니다. 기존 PRE를 소급 생성하지 않습니다.</div>}
    </section>
