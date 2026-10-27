@@ -8,7 +8,9 @@ test("the 30m-to-kickoff window collects all four sports, even without odds",()=
  rows[3].markets=[];
  const c=collect({schema:SCHEMA,records:[]},{ok:true,games:[...rows,g("soccer",31),g("soccer",-1)]},T);
  assert.equal(c.summary.window,4);assert.equal(c.summary.new,4);assert.equal(c.summary.noOdds,1);
- assert.equal(c.state.records.length,4);assert.equal(projection(c.state,T).counts.collected,4);
+ assert.equal(c.state.records.length,6);assert.equal(projection(c.state,T).counts.collected,6);
+ assert.equal(projection(c.state,T).counts.pregameCaptured,4);
+ assert.equal(projection(c.state,T).counts.resultOnly,1);
 });
 test("repeat scans retain first capture and fixture identity; no kickoff retro capture",()=>{
  const init={schema:SCHEMA,records:[]};
@@ -71,4 +73,39 @@ test("workflow persists the ledger before heavy PRE and gates prediction on veri
  assert.match(w,/collect-first-state\.json\.gz/);
  assert.match(w,/collect-first-public\.json/);
  assert.match(w,/prediction_ready == 'true'/);
+});
+
+test("a fixture listed days ahead becomes an authentic pregame capture only after entering 30 minutes",()=>{
+ const distant=g("soccer",90);
+ const first=collect({schema:SCHEMA,records:[]},{ok:true,games:[distant]},T);
+ assert.equal(first.summary.discovered,1);
+ assert.equal(first.summary.window,0);
+ assert.equal(first.state.records[0].pregameCapturedAt,null);
+ assert.equal(first.state.records[0].odds.length,0);
+ const near=collect(first.state,{ok:true,games:[distant]},T+65*M);
+ assert.equal(near.summary.new,1);
+ assert.equal(near.state.records[0].pregameCapturedAt,T+65*M);
+ assert.ok(near.state.records[0].odds.length>0);
+ const late=collect(first.state,{ok:true,games:[distant]},T+92*M);
+ assert.equal(late.summary.new,0);
+ assert.equal(late.state.records[0].pregameCapturedAt,null);
+ assert.equal(projection(late.state,T+92*M).counts.resultOnly,1);
+});
+test("result-only discoveries may settle but do not count as valid pregame training",()=>{
+ const game=g("basketball",-60);
+ const resultOnly=collect({schema:SCHEMA,records:[]},{ok:true,games:[game]},T).state;
+ assert.equal(resultOnly.records[0].pregameCapturedAt,null);
+ assert.equal(resultOnly.records[0].odds.length,0);
+ const after=mergeProviderFinal(resultOnly,resultOnly.records[0].key,
+   {ok:true,finalConfirmed:true,result:{homeScore:102,awayScore:99}},T+120*M);
+ assert.equal(after.records[0].verdict,"VERIFIED");
+ assert.equal(projection(after,T+120*M).counts.verified,1);
+ assert.equal(projection(after,T+120*M).counts.verifiedWithPregame,0);
+});
+test("repeat reads of the same feed timestamp cannot inflate independent observations",()=>{
+ const match=g("soccer",25);
+ const initial=collect({schema:SCHEMA,records:[]},{ok:true,games:[match]},T);
+ const duplicated=collect(initial.state,{ok:true,games:[match]},T+M,T);
+ assert.equal(duplicated.state.records[0].seenCount,1);
+ assert.equal(duplicated.state.records[0].firstSeenAt,T);
 });
