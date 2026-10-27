@@ -39,7 +39,7 @@ export function collect(state,feed,now=Date.now(),observedAt=now){
        home:String(game.home),away:String(game.away),startMs:t,
        firstSeenAt:observedAt,lastSeenAt:observedAt,seenCount:1,
        pregameCapturedAt:null,fixtureId:sourceId(game),odds:[],latestOdds:[],
-       latestOddsAt:null,verdict:"PENDING",final:null,
+       firstOddsAt:null,latestOddsAt:null,verdict:"PENDING",final:null,
        resultSource:null,verifiedAt:null,lastResultCheckAt:null,checkReason:"WAITING_FOR_END"};
      by.set(k,row);summary.discovered++;
      if(t<=now)summary.resultOnlyDiscovered++;
@@ -61,10 +61,11 @@ export function collect(state,feed,now=Date.now(),observedAt=now){
    if(!odds.length)summary.noOdds++;
    if(row.pregameCapturedAt===null){
      row.pregameCapturedAt=observedAt;
-     row.odds=odds;row.latestOdds=odds;row.latestOddsAt=observedAt;
+     row.odds=odds;row.firstOddsAt=odds.length?observedAt:null;
+     row.latestOdds=odds;row.latestOddsAt=odds.length?observedAt:null;
      summary.new++;summary.pregameCaptured++;
    }else if(odds.length&&observedAt>Number(row.latestOddsAt??0)){
-     if(!row.odds.length)row.odds=odds;
+     if(!row.odds.length){row.odds=odds;row.firstOddsAt=observedAt;}
      row.latestOdds=odds;row.latestOddsAt=observedAt;
    }
  }
@@ -72,7 +73,7 @@ export function collect(state,feed,now=Date.now(),observedAt=now){
  const records=[...by.values()].filter(r=>r.startMs>now-120*D)
    .sort((a,b)=>b.startMs-a.startMs||a.key.localeCompare(b.key)).slice(0,4000);
  return {state:{...state,schema:SCHEMA,updatedAt:now,lastFeedAt:observedAt,
-   lastFeedOk:true,lastFeedError:null,records},summary};
+   lastFeedOk:true,lastFeedError:null,lastCaptureSummary:summary,records},summary};
 }
 export function settlement(state,tracker=[],now=Date.now()){
  const rows=(state.records||[]).map(r=>({...r}));
@@ -128,7 +129,8 @@ export function projection(state,now=Date.now()){
    .sort((a,b)=>b.startMs-a.startMs).slice(0,150);
  const all=state.records||[];
  return {schema:"wisetoto-collect-first-public-v1",generatedAt:new Date(now).toISOString(),
-   source:{lastFeedAt:state?.lastFeedAt??null,ok:state?.lastFeedOk===true,error:state?.lastFeedError??null},
+   source:{lastFeedAt:state?.lastFeedAt??null,ok:state?.lastFeedOk===true,error:state?.lastFeedError??null,
+     lastCaptureSummary:state?.lastCaptureSummary??null},
    counts:{collected:all.length,verified:all.filter(x=>x.verdict==="VERIFIED").length,
      pending:all.filter(x=>x.verdict==="PENDING").length,
      pregameCaptured:all.filter(x=>Number.isFinite(x.pregameCapturedAt)).length,
