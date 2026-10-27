@@ -17,7 +17,11 @@ try{
  const wrapper=JSON.parse(await fs.readFile(dir+"/betman-feed.json","utf8"));
  const data=collect(state,feed,now,wrapper.fetchedAt);state=data.state;fresh=true;
  console.log("COLLECT_FIRST "+JSON.stringify(data.summary));
-}catch(e){console.error("COLLECT_FIRST_SOURCE_WAIT "+String(e))}
+}catch(e){
+ // Preserve the prior ledger; expose outage without claiming fresh coverage.
+ state={...state,lastFeedOk:false,lastFeedError:String(e).slice(0,160)};
+ console.error("COLLECT_FIRST_SOURCE_WAIT "+String(e));
+}
 let tracker={localStorage:{}};
 try{tracker=JSON.parse(await fs.readFile(STATE_FILE,"utf8"))}catch{}
 let verified=settlement(state,getRecords(tracker),now);state=verified.state;
