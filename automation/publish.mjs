@@ -73,9 +73,18 @@ export function summarizeRecord(r){
  };
 }
 export function publishProjection(state){
- const records=getRecords(state).map(summarizeRecord)
- .filter(r=>r.id&&r.startMs!==null&&r.capturedAt!==null)
- .sort((a,b)=>b.startMs-a.startMs||a.id.localeCompare(b.id));
+ const raw=getRecords(state);
+ const records=raw.map((source,index)=>{
+   const item=summarizeRecord(source);
+   // Never silently drop a frozen row just because one metadata field is broken.
+   // Synthetic display IDs mark an error; they do NOT modify the frozen source.
+   if(!item.id||item.startMs===null||item.capturedAt===null){
+     if(!item.id)item.id="MISSING_ID_RAW_INDEX_"+index;
+     item.status="REVIEW_REQUIRED";
+     item.warnings.push("보관된 원본 PRE 식별/시각 데이터 누락 — 원본 수정 금지·수동 점검");
+   }
+   return item;
+ }).sort((a,b)=>(b.startMs??0)-(a.startMs??0)||a.id.localeCompare(b.id));
  return {
   schema:"wisetoto-public-history-v1",
   publishedAt:new Date().toISOString(),
