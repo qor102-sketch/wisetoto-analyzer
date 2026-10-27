@@ -1,5 +1,5 @@
 import test from "node:test";import assert from "node:assert/strict";
-import {SCHEMA,collect,settlement,dueResults,mergeProviderFinal,projection} from "./collect-first.mjs";
+import {SCHEMA,collect,settlement,dueResults,mergeProviderFinal,projection,verifiedNaverFinal} from "./collect-first.mjs";
 const T=Date.parse("2026-10-27T00:00:00Z"),M=60000;
 const g=(sport="soccer",min=25,odds=true)=>({sport,league:"TEST",home:"Home FC",away:"Away FC",
  gameDateMs:T+min*M,fixtureId:3456,markets:odds?[{betName:"승패",selections:[{side:"win",odds:1.8}]}]:[]});
@@ -43,4 +43,32 @@ test("a provider rate-limit checkpoint respects a 60 minute backoff",()=>{
  const checked=mergeProviderFinal(st,st.records[0].key,{error:"HTTP 429"},now);
  assert.equal(dueResults(checked,now+10*M).length,0);
  assert.equal(dueResults(checked,now+61*M).length,1);
+});
+
+test("ID-less fixtures are not lost and Naver requires exact completed match",()=>{
+ const input={...g("soccer"),fixtureId:null};
+ const state=collect({schema:SCHEMA,records:[]},{ok:true,games:[input]},T).state;
+ assert.equal(state.records[0].fixtureId,null);
+ assert.equal(dueResults(state,T+3*3600000).length,1);
+ const invalid=[
+  {ok:true,completed:false,gameId:"a",finalScore:{home:2,away:1}},
+  {ok:true,completed:true,partial:true,gameId:"a",finalScore:{home:2,away:1}},
+  {ok:true,completed:true,gameId:null,finalScore:{home:2,away:1}},
+  {ok:true,completed:true,gameId:"a",finalScore:{home:null,away:1}}
+ ];
+ assert.ok(invalid.every(x=>verifiedNaverFinal(x).ok===false));
+ const final=verifiedNaverFinal({ok:true,completed:true,gameId:"20261027FOOTBALL",
+   finalScore:{home:2,away:1}});
+ const settled=mergeProviderFinal(state,state.records[0].key,final,T+3*3600000);
+ assert.equal(settled.records[0].verdict,"VERIFIED");
+});
+test("workflow persists the ledger before heavy PRE and gates prediction on verified outcomes",async()=>{
+ const {readFile}=await import("node:fs/promises");
+ const w=await readFile(new URL("../../.github/workflows/wisetoto-auto-analysis.yml",import.meta.url),"utf8");
+ const a=w.indexOf("Capture 30-minute fixtures and reconcile verified results without browser");
+ const b=w.indexOf("Run exact production model and verify results");
+ assert.ok(a>0&&b>a);
+ assert.match(w,/collect-first-state\.json\.gz/);
+ assert.match(w,/collect-first-public\.json/);
+ assert.match(w,/prediction_ready == 'true'/);
 });
