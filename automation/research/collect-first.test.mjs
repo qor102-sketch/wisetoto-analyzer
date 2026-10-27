@@ -194,3 +194,18 @@ test("40 samples alone cannot automatically restart heavy PRE",async()=>{
  assert.match(w,/const ready=sampleReady&&restartApproved/);
  assert.match(w,/const browserNeeded=process\.env\.VERIFY_DUE==="true"/);
 });
+
+test("missing initial odds are not assigned a fake first-odds timestamp",()=>{
+ const noMarket=g("soccer",25,false),withOdds=g("soccer",25,true);
+ const first=collect({schema:SCHEMA,records:[]},{ok:true,games:[noMarket]},T);
+ assert.equal(first.state.records[0].pregameCapturedAt,T);
+ assert.equal(first.state.records[0].firstOddsAt,null);
+ assert.equal(first.state.records[0].latestOddsAt,null);
+ assert.equal(first.state.lastCaptureSummary.noOdds,1);
+ const second=collect(first.state,{ok:true,games:[withOdds]},T+10*M);
+ assert.equal(second.state.records[0].pregameCapturedAt,T);
+ assert.equal(second.state.records[0].firstOddsAt,T+10*M);
+ assert.equal(second.state.records[0].latestOddsAt,T+10*M);
+ assert.equal(second.state.records[0].odds.length,1);
+ assert.equal(projection(second.state,T+10*M).source.lastCaptureSummary.new,0);
+});
