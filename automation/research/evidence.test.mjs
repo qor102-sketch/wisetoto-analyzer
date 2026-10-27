@@ -89,7 +89,7 @@ test("research TOP1 only after league samples, strictly chronological walk-forwa
  assert.equal(observed.stage,"WATCH");
  const winningPrior=Array.from({length:100},(_,i)=>({
    id:"prior-"+i,sport:"축구",league:"test",startMs:T-(1000-i)*MIN,
-   truth:{winner:observed.top1.side,verifiedAt:T-(990-i)*MIN},
+   truth:{winner:observed.top1.side,verifiedAt:T-(995-i)*MIN},
    frozenCandidate:{...observed.top1,asOf:T-(1050-i)*MIN}
  }));
  const qualified=decideEvidence(current,winningPrior,now);
