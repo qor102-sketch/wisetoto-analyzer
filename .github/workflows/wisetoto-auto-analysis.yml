@@ -86,6 +86,13 @@ jobs:
             jq -r '.content' /tmp/wisetoto-evidence-ref.json | base64 -d > /tmp/wisetoto-evidence-state.json.gz
             gzip -dc /tmp/wisetoto-evidence-state.json.gz > automation-state/research-state.json
           fi
+      - name: Restore 30-minute collection ledger
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "/repos/$GITHUB_REPOSITORY/contents/collect-first-state.json.gz?ref=automation-data" > /tmp/collect-ledger-ref.json 2>/dev/null; then
+            jq -r '.content' /tmp/collect-ledger-ref.json | base64 -d | gzip -dc > automation-state/collect-first-state.json
+          fi
       - name: Due match and verification preflight
         id: due
         run: node automation/runner.mjs --preflight
@@ -117,6 +124,36 @@ jobs:
               gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$f" \
                 -f branch="automation-data" -f message="Disable Vercel deploys for data-only branch" \
                 -f content="$encoded" >/dev/null
+            fi
+          done
+      - name: Capture 30-minute fixtures and reconcile verified results without browser
+        if: always()
+        env:
+          WISETOTO_URL: https://wisetoto-analyzer.vercel.app
+        run: node automation/research/run-collect-first.mjs
+      - name: Persist collection-first ledger and public status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -s automation-state/collect-first-state.json ]; then exit 0; fi
+          gzip -cn automation-state/collect-first-state.json > /tmp/collect-first-state.json.gz
+          for remote_file in collect-first-state.json.gz collect-first-public.json; do
+            if [ "$remote_file" = "collect-first-state.json.gz" ]; then
+              file=/tmp/collect-first-state.json.gz
+            else
+              file=automation-state/collect-first-public.json
+            fi
+            content="$(base64 -w0 "$file")"
+            sha="$(gh api "/repos/$GITHUB_REPOSITORY/contents/$remote_file?ref=automation-data" --jq .sha 2>/dev/null || true)"
+            if [ -n "$sha" ]; then
+              gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$remote_file" \
+                -f branch="automation-data" -f message="Collect-first 30min fixtures and confirmed results" \
+                -f sha="$sha" -f content="$content" >/dev/null
+            else
+              gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$remote_file" \
+                -f branch="automation-data" -f message="Initialize collect-first ledger" \
+                -f content="$content" >/dev/null
             fi
           done
       - name: Collect longitudinal prekickoff evidence without Chromium
