@@ -20,6 +20,7 @@ export default function AutomationDashboard(){
  const [loading,setLoading]=useState(true);
  const [evidence,setEvidence]=useState<ResearchEvidence|null>(null);
  const [collection,setCollection]=useState<CollectedLedger|null>(null);
+ const [collectionError,setCollectionError]=useState("");
  const [error,setError]=useState("");
  const [filter,setFilter]=useState("all");
  const [sport,setSport]=useState("all");
@@ -28,9 +29,10 @@ export default function AutomationDashboard(){
  async function reload(){setLoading(true);setError("");try{const res=await fetch("/api/automation/results",{cache:"no-store"});const json=await res.json();if(!res.ok||!json.ok||!Array.isArray(json.data?.records))throw Error(json.error||"기록이 없습니다.");setData(json.data);}catch(e){setError(e instanceof Error?e.message:"데이터 연결 오류");}finally{setLoading(false);}}
  useEffect(()=>{void reload();},[]);
  useEffect(()=>{let alive=true;void fetch("/api/automation/collection",{cache:"no-store"})
-   .then(async r=>{if(!r.ok)throw Error("First collection pending");return r.json();})
-   .then(v=>{if(alive&&v?.ok)setCollection(v.data as CollectedLedger);})
-   .catch(()=>{});return ()=>{alive=false;};},[]);
+   .then(async r=>{const v=await r.json();if(!r.ok||!v?.ok)throw Error(v?.error||"수집 API 조회 실패");return v;})
+   .then(v=>{if(alive){setCollection(v.data as CollectedLedger);setCollectionError("");}})
+   .catch(e=>{if(alive)setCollectionError(e instanceof Error?e.message:"수집 API 연결 실패");});
+   return ()=>{alive=false;};},[]);
  useEffect(()=>{let alive=true;void fetch("/api/automation/research",{cache:"no-store"})
    .then(async r=>{if(!r.ok)throw Error("research archive not yet published");return r.json();})
    .then(json=>{if(alive&&json?.ok&&Array.isArray(json?.data?.records))setEvidence(json.data as ResearchEvidence);})
@@ -80,7 +82,7 @@ export default function AutomationDashboard(){
           <strong>{r.home} <em>vs</em> {r.away}</strong><small>{r.verdict==="VERIFIED"?"결과 확인 "+r.final?.homeScore+" : "+r.final?.awayScore:r.pregameCapturedAt===null?"경기 목록 등록 · 30분 전 수집 대기 또는 시간 경과 · "+(r.checkReason||"결과 조회 예정"):"30분 전 수집 완료 · 검증 대기 · "+(r.checkReason||"최종점수 조회 예정")}</small>
           {r.resultErrors?.length?<small>결과 확인 오류 이력 · 총 조회 {r.resultChecks??0}회 · 최근 {r.resultErrors[r.resultErrors.length-1].reasons.join(" / ")}</small>:null}
         </div>
-      </article>)}</div></>:<div className="auto-empty">신규 30분 전 수집 기록은 기능 승인 및 첫 GitHub 스캔 후 표시됩니다. 기존 PRE를 소급 생성하지 않습니다.</div>}
+      </article>)}</div></>:<div className="auto-empty">{collectionError?"수집 API 상태: "+collectionError:"신규 30분 전 수집 기록은 기능 승인 및 첫 GitHub 스캔 후 표시됩니다. 기존 PRE를 소급 생성하지 않습니다."}</div>}
    </section>
    <section className="auto-results" aria-label="경기 전 배당 축적 연구" style={{marginBottom:20}}>
     <div className="auto-section-title"><div>
