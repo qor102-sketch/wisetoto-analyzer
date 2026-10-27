@@ -79,9 +79,20 @@ export function mergeProviderFinal(state,fixtureKeyValue,payload,now=Date.now())
  }
  return {...state,updatedAt:now,records:rows};
 }
+export function verifiedNaverFinal(payload){
+ // Naver route returns only schedule-exact matched event rows; recent-only
+ // football responses are explicitly incomplete. Reject any ambiguous ones.
+ if(payload?.ok!==true||payload.completed!==true||payload.cancelled===true||
+    payload.partial===true||payload.recentOnly===true||!payload.gameId||
+    !payload.finalScore)return {ok:false,waitReason:"NAVER_FINAL_OR_ID_UNCONFIRMED"};
+ const home=payload.finalScore.home,away=payload.finalScore.away;
+ if(home===null||away===null||!Number.isFinite(Number(home))||!Number.isFinite(Number(away)))
+   return {ok:false,waitReason:"NAVER_SCORE_MISSING"};
+ return {ok:true,finalConfirmed:true,result:{homeScore:Number(home),awayScore:Number(away)}};
+}
 export function dueResults(state,now=Date.now(),limit=6){
  return (state.records||[]).filter(r=>r.verdict==="PENDING"&&
-   r.startMs<=now-2*60*M&&r.startMs>=now-14*D&&r.fixtureId!==null&&
+   r.startMs<=now-2*60*M&&r.startMs>=now-14*D&&
    (!r.lastResultCheckAt||now-r.lastResultCheckAt>=60*M))
    .sort((a,b)=>Number(a.lastResultCheckAt??0)-Number(b.lastResultCheckAt??0)||
      a.startMs-b.startMs).slice(0,limit);
