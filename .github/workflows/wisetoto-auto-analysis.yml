@@ -159,6 +159,9 @@ jobs:
       - name: Gate heavy prediction until collection/results training sample exists
         id: sample_gate
         if: always()
+        env:
+          PREGAME_DUE: ${{ steps.due.outputs.pregame_due }}
+          VERIFY_DUE: ${{ steps.due.outputs.verify_due }}
         run: |
           node --input-type=module -e '
             import fs from "node:fs";
@@ -166,7 +169,10 @@ jobs:
             try{rows=JSON.parse(fs.readFileSync("automation-state/collect-first-state.json","utf8")).records??[]}catch{}
             const verified=rows.filter(x=>x.verdict==="VERIFIED").length;
             const ready=verified>=40;
-            fs.appendFileSync(process.env.GITHUB_OUTPUT,"prediction_ready="+ready+"\n");
+            const browserNeeded=process.env.VERIFY_DUE==="true" ||
+              (ready&&process.env.PREGAME_DUE==="true");
+            fs.appendFileSync(process.env.GITHUB_OUTPUT,
+              "prediction_ready="+ready+"\\n"+"browser_needed="+browserNeeded+"\\n");
             console.log("COLLECT_FIRST_STAGE",JSON.stringify({verified,required:40,
               stage:ready?"PREDICT_AND_VALIDATE":"COLLECT_AND_VERIFY_ONLY"}));
           '
@@ -219,7 +225,7 @@ jobs:
               -f content="$encoded" >/dev/null
           fi
       - name: Install browser only when work is due
-        if: always() && steps.due.outputs.run_browser == 'true'
+        if: always() && steps.sample_gate.outputs.browser_needed == 'true'
         run: |
           npm install --no-save --no-audit --no-fund playwright@1.56.1
           npx playwright install chromium
@@ -237,11 +243,11 @@ jobs:
         run: |
           if [ -s automation-state/state.json ]; then node automation/runner.mjs --verify-only; fi
       - name: Generate public read-only dashboard projection
-        if: always() && steps.due.outputs.run_browser == 'true'
+        if: always() && steps.sample_gate.outputs.browser_needed == 'true'
         run: |
           if [ -s automation-state/state.json ] && [ -s automation-state/checkpoint-ready ]; then node automation/publish.mjs; fi
       - name: Publish site-readable history (no browser secrets)
-        if: always() && steps.due.outputs.run_browser == 'true'
+        if: always() && steps.sample_gate.outputs.browser_needed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -254,10 +260,10 @@ jobs:
             -f sha="$current_sha" \
             -f content="$encoded" > /dev/null
       - name: Summarize OOS report
-        if: steps.due.outputs.run_browser == 'true'
-        run: cat automation-state/report.md >> "$GITHUB_STEP_SUMMARY"
+        if: steps.sample_gate.outputs.browser_needed == 'true'
+        run: if [ -s automation-state/report.md ]; then cat automation-state/report.md >> "$GITHUB_STEP_SUMMARY"; fi
       - name: Open review issue for source/grade problems
-        if: steps.due.outputs.run_browser == 'true'
+        if: steps.sample_gate.outputs.browser_needed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -270,7 +276,7 @@ jobs:
             fi
           fi
       - name: Archive frozen tracker and OOS report
-        if: always() && steps.due.outputs.run_browser == 'true'
+        if: always() && steps.sample_gate.outputs.browser_needed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: wisetoto-auto-state
