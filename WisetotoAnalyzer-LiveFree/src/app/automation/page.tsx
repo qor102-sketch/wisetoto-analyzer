@@ -7,6 +7,8 @@ type ScanHealth={schema:string;scannedAt:string;expectedIntervalMinutes:number;s
 type EvidencePick={side:string;label:string;odds:number;marketProbability:number;openProbability:number;shift:number;marketHold:number;asOf:number};
 type EvidenceRow={id:string;sport:string;league:string;home:string;away:string;startMs:number;firstSeenAt:number;lastSeenAt:number;observations:number;stage:string;reason:string;top1:EvidencePick|null;calibration:{samples:number;qualified:boolean;probability?:number;conservativeEV?:number}|null};
 type ResearchEvidence={generatedAt:string;counts:{future:number;observed:number;researchTop1:number;insufficient:number};records:EvidenceRow[]};
+type CollectedRow={key:string;sport:string;league:string;home:string;away:string;startMs:number;firstSeenAt:number;seenCount:number;oddsCount:number;verdict:string;final:{homeScore:number;awayScore:number}|null;checkReason:string|null};
+type CollectedLedger={generatedAt:string;counts:{collected:number;verified:number;pending:number;missingFixtureId:number};records:CollectedRow[]};
 type History={scanHealth?:ScanHealth|null;schema:string;publishedAt:string;lastRunAt:number|null;source:string;counts:{total:number;pending:number;verified:number;review?:number;void:number;hit:number;miss:number;warnings:number;overdue?:number};records:Match[]};
 function date(ms:number|null|undefined){return typeof ms==="number"&&Number.isFinite(ms)?new Date(ms).toLocaleString("ko-KR",{timeZone:"Asia/Seoul",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}):"—";}
 function num(v:number|null|undefined,d=1){return typeof v==="number"&&Number.isFinite(v)?v.toFixed(d):"—";}
@@ -17,6 +19,7 @@ export default function AutomationDashboard(){
  const [data,setData]=useState<History|null>(null);
  const [loading,setLoading]=useState(true);
  const [evidence,setEvidence]=useState<ResearchEvidence|null>(null);
+ const [collection,setCollection]=useState<CollectedLedger|null>(null);
  const [error,setError]=useState("");
  const [filter,setFilter]=useState("all");
  const [sport,setSport]=useState("all");
@@ -24,6 +27,10 @@ export default function AutomationDashboard(){
  const [open,setOpen]=useState<string|null>(null);
  async function reload(){setLoading(true);setError("");try{const res=await fetch("/api/automation/results",{cache:"no-store"});const json=await res.json();if(!res.ok||!json.ok||!Array.isArray(json.data?.records))throw Error(json.error||"기록이 없습니다.");setData(json.data);}catch(e){setError(e instanceof Error?e.message:"데이터 연결 오류");}finally{setLoading(false);}}
  useEffect(()=>{void reload();},[]);
+ useEffect(()=>{let alive=true;void fetch("/api/automation/collection",{cache:"no-store"})
+   .then(async r=>{if(!r.ok)throw Error("First collection pending");return r.json();})
+   .then(v=>{if(alive&&v?.ok)setCollection(v.data as CollectedLedger);})
+   .catch(()=>{});return ()=>{alive=false;};},[]);
  useEffect(()=>{let alive=true;void fetch("/api/automation/research",{cache:"no-store"})
    .then(async r=>{if(!r.ok)throw Error("research archive not yet published");return r.json();})
    .then(json=>{if(alive&&json?.ok&&Array.isArray(json?.data?.records))setEvidence(json.data as ResearchEvidence);})
@@ -58,6 +65,17 @@ export default function AutomationDashboard(){
    <section className="auto-stats" aria-label="자동분석 요약">{[
     ["고정 PRE",data.counts.total,"최초 경기 전 예측"],["종료 검증",data.counts.verified,"점수 유효성 통과"],["검증 재검토",data.counts.review??0,"종목 규칙과 결과 불일치"],["TOP1 적중",data.counts.hit,"검증된 픽"],["TOP1 미적중",data.counts.miss,"원인 분석 대상"],["결과 확인 지연",data.counts.overdue??records.filter(r=>r.status==="PENDING"&&r.startMs<Date.now()-6*60*60_000).length,"시작 6시간 후에도 결과 미확인"],["검토 신호",data.counts.warnings,"수집 품질 확인"]
    ].map(([title,value,desc])=><div key={String(title)} className="auto-stat"><span>{title}</span><strong>{value}</strong><small>{desc}</small></div>)}</section>
+   <section className="auto-results" aria-label="경기 시작 30분 전 수집 및 종료 결과" style={{marginBottom:20}}>
+    <div className="auto-section-title"><div><h2>30분 전 경기 수집 → 최종 결과 장부</h2>
+      <p>예측과 별도 저장 · 경기 전 관측만 기록 · 공식 최종 결과 확인 전에는 PENDING 유지</p>
+    </div><strong>{collection?collection.counts.collected+"경기 수집":"수집 시작 대기"}</strong></div>
+    {collection?<><div className="auto-explainer">누적 수집 {collection.counts.collected} · 종료 검증 {collection.counts.verified} · 검증 대기 {collection.counts.pending} · 외부 경기 ID 부족 {collection.counts.missingFixtureId}</div>
+      <div className="auto-game-list">{collection.records.slice(0,20).map(r=><article className="auto-game" key={r.key} style={{padding:12}}>
+        <div className="auto-game-identity"><span className="auto-game-meta">{r.sport} · {r.league} · {date(r.startMs)} KST · 관측 {r.seenCount}회 · 배당 항목 {r.oddsCount}개</span>
+          <strong>{r.home} <em>vs</em> {r.away}</strong><small>{r.verdict==="VERIFIED"?"결과 확인 "+r.final?.homeScore+" : "+r.final?.awayScore:"검증 대기 · "+(r.checkReason||"최종점수 조회 대기")}</small>
+        </div>
+      </article>)}</div></>:<div className="auto-empty">신규 30분 전 수집 기록은 기능 승인 및 첫 GitHub 스캔 후 표시됩니다. 기존 PRE를 소급 생성하지 않습니다.</div>}
+   </section>
    <section className="auto-results" aria-label="경기 전 배당 축적 연구" style={{marginBottom:20}}>
     <div className="auto-section-title"><div>
       <h2>경기 전 축적 자료 · 실험 TOP1 연구</h2>
