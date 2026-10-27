@@ -64,14 +64,17 @@ test("mixed-success Actions batch must publish all already-frozen PRE even when 
  assert.equal(JSON.parse(state.localStorage[TRACKER_KEY]).length,31);
  assert.ok(result.records.every(r=>r.capturedAt<r.startMs));
 });
-test("failed browser scans still publish state checkpoints, but not missing state",async()=>{
+test("browser timeout must not block archived tracker publication",async()=>{
  const {readFile}=await import("node:fs/promises");
- const workflow=await readFile(new URL("../.github/workflows/wisetoto-auto-analysis.yml",import.meta.url),"utf8");
- assert.match(workflow,/- name: Generate public read-only dashboard projection\s+if: always\(\) && steps\.sample_gate\.outputs\.browser_needed == 'true'/);
- assert.match(workflow,/- name: Publish site-readable history \(no browser secrets\)\s+if: always\(\) && steps\.sample_gate\.outputs\.browser_needed == 'true'/);
- assert.match(workflow,/if \[ ! -s automation-state\/public-history\.json \] \|\| \[ ! -s automation-state\/checkpoint-ready \]; then exit 0; fi/);
+ const w=await readFile(new URL("../.github/workflows/wisetoto-auto-analysis.yml",import.meta.url),"utf8");
+ const gen=w.slice(w.indexOf("- name: Generate public read-only dashboard projection"),w.indexOf("- name: Publish site-readable history"));
+ const pub=w.slice(w.indexOf("- name: Publish site-readable history"),w.indexOf("- name: Summarize OOS report"));
+ assert.ok(gen.includes("if: always()"));
+ assert.ok(pub.includes("if: always()"));
+ assert.ok(pub.includes("PUBLIC_RECORD_REGRESSION"));
+ assert.ok(pub.includes("PUBLIC_LEDGER_RECONCILED"));
+ assert.ok(!pub.includes("checkpoint-ready"));
 });
-
 test("public output distinguishes a delayed result without fabricating final score",()=>{
  const now=Date.now(),r={id:"pending",sport:"축구",home:"A",away:"B",
    startMs:now-8*60*60_000,capturedAt:now-10*60*60_000,decision:"PASS",
@@ -92,7 +95,7 @@ test("Actions always reconciles results independently of PRE batch and publishes
  const page=await readFile(new URL("../WisetotoAnalyzer-LiveFree/src/app/page.tsx",import.meta.url),"utf8");
  assert.match(workflow,/name: Reconcile ended games independently of PRE batch outcome\s+if: always\(\) && steps\.due\.outputs\.verify_due == 'true'/);
  assert.match(workflow,/node automation\/runner\.mjs --verify-only/);
- assert.match(workflow,/if \[ ! -s automation-state\/public-history\.json \] \|\| \[ ! -s automation-state\/checkpoint-ready \]/);
+ assert.match(workflow,/PUBLIC_RECORD_REGRESSION/);
  assert.match(runner,/const verifyOnly=process\.argv\.includes\("--verify-only"\)/);
  assert.match(runner,/verificationTimedOut/);
  assert.match(page,/Fair queue: do not keep retrying the same failed first 10 records/);
