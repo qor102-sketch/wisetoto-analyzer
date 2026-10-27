@@ -2,7 +2,7 @@
 import fs from "node:fs/promises";
 import {loadFeed} from "../feed.mjs";
 import {getRecords,STATE_FILE} from "../logic.mjs";
-import {SCHEMA,collect,settlement,dueResults,mergeProviderFinal,projection} from "./collect-first.mjs";
+import {SCHEMA,collect,settlement,dueResults,mergeProviderFinal,projection,verifiedNaverFinal} from "./collect-first.mjs";
 const dir="automation-state",file=dir+"/collect-first-state.json";
 await fs.mkdir(dir,{recursive:true});
 let state;
@@ -25,9 +25,20 @@ console.log("COLLECT_FIRST_TRACKER_VERIFIED "+verified.settled);
 const base=(process.env.WISETOTO_URL||"https://wisetoto-analyzer.vercel.app").replace(/\/+$/,"");
 for(const r of dueResults(state,now,6)){
  try{
-   const response=await fetch(base+"/api/fixture/result?id="+r.fixtureId+"&sport="+encodeURIComponent(r.sport),
-     {signal:AbortSignal.timeout(12000),cache:"no-store"});
-   const payload=await response.json();
+   let url;
+   if(r.fixtureId!==null){
+     url=base+"/api/fixture/result?id="+r.fixtureId+"&sport="+encodeURIComponent(r.sport);
+   }else if(["축구","농구","야구"].includes(r.sport)){
+     const q=new URLSearchParams({sport:r.sport,league:r.league,home:r.home,
+       away:r.away,date:new Date(r.startMs).toISOString()});
+     url=base+"/api/naver/lineup?"+q.toString();
+   }else{
+     state=mergeProviderFinal(state,r.key,{ok:false,waitReason:"NO_FINAL_PROVIDER_FOR_SPORT"},Date.now());
+     continue;
+   }
+   const response=await fetch(url,{signal:AbortSignal.timeout(16000),cache:"no-store"});
+   const json=await response.json();
+   const payload=r.fixtureId===null?verifiedNaverFinal(json):json;
    state=mergeProviderFinal(state,r.key,payload,Date.now());
    if(response.status===429){console.error("RESULT_SOURCE_LIMIT_429");break;}
  }catch(e){
