@@ -37,6 +37,7 @@ async function requestFinal(url){
 }
 for(const r of dueResults(state,now,6)){
  let confirmed=null,reasons=[];
+ if(sportsApiLimited&&r.fixtureId!==null)reasons.push("SPORTSAPI_RATE_LIMIT");
  // A provider ID from the Betman row may give an exact match. When that
  // endpoint fails, a separately matched Naver result can still rescue it.
  if(r.fixtureId!==null&&!sportsApiLimited){
@@ -60,11 +61,11 @@ for(const r of dueResults(state,now,6)){
    }catch(e){reasons.push("NAVER_NETWORK:"+String(e).slice(0,65))}
  }
  if(!confirmed){
-   if(sportsApiLimited&&r.fixtureId!==null)reasons.push("SPORTSAPI_RATE_LIMIT");
    if(r.fixtureId===null&&!supportedNaver.has(r.sport))reasons.push("NO_FINAL_PROVIDER_FOR_SPORT");
  }
- state=mergeProviderFinal(state,r.key,confirmed??{
-   ok:false,waitReason:reasons.join(" | ").slice(0,180)||"SOURCE_NOT_VERIFIED"
+ state=mergeProviderFinal(state,r.key,{
+   ...(confirmed??{ok:false,waitReason:reasons.join(" | ").slice(0,180)||"SOURCE_NOT_VERIFIED"}),
+   providerErrors:reasons
  },Date.now());
 }
 await fs.writeFile(file,JSON.stringify(state)+"\n");
