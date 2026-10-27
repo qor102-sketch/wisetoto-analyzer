@@ -158,8 +158,14 @@ jobs:
         env:
           WISETOTO_URL: https://wisetoto-analyzer.vercel.app
         run: node automation/research/run-collect-first.mjs
-      - name: Persist collection-first ledger and public status
+      - name: Archive old fixtures before trimming active ledger
+        id: collection_archive
         if: always() && steps.ledger_restore.outcome == 'success' && steps.ledger_capture.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node automation/research/archive-collection.mjs
+      - name: Persist collection-first ledger and public status
+        if: always() && steps.ledger_restore.outcome == 'success' && steps.ledger_capture.outcome == 'success' && steps.collection_archive.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
