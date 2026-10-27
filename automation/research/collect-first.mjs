@@ -21,9 +21,12 @@ export function collect(state,feed,now=Date.now(),observedAt=now){
  if(!feed?.ok||!Array.isArray(feed.games)||!Number.isFinite(observedAt)||observedAt>now||
    now-observedAt>5*M)throw Error("fresh Betman feed required");
  const by=new Map((state?.records||[]).map(r=>[r.key,{...r}]));
+ const sinceLastScan=Number.isFinite(state?.lastFeedAt)?observedAt-state.lastFeedAt:null;
  const summary={listed:feed.games.length,window:0,new:0,revisited:0,
    discovered:0,resultOnlyDiscovered:0,pregameCaptured:0,
-   missedWindow:0,missingIdentity:0,noOdds:0};
+   missedWindow:0,missingIdentity:0,noOdds:0,watchlistMissing:0,
+   sinceLastScanMs:sinceLastScan,delayedScan:sinceLastScan!==null&&sinceLastScan>20*M};
+ const listedKeys=new Set();
  for(const game of feed.games){
    const k=fixtureKey(game),t=Number(game.gameDateMs??Date.parse(game.gameDate));
    if(!k){summary.missingIdentity++;continue;}
@@ -31,6 +34,7 @@ export function collect(state,feed,now=Date.now(),observedAt=now){
    // This is NOT a frozen pregame capture and MUST NOT train the predictor.
    // Also retain recently listed matches found after kickoff, tagged result-only.
    if(t>now+7*D||t<now-14*D)continue;
+   listedKeys.add(k);
    const isPregame=now<t&&t-now<=30*M&&observedAt<t&&t-observedAt<=30*M;
    if(isPregame)summary.window++;
    let row=by.get(k);
@@ -70,6 +74,22 @@ export function collect(state,feed,now=Date.now(),observedAt=now){
    }
  }
  // Important: older pending results are retained long enough for retries.
+ // Previously discovered fixtures can disappear from Betman just when the
+ // 30-minute real-odds capture is due. Preserve a visible incident instead of
+ // manufacturing odds or silently assuming the match was still offered.
+ for(const r of by.values()){
+   if(r.startMs>now&&r.startMs-now<=30*M&&!listedKeys.has(r.key)&&
+       r.pregameCapturedAt===null){
+     summary.watchlistMissing++;
+     r.captureIssue="BETMAN_WATCHLIST_DISAPPEARED_IN_CAPTURE_WINDOW";
+     if(!r.firstMissingAt)r.firstMissingAt=observedAt;
+   }
+   if(r.startMs<=now&&r.pregameCapturedAt===null&&!r.missedWindowAt&&
+       r.startMs>=now-14*D){
+     r.missedWindowAt=now;
+     r.captureIssue=r.captureIssue??"NO_VERIFIED_FEED_DURING_CAPTURE_WINDOW";
+   }
+ }
  // Do not truncate here. Archive export must persist expired rows FIRST.
  // The workflow archives, verifies and then removes old rows from the active ledger.
  const records=[...by.values()]
