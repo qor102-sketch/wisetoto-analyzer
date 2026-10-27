@@ -81,23 +81,27 @@ test("fixture identity is stable across annotations but never team/time swaps",(
  assert.notEqual(normalized,fixtureId({...game,gameDateMs:game.gameDateMs+MIN}));
 });
 
-test("only prior verified research wins can qualify conservative experimental TOP1",()=>{
+test("research TOP1 only after league samples, strictly chronological walk-forward improvement and positive EV",()=>{
  const kickoff=T+300*MIN,now=T+70*MIN;
  const initial=ingestEvidence(init,feed([betman("soccer",kickoff)]),T).state;
  const later=ingestEvidence(initial,feed([betman("soccer",kickoff,[1.73,3.1,4.2])]),T+35*MIN).state;
  const current=later.fixtures[0],observed=decideEvidence(current,[],now);
  assert.equal(observed.stage,"WATCH");
- const winningPrior=Array.from({length:40},(_,i)=>({
-   id:"prior-"+i,sport:"축구",startMs:T-(300+i)*MIN,
-   truth:{winner:observed.top1.side,verifiedAt:T-(260+i)*MIN},
-   frozenCandidate:{...observed.top1,asOf:T-(350+i)*MIN}
+ const winningPrior=Array.from({length:100},(_,i)=>({
+   id:"prior-"+i,sport:"축구",league:"test",startMs:T-(1000-i)*MIN,
+   truth:{winner:observed.top1.side,verifiedAt:T-(990-i)*MIN},
+   frozenCandidate:{...observed.top1,asOf:T-(1050-i)*MIN}
  }));
  const qualified=decideEvidence(current,winningPrior,now);
- assert.equal(qualified.stage,"RESEARCH_TOP1");
- assert.ok(qualified.calibration.samples>=40&&qualified.calibration.conservativeEV>0.03);
- const noLookahead=winningPrior.map(x=>({...x,truth:{...x.truth,verifiedAt:now+MIN}}));
- assert.equal(decideEvidence(current,noLookahead,now).stage,"WATCH");
- assert.equal(decideEvidence(current,winningPrior.slice(0,39),now).stage,"WATCH");
+ assert.equal(qualified.stage,"RESEARCH_TOP1",JSON.stringify(qualified.calibration));
+ assert.ok(qualified.calibration.samples>=50&&qualified.calibration.sportSamples>=80);
+ assert.ok(qualified.calibration.backtest.samples>=20);
+ assert.ok(qualified.calibration.backtest.improved);
+ assert.ok(qualified.calibration.conservativeEV>0.03);
+ assert.equal(decideEvidence(current,winningPrior.map(f=>({...f,league:"unrelated"})),now).stage,"WATCH");
+ assert.equal(decideEvidence(current,winningPrior.slice(0,49),now).stage,"WATCH");
+ const futureVerified=winningPrior.map(x=>({...x,truth:{...x.truth,verifiedAt:now+MIN}}));
+ assert.equal(decideEvidence(current,futureVerified,now).stage,"WATCH");
 });
 test("a delayed cached prekickoff feed cannot create research after the wall-clock cutoff",()=>{
  const kickoff=T+40*MIN,g=betman("soccer",kickoff);
