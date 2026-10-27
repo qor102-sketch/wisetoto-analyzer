@@ -59,7 +59,7 @@ export async function rotateArchive({state,now=Date.now(),getRemote,putRemote}){
  }
  const old=state.archiveCounts??Object.fromEntries(fields.map(k=>[k,0]));
  const delta=countRows(state.records.filter(r=>r.startMs<=now-ACTIVE_DAYS*DAY));
- const archiveCounts=Object.fromEntries(fields.map(k=>[k=>(old[k]??0)+delta[k]]));
+ const archiveCounts=Object.fromEntries(fields.map(k=>[k,(old[k]??0)+delta[k]]));
  return {state:{...state,records:active,archiveCounts,archiveUpdatedAt:now},moved,shards:groups.size};
 }
 function remoteApi({repo,branch,token,fetchFn=fetch}){
