@@ -56,7 +56,7 @@ test("daily research TOP1 is selected by pregame market shift, never the postmat
 test("unverified future outcomes and quotes after kickoff cannot improve pilot estimates",()=>{
  const valid=fx(1),unverified=fx(2,{verified:false}),late=fx(3,{asOf:S+4*DAY+HOUR});
  const future=fx(4,{verified:true,kickoff:S+27*DAY,truth:"win"});
- const report=buildPilotReport({pilot:{startedAt:S},fixtures:[valid,unverified,late,future]},S+2*DAY);
+ const report=buildPilotReport({pilot:{startedAt:S},fixtures:[valid,unverified,late,future]},S+2*DAY+3*HOUR);
  assert.equal(report.counts.verified,1);
  assert.equal(report.all.decisions,1);
  assert.equal(report.counts.pendingFinal,0);
