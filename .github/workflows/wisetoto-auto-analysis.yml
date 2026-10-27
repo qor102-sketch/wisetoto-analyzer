@@ -156,6 +156,20 @@ jobs:
                 -f content="$content" >/dev/null
             fi
           done
+      - name: Gate heavy prediction until collection/results training sample exists
+        id: sample_gate
+        if: always()
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            let rows=[];
+            try{rows=JSON.parse(fs.readFileSync("automation-state/collect-first-state.json","utf8")).records??[]}catch{}
+            const verified=rows.filter(x=>x.verdict==="VERIFIED").length;
+            const ready=verified>=40;
+            fs.appendFileSync(process.env.GITHUB_OUTPUT,"prediction_ready="+ready+"\n");
+            console.log("COLLECT_FIRST_STAGE",JSON.stringify({verified,required:40,
+              stage:ready?"PREDICT_AND_VALIDATE":"COLLECT_AND_VERIFY_ONLY"}));
+          '
       - name: Collect longitudinal prekickoff evidence without Chromium
         # Separate observational lane: starts even if a previous/main PRE failed.
         if: always()
@@ -210,7 +224,9 @@ jobs:
           npm install --no-save --no-audit --no-fund playwright@1.56.1
           npx playwright install chromium
       - name: Run exact production model and verify results
-        if: steps.due.outputs.pregame_due == 'true'
+        # Cold-start mode: collect genuine pregame fixtures and settle them
+        # before applying the expensive legacy predictor to new matches.
+        if: steps.due.outputs.pregame_due == 'true' && steps.sample_gate.outputs.prediction_ready == 'true'
         env:
           WISETOTO_URL: https://wisetoto-analyzer.vercel.app
         run: node automation/runner.mjs
