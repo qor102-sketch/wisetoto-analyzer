@@ -39,6 +39,8 @@ export async function writePilotReview({root="automation-state/",now=Date.now()}
       "- 관측: "+p.counts.listed+"건; 경기 전 잠금 후보: "+p.counts.pregameCandidates+
          "건; 결과 확인: "+p.counts.verified+"건; 검증 대기: "+p.counts.pendingFinal+"건",
       "- 전체 그림자 후보: "+line(p.all),
+      "- 전략 A (이동 2%p 이상): "+line(p.strategies.baseShift2pct),
+      "- 전략 B (이동 4%p 이상): "+line(p.strategies.strongShift4pct),
       "- 하루 1건 사전 선정 TOP1: "+line(p.shadowTop1),
       "- 시간순 OOS: "+p.walkForward.decisions+"건; 모델 Brier "+
          (p.walkForward.modelBrier??"미산정")+" vs 시장 "+
