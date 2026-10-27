@@ -3,7 +3,7 @@
 import {sportName} from "../logic.mjs";
 export const SCHEMA="wisetoto-market-evidence-v1";
 const MINUTE=60_000,HOUR=60*MINUTE,DAY=24*HOUR;
-const MAX_FIXTURES=800,MAX_SNAPSHOTS=24;
+const MAX_SNAPSHOTS=24;
 const clean=v=>String(v??"").normalize("NFKC").toLowerCase().replace(/\([^)]*\)|\[[^\]]*\]/g,"").replace(/\b(fc|cf|bc|bk|sc|club)\b/g,"").replace(/[^a-z0-9가-힣]/g,"");
 const okayTeams=g=>[g.home,g.away].every(t=>typeof t==="string"&&t.trim()&&!/^(미정|tbd|tba|unknown|-)$/i.test(t.trim()));
 export function fixtureId(g){
@@ -175,8 +175,10 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now)
    // Never create or re-select historic TOP1 using known final outcome.
    if(!frozen)f.truth={...f.truth,untrained:true};
  }
- let fixtures=[...byId.values()].filter(f=>f.startMs>now-120*DAY&&f.startMs<now+7*DAY)
-   .sort((a,b)=>b.startMs-a.startMs||a.id.localeCompare(b.id)).slice(0,MAX_FIXTURES);
+ // Never silently evict older study fixtures. The workflow archives them
+ // durably, before the rolling research file is compacted.
+ let fixtures=[...byId.values()].filter(f=>f.startMs<now+7*DAY)
+   .sort((a,b)=>b.startMs-a.startMs||a.id.localeCompare(b.id));
  for(const f of fixtures){
    if(!f.frozenCandidate&&f.startMs<=now){
      // No after-kickoff selection, including after a missed runner scan.
