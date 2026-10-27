@@ -109,3 +109,50 @@ test("repeat reads of the same feed timestamp cannot inflate independent observa
  assert.equal(duplicated.state.records[0].seenCount,1);
  assert.equal(duplicated.state.records[0].firstSeenAt,T);
 });
+
+test("real Node collector preserves a past fixture and settles Naver after SportsAPI HTTP429",async()=>{
+ const {mkdtemp,mkdir,writeFile,readFile,rm}=await import("node:fs/promises");
+ const {tmpdir}=await import("node:os");
+ const {join}=await import("node:path");
+ const {spawn}=await import("node:child_process");
+ const {createServer}=await import("node:http");
+ const root=await mkdtemp(join(tmpdir(),"wisetoto-collectfirst-"));
+ const now=Date.now(),game={sport:"soccer",league:"TEST",home:"Home FC",away:"Away FC",
+   gameDateMs:now-3*3600000,fixtureId:1357,markets:[]};
+ const calls=[];
+ const srv=createServer((req,res)=>{
+   calls.push(req.url);
+   res.setHeader("Content-Type","application/json");
+   if(req.url.startsWith("/api/fixture/result")){
+     res.statusCode=429;res.end(JSON.stringify({ok:false,error:"HTTP 429"}));
+   }else if(req.url.startsWith("/api/naver/lineup")){
+     res.end(JSON.stringify({ok:true,completed:true,gameId:"unique-fixture",
+       finalScore:{home:2,away:1}}));
+   }else{res.statusCode=404;res.end(JSON.stringify({ok:false}));}
+ });
+ try{
+  await mkdir(join(root,"automation-state"));
+  await writeFile(join(root,"automation-state/betman-feed.json"),
+    JSON.stringify({fetchedAt:now,payload:{ok:true,games:[game]}}));
+  await new Promise(resolve=>srv.listen(0,"127.0.0.1",resolve));
+  const port=srv.address().port;
+  const result=await new Promise((resolve,reject)=>{
+   const child=spawn(process.execPath,[new URL("./run-collect-first.mjs",import.meta.url).pathname],{
+     cwd:root,env:{...process.env,WISETOTO_URL:"http://127.0.0.1:"+port}});
+   let stdout="",stderr="";
+   child.stdout.on("data",d=>stdout+=d);child.stderr.on("data",d=>stderr+=d);
+   child.on("error",reject);
+   child.on("close",code=>resolve({code,stdout,stderr}));
+  });
+  assert.equal(result.code,0,result.stderr);
+  assert.equal(calls.filter(x=>x.startsWith("/api/fixture/result")).length,1);
+  assert.equal(calls.filter(x=>x.startsWith("/api/naver/lineup")).length,1);
+  const state=JSON.parse(await readFile(join(root,"automation-state/collect-first-state.json"),"utf8"));
+  const publicData=JSON.parse(await readFile(join(root,"automation-state/collect-first-public.json"),"utf8"));
+  assert.equal(state.records[0].verdict,"VERIFIED");
+  assert.equal(state.records[0].resultSource,"NAVER");
+  assert.equal(state.records[0].pregameCapturedAt,null);
+  assert.equal(publicData.counts.verifiedWithPregame,0);
+  assert.equal(publicData.source.ok,true);
+ }finally{await new Promise(resolve=>srv.close(()=>resolve()));await rm(root,{recursive:true,force:true});}
+});
