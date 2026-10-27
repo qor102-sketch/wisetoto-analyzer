@@ -77,15 +77,39 @@ jobs:
             fi
           fi
       - name: Restore persistent pregame market evidence
-        # GitHub automation-data holds durable odds snapshots; no paid database.
+        id: evidence_restore
+        # A 28-day research clock must never restart after GitHub 429/5xx.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh api "/repos/$GITHUB_REPOSITORY/contents/research-state.json.gz?ref=automation-data" \
-              > /tmp/wisetoto-evidence-ref.json 2>/dev/null; then
-            jq -r '.content' /tmp/wisetoto-evidence-ref.json | base64 -d > /tmp/wisetoto-evidence-state.json.gz
-            gzip -dc /tmp/wisetoto-evidence-state.json.gz > automation-state/research-state.json
-          fi
+          set -euo pipefail
+          status="$(curl -sSL -w '%{http_code}' -o /tmp/evidence-ref.json \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/research-state.json.gz?ref=automation-data")"
+          case "$status" in
+            200)
+              jq -er '.content' /tmp/evidence-ref.json | base64 -d | gzip -dc > automation-state/research-state.json
+              node --input-type=module -e '
+                import fs from "node:fs";
+                const s=JSON.parse(fs.readFileSync("automation-state/research-state.json","utf8"));
+                if(s.schema!=="wisetoto-market-evidence-v1"||!Array.isArray(s.fixtures)||
+                  (s.pilot!==undefined&&s.pilot!==null&&
+                    (!Number.isFinite(s.pilot.startedAt)||s.pilot.startedAt<=0)))
+                  throw Error("Invalid research archive or fixed pilot start");
+              '
+              ;;
+            404)
+              if ! gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/automation-data" >/dev/null; then
+                echo "RESEARCH_ARCHIVE_BRANCH_UNAVAILABLE" >&2
+                exit 1
+              fi
+              echo "RESEARCH_FIRST_RUN: branch exists; archive absent"
+              ;;
+            *)
+              echo "RESEARCH_RESTORE_FAILED: HTTP $status — refusing to reset 28-day pilot" >&2
+              exit 1
+              ;;
+          esac
       - name: Restore 30-minute collection ledger
         id: ledger_restore
         env:
@@ -219,15 +243,16 @@ jobs:
               stage:ready?"PREDICT_AND_VALIDATE":"COLLECT_AND_VERIFY_ONLY",\n              excludeRetrospective:true}));
           '
       - name: Collect longitudinal prekickoff evidence without Chromium
-        # Separate observational lane: starts even if a previous/main PRE failed.
-        if: always()
+        # Independent of the browser but never start from failed archive restore.
+        if: always() && steps.evidence_restore.outcome == 'success' && steps.ledger_restore.outcome == 'success'
         run: node automation/research/run.mjs
       - name: Evaluate weekly 28-day pilot, including feed outage days
-        if: always() && steps.ledger_restore.outcome == 'success'
+        id: pilot_review
+        if: always() && steps.evidence_restore.outcome == 'success' && steps.ledger_restore.outcome == 'success'
         run: node automation/research/run-pilot-review.mjs
       - name: Archive old study odds snapshots before rolling research file
         id: evidence_archive
-        if: always() && steps.ledger_restore.outcome == 'success'
+        if: always() && steps.evidence_restore.outcome == 'success' && steps.pilot_review.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
         run: node automation/research/archive-evidence.mjs
