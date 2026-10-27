@@ -34,11 +34,14 @@ export function collect(state,feed,now=Date.now(),observedAt=now){
    if(prior){prior.lastSeenAt=observedAt;prior.seenCount++;
      if(prior.fixtureId===null)prior.fixtureId=sourceId(game);
      if(prior.odds.length===0&&odds.length)prior.odds=odds;
+     if(odds.length&&(!prior.latestOddsAt||observedAt>prior.latestOddsAt)){
+       prior.latestOdds=odds;prior.latestOddsAt=observedAt;
+     }
      summary.revisited++;continue;}
    by.set(k,{key:k,sport:sportName(game.sport),league:String(game.league??""),
      home:String(game.home),away:String(game.away),startMs:t,
      firstSeenAt:observedAt,lastSeenAt:observedAt,seenCount:1,
-     fixtureId:sourceId(game),odds,verdict:"PENDING",final:null,
+     fixtureId:sourceId(game),odds,latestOdds:odds,latestOddsAt:observedAt,verdict:"PENDING",final:null,
      resultSource:null,verifiedAt:null,lastResultCheckAt:null,checkReason:"WAITING_FOR_END"});
    summary.new++;
  }
@@ -84,7 +87,7 @@ export function dueResults(state,now=Date.now(),limit=6){
      a.startMs-b.startMs).slice(0,limit);
 }
 export function projection(state,now=Date.now()){
- const records=(state.records||[]).map(({odds,...r})=>({...r,oddsCount:odds.length}))
+ const records=(state.records||[]).map(({odds,latestOdds,...r})=>({...r,oddsCount:odds.length}))
    .sort((a,b)=>b.startMs-a.startMs).slice(0,150);
  const all=state.records||[];
  return {schema:"wisetoto-collect-first-public-v1",generatedAt:new Date(now).toISOString(),
