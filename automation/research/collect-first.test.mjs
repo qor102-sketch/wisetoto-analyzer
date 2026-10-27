@@ -151,6 +151,8 @@ test("real Node collector preserves a past fixture and settles Naver after Sport
   const publicData=JSON.parse(await readFile(join(root,"automation-state/collect-first-public.json"),"utf8"));
   assert.equal(state.records[0].verdict,"VERIFIED");
   assert.equal(state.records[0].resultSource,"NAVER");
+  assert.equal(state.records[0].resultChecks,1);
+  assert.match(state.records[0].resultErrors[0].reasons.join(" "),/429/);
   assert.equal(state.records[0].pregameCapturedAt,null);
   assert.equal(publicData.counts.verifiedWithPregame,0);
   assert.equal(publicData.source.ok,true);
