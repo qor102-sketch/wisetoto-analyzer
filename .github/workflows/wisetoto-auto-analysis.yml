@@ -190,18 +190,23 @@ jobs:
         env:
           PREGAME_DUE: ${{ steps.due.outputs.pregame_due }}
           VERIFY_DUE: ${{ steps.due.outputs.verify_due }}
+          PREDICTION_RESTART_APPROVED: ${{ vars.WISETOTO_PREDICTION_RESTART_APPROVED == 'true' }}
         run: |
           node --input-type=module -e '
             import fs from "node:fs";
             let rows=[];
             try{rows=JSON.parse(fs.readFileSync("automation-state/collect-first-state.json","utf8")).records??[]}catch{}
             const verified=rows.filter(x=>x.verdict==="VERIFIED" &&\n              Number.isFinite(x.pregameCapturedAt) && x.pregameCapturedAt<x.startMs).length;
-            const ready=verified>=40;
+            // The 40-sample floor is not approval of predictive validity.
+            // Only opt back in after a separate time-ordered research review.
+            const sampleReady=verified>=40;
+            const restartApproved=process.env.PREDICTION_RESTART_APPROVED==="true";
+            const ready=sampleReady&&restartApproved;
             const browserNeeded=process.env.VERIFY_DUE==="true" ||
               (ready&&process.env.PREGAME_DUE==="true");
             fs.appendFileSync(process.env.GITHUB_OUTPUT,
               "prediction_ready="+ready+"\n"+"browser_needed="+browserNeeded+"\n");
-            console.log("COLLECT_FIRST_STAGE",JSON.stringify({verified,required:40,
+            console.log("COLLECT_FIRST_STAGE",JSON.stringify({verified,required:40,sampleReady,restartApproved,
               stage:ready?"PREDICT_AND_VALIDATE":"COLLECT_AND_VERIFY_ONLY",\n              excludeRetrospective:true}));
           '
       - name: Collect longitudinal prekickoff evidence without Chromium
