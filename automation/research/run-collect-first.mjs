@@ -27,27 +27,45 @@ try{tracker=JSON.parse(await fs.readFile(STATE_FILE,"utf8"))}catch{}
 let verified=settlement(state,getRecords(tracker),now);state=verified.state;
 console.log("COLLECT_FIRST_TRACKER_VERIFIED "+verified.settled);
 const base=(process.env.WISETOTO_URL||"https://wisetoto-analyzer.vercel.app").replace(/\/+$/,"");
+let sportsApiLimited=false;
+const supportedNaver=new Set(["축구","농구","야구"]);
+async function requestFinal(url){
+ const response=await fetch(url,{signal:AbortSignal.timeout(16000),cache:"no-store"});
+ let payload;
+ try{payload=await response.json()}catch{payload={ok:false,error:"MALFORMED_PROVIDER_RESPONSE"}}
+ return {status:response.status,payload};
+}
 for(const r of dueResults(state,now,6)){
- try{
-   let url;
-   if(r.fixtureId!==null){
-     url=base+"/api/fixture/result?id="+r.fixtureId+"&sport="+encodeURIComponent(r.sport);
-   }else if(["축구","농구","야구"].includes(r.sport)){
-     const q=new URLSearchParams({sport:r.sport,league:r.league,home:r.home,
-       away:r.away,date:new Date(r.startMs).toISOString()});
-     url=base+"/api/naver/lineup?"+q.toString();
-   }else{
-     state=mergeProviderFinal(state,r.key,{ok:false,waitReason:"NO_FINAL_PROVIDER_FOR_SPORT"},Date.now());
-     continue;
-   }
-   const response=await fetch(url,{signal:AbortSignal.timeout(16000),cache:"no-store"});
-   const json=await response.json();
-   const payload=r.fixtureId===null?verifiedNaverFinal(json):json;
-   state=mergeProviderFinal(state,r.key,payload,Date.now());
-   if(response.status===429){console.error("RESULT_SOURCE_LIMIT_429");break;}
- }catch(e){
-   state=mergeProviderFinal(state,r.key,{ok:false,error:String(e)},Date.now());
+ let confirmed=null,reasons=[];
+ // A provider ID from the Betman row may give an exact match. When that
+ // endpoint fails, a separately matched Naver result can still rescue it.
+ if(r.fixtureId!==null&&!sportsApiLimited){
+   try{
+     const p=await requestFinal(base+"/api/fixture/result?id="+r.fixtureId+
+       "&sport="+encodeURIComponent(r.sport));
+     if(p.status===429)sportsApiLimited=true;
+     if(p.payload?.ok===true&&p.payload.finalConfirmed===true&&p.payload.result)
+       confirmed={...p.payload,source:"SPORTSAPI"};
+     else reasons.push("SPORTSAPI_HTTP_"+p.status+":"+String(p.payload?.waitReason??p.payload?.error??"UNCONFIRMED").slice(0,65));
+   }catch(e){reasons.push("SPORTSAPI_NETWORK:"+String(e).slice(0,65))}
  }
+ if(!confirmed&&supportedNaver.has(r.sport)){
+   try{
+     const params=new URLSearchParams({sport:r.sport,league:r.league,home:r.home,
+       away:r.away,date:new Date(r.startMs).toISOString()});
+     const response=await requestFinal(base+"/api/naver/lineup?"+params.toString());
+     const candidate=verifiedNaverFinal(response.payload);
+     if(candidate.ok)confirmed={...candidate,source:"NAVER"};
+     else reasons.push("NAVER_HTTP_"+response.status+":"+String(candidate.waitReason).slice(0,65));
+   }catch(e){reasons.push("NAVER_NETWORK:"+String(e).slice(0,65))}
+ }
+ if(!confirmed){
+   if(sportsApiLimited&&r.fixtureId!==null)reasons.push("SPORTSAPI_RATE_LIMIT");
+   if(r.fixtureId===null&&!supportedNaver.has(r.sport))reasons.push("NO_FINAL_PROVIDER_FOR_SPORT");
+ }
+ state=mergeProviderFinal(state,r.key,confirmed??{
+   ok:false,waitReason:reasons.join(" | ").slice(0,180)||"SOURCE_NOT_VERIFIED"
+ },Date.now());
 }
 await fs.writeFile(file,JSON.stringify(state)+"\n");
 await fs.writeFile(dir+"/collect-first-public.json",JSON.stringify(projection(state,Date.now()))+"\n");
