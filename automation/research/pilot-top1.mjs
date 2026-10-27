@@ -51,6 +51,10 @@ export function buildPilotReport(state,now=Date.now()){
  const pending=frozen.filter(f=>f.startMs<=now&&
   (!verified(f)||f.truth.verifiedAt>now));
  const allMetric=evaluateRows(confirmed);
+ // Prespecified shadow variant for a later version proposal; do not optimize
+ // thresholds on the same 28-day data and then claim an independent backtest.
+ const strongShift=evaluateRows(confirmed.filter(f=>f.frozenCandidate.shift>=0.04));
+ const strategies={baseShift2pct:allMetric,strongShift4pct:strongShift};
  const bySport=Object.fromEntries(SPORTS.map(s=>[s,evaluateRows(confirmed.filter(f=>f.sport===s))]));
  const weeks=Array.from({length:4},(_,week)=>{
   const begin=startedAt+week*7*DAY,end=begin+7*DAY;
@@ -105,6 +109,11 @@ export function buildPilotReport(state,now=Date.now()){
   proposals.push("시장확률 대비 개선 입증 실패: 확률 보정 강도 변경안을 별도 그림자 테스트");
  else
   proposals.push("시간순 보정 개선 발견: 다른 기간의 그림자 테스트를 거쳐 연구 모델만 별도 버전으로 검토");
+ if(strongShift.decisions>=5&&allMetric.decisions>=10&&
+    strongShift.marketBrier!==null&&allMetric.marketBrier!==null&&
+    strongShift.marketBrier+0.01<allMetric.marketBrier)
+  proposals.push("4%p 이상 강한 시장 이동 전략은 비교 실험 제안 가능; 이 28일 표본만으로 확정하거나 소급 재선정하지 말 것");
+ proposals.push("다음 4주는 기존 2%p 전략과 시험 후보를 병렬 그림자 운영하여 별도 기간에서 검증");
  proposals.push("기존 frozen PRE/공식 TOP1 절대 수정 금지; 변경안은 별도 테스트·PR 검토");
  const grade=allMetric.decisions>=10&&walkForward.improved&&shadowMetric.decisions>=5
    ?"PROMISING_RESEARCH":"EXPLORATORY_ONLY";
@@ -112,7 +121,7 @@ export function buildPilotReport(state,now=Date.now()){
   startedAt,endsAt,completedDays,durationDays:PILOT_DAYS,
   counts:{listed:rows.length,pregameCandidates:frozen.length,verified:confirmed.length,
     pendingFinal:pending.length,shadowDays:shadow.length},
-  bySport,weeks,all:allMetric,shadowTop1:shadowMetric,shadowHistory:shadow.slice(-28),
+  bySport,weeks,all:allMetric,strategies,shadowTop1:shadowMetric,shadowHistory:shadow.slice(-28),
   walkForward,grade,proposals,reportUpdatedAt:now,
   note:complete?"28일 코호트 연구 분석. 표본이 작으면 결론과 추천이 아닌 탐색 신호로만 해석.":
    "일자별 그림자 TOP1은 경기 시작 전 시점으로만 선정하며 결과를 뒤늦게 선택에 반영하지 않음."};
