@@ -95,6 +95,12 @@ export function mergeProviderFinal(state,fixtureKeyValue,payload,now=Date.now())
  const rows=(state.records||[]).map(r=>({...r}));const r=rows.find(x=>x.key===fixtureKeyValue);
  if(!r||r.verdict!=="PENDING")return state;
  r.lastResultCheckAt=now;
+ r.resultChecks=(Number(r.resultChecks)||0)+1;
+ // Keep failed source evidence even if another provider later confirms FINAL.
+ const issues=Array.isArray(payload?.providerErrors)?payload.providerErrors
+   .map(x=>String(x).slice(0,180)).slice(0,6):[];
+ if(issues.length)r.resultErrors=[...(Array.isArray(r.resultErrors)?r.resultErrors:[]),
+   {at:now,reasons:issues}].slice(-12);
  if(payload?.ok!==true||payload.finalConfirmed!==true||!payload.result){
    r.checkReason=String(payload?.waitReason??payload?.error??"UNCONFIRMED_FINAL").slice(0,180);
  }else if(!scorePlausibility(r.sport,payload.result.homeScore,payload.result.awayScore).ok){
