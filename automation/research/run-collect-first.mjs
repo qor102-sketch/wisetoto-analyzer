@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import {loadFeed} from "../feed.mjs";
 import {getRecords,STATE_FILE} from "../logic.mjs";
 import {SCHEMA,collect,settlement,dueResults,mergeProviderFinal,projection,verifiedNaverFinal} from "./collect-first.mjs";
+import {lookupVolleyballFinal} from "./volleyball-result.mjs";
 const dir="automation-state",file=dir+"/collect-first-state.json";
 await fs.mkdir(dir,{recursive:true});
 let state;
@@ -60,8 +61,12 @@ for(const r of dueResults(state,now,6)){
      else reasons.push("NAVER_HTTP_"+response.status+":"+String(candidate.waitReason).slice(0,65));
    }catch(e){reasons.push("NAVER_NETWORK:"+String(e).slice(0,65))}
  }
- if(!confirmed){
-   if(r.fixtureId===null&&!supportedNaver.has(r.sport))reasons.push("NO_FINAL_PROVIDER_FOR_SPORT");
+ if(!confirmed&&r.sport==="배구"){
+   // Independent schedule-exact volleyball lookup also works without SportsAPI IDs.
+   const final=await lookupVolleyballFinal(r);
+   if(final.ok)confirmed=final;
+   else reasons.push("NAVER_VOLLEYBALL:"+String(final.waitReason).slice(0,140));
+   if(Array.isArray(final.providerErrors))reasons.push(...final.providerErrors);
  }
  state=mergeProviderFinal(state,r.key,{
    ...(confirmed??{ok:false,waitReason:reasons.join(" | ").slice(0,180)||"SOURCE_NOT_VERIFIED"}),
