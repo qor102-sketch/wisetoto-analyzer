@@ -19,12 +19,15 @@ export function countRows(rows){
  }
  return x;
 }
-export function partitionForArchive(state,now=Date.now()){
+export function partitionForArchive(state,now=Date.now(),{activeDays=ACTIVE_DAYS,maxActive=Infinity}={}){
  if(!Array.isArray(state?.records))throw Error("ARCHIVE_INVALID_ACTIVE_LEDGER");
  const active=[],groups=new Map();
+ const newest=[...state.records].sort((a,b)=>b.startMs-a.startMs);
+ const keep=new Set(newest.filter(r=>r.startMs>now-activeDays*DAY)
+   .slice(0,maxActive).map(r=>r.key));
  for(const r of state.records){
   if(!r.key||!Number.isFinite(r.startMs))throw Error("ARCHIVE_INVALID_RECORD_IDENTITY");
-  if(r.startMs>now-ACTIVE_DAYS*DAY){active.push(r);continue;}
+  if(keep.has(r.key)){active.push(r);continue;}
   const month=new Date(r.startMs).toISOString().slice(0,7);
   const bucket=createHash("sha256").update(r.key).digest("hex")[0];
   const id=month+"-"+bucket;
@@ -46,8 +49,8 @@ export function mergeArchive(existing,rows,archiveId){
  }
  return {schema:ARCHIVE_SCHEMA,archiveId,records:[...by.values()].sort((a,b)=>a.key.localeCompare(b.key))};
 }
-export async function rotateArchive({state,now=Date.now(),getRemote,putRemote}){
- const {active,groups,moved}=partitionForArchive(state,now);
+export async function rotateArchive({state,now=Date.now(),activeDays=ACTIVE_DAYS,maxActive=Infinity,getRemote,putRemote}){
+ const {active,groups,moved}=partitionForArchive(state,now,{activeDays,maxActive});
  // Pure no-op when nothing is eligible.
  if(!moved)return {state,moved:0,shards:0};
  for(const [id,rows] of [...groups].sort((a,b)=>a[0].localeCompare(b[0]))){
@@ -58,13 +61,15 @@ export async function rotateArchive({state,now=Date.now(),getRemote,putRemote}){
    await putRemote(id,gz,remote?.sha??null);
  }
  const old=state.archiveCounts??Object.fromEntries(fields.map(k=>[k,0]));
- const delta=countRows(state.records.filter(r=>r.startMs<=now-ACTIVE_DAYS*DAY));
+ const kept=new Set(active.map(r=>r.key));
+ const delta=countRows(state.records.filter(r=>!kept.has(r.key)));
  const archiveCounts=Object.fromEntries(fields.map(k=>[k,(old[k]??0)+delta[k]]));
  return {state:{...state,records:active,archiveCounts,archiveUpdatedAt:now},moved,shards:groups.size};
 }
-function remoteApi({repo,branch,token,fetchFn=fetch}){
+export function remoteApi({repo,branch,token,prefix="collect-archive",fetchFn=fetch}){
  if(!/^[\w.-]+\/[\w.-]+$/.test(repo)||!token)throw Error("ARCHIVE_GITHUB_AUTH_REQUIRED");
- const base="https://api.github.com/repos/"+repo+"/contents/collect-archive/";
+ if(!/^[a-z0-9-]+$/.test(prefix))throw Error("ARCHIVE_PREFIX_INVALID");
+ const base="https://api.github.com/repos/"+repo+"/contents/"+prefix+"/";
  const headers={Authorization:"Bearer "+token,Accept:"application/vnd.github+json",
    "X-GitHub-Api-Version":"2022-11-28"};
  return {
