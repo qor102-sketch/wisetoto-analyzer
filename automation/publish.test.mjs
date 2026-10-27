@@ -67,8 +67,8 @@ test("mixed-success Actions batch must publish all already-frozen PRE even when 
 test("failed browser scans still publish state checkpoints, but not missing state",async()=>{
  const {readFile}=await import("node:fs/promises");
  const workflow=await readFile(new URL("../.github/workflows/wisetoto-auto-analysis.yml",import.meta.url),"utf8");
- assert.match(workflow,/- name: Generate public read-only dashboard projection\s+if: always\(\) && steps\.due\.outputs\.run_browser == 'true'/);
- assert.match(workflow,/- name: Publish site-readable history \(no browser secrets\)\s+if: always\(\) && steps\.due\.outputs\.run_browser == 'true'/);
+ assert.match(workflow,/- name: Generate public read-only dashboard projection\s+if: always\(\) && steps\.sample_gate\.outputs\.browser_needed == 'true'/);
+ assert.match(workflow,/- name: Publish site-readable history \(no browser secrets\)\s+if: always\(\) && steps\.sample_gate\.outputs\.browser_needed == 'true'/);
  assert.match(workflow,/if \[ ! -s automation-state\/public-history\.json \] \|\| \[ ! -s automation-state\/checkpoint-ready \]; then exit 0; fi/);
 });
 
