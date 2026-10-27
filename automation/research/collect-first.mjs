@@ -71,7 +71,8 @@ export function collect(state,feed,now=Date.now(),observedAt=now){
  // Important: older pending results are retained long enough for retries.
  const records=[...by.values()].filter(r=>r.startMs>now-120*D)
    .sort((a,b)=>b.startMs-a.startMs||a.key.localeCompare(b.key)).slice(0,4000);
- return {state:{...state,schema:SCHEMA,updatedAt:now,lastFeedAt:observedAt,\n   lastFeedOk:true,lastFeedError:null,records},summary};
+ return {state:{...state,schema:SCHEMA,updatedAt:now,lastFeedAt:observedAt,
+   lastFeedOk:true,lastFeedError:null,records},summary};
 }
 export function settlement(state,tracker=[],now=Date.now()){
  const rows=(state.records||[]).map(r=>({...r}));
