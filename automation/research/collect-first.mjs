@@ -7,7 +7,9 @@ export const SCHEMA="wisetoto-collect-first-v1";
 const key=v=>String(v??"").normalize("NFKC").toLowerCase().replace(/[^가-힣a-z0-9]/g,"");
 export const fixtureKey=g=>{
  const sport=sportName(g.sport),t=Number(g.gameDateMs??Date.parse(g.gameDate));
- return sport&&Number.isFinite(t)&&g.home&&g.away?[sport,t,key(g.home),key(g.away)].join("|"):null;
+ const teams=[String(g.home??"").trim(),String(g.away??"").trim()];
+ return sport&&Number.isFinite(t)&&teams.every(v=>v&&!/^(미정|tbd|tba|unknown|to be determined|-)$/i.test(v)&&key(v))
+   ?[sport,t,key(g.home),key(g.away)].join("|"):null;
 };
 const sourceId=g=>{
  for(const x of [g.fixtureId,g.sportsFixtureId,g.sportsApiFixtureId,g.selectedFixture?.id]){
@@ -29,7 +31,7 @@ export function collect(state,feed,now=Date.now(),observedAt=now){
    // This is NOT a frozen pregame capture and MUST NOT train the predictor.
    // Also retain recently listed matches found after kickoff, tagged result-only.
    if(t>now+7*D||t<now-14*D)continue;
-   const isPregame=now<t&&t-now<=30*M&&observedAt<t;
+   const isPregame=now<t&&t-now<=30*M&&observedAt<t&&t-observedAt<=30*M;
    if(isPregame)summary.window++;
    let row=by.get(k);
    if(!row){
@@ -54,7 +56,7 @@ export function collect(state,feed,now=Date.now(),observedAt=now){
    }
    const odds=Array.isArray(game.markets)?game.markets.flatMap(m=>
      (Array.isArray(m?.selections)?m.selections:[]).map(v=>({
-       market:String(m.betName??m.type??""),side:String(v?.side??v?.label??""),
+       market:String(m?.betName??m?.type??""),side:String(v?.side??v?.label??""),
        odds:Number(v?.odds)})).filter(v=>Number.isFinite(v.odds)&&v.odds>1)):[];
    if(!odds.length)summary.noOdds++;
    if(row.pregameCapturedAt===null){
@@ -69,7 +71,7 @@ export function collect(state,feed,now=Date.now(),observedAt=now){
  // Important: older pending results are retained long enough for retries.
  const records=[...by.values()].filter(r=>r.startMs>now-120*D)
    .sort((a,b)=>b.startMs-a.startMs||a.key.localeCompare(b.key)).slice(0,4000);
- return {state:{schema:SCHEMA,updatedAt:now,records},summary};
+ return {state:{...state,schema:SCHEMA,updatedAt:now,lastFeedAt:observedAt,\n   lastFeedOk:true,lastFeedError:null,records},summary};
 }
 export function settlement(state,tracker=[],now=Date.now()){
  const rows=(state.records||[]).map(r=>({...r}));
@@ -124,6 +126,7 @@ export function projection(state,now=Date.now()){
    .sort((a,b)=>b.startMs-a.startMs).slice(0,150);
  const all=state.records||[];
  return {schema:"wisetoto-collect-first-public-v1",generatedAt:new Date(now).toISOString(),
+   source:{lastFeedAt:state?.lastFeedAt??null,ok:state?.lastFeedOk===true,error:state?.lastFeedError??null},
    counts:{collected:all.length,verified:all.filter(x=>x.verdict==="VERIFIED").length,
      pending:all.filter(x=>x.verdict==="PENDING").length,
      pregameCaptured:all.filter(x=>Number.isFinite(x.pregameCapturedAt)).length,
