@@ -157,3 +157,41 @@ test("public card limit never understates full seven-day fixture coverage",()=>{
  assert.equal(output.counts.future,161);
  assert.equal(output.counts.insufficient,161);
 });
+
+test("runner trains only pregame-captured collect-first finals, excluding result-only discoveries",async()=>{
+ const {mkdtemp,mkdir,writeFile,readFile,rm}=await import("node:fs/promises");
+ const {spawnSync}=await import("node:child_process");
+ const {tmpdir}=await import("node:os");
+ const {join}=await import("node:path");
+ const root=await mkdtemp(join(tmpdir(),"wisetoto-evidence-bridge-"));
+ const now=Date.now(),start=now-4*60*MIN;
+ try{
+  const dir=join(root,"automation-state");await mkdir(dir,{recursive:true});
+  const old=(id,home)=>({
+   id:fixtureId({sport:"축구",home,away:"Away",gameDateMs:start}),
+   sport:"축구",league:"VTEST",home,away:"Away",startMs:start,
+   snapshots:[{at:start-90*MIN,market:{}},{at:start-45*MIN,market:{}}],
+   frozenCandidate:{side:"win",odds:1.8,marketProbability:0.55,asOf:start-45*MIN},
+   truth:null
+  });
+  await writeFile(join(dir,"research-state.json"),JSON.stringify({schema:SCHEMA,fixtures:[
+   old("a","Home One"),old("b","Home Two")]}));
+  await writeFile(join(dir,"collect-first-state.json"),JSON.stringify({
+   schema:"wisetoto-collect-first-v1",records:["Home One","Home Two"].map((home,i)=>({
+     key:"col-"+i,sport:"축구",home,away:"Away",league:"VTEST",startMs:start,
+     pregameCapturedAt:i===0?start-60*MIN:null,verdict:"VERIFIED",
+     verifiedAt:start+160*MIN,final:{homeScore:2,awayScore:1},resultSource:"NAVER"
+   }))}));
+  const game=betman("soccer",now+150*MIN);
+  await writeFile(join(dir,"betman-feed.json"),JSON.stringify({fetchedAt:now,payload:feed([game])}));
+  const out=spawnSync(process.execPath,[new URL("./run.mjs",import.meta.url).pathname],
+   {cwd:root,encoding:"utf8",timeout:15000});
+  assert.equal(out.status,0,out.stderr||out.stdout);
+  const saved=JSON.parse(await readFile(join(dir,"research-state.json"),"utf8"));
+  const one=saved.fixtures.find(x=>x.home==="Home One"),two=saved.fixtures.find(x=>x.home==="Home Two");
+  assert.equal(one.truth?.winner,"win");
+  assert.equal(one.truth?.source,"COLLECT_FIRST_NAVER");
+  assert.equal(two.truth,null);
+  assert.match(out.stdout,/excludedResultOnly/);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
