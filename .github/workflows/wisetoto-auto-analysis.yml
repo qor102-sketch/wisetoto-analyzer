@@ -229,7 +229,8 @@ jobs:
             import fs from "node:fs";
             let rows=[];
             try{rows=JSON.parse(fs.readFileSync("automation-state/collect-first-state.json","utf8")).records??[]}catch{}
-            const verified=rows.filter(x=>x.verdict==="VERIFIED" &&\n              Number.isFinite(x.pregameCapturedAt) && x.pregameCapturedAt<x.startMs).length;
+            const verified=rows.filter(x=>x.verdict==="VERIFIED" &&
+              Number.isFinite(x.pregameCapturedAt) && x.pregameCapturedAt<x.startMs).length;
             // The 40-sample floor is not approval of predictive validity.
             // Only opt back in after a separate time-ordered research review.
             const sampleReady=verified>=40;
@@ -240,7 +241,8 @@ jobs:
             fs.appendFileSync(process.env.GITHUB_OUTPUT,
               "prediction_ready="+ready+"\n"+"browser_needed="+browserNeeded+"\n");
             console.log("COLLECT_FIRST_STAGE",JSON.stringify({verified,required:40,sampleReady,restartApproved,
-              stage:ready?"PREDICT_AND_VALIDATE":"COLLECT_AND_VERIFY_ONLY",\n              excludeRetrospective:true}));
+              stage:ready?"PREDICT_AND_VALIDATE":"COLLECT_AND_VERIFY_ONLY",
+              excludeRetrospective:true}));
           '
       - name: Collect longitudinal prekickoff evidence without Chromium
         # Independent of the browser but never start from failed archive restore.
