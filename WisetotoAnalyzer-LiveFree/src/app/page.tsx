@@ -34,6 +34,7 @@
 // DEPLOY_MARKER_V13_8_34_NAVER_RECENT_BATTING_V1_20260903
 
 import { useEffect, useMemo, useState, useRef } from "react";
+import {positiveValueCandidate,scorePlausibility} from "../lib/postmatch-guards.mjs";
 
 type Sport =
   | "전체"
@@ -955,7 +956,7 @@ type LiveTrackerRecord = {
   // Captured ONLY at the original pre-kickoff analysis; never backfill from outcomes.
   courtPre?: CourtPreSnapshot | null;
   footballPreResult?: FootballPreValidationResult | null;
-  verifyWaitReason?: "BETMAN_MATCH_WAIT" | "BETMAN_FINAL_WAIT" | "FALLBACK_TIME_WAIT" | "FIXTURE_ID_MISSING" | "RESULT_NOT_FOUND" | null;
+  verifyWaitReason?: "BETMAN_MATCH_WAIT" | "BETMAN_FINAL_WAIT" | "FALLBACK_TIME_WAIT" | "FIXTURE_ID_MISSING" | "RESULT_NOT_FOUND" | "INVALID_FINAL_SCORE" | "SPORTSAPI_RATE_LIMIT" | null;
   verifyLastCheckedAt?: number | null;
   verifyMatchMethod?: "IDENTITY_EXACT" | "MARKET_ID" | "TEAM_TIME_EXACT" | "TEAM_TIME_FUZZY" | null;
   verifyMatchAudit?: string | null;
@@ -11655,6 +11656,10 @@ function evaluateValueGrade(input: {
 }
 
 function pickValueStatus(pick: MarketPick) {
+  // The grade is insufficient if a slate promotion bypassed positive EV.
+  if (["VALUE","STRONG VALUE"].includes(pick.valueGrade) && !positiveValueCandidate(pick)) {
+    return {label:"PASS · EV/배당/확률 정합성 실패",eligible:false};
+  }
   if (pick.valueGrade === "STRONG VALUE") {
     return {
       label: "STRONG VALUE",
@@ -20317,7 +20322,7 @@ export default function Home() {
        * 전체 마켓은 marketResults에 계속 저장해 학습/검증 표본은 잃지 않는다.
        */
       const trackerPicks: LiveTrackerPick[] =
-        (bestActualPick ? [bestActualPick] : []).map((pick) => {
+        (bestActualPick && positiveValueCandidate(bestActualPick) ? [bestActualPick] : []).map((pick) => {
           const marketIndex = markets.findIndex(
             (market: any, index: number) =>
               marketStableKey(market, index) === pick.key
@@ -20346,7 +20351,9 @@ export default function Home() {
             marketProbability: pick.marketProbability,
             edge: pick.edge,
             expectedValue: pick.expectedValue,
-            grade: pick.valueGrade,
+            // Frozen new tracker output must never claim VALUE on <=0 EV.
+            grade: positiveValueCandidate(pick) ? pick.valueGrade :
+              ["VALUE","STRONG VALUE"].includes(pick.valueGrade) ? "PASS" : pick.valueGrade,
             confidenceGrade: pick.confidenceGrade,
             recommendationScore: pick.recommendationScore,
             modelSnapshot: { ...pick },
@@ -20379,7 +20386,9 @@ export default function Home() {
             marketProbability: pick.marketProbability,
             edge: pick.edge,
             expectedValue: pick.expectedValue,
-            grade: pick.valueGrade,
+            // Frozen new tracker output must never claim VALUE on <=0 EV.
+            grade: positiveValueCandidate(pick) ? pick.valueGrade :
+              ["VALUE","STRONG VALUE"].includes(pick.valueGrade) ? "PASS" : pick.valueGrade,
             confidenceGrade: pick.confidenceGrade,
             recommendationScore: pick.recommendationScore,
             modelSnapshot: { ...pick },
@@ -20613,7 +20622,7 @@ export default function Home() {
         promoteBaseballSlateTopPick(candidate.pick, 1, candidate.slateScore),
         baseballReadyFreshness(record, null, now)
       );
-      if (promoted.valueGrade !== "VALUE" && promoted.valueGrade !== "STRONG VALUE") {
+      if (!positiveValueCandidate(promoted)) {
         desired.set(record.id, null);
         continue;
       }
@@ -20691,7 +20700,7 @@ export default function Home() {
         continue;
       }
       const promoted = promoteSoccerSlateTopPick(candidate.pick, 1, candidate.slateScore);
-      if (promoted.valueGrade !== "VALUE" && promoted.valueGrade !== "STRONG VALUE") {
+      if (!positiveValueCandidate(promoted)) {
         desired.set(record.id, null);
         continue;
       }
@@ -20774,7 +20783,7 @@ export default function Home() {
         continue;
       }
       const promoted = promoteCourtSlateTopPick(candidate.pick, 1, candidate.slateScore);
-      if (promoted.valueGrade !== "VALUE" && promoted.valueGrade !== "STRONG VALUE") {
+      if (!positiveValueCandidate(promoted)) {
         desired.set(record.id, null);
         continue;
       }
@@ -20919,7 +20928,7 @@ export default function Home() {
         sport: koreanSport(record.sport),
         league: record.league,
       });
-      const response = await fetch(`/api/naver/lineup?${params.toString()}`, { cache: "no-store" });
+      const response = await fetch(`/api/naver/lineup?${params.toString()}`, { cache: "no-store", signal: AbortSignal.timeout(20000) });
       const payload = await readApiResponse(response, `Naver VERIFY · ${record.home} vs ${record.away}`);
       if (!response.ok || !payload?.ok) {
         return { truth: null, audit: `HTTP ${response.status} · ${String(payload?.error ?? "Naver resolve 실패")}`, voidReason: null };
@@ -20976,7 +20985,12 @@ export default function Home() {
             trackerRecordCourtGroup(record) !== "EXCLUDED"
           ))
       )
-      .slice(0, 10);
+      // Fair queue: do not keep retrying the same failed first 10 records.
+      // Never mark PENDING as VERIFIED without a final-score source.
+      .sort((a,b) => Number(a.verifyLastCheckedAt ?? 0)-Number(b.verifyLastCheckedAt ?? 0) ||
+        Number(a.startMs)-Number(b.startMs))
+      .slice(0, typeof window !== "undefined" &&
+        new URLSearchParams(window.location.search).get("automation")==="1" ? 3 : 10);
     // FIX9 migration: old Naver VERIFY could misread cancelled games as 0:0 RESULT.
     // Recheck only legacy Naver 0:0 VERIFIED rows once; genuine 0:0 finals remain VERIFIED.
     const legacyVoidRepairCandidates = courtAutoOnly
@@ -21014,7 +21028,7 @@ export default function Home() {
       /* V13.8.47: SportsAPI fixtureId가 없는 Naver 독립 PRE도 Betman 종료점수로 검증한다. */
       let betmanFinishedGames: BetmanMatch[] = [];
       try {
-        const betmanResponse = await fetch("/api/betman?scope=all", { cache: "no-store" });
+        const betmanResponse = await fetch("/api/betman?scope=all", { cache: "no-store", signal: AbortSignal.timeout(20000) });
         const betmanPayload = await readApiResponse(betmanResponse, "Betman 종료 결과 검증 API");
         if (betmanResponse.ok && betmanPayload?.ok) {
           betmanFinishedGames = getBetmanGames(betmanPayload);
@@ -21142,15 +21156,15 @@ export default function Home() {
           // SportsAPI result는 VERIFY 전용 최종 fallback이며 경기 시작 +2시간 이후에만 호출한다.
           if (!truth && fallbackEligible && record.fixtureId !== null && Number.isFinite(Number(record.fixtureId))) {
             const response = await fetch(
-              `/api/fixture/result?id=${encodeURIComponent(String(record.fixtureId))}`,
-              { cache: "no-store" }
+              `/api/fixture/result?id=${encodeURIComponent(String(record.fixtureId))}&sport=${encodeURIComponent(koreanSport(record.sport))}`,
+              { cache: "no-store", signal: AbortSignal.timeout(20000) }
             );
             const payload = await readApiResponse(
               response,
               `실전 추적 Fixture #${record.fixtureId}`
             );
 
-            if (response.ok && payload?.ok && payload?.result) {
+            if (response.ok && payload?.ok && payload?.result && payload?.finalConfirmed === true) {
               truth = {
                 homeScore: Number(payload.result.homeScore),
                 awayScore: Number(payload.result.awayScore),
@@ -21163,6 +21177,11 @@ export default function Home() {
                 sourceLabel: `SportsAPI Fixture #${record.fixtureId} · 실전 PRE 잠금 후 검증`,
               };
             } else if (response.status === 429) {
+              // Keep the rate limit visible and avoid retry starvation.
+              next=next.map(candidate=>candidate.id===record.id ? {
+                ...candidate,verifyWaitReason:"SPORTSAPI_RATE_LIMIT" as const,
+                verifyLastCheckedAt:Date.now(),verifyMatchAudit:"SportsAPI HTTP 429 · rate limited"
+              }:candidate);
               unavailable += 1;
               break;
             } else {
@@ -21176,6 +21195,16 @@ export default function Home() {
             waitReason = koreanSport(record.sport) === "농구" ? "RESULT_NOT_FOUND" : "FIXTURE_ID_MISSING";
           }
 
+          // A score is not FINAL if it violates the sport rules.
+          // Previously archived VERIFIED rows are never silently rewritten.
+          if (truth) {
+            const plausibility=scorePlausibility(koreanSport(record.sport),truth.homeScore,truth.awayScore);
+            if (!plausibility.ok) {
+              waitReason="INVALID_FINAL_SCORE";
+              naverVerifyAudit=[naverVerifyAudit,plausibility.reason].filter(Boolean).join(" · ");
+              truth=null;
+            }
+          }
           if (!truth || !Number.isFinite(truth.homeScore) || !Number.isFinite(truth.awayScore)) {
             const checkedAt = Date.now();
             next = next.map((candidate) =>
@@ -21274,7 +21303,14 @@ export default function Home() {
               : candidate
           );
           verified += 1;
-        } catch {
+        } catch (error) {
+          // A transient provider/network failure must not retry this same
+          // first fixture forever and starve the remainder of the queue.
+          next=next.map(candidate=>candidate.id===record.id ? {
+            ...candidate,verifyWaitReason:"RESULT_NOT_FOUND" as const,
+            verifyLastCheckedAt:Date.now(),
+            verifyMatchAudit:"검증 요청 실패 · 재시도 예정: "+(error instanceof Error?error.message.slice(0,100):"unknown")
+          }:candidate);
           unavailable += 1;
         }
       }
@@ -21304,6 +21340,10 @@ export default function Home() {
   // V13.12.05: 수동 VERIFY를 누르지 않아도 종료 후 2시간이 지난 지원 농구 결과를 세션당 1회 확인해
   // 다음 경기 분석에서 VERIFIED HISTORY가 자동으로 recent/venue 표본으로 들어오게 한다.
   useEffect(() => {
+    // On Actions, explicit postmatch reconciliation owns this phase; the
+    // session auto-court hook must not consume the bridge's verification lock.
+    if (typeof window !== "undefined" &&
+        new URLSearchParams(window.location.search).get("automation")==="1") return;
     if (!liveTrackerHydratedRef.current || validationLoading || !liveTrackerRecords.length) return;
     const cutoff = Date.now() - 2 * 60 * 60 * 1000;
     const dueCourt = liveTrackerRecords
@@ -25647,6 +25687,20 @@ export default function Home() {
     }
 
     if (liveBatchAnalysis.phase === "SELECT") {
+      // Headless PRE must never start a queued game after kickoff.
+      if (typeof window !== "undefined" &&
+          new URLSearchParams(window.location.search).get("automation")==="1" &&
+          gameTimeMs(game) <= Date.now()) {
+        setLiveBatchOutcomes((previous) => ({
+          ...previous, [key]: {status:"FAIL",message:"킥오프 경과 — PRE 생성 금지"}
+        }));
+        setLiveBatchAnalysis((previous) => {
+          const nextIndex=previous.index+1,done=nextIndex>=previous.gameKeys.length;
+          return {...previous,failed:previous.failed+1,index:nextIndex,
+            phase:done?"IDLE":"SELECT",running:!done};
+        });
+        return;
+      }
       const index = visibleBetmanGames.indexOf(game);
       chooseGame(game, index >= 0 ? index : 0);
       setLiveBatchAnalysis((previous) => ({
@@ -25743,7 +25797,7 @@ export default function Home() {
         const start = gameTimeMs(game);
         if (!supportedRaw.has(String((game as any)?.sport ?? "").trim().toLowerCase()) ||
             !supported.has(koreanSport(String((game as any)?.sport ?? ""))) ||
-            !Number.isFinite(start) || start - time < 10 * 60_000 || start - time > 100 * 60_000) return false;
+            !Number.isFinite(start) || start - time < 10 * 60_000 || start - time > 180 * 60_000) return false;
         if ([game.home,game.away].some(name =>
           !String(name ?? "").trim() || /^(미정|tbd|tba|unknown|to be determined|-)$/i.test(String(name ?? "").trim())
         )) return false;
@@ -25776,7 +25830,8 @@ export default function Home() {
       analyze: () => {
         if (loading || liveBatchAnalysis.running || backtestMode || recentVerifyMode) return { started: false, reason: "BUSY" };
         const due = automationDueGames();
-        const selected = due.slice(0, 24);
+        // Keep each free Actions run bounded; later eligible games are handled by the next scan.
+        const selected = due.slice(0, 3);
         const keys = selected.map((game) => visibleGameKey(game));
         if (!keys.length) return { started: false, reason: "NO_DUE_GAME", count: 0 };
         setLiveBatchSelectedKeys(keys);

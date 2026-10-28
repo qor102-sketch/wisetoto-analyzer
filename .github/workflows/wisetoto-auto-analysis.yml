@@ -17,8 +17,8 @@ permissions:
   issues: write
 
 concurrency:
-  group: wisetoto-automatic-pre-post
-  cancel-in-progress: false
+  group: wisetoto-automatic-pre-post-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   smoke:
@@ -31,12 +31,16 @@ jobs:
         with:
           node-version: "24"
       - name: Run immutable-record unit tests
-        run: node --test automation/*.test.mjs automation/repair/*.test.mjs
+        run: node --test automation/*.test.mjs automation/repair/*.test.mjs automation/research/*.test.mjs
       - name: Install app and browser
         run: |
           cd WisetotoAnalyzer-LiveFree && npm install --no-audit --no-fund
           cd .. && npm install --no-save --no-audit --no-fund playwright@1.56.1
           npx playwright install --with-deps chromium
+      - name: Compile and typecheck Next.js production build (Preview quota fallback)
+        run: |
+          cd WisetotoAnalyzer-LiveFree
+          npm run build
       - name: Launch Next.js browser test server
         run: |
           cd WisetotoAnalyzer-LiveFree
@@ -72,9 +76,235 @@ jobs:
               unzip -oq /tmp/wisetoto-auto-state.zip -d automation-state
             fi
           fi
+      - name: Restore persistent pregame market evidence
+        id: evidence_restore
+        # A 28-day research clock must never restart after GitHub 429/5xx.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          status="$(curl -sSL -w '%{http_code}' -o /tmp/evidence-ref.json \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/research-state.json.gz?ref=automation-data")"
+          case "$status" in
+            200)
+              jq -er '.content' /tmp/evidence-ref.json | base64 -d | gzip -dc > automation-state/research-state.json
+              node --input-type=module -e '
+                import fs from "node:fs";
+                const s=JSON.parse(fs.readFileSync("automation-state/research-state.json","utf8"));
+                if(s.schema!=="wisetoto-market-evidence-v1"||!Array.isArray(s.fixtures)||
+                  (s.pilot!==undefined&&s.pilot!==null&&
+                    (!Number.isFinite(s.pilot.startedAt)||s.pilot.startedAt<=0)))
+                  throw Error("Invalid research archive or fixed pilot start");
+              '
+              ;;
+            404)
+              if ! gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/automation-data" >/dev/null; then
+                echo "RESEARCH_ARCHIVE_BRANCH_UNAVAILABLE" >&2
+                exit 1
+              fi
+              echo "RESEARCH_FIRST_RUN: branch exists; archive absent"
+              ;;
+            *)
+              echo "RESEARCH_RESTORE_FAILED: HTTP $status — refusing to reset 28-day pilot" >&2
+              exit 1
+              ;;
+          esac
+      - name: Restore 30-minute collection ledger
+        id: ledger_restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          status="$(curl -sSL -w '%{http_code}' -o /tmp/collect-ledger-ref.json \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/collect-first-state.json.gz?ref=automation-data")"
+          case "$status" in
+            200)
+              jq -er '.content' /tmp/collect-ledger-ref.json | base64 -d | gzip -dc > automation-state/collect-first-state.json
+              node --input-type=module -e '
+                import fs from "node:fs";
+                const state=JSON.parse(fs.readFileSync("automation-state/collect-first-state.json","utf8"));
+                if(state.schema!=="wisetoto-collect-first-v1"||!Array.isArray(state.records))
+                  throw Error("Existing collection ledger has invalid schema; refusing replacement");
+              '
+              ;;
+            404)
+              # First-run absence is safe only if the archive branch itself is readable.
+              # An authorization/branch failure must never initialize an empty ledger.
+              if ! gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/automation-data" >/dev/null; then
+                echo "COLLECT_LEDGER_BRANCH_UNAVAILABLE: cannot establish safe first-run baseline" >&2
+                exit 1
+              fi
+              echo "COLLECT_LEDGER_FIRST_RUN: file absent, archive branch confirmed"
+              ;;
+            *)
+              echo "COLLECT_LEDGER_RESTORE_FAILED: GitHub HTTP $status; refusing to overwrite prior data" >&2
+              exit 1
+              ;;
+          esac
       - name: Due match and verification preflight
         id: due
         run: node automation/runner.mjs --preflight
+      - name: Seed no-deploy config on automation-data branch
+        # Vercel reads vercel.json FROM THE DATA BRANCH itself.
+        # Existing minimal configs must also be updated, not skipped.
+        if: always() && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for f in "WisetotoAnalyzer-LiveFree/vercel.json" "WisetotoAnalyzer-LiveFree/WisetotoAnalyzer-LiveFree/vercel.json"; do
+            current_sha=""
+            if gh api "/repos/$GITHUB_REPOSITORY/contents/$f?ref=automation-data" > /tmp/data-vercel-config.json 2>/dev/null; then
+              current_sha="$(jq -r '.sha' /tmp/data-vercel-config.json)"
+              current_json="$(jq -r '.content' /tmp/data-vercel-config.json | base64 -d)"
+              if printf '%s' "$current_json" | jq -e '.git.deploymentEnabled["automation-data"] == false' > /dev/null; then
+                continue
+              fi
+              updated_json="$(printf '%s' "$current_json" | jq -c '.git.deploymentEnabled["automation-data"] = false')"
+            else
+              updated_json='{"framework":"nextjs","git":{"deploymentEnabled":{"automation-data":false}}}'
+            fi
+            encoded="$(printf '%s' "$updated_json" | base64 -w0)"
+            if [ -n "$current_sha" ]; then
+              gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$f" \
+                -f branch="automation-data" -f message="Disable Vercel deploys for data-only branch" \
+                -f sha="$current_sha" -f content="$encoded" >/dev/null
+            else
+              gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$f" \
+                -f branch="automation-data" -f message="Disable Vercel deploys for data-only branch" \
+                -f content="$encoded" >/dev/null
+            fi
+          done
+      - name: Capture 30-minute fixtures and reconcile verified results without browser
+        id: ledger_capture
+        if: always() && steps.ledger_restore.outcome == 'success'
+        env:
+          WISETOTO_URL: https://wisetoto-analyzer.vercel.app
+        run: node automation/research/run-collect-first.mjs
+      - name: Archive old fixtures before trimming active ledger
+        id: collection_archive
+        if: always() && steps.ledger_restore.outcome == 'success' && steps.ledger_capture.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node automation/research/archive-collection.mjs
+      - name: Persist collection-first ledger and public status
+        if: always() && steps.ledger_restore.outcome == 'success' && steps.ledger_capture.outcome == 'success' && steps.collection_archive.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ ! -s automation-state/collect-first-state.json ] || [ ! -s automation-state/collect-first-public.json ]; then
+            echo "COLLECT_LEDGER_PUBLISH_BLOCKED: missing complete state/public pair" >&2
+            exit 1
+          fi
+          gzip -cn automation-state/collect-first-state.json > /tmp/collect-first-state.json.gz
+          for remote_file in collect-first-state.json.gz collect-first-public.json; do
+            if [ "$remote_file" = "collect-first-state.json.gz" ]; then
+              file=/tmp/collect-first-state.json.gz
+            else
+              file=automation-state/collect-first-public.json
+            fi
+            content="$(base64 -w0 "$file")"
+            sha="$(gh api "/repos/$GITHUB_REPOSITORY/contents/$remote_file?ref=automation-data" --jq .sha 2>/dev/null || true)"
+            if [ -n "$sha" ]; then
+              gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$remote_file" \
+                -f branch="automation-data" -f message="Collect-first 30min fixtures and confirmed results" \
+                -f sha="$sha" -f content="$content" >/dev/null
+            else
+              gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$remote_file" \
+                -f branch="automation-data" -f message="Initialize collect-first ledger" \
+                -f content="$content" >/dev/null
+            fi
+          done
+      - name: Gate heavy prediction until collection/results training sample exists
+        id: sample_gate
+        if: always()
+        env:
+          PREGAME_DUE: ${{ steps.due.outputs.pregame_due }}
+          VERIFY_DUE: ${{ steps.due.outputs.verify_due }}
+          PREDICTION_RESTART_APPROVED: ${{ vars.WISETOTO_PREDICTION_RESTART_APPROVED == 'true' }}
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            let rows=[];
+            try{rows=JSON.parse(fs.readFileSync("automation-state/collect-first-state.json","utf8")).records??[]}catch{}
+            const verified=rows.filter(x=>x.verdict==="VERIFIED" &&
+              Number.isFinite(x.pregameCapturedAt) && x.pregameCapturedAt<x.startMs).length;
+            // The 40-sample floor is not approval of predictive validity.
+            // Only opt back in after a separate time-ordered research review.
+            const sampleReady=verified>=40;
+            const restartApproved=process.env.PREDICTION_RESTART_APPROVED==="true";
+            const ready=sampleReady&&restartApproved;
+            const browserNeeded=process.env.VERIFY_DUE==="true" ||
+              (ready&&process.env.PREGAME_DUE==="true");
+            fs.appendFileSync(process.env.GITHUB_OUTPUT,
+              "prediction_ready="+ready+"\n"+"browser_needed="+browserNeeded+"\n");
+            console.log("COLLECT_FIRST_STAGE",JSON.stringify({verified,required:40,sampleReady,restartApproved,
+              stage:ready?"PREDICT_AND_VALIDATE":"COLLECT_AND_VERIFY_ONLY",
+              excludeRetrospective:true}));
+          '
+      - name: Collect longitudinal prekickoff evidence without Chromium
+        # Independent of the browser but never start from failed archive restore.
+        if: always() && steps.evidence_restore.outcome == 'success' && steps.ledger_restore.outcome == 'success'
+        run: node automation/research/run.mjs
+      - name: Evaluate weekly 28-day pilot, including feed outage days
+        id: pilot_review
+        if: always() && steps.evidence_restore.outcome == 'success' && steps.ledger_restore.outcome == 'success'
+        run: node automation/research/run-pilot-review.mjs
+      - name: Archive old study odds snapshots before rolling research file
+        id: evidence_archive
+        if: always() && steps.evidence_restore.outcome == 'success' && steps.pilot_review.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node automation/research/archive-evidence.mjs
+      - name: Publish evidence archive and experimental read-only candidates
+        if: always() && steps.evidence_archive.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -s automation-state/research-public.json ]; then exit 0; fi
+          # Preserve the full 120-day research sample while staying well below
+          # GitHub Contents API's 1 MiB inline-content limit.
+          gzip -cn automation-state/research-state.json > /tmp/research-state.json.gz
+          for remote_file in "research-state.json.gz" "research-public.json"; do
+            if [ "$remote_file" = "research-state.json.gz" ]; then
+              local_file="/tmp/research-state.json.gz"
+            else
+              local_file="automation-state/research-public.json"
+            fi
+            content="$(base64 -w 0 "$local_file")"
+            sha="$(gh api "/repos/$GITHUB_REPOSITORY/contents/$remote_file?ref=automation-data" --jq .sha 2>/dev/null || true)"
+            if [ -n "$sha" ]; then
+              gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$remote_file" \
+                -f branch="automation-data" -f message="Prekickoff evidence observation" \
+                -f sha="$sha" -f content="$content" >/dev/null
+            else
+              gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$remote_file" \
+                -f branch="automation-data" -f message="Initialize prekickoff evidence archive" \
+                -f content="$content" >/dev/null
+            fi
+          done
+      - name: Open 4-week research TOP1 review issue for manual iteration
+        if: always() && steps.evidence_archive.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ ! -s automation-state/pilot-top1-review.md ]; then exit 0; fi
+          title="$(node --input-type=module -e '
+            import fs from "node:fs";
+            const s=JSON.parse(fs.readFileSync("automation-state/research-state.json","utf8"));
+            console.log("[Wisetoto 28일 TOP1 연구] "+new Date(s.pilot.startedAt).toISOString().slice(0,10)+" 시작 코호트")
+          ')"
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --json title,number \
+            --jq ".[] | select(.title == \"$title\") | .number" | head -n 1)"
+          if [ -z "$existing" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
+              --body-file automation-state/pilot-top1-review.md
+          else
+            echo "PILOT_REVIEW_ALREADY_CREATED #$existing — preserve manual review history"
+          fi
       - name: Publish transparent scan health even if Betman is down
         if: always()
         env:
@@ -93,35 +323,62 @@ jobs:
               -f content="$encoded" >/dev/null
           fi
       - name: Install browser only when work is due
-        if: steps.due.outputs.run_browser == 'true'
+        if: always() && steps.sample_gate.outputs.browser_needed == 'true'
         run: |
           npm install --no-save --no-audit --no-fund playwright@1.56.1
-          npx playwright install --with-deps chromium
+          npx playwright install chromium
       - name: Run exact production model and verify results
-        if: steps.due.outputs.run_browser == 'true'
+        # Cold-start mode: collect genuine pregame fixtures and settle them
+        # before applying the expensive legacy predictor to new matches.
+        if: steps.due.outputs.pregame_due == 'true' && steps.sample_gate.outputs.prediction_ready == 'true'
         env:
           WISETOTO_URL: https://wisetoto-analyzer.vercel.app
         run: node automation/runner.mjs
+      - name: Reconcile ended games independently of PRE batch outcome
+        if: always() && steps.due.outputs.verify_due == 'true'
+        env:
+          WISETOTO_URL: https://wisetoto-analyzer.vercel.app
+        run: |
+          if [ -s automation-state/state.json ]; then node automation/runner.mjs --verify-only; fi
       - name: Generate public read-only dashboard projection
-        if: steps.due.outputs.run_browser == 'true'
-        run: node automation/publish.mjs
+        # A browser timeout must NOT suppress publication of the last restored
+        # immutable tracker. Exactly this suppressed 41 frozen rows on 2026-10-27.
+        if: always()
+        run: |
+          if [ -s automation-state/state.json ]; then node automation/publish.mjs; fi
       - name: Publish site-readable history (no browser secrets)
-        if: steps.due.outputs.run_browser == 'true'
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          if [ ! -s automation-state/public-history.json ]; then exit 0; fi
+          gh api "/repos/$GITHUB_REPOSITORY/contents/automation-history.json?ref=automation-data" > /tmp/old-public-history.json
+          jq -r '.content' /tmp/old-public-history.json | base64 -d > /tmp/old-public-history-data.json
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const old=JSON.parse(fs.readFileSync("/tmp/old-public-history-data.json","utf8"));
+            const next=JSON.parse(fs.readFileSync("automation-state/public-history.json","utf8"));
+            if(old.schema!=="wisetoto-public-history-v1"||next.schema!==old.schema
+               ||!Array.isArray(old.records)||!Array.isArray(next.records))throw Error("PUBLIC_SCHEMA_MISMATCH");
+            const ids=new Set(next.records.map(r=>r.id));
+            const lost=old.records.filter(r=>!ids.has(r.id)).map(r=>r.id);
+            if(lost.length)throw Error("PUBLIC_RECORD_REGRESSION: "+lost.slice(0,12).join(","));
+            if(next.counts.total!==next.records.length)throw Error("PUBLIC_COUNT_MISMATCH");
+            console.log("PUBLIC_LEDGER_RECONCILED",JSON.stringify({previous:old.records.length,current:next.records.length}));
+          '
           encoded="$(base64 -w 0 automation-state/public-history.json)"
-          current_sha="$(gh api "/repos/$GITHUB_REPOSITORY/contents/automation-history.json?ref=automation-data" --jq .sha)"
+          current_sha="$(jq -r .sha /tmp/old-public-history.json)"
           gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/automation-history.json" \
-            -f message="Update read-only automation dashboard data" \
+            -f message="Reconcile all frozen PRE in public dashboard without retrofitting picks" \
             -f branch="automation-data" \
             -f sha="$current_sha" \
             -f content="$encoded" > /dev/null
       - name: Summarize OOS report
-        if: steps.due.outputs.run_browser == 'true'
-        run: cat automation-state/report.md >> "$GITHUB_STEP_SUMMARY"
+        if: steps.sample_gate.outputs.browser_needed == 'true'
+        run: if [ -s automation-state/report.md ]; then cat automation-state/report.md >> "$GITHUB_STEP_SUMMARY"; fi
       - name: Open review issue for source/grade problems
-        if: steps.due.outputs.run_browser == 'true'
+        if: steps.sample_gate.outputs.browser_needed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -134,7 +391,7 @@ jobs:
             fi
           fi
       - name: Archive frozen tracker and OOS report
-        if: always() && steps.due.outputs.run_browser == 'true'
+        if: always() && steps.sample_gate.outputs.browser_needed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: wisetoto-auto-state

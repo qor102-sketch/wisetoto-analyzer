@@ -2,17 +2,35 @@
 import {useEffect,useMemo,useState} from "react";
 import "./dashboard.css";
 type Pick={key:string;market:string;pick:string;probability:number|null;odds:number|null;expectedValue:number|null;edge:number|null;grade:string;score:number|null;resultStatus:string;actualLabel:string|null;resultNote:string|null};
-type Match={id:string;sport:string;league:string;home:string;away:string;startMs:number;capturedAt:number;status:string;verifiedAt:number|null;decision:string;result:{homeScore:number|null;awayScore:number|null;source:string}|null;pre:{expectedHome:number|null;expectedAway:number|null;homeRecentSample:number|null;awayRecentSample:number|null;homeVenueSample:number|null;awayVenueSample:number|null}|null;courtPre:{expectedHome:number|null;expectedAway:number|null;homeRecentSample:number|null;awayRecentSample:number|null;homeVenueSample:number|null;awayVenueSample:number|null}|null;lineup:{stage:string;capturedAt:number|null}|null;top1:Pick|null;markets:Pick[];warnings:string[]};
+type Match={id:string;sport:string;league:string;home:string;away:string;startMs:number;capturedAt:number;status:string;verifiedAt:number|null;decision:string;result:{homeScore:number|null;awayScore:number|null;source:string}|null;pre:{expectedHome:number|null;expectedAway:number|null;homeRecentSample:number|null;awayRecentSample:number|null;homeVenueSample:number|null;awayVenueSample:number|null}|null;courtPre:{expectedHome:number|null;expectedAway:number|null;homeRecentSample:number|null;awayRecentSample:number|null;homeVenueSample:number|null;awayVenueSample:number|null}|null;lineup:{stage:string;capturedAt:number|null}|null;top1:Pick|null;markets:Pick[];warnings:string[];verifyWaitReason?:string|null;verifyLastCheckedAt?:number|null};
 type ScanHealth={schema:string;scannedAt:string;expectedIntervalMinutes:number;sourceOk:boolean;sourceError:string|null;feedSports:Record<string,number>;eligibleForPregame:number;awaitingPostmatch:number;feedOrigin:string};
-type History={scanHealth?:ScanHealth|null;schema:string;publishedAt:string;lastRunAt:number|null;source:string;counts:{total:number;pending:number;verified:number;void:number;hit:number;miss:number;warnings:number};records:Match[]};
+type EvidencePick={side:string;label:string;odds:number;marketProbability:number;openProbability:number;shift:number;marketHold:number;asOf:number};
+type EvidenceRow={id:string;sport:string;league:string;home:string;away:string;startMs:number;firstSeenAt:number;lastSeenAt:number;observations:number;stage:string;reason:string;top1:EvidencePick|null;calibration:{samples:number;qualified:boolean;probability?:number;conservativeEV?:number;sportSamples?:number;leagueSamples?:number;backtest?:{samples:number;marketBrier?:number;modelBrier?:number;improved?:boolean}}|null};
+type PilotMetric={decisions:number;hits:number;misses:number;hitRate:number|null;unitProfit:number|null;unitROI:number|null;marketBrier:number|null;hitLower90:number|null};
+type PilotReport={status:string;startedAt:number|null;endsAt:number|null;completedDays:number;durationDays:number;grade?:string;
+ counts?:{listed:number;pregameCandidates:number;verified:number;pendingFinal:number;shadowDays:number};
+ all?:PilotMetric;shadowTop1?:PilotMetric;bySport?:Record<string,PilotMetric>;
+ walkForward?:{decisions:number;marketBrier:number|null;modelBrier:number|null;improved:boolean};
+ weeks?:Array<{week:number;complete:boolean;observed:number;frozen:number;metrics:PilotMetric}>;
+ proposals?:string[];shadowHistory?:Array<{date:string;id:string;sport:string;home:string;away:string;side:string;odds:number;result:string}>};
+type CollectionFunnelCount={registered:number;pregameWindow:number;pregameOdds:number;finalVerified:number;verifiedWithOdds:number;verifiedWithLineup:number;lineupConfirmed:number;lineupPartial:number;lineupUnsupported:number;overduePending:number;resultOnly:number;captureWarnings:number};
+type CollectionFunnel={status:string;startedAt?:number;endsAt?:number;counts?:CollectionFunnelCount;bySport?:Record<string,CollectionFunnelCount>};
+type ResearchEvidence={generatedAt:string;counts:{future:number;observed:number;researchTop1:number;insufficient:number};records:EvidenceRow[];collectionPipeline?:CollectionFunnel;
+ pilot?:PilotReport;pilotTop1?:{id:string;sport:string;league:string;home:string;away:string;startMs:number;side:string;label:string;odds:number;marketProbability:number;shift:number;observedAt:number;grade:string;note:string}|null};
+type CollectedRow={key:string;sport:string;league:string;home:string;away:string;startMs:number;firstSeenAt:number;pregameCapturedAt:number|null;firstOddsAt?:number|null;latestOddsAt?:number|null;seenCount:number;oddsCount:number;resultChecks?:number;resultErrors?:Array<{at:number;reasons:string[]}>;captureIssue?:string|null;verdict:string;final:{homeScore:number;awayScore:number}|null;checkReason:string|null;lineup?:{status:string;source?:string;capturedAt?:number;homeCount?:number;awayCount?:number;homeStarter?:string|null;awayStarter?:string|null;reason?:string;lastAttemptAt?:number;lastError?:string;attempts?:number}};
+type CollectedLedger={generatedAt:string;source?:{lastFeedAt:number|null;ok:boolean;error:string|null;lastCaptureSummary?:{listed:number;window:number;new:number;noOdds:number;missingIdentity:number;missedWindow:number;watchlistMissing?:number;delayedScan?:boolean;sinceLastScanMs?:number|null}|null};counts:{collected:number;active?:number;archived?:number;verified:number;pending:number;pregameCaptured:number;verifiedWithPregame:number;resultOnly:number;missingFixtureId:number;lineupConfirmed?:number;lineupPartial?:number;lineupUnsupported?:number;verifiedWithLineup?:number};records:CollectedRow[]};
+type History={scanHealth?:ScanHealth|null;schema:string;publishedAt:string;lastRunAt:number|null;source:string;counts:{total:number;pending:number;verified:number;review?:number;void:number;hit:number;miss:number;warnings:number;overdue?:number};records:Match[]};
 function date(ms:number|null|undefined){return typeof ms==="number"&&Number.isFinite(ms)?new Date(ms).toLocaleString("ko-KR",{timeZone:"Asia/Seoul",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}):"—";}
 function num(v:number|null|undefined,d=1){return typeof v==="number"&&Number.isFinite(v)?v.toFixed(d):"—";}
-function stateText(r:Match){if(r.status==="VOID")return "취소 / 무효";if(r.status==="VERIFIED")return "결과 검증 완료";return Date.now()<r.startMs?"경기 전 PRE 잠금":"종료 결과 검증 대기";}
+function stateText(r:Match){if(r.status==="VOID")return "취소 / 무효";if(r.status==="REVIEW_REQUIRED")return "검증 오류 · 재검토";if(r.status==="VERIFIED")return "결과 검증 완료";return Date.now()<r.startMs?"경기 전 PRE 잠금":Date.now()-r.startMs>6*60*60_000?"결과 확인 지연":"종료 결과 검증 대기";}
 function pickText(p:Pick|null){if(!p)return "PASS";if(p.resultStatus==="HIT")return "적중";if(p.resultStatus==="MISS")return "미적중";if(p.resultStatus==="VOID")return "무효";return "검증 대기";}
-function statusClass(t:string){return t==="HIT"||t==="VERIFIED"?"good":t==="MISS"||t==="VOID"?"bad":"neutral";}
+function statusClass(t:string){return t==="HIT"||t==="VERIFIED"?"good":t==="MISS"||t==="VOID"||t==="REVIEW_REQUIRED"?"bad":"neutral";}
 export default function AutomationDashboard(){
  const [data,setData]=useState<History|null>(null);
  const [loading,setLoading]=useState(true);
+ const [evidence,setEvidence]=useState<ResearchEvidence|null>(null);
+ const [collection,setCollection]=useState<CollectedLedger|null>(null);
+ const [collectionError,setCollectionError]=useState("");
  const [error,setError]=useState("");
  const [filter,setFilter]=useState("all");
  const [sport,setSport]=useState("all");
@@ -20,10 +38,19 @@ export default function AutomationDashboard(){
  const [open,setOpen]=useState<string|null>(null);
  async function reload(){setLoading(true);setError("");try{const res=await fetch("/api/automation/results",{cache:"no-store"});const json=await res.json();if(!res.ok||!json.ok||!Array.isArray(json.data?.records))throw Error(json.error||"기록이 없습니다.");setData(json.data);}catch(e){setError(e instanceof Error?e.message:"데이터 연결 오류");}finally{setLoading(false);}}
  useEffect(()=>{void reload();},[]);
+ useEffect(()=>{let alive=true;void fetch("/api/automation/collection",{cache:"no-store"})
+   .then(async r=>{const v=await r.json();if(!r.ok||!v?.ok)throw Error(v?.error||"수집 API 조회 실패");return v;})
+   .then(v=>{if(alive){setCollection(v.data as CollectedLedger);setCollectionError("");}})
+   .catch(e=>{if(alive)setCollectionError(e instanceof Error?e.message:"수집 API 연결 실패");});
+   return ()=>{alive=false;};},[]);
+ useEffect(()=>{let alive=true;void fetch("/api/automation/research",{cache:"no-store"})
+   .then(async r=>{if(!r.ok)throw Error("research archive not yet published");return r.json();})
+   .then(json=>{if(alive&&json?.ok&&Array.isArray(json?.data?.records))setEvidence(json.data as ResearchEvidence);})
+   .catch(()=>{});return ()=>{alive=false;};},[]);
  const records=data?.records||[];
  const sports=useMemo(()=>Array.from(new Set(records.map(r=>r.sport))),[data]);
  const visible=useMemo(()=>records.filter(r=>(sport==="all"||r.sport===sport)&&
-  (filter==="all"||(filter==="pending"&&r.status==="PENDING")||(filter==="verified"&&r.status==="VERIFIED")||(filter==="miss"&&r.top1?.resultStatus==="MISS")||(filter==="issues"&&r.warnings?.length>0))&&
+  (filter==="all"||(filter==="pending"&&r.status==="PENDING")||(filter==="verified"&&r.status==="VERIFIED")||(filter==="miss"&&r.top1?.resultStatus==="MISS")||(filter==="issues"&&(r.warnings?.length>0||r.status==="REVIEW_REQUIRED")))&&
   (r.home+" "+r.away+" "+r.league).toLowerCase().includes(query.toLowerCase())
  ),[data,sport,filter,query]);
  return <main className="auto-page"><div className="auto-background" aria-hidden="true"/><div className="auto-container">
@@ -48,8 +75,97 @@ export default function AutomationDashboard(){
     })():<div className="scan-health-box scan-alert">검색 상태 초기화 대기 — 자동 실행 기록을 확인하세요.</div>}
    </section>
    <section className="auto-stats" aria-label="자동분석 요약">{[
-    ["고정 PRE",data.counts.total,"최초 경기 전 예측"],["종료 검증",data.counts.verified,"결과 연결 완료"],["TOP1 적중",data.counts.hit,"검증된 픽"],["TOP1 미적중",data.counts.miss,"원인 분석 대상"],["검토 신호",data.counts.warnings,"수집 품질 확인"]
+    ["고정 PRE",data.counts.total,"최초 경기 전 예측"],["종료 검증",data.counts.verified,"점수 유효성 통과"],["검증 재검토",data.counts.review??0,"종목 규칙과 결과 불일치"],["TOP1 적중",data.counts.hit,"검증된 픽"],["TOP1 미적중",data.counts.miss,"원인 분석 대상"],["결과 확인 지연",data.counts.overdue??records.filter(r=>r.status==="PENDING"&&r.startMs<Date.now()-6*60*60_000).length,"시작 6시간 후에도 결과 미확인"],["검토 신호",data.counts.warnings,"수집 품질 확인"]
    ].map(([title,value,desc])=><div key={String(title)} className="auto-stat"><span>{title}</span><strong>{value}</strong><small>{desc}</small></div>)}</section>
+   <section className="auto-results" aria-label="경기 시작 30분 전 수집 및 종료 결과" style={{marginBottom:20}}>
+    <div className="auto-section-title"><div><h2>30분 전 경기 수집 → 최종 결과 장부</h2>
+      <p>예측과 별도 저장 · 경기 전 관측만 기록 · 공식 최종 결과 확인 전에는 PENDING 유지</p>
+    </div><strong>{collection?collection.counts.collected+"경기 수집":"수집 시작 대기"}</strong></div>
+    {collection?<><div className="auto-explainer">등록된 경기 {collection.counts.collected} (최근 장부 {collection.counts.active??collection.counts.collected} · 장기 보관 {collection.counts.archived??0}) · 30분 전 자료 수집 {collection.counts.pregameCaptured??0} · 종료 검증 {collection.counts.verified} · 사전 수집+종료 검증 표본 {collection.counts.verifiedWithPregame??0}/40 · 검증 대기 {collection.counts.pending} · 사전 수집 누락(결과만) {collection.counts.resultOnly??0} · 외부 경기 ID 부족 {collection.counts.missingFixtureId} · <strong>시작 전 확정 라인업 {collection.counts.lineupConfirmed??0}건</strong> · 부분 라인업 {collection.counts.lineupPartial??0}건 · 제공처 미지원 {collection.counts.lineupUnsupported??0}건 · 라인업+종료 검증 동시 완료 {collection.counts.verifiedWithLineup??0}건</div>
+      {collection.source&&<div className="auto-explainer">
+        Betman 최신 상태: {collection.source.ok?"정상":"수집 오류 · 이전 장부 유지"} · 마지막 정상 목록 조회 {date(collection.source.lastFeedAt)} KST
+        {!collection.source.ok&&<strong> · 오류: {collection.source.error||"원인 확인 필요"}</strong>}
+        {collection.source.lastCaptureSummary&&<span> · 직전 정상 스캔 {collection.source.lastCaptureSummary.listed}경기 중 30분 창 {collection.source.lastCaptureSummary.window}건 · 신규 사전 수집 {collection.source.lastCaptureSummary.new}건 · 배당 없음 {collection.source.lastCaptureSummary.noOdds}건 · 식별 불가 {collection.source.lastCaptureSummary.missingIdentity}건 · 창 경과 경기 {collection.source.lastCaptureSummary.missedWindow}건 · 목록에서 사라진 관찰 경기 {collection.source.lastCaptureSummary.watchlistMissing??0}건 · 스캔 지연 {collection.source.lastCaptureSummary.delayedScan?"확인 필요":"없음"}</span>}
+      </div>}
+      <div className="auto-game-list">{collection.records.slice(0,20).map(r=><article className="auto-game" key={r.key} style={{padding:12}}>
+        <div className="auto-game-identity"><span className="auto-game-meta">{r.sport} · {r.league} · {date(r.startMs)} KST · 관측 {r.seenCount}회 · 배당 항목 {r.oddsCount}개 · 최초 배당 {date(r.firstOddsAt)} KST · 최신 배당 {date(r.latestOddsAt)} KST</span>
+          <strong>{r.home} <em>vs</em> {r.away}</strong><small>{r.verdict==="VERIFIED"?"결과 확인 "+r.final?.homeScore+" : "+r.final?.awayScore:r.pregameCapturedAt===null?"경기 목록 등록 · 30분 전 수집 대기 또는 시간 경과 · "+(r.checkReason||"결과 조회 예정"):"30분 전 수집 완료 · 검증 대기 · "+(r.checkReason||"최종점수 조회 예정")}</small>
+          {r.lineup?<small>경기 전 라인업: {r.lineup.status==="CONFIRMED"?"양팀 발표 명단 저장 완료":r.lineup.status==="PARTIAL"?"일부 명단만 사전 확인":r.lineup.status==="UNSUPPORTED"?"현재 확인 가능한 라인업 제공처 없음":"발표 대기 / 경기 식별 또는 조회 실패"} · 홈 {r.lineup.homeCount??0}명 / 원정 {r.lineup.awayCount??0}명 · 선수 명단 수집 {date(r.lineup.capturedAt)} KST · 조회 {r.lineup.attempts??0}회 · 선발투수 {r.lineup.homeStarter||"미확인"} / {r.lineup.awayStarter||"미확인"}{r.lineup.lastError?" · 최근 오류: "+r.lineup.lastError:""}</small>:<small>경기 전 라인업 미수집 · 명단 조회 여부 미확인</small>}
+          {r.captureIssue?<small>수집 추적 경고 · {r.captureIssue}</small>:null}
+          {r.resultErrors?.length?<small>결과 확인 오류 이력 · 총 조회 {r.resultChecks??0}회 · 최근 {r.resultErrors[r.resultErrors.length-1].reasons.join(" / ")}</small>:null}
+        </div>
+      </article>)}</div></>:<div className="auto-empty">{collectionError?"수집 API 상태: "+collectionError:"신규 30분 전 수집 기록은 기능 승인 및 첫 GitHub 스캔 후 표시됩니다. 기존 PRE를 소급 생성하지 않습니다."}</div>}
+   </section>
+   <section className="auto-results" aria-label="경기 전 배당 축적 연구" style={{marginBottom:20}}>
+    <div className="auto-section-title"><div>
+      <h2>경기 전 축적 자료 · 실험 TOP1 연구</h2>
+      <p>공식 LIVE TRACKER TOP1과 완전히 별개입니다. 10분 검색 → 시점별 배당 기록 → 과거 확정 결과로 보정합니다.</p>
+    </div><strong>{evidence?evidence.counts.future+"경기 수집":"첫 관측 데이터 대기"}</strong></div>
+    <div className="auto-explainer">4주간 사전 잠금한 그림자 TOP1 성적과 미래 경기의 탐색 TOP1을 구분해 표시합니다. 소표본 분석은 검증된 실전 추천이 아니며, 공식 PRE·TOP1은 바꾸지 않습니다.</div>
+    {evidence?.collectionPipeline&&<div className="scan-health-box" style={{marginBottom:14}}>
+      <div className="scan-head"><strong>4주 경기 전체 수집 → 경기 전 자료 → 종료 결과</strong>
+        <span>{evidence.collectionPipeline.status==="LEDGER_UNAVAILABLE"?"전체 수집 장부 대기":"실제 수집 장부에서 집계"}</span></div>
+      {evidence.collectionPipeline.counts?<div className="scan-metrics">
+        <span>경기 등록 {evidence.collectionPipeline.counts.registered}</span>
+        <span>시작 30분 창 {evidence.collectionPipeline.counts.pregameWindow}</span>
+        <span>진짜 사전 배당 {evidence.collectionPipeline.counts.pregameOdds}</span>
+        <span>시작 전 라인업 {evidence.collectionPipeline.counts.lineupConfirmed}</span>
+        <span>최종 결과 검증 {evidence.collectionPipeline.counts.finalVerified}</span>
+        <span>배당+결과 {evidence.collectionPipeline.counts.verifiedWithOdds}</span>
+        <span>배당+라인업+결과 {evidence.collectionPipeline.counts.verifiedWithLineup}</span>
+        <span>종료 확인 지연 {evidence.collectionPipeline.counts.overduePending}</span>
+      </div>:<p>장부가 확인되지 않아 실제 누적 수를 추정하지 않습니다.</p>}
+      {evidence.collectionPipeline.bySport&&<div className="scan-metrics">
+        {Object.entries(evidence.collectionPipeline.bySport).map(([name,c])=>
+          <span key={name}>{name} · 등록 {c.registered} / 사전 배당 {c.pregameOdds} / 라인업 {c.lineupConfirmed} / 결과 {c.finalVerified}</span>)}
+      </div>}
+    </div>}
+    {evidence?.pilot&&<div className="scan-health-box" style={{marginBottom:14}}>
+      <div className="scan-head"><strong>28일 TOP1 연구 파일럿 · {evidence.pilot.status==="NOT_STARTED"?"실제 수집 시작 대기":evidence.pilot.status==="FOUR_WEEK_REVIEW_READY"?"4주 분석 보고서 생성":"데이터 검증 중"}</strong>
+      <span>{evidence.pilot.startedAt?date(evidence.pilot.startedAt)+" 시작 · "+date(evidence.pilot.endsAt)+" 종료 기준":"첫 정상 실제 수집 이후 28일"}</span></div>
+      <div className="scan-metrics"><span>진행 {evidence.pilot.completedDays??0}/28일</span>
+        <span>경기 전 후보 {evidence.pilot.counts?.pregameCandidates??0}</span>
+        <span>검증 완료 {evidence.pilot.counts?.verified??0}</span>
+        <span>종료 확인 대기 {evidence.pilot.counts?.pendingFinal??0}</span>
+        <span>하루 1건 사전 선정 그림자 TOP1 {evidence.pilot.shadowTop1?.decisions??0}건</span>
+        <span>적중 {evidence.pilot.shadowTop1?.hits??0}건</span></div>
+      {evidence.pilot.status==="FOUR_WEEK_REVIEW_READY"&&<>
+        <p>연구 평가 등급: {evidence.pilot.grade==="PROMISING_RESEARCH"?"후속 그림자 검증 가능":"탐색적 결과 · 추가 검증 필요"}
+        {" · "}그림자 TOP1 가상 ROI: {evidence.pilot.shadowTop1?.unitROI==null?"표본 부족":(evidence.pilot.shadowTop1.unitROI*100).toFixed(1)+"%"}
+        {" · "}시간순 OOS: {evidence.pilot.walkForward?.decisions??0}건
+        {" · "}시장확률 대비 Brier 개선: {evidence.pilot.walkForward?.improved?"관찰됨":"입증되지 않음"}</p>
+        {evidence.pilot.proposals?.map((p,i)=><p key={i}>· {p}</p>)}
+        <p>측정값은 실제 결과 확인 경기 기준입니다. 미확정·사후 발견 경기는 적중률에 포함하지 않습니다.</p>
+      </>}
+      {evidence.pilot.weeks&&<div className="scan-metrics">
+        {evidence.pilot.weeks.map(w=><span key={w.week}>{w.week}주 {w.complete?"완료":"진행 중"} · 사전 후보 {w.frozen} · 검증 {w.metrics.decisions}</span>)}
+      </div>}
+    </div>}
+    {evidence?.pilotTop1&&<div className="scan-health-box" style={{marginBottom:14}}>
+      <div className="scan-head"><strong>4주 이후 미래 경기 연구 TOP1 · {evidence.pilotTop1.grade==="EXPLORATORY_TOP1"?"탐색적 후보":"연구 후보"}</strong>
+        <span>사전 관측 {date(evidence.pilotTop1.observedAt)} KST</span></div>
+      <p>{evidence.pilotTop1.sport} · {evidence.pilotTop1.league} · {evidence.pilotTop1.home} vs {evidence.pilotTop1.away}
+        {" · "}시작 {date(evidence.pilotTop1.startMs)} KST
+        {" · "}방향 {evidence.pilotTop1.label} · 배당 {evidence.pilotTop1.odds.toFixed(2)}
+        {" · "}시장 환산확률 {(evidence.pilotTop1.marketProbability*100).toFixed(1)}%
+        {" · "}배당 확률 이동 {(evidence.pilotTop1.shift*100).toFixed(1)}%p</p>
+      <p>{evidence.pilotTop1.note}</p>
+    </div>}
+    {evidence&&<div className="auto-scan-health"><div className="scan-health-box scan-success">
+      <div className="scan-metrics"><span>관찰 대상 {evidence.counts.future}</span><span>시장 변화 후보 {evidence.counts.observed}</span><span>검증 기준 통과 TOP1 {evidence.counts.researchTop1}</span><span>근거 부족·HOLD {evidence.counts.insufficient}</span></div>
+    </div></div>}
+    <div className="auto-game-list">{(evidence?.records||[]).slice(0,12).map(r=><article className="auto-game" key={r.id} style={{padding:14}}>
+      <div className="auto-game-identity">
+        <span className="auto-game-meta">{r.sport} · {r.league} · {date(r.startMs)} KST · 경기 전 관측 {r.observations}회</span>
+        <strong>{r.home} <em>vs</em> {r.away}</strong>
+        <small>{r.stage==="RESEARCH_TOP1"?"연구 TOP1 조건 충족":r.top1?"WATCH · 배당 이동 관찰":"HOLD · 자료 축적 중"} · {r.reason}</small>
+        {r.top1&&<small>관찰 방향: {r.top1.label} · 배당 {r.top1.odds.toFixed(2)} · 시장 환산확률 {(100*r.top1.marketProbability).toFixed(1)}% · 최초 대비 {(100*r.top1.shift).toFixed(1)}%p · {date(r.top1.asOf)} KST</small>}
+        {r.calibration&&<small>선행 종료 검증표본 {r.calibration.samples}건 · 종목 {r.calibration.sportSamples??0}건 / 리그 {r.calibration.leagueSamples??0}건 · 시간순 OOS {r.calibration.backtest?.samples??0}건 · {r.calibration.backtest?.improved?"시장확률 대비 Brier 개선":"성능 개선 미확인"} · 보수적 EV {typeof r.calibration.conservativeEV==="number"?(100*r.calibration.conservativeEV).toFixed(1)+"%":"미산정"} · {r.calibration.qualified?"연구 보정 기준 통과":"TOP1 보류"}</small>}
+      </div>
+    </article>)}
+      {!evidence&&<div className="auto-empty">독립 연구 기록은 Production 승인 후 첫 경기 전 수집부터 생성됩니다. 기존 PASS에서 픽을 사후 생성하지 않습니다.</div>}
+    </div>
+   </section>
    <section className="auto-results"><div className="auto-section-title"><div><h2>경기별 추적 기록</h2><p>PRE 원본과 종료 후 검증 결과를 따로 표시</p></div><strong>{visible.length} / {records.length} 경기</strong></div>
     <div className="auto-filters"><div className="auto-tabs">{[["all","전체"],["pending","검증 대기"],["verified","검증 완료"],["miss","미적중"],["issues","수집 점검"]].map(([k,label])=><button key={k} onClick={()=>setFilter(k)} aria-pressed={filter===k} className={filter===k?"active":""}>{label}</button>)}</div><div className="auto-fields"><select aria-label="종목" value={sport} onChange={e=>setSport(e.target.value)}><option value="all">모든 종목</option>{sports.map(x=><option key={x} value={x}>{x}</option>)}</select><input aria-label="팀 검색" value={query} onChange={e=>setQuery(e.target.value)} placeholder="팀명 · 리그 검색"/></div></div>
     <div className="auto-game-list">{visible.length===0?<div className="auto-empty">해당 조건의 자동분석 기록이 없습니다.</div>:visible.map(r=>{
@@ -65,6 +181,7 @@ export default function AutomationDashboard(){
         <div><span>최근 Form 홈 / 원정</span><strong>{r.sport==="축구"&&r.pre?String(r.pre.homeRecentSample??"—")+" / "+String(r.pre.awayRecentSample??"—"):r.sport==="농구"&&r.courtPre?String(r.courtPre.homeRecentSample??"—")+" / "+String(r.courtPre.awayRecentSample??"—"):"해당 PRE 표본 미저장"}</strong></div>
         <div><span>{r.sport==="축구"?"선발 XI 검증":"선발 검증"}</span><strong>{r.sport==="농구"?"NBA 모델 별도 단계":r.lineup?.stage||"미확보"}</strong></div><div><span>결과 검증</span><strong>{stateText(r)}</strong></div>
        </div>{r.warnings?.length>0&&<div className="auto-warning"><b>점검 신호</b>{r.warnings.map((w,i)=><p key={i}>· {w}</p>)}</div>}
+       {r.status==="PENDING"&&r.startMs<Date.now()-2*60*60_000&&<p className="auto-audit-footer">결과 검증 상태: ${r.verifyWaitReason||"결과 조회 진행/미확인"} · 마지막 결과 조회 ${date(r.verifyLastCheckedAt)} KST. 공식 최종점수가 확인될 때까지 결과를 임의로 확정하지 않습니다.</p>}
        {p&&<div className="auto-top-metrics"><span>TOP1 확률 <b>{num(p.probability)}%</b></span><span>배당 <b>{num(p.odds,2)}</b></span><span>EV <b>{num(p.expectedValue)}%</b></span><span>TOP1 점수 <b>{num(p.score)}</b></span><span>정산 <b>{pickText(p)}</b></span></div>}
        <h3>시장별 PRE 및 정산</h3><div className="auto-table-scroll"><table><thead><tr><th>시장</th><th>선택</th><th>확률</th><th>EV</th><th>등급</th><th>정산</th></tr></thead><tbody>{(r.markets?.length?r.markets:p?[p]:[]).map((m,i)=><tr key={m.key||i}><td>{m.market}</td><td>{m.pick}</td><td>{num(m.probability)}%</td><td>{num(m.expectedValue)}%</td><td>{m.grade}</td><td>{pickText(m)}</td></tr>)}{!r.markets?.length&&!p&&<tr><td colSpan={6}>저장된 시장 선택이 없습니다. PASS 경기입니다.</td></tr>}</tbody></table></div>
        <p className="auto-audit-footer">검증 시각: {date(r.verifiedAt)} · 결과 출처: {r.result?.source||"대기"} · 추적 ID: {r.id}</p>

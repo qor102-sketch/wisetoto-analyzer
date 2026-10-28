@@ -8,8 +8,9 @@ await fs.mkdir(path.dirname(STATE_FILE),{recursive:true});
 const old=await fs.readFile(STATE_FILE,"utf8").then(JSON.parse).catch(()=>({localStorage:{},meta:{}}));
 const previous=getRecords(old);
 const now=Date.now();
+const verifyOnly=process.argv.includes("--verify-only");
 let due=[],feedCounts={},sourceError=null,feedPayload=null,feedOrigin="none";
-try {
+if(!verifyOnly)try {
   // The preflight and browser MUST share the same verified offers. A second
   // upstream request is both unreliable and can silently lose valid fixtures.
   feedPayload=process.argv.includes("--preflight")?null:await loadFeed(now);
@@ -24,7 +25,7 @@ try {
   due=dueGames(feedPayload.games,previous,now);
 } catch(e){sourceError=String(e); console.error("SOURCE_ERROR: "+sourceError);}
 const pending=dueVerifications(previous,now);
-const verifyDue=pending.length>0&&(now-Number(old.meta?.lastVerifyAttempt??0)>90*60_000);
+const verifyDue=pending.length>0; // fair, bounded result check on every scan; never starve overdue fixtures
 const runBrowser=due.length>0||verifyDue;
 if(process.argv.includes("--preflight")){
   const health={schema:"wisetoto-auto-scan-health-v1",scannedAt:new Date(now).toISOString(),
@@ -34,7 +35,8 @@ if(process.argv.includes("--preflight")){
     note:"A completed scan is not proof that every Betman game was captured before kickoff."};
   await fs.writeFile("automation-state/scan-health.json",JSON.stringify(health,null,2)+"\n");
   console.log(JSON.stringify({date:new Date(now).toISOString(),frequency:"10 minutes (best effort)",feedSports:feedCounts,feedOrigin,upcoming:due.length,dueSports:sportCounts(due),verifyPending:pending.length,runBrowser,sourceError}));
-  if(process.env.GITHUB_OUTPUT)await fs.appendFile(process.env.GITHUB_OUTPUT,"run_browser="+String(runBrowser)+"\n");
+  if(process.env.GITHUB_OUTPUT)await fs.appendFile(process.env.GITHUB_OUTPUT,
+    "run_browser="+String(runBrowser)+"\n"+"pregame_due="+String(due.length>0)+"\n"+"verify_due="+String(verifyDue)+"\n");
   if(sourceError&&!pending.length)process.exitCode=1;
 }else{
   const {chromium}=await import("playwright");
@@ -66,23 +68,36 @@ if(process.argv.includes("--preflight")){
       await page.waitForFunction(()=>!!window.__wisetotoAutomation?.snapshot().feedReady,null,{timeout:90000});
     }
     console.log("Ready",JSON.stringify(await page.evaluate(()=>window.__wisetotoAutomation.snapshot())));
-    const analysis=await page.evaluate(()=>window.__wisetotoAutomation.analyze());
+    const analysis=verifyOnly?{started:false,count:0,reason:"VERIFY_ONLY"}:
+      await page.evaluate(()=>window.__wisetotoAutomation.analyze());
     console.log("Analysis",JSON.stringify(analysis));
     if(analysis.started && analysis.count < due.length)console.log("Later due games queued for following 10-minute scan:",due.length-analysis.count);
+    let batchTimedOut=false;
     if(analysis.started){
       await page.waitForTimeout(2000);
-      await page.waitForFunction(()=>!window.__wisetotoAutomation.snapshot().batchRunning,null,{timeout:540000});
-      await page.waitForTimeout(3000);
+      try{
+        await page.waitForFunction(()=>!window.__wisetotoAutomation.snapshot().batchRunning,null,{timeout:240000});
+      }catch(e){
+        batchTimedOut=true;
+        console.error("BATCH_WATCHDOG_TIMEOUT: preserving only records already frozen before closing browser",String(e));
+      }
+      if(!batchTimedOut)await page.waitForTimeout(3000);
     }
     const completeSnapshot=await page.evaluate(()=>window.__wisetotoAutomation.snapshot());
     console.log("Batch result",JSON.stringify(completeSnapshot));
-    const verify=await page.evaluate(()=>window.__wisetotoAutomation.verify());
+    // Dedicated verifier is scheduled independently after PRE, even when PRE fails.
+    const verify=verifyOnly && !completeSnapshot.batchRunning
+      ? await page.evaluate(()=>window.__wisetotoAutomation.verify())
+      : {started:false,reason:verifyOnly?"BATCH_STILL_RUNNING":"INDEPENDENT_VERIFY_JOB"};
     console.log("Result verification",JSON.stringify(verify));
+    let verificationTimedOut=false;
     if(verify.started){
       old.meta={...old.meta,lastVerifyAttempt:Date.now()};
       await page.waitForTimeout(1500);
-      await page.waitForFunction(()=>!window.__wisetotoAutomation.snapshot().validationLoading,null,{timeout:240000});
-      await page.waitForTimeout(2000);
+      try{
+        await page.waitForFunction(()=>!window.__wisetotoAutomation.snapshot().validationLoading,null,{timeout:180000});
+        await page.waitForTimeout(1500);
+      }catch(e){verificationTimedOut=true;console.error("VERIFY_TIMEOUT_CHECKPOINT",String(e));}
     }
     const storage=await page.evaluate(()=>{
       const result={};
@@ -105,6 +120,7 @@ if(process.argv.includes("--preflight")){
     await fs.writeFile(STATE_FILE,JSON.stringify({schema:"wisetoto-auto-v1",localStorage:storage,meta:{
       ...old.meta,lastRunAt:Date.now(),lastBase:base,browserErrors:errors.slice(0,5)
     }},null,2));
+    await fs.writeFile("automation-state/checkpoint-ready",new Date().toISOString()+"\n");
     await fs.writeFile("automation-state/audit.json",JSON.stringify(report,null,2));
     const lines=[
       "## Wisetoto 자동 PRE/사후검증","- 실행: "+report.generatedAt,
@@ -129,8 +145,10 @@ if(process.argv.includes("--preflight")){
       ].join("\n")+"\n");
     }
     console.log("Completed",JSON.stringify({newPredictions:report.created,newVerified:report.verified.length,anomalies:report.suspicious.length,sourceError}));
+    if(batchTimedOut){console.error("BATCH_INCOMPLETE_CHECKPOINTED");process.exitCode=1;}
+    if(verificationTimedOut){console.error("VERIFY_RETRY_NEXT_SCAN");process.exitCode=1;}
     if(sourceError)process.exitCode=1; // never call a source-outage scan SUCCESS
-    if(due.length>0&&analysis.count===0){console.error("DUE_GAMES_NOT_ANALYZED:",due.length);process.exitCode=1;}
+    if(!verifyOnly&&due.length>0&&analysis.count===0){console.error("DUE_GAMES_NOT_ANALYZED:",due.length);process.exitCode=1;}
     if(completeSnapshot.batchFailed>0){console.error("BATCH_FAILURES:",completeSnapshot.batchFailed);process.exitCode=1;}
   }finally{await browser.close();}
 }

@@ -2,6 +2,7 @@
 // Never publish browser localStorage or rewrite original frozen records.
 import fs from "node:fs/promises";
 import {getRecords,STATE_FILE} from "./logic.mjs";
+import {scorePlausibility,positiveValueCandidate} from "../WisetotoAnalyzer-LiveFree/src/lib/postmatch-guards.mjs";
 export const firstNumeric=(...values)=>{
   for(const v of values) if(typeof v==="number"&&Number.isFinite(v))return v;
   return null;
@@ -28,6 +29,11 @@ export function summarizeRecord(r){
  const startMs=firstNumeric(r.startMs);
  const capturedAt=firstNumeric(r.capturedAt);
  const warnings=[];
+ if(r.verificationStatus==="VERIFIED" && result && !scorePlausibility(r.sport,result.homeScore,result.awayScore).ok)
+   warnings.push("기존 종료 검증 점수가 종목 규칙에 맞지 않음 — 원본 재검토 필요");
+ if(picks.some(p=>["VALUE","STRONG VALUE"].includes(p.grade)&&!positiveValueCandidate(p)))
+   warnings.push("과거 잠금 VALUE의 EV/배당/확률 불일치 — 신규 후보는 차단, 원본 보존");
+
  if(startMs!==null&&capturedAt!==null&&capturedAt>=startMs)warnings.push("킥오프 이후 캡처 — PRE 유효성 점검");
  if(pre){
    const h=firstNumeric(pre.homeRecentSample),a=firstNumeric(pre.awayRecentSample);
@@ -42,8 +48,12 @@ export function summarizeRecord(r){
    home:String(r.home??""),away:String(r.away??""),
    startMs,capturedAt,
    decision:String(r.decision??"PASS"),
-   status:String(r.verificationStatus??"PENDING"),
+   status:r.verificationStatus==="VERIFIED" && result &&
+      !scorePlausibility(r.sport,result.homeScore,result.awayScore).ok
+        ? "REVIEW_REQUIRED" : String(r.verificationStatus??"PENDING"),
    verifiedAt:firstNumeric(r.verifiedAt),
+   verifyWaitReason:r.verificationStatus==="PENDING" && r.verifyWaitReason ? String(r.verifyWaitReason).slice(0,64) : null,
+   verifyLastCheckedAt:firstNumeric(r.verifyLastCheckedAt),
    result:result?{homeScore:firstNumeric(result.homeScore),awayScore:firstNumeric(result.awayScore),source:String(result.source??"")} :null,
    pre:pre?{
      expectedHome:firstNumeric(pre.expectedHome),expectedAway:firstNumeric(pre.expectedAway),
@@ -63,9 +73,18 @@ export function summarizeRecord(r){
  };
 }
 export function publishProjection(state){
- const records=getRecords(state).map(summarizeRecord)
- .filter(r=>r.id&&r.startMs!==null&&r.capturedAt!==null)
- .sort((a,b)=>b.startMs-a.startMs||a.id.localeCompare(b.id));
+ const raw=getRecords(state);
+ const records=raw.map((source,index)=>{
+   const item=summarizeRecord(source);
+   // Never silently drop a frozen row just because one metadata field is broken.
+   // Synthetic display IDs mark an error; they do NOT modify the frozen source.
+   if(!item.id||item.startMs===null||item.capturedAt===null){
+     if(!item.id)item.id="MISSING_ID_RAW_INDEX_"+index;
+     item.status="REVIEW_REQUIRED";
+     item.warnings.push("보관된 원본 PRE 식별/시각 데이터 누락 — 원본 수정 금지·수동 점검");
+   }
+   return item;
+ }).sort((a,b)=>(b.startMs??0)-(a.startMs??0)||a.id.localeCompare(b.id));
  return {
   schema:"wisetoto-public-history-v1",
   publishedAt:new Date().toISOString(),
@@ -74,10 +93,12 @@ export function publishProjection(state){
   counts:{
     total:records.length,pending:records.filter(r=>r.status==="PENDING").length,
     verified:records.filter(r=>r.status==="VERIFIED").length,
+    review:records.filter(r=>r.status==="REVIEW_REQUIRED").length,
     void:records.filter(r=>r.status==="VOID").length,
     hit:records.filter(r=>r.top1?.resultStatus==="HIT").length,
     miss:records.filter(r=>r.top1?.resultStatus==="MISS").length,
-    warnings:records.filter(r=>r.warnings.length).length
+    warnings:records.filter(r=>r.warnings.length).length,
+    overdue:records.filter(r=>r.status==="PENDING" && r.startMs!==null && r.startMs<Date.now()-6*60*60_000).length
   },
   records
  };

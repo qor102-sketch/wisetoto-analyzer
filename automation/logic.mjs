@@ -20,7 +20,7 @@ export function sportCounts(games) {
 export function eligibleAutoGame(game,now=Date.now()) {
   const start=Number(game?.gameDateMs??new Date(game?.gameDate).getTime());
   if(!sportName(game?.sport) || !Number.isFinite(start) ||
-     start-now<10*minute || start-now>100*minute)return false;
+     start-now<10*minute || start-now>180*minute)return false;
   // Never match an undefined real team to another match at the same kickoff.
   const names=[String(game?.home??"").trim(),String(game?.away??"").trim()];
   if(names.some(v=>!v||/^(미정|tbd|tba|unknown|to be determined|-)$/i.test(v)))return false;
