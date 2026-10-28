@@ -13,7 +13,9 @@ type PilotReport={status:string;startedAt:number|null;endsAt:number|null;complet
  walkForward?:{decisions:number;marketBrier:number|null;modelBrier:number|null;improved:boolean};
  weeks?:Array<{week:number;complete:boolean;observed:number;frozen:number;metrics:PilotMetric}>;
  proposals?:string[];shadowHistory?:Array<{date:string;id:string;sport:string;home:string;away:string;side:string;odds:number;result:string}>};
-type ResearchEvidence={generatedAt:string;counts:{future:number;observed:number;researchTop1:number;insufficient:number};records:EvidenceRow[];
+type CollectionFunnelCount={registered:number;pregameWindow:number;pregameOdds:number;finalVerified:number;verifiedWithOdds:number;verifiedWithLineup:number;lineupConfirmed:number;lineupPartial:number;lineupUnsupported:number;overduePending:number;resultOnly:number;captureWarnings:number};
+type CollectionFunnel={status:string;startedAt?:number;endsAt?:number;counts?:CollectionFunnelCount;bySport?:Record<string,CollectionFunnelCount>};
+type ResearchEvidence={generatedAt:string;counts:{future:number;observed:number;researchTop1:number;insufficient:number};records:EvidenceRow[];collectionPipeline?:CollectionFunnel;
  pilot?:PilotReport;pilotTop1?:{id:string;sport:string;league:string;home:string;away:string;startMs:number;side:string;label:string;odds:number;marketProbability:number;shift:number;observedAt:number;grade:string;note:string}|null};
 type CollectedRow={key:string;sport:string;league:string;home:string;away:string;startMs:number;firstSeenAt:number;pregameCapturedAt:number|null;firstOddsAt?:number|null;latestOddsAt?:number|null;seenCount:number;oddsCount:number;resultChecks?:number;resultErrors?:Array<{at:number;reasons:string[]}>;captureIssue?:string|null;verdict:string;final:{homeScore:number;awayScore:number}|null;checkReason:string|null;lineup?:{status:string;source?:string;capturedAt?:number;homeCount?:number;awayCount?:number;homeStarter?:string|null;awayStarter?:string|null;reason?:string;lastAttemptAt?:number;lastError?:string;attempts?:number}};
 type CollectedLedger={generatedAt:string;source?:{lastFeedAt:number|null;ok:boolean;error:string|null;lastCaptureSummary?:{listed:number;window:number;new:number;noOdds:number;missingIdentity:number;missedWindow:number;watchlistMissing?:number;delayedScan?:boolean;sinceLastScanMs?:number|null}|null};counts:{collected:number;active?:number;archived?:number;verified:number;pending:number;pregameCaptured:number;verifiedWithPregame:number;resultOnly:number;missingFixtureId:number;lineupConfirmed?:number;lineupPartial?:number;lineupUnsupported?:number;verifiedWithLineup?:number};records:CollectedRow[]};
@@ -100,6 +102,24 @@ export default function AutomationDashboard(){
       <p>공식 LIVE TRACKER TOP1과 완전히 별개입니다. 10분 검색 → 시점별 배당 기록 → 과거 확정 결과로 보정합니다.</p>
     </div><strong>{evidence?evidence.counts.future+"경기 수집":"첫 관측 데이터 대기"}</strong></div>
     <div className="auto-explainer">4주간 사전 잠금한 그림자 TOP1 성적과 미래 경기의 탐색 TOP1을 구분해 표시합니다. 소표본 분석은 검증된 실전 추천이 아니며, 공식 PRE·TOP1은 바꾸지 않습니다.</div>
+    {evidence?.collectionPipeline&&<div className="scan-health-box" style={{marginBottom:14}}>
+      <div className="scan-head"><strong>4주 경기 전체 수집 → 경기 전 자료 → 종료 결과</strong>
+        <span>{evidence.collectionPipeline.status==="LEDGER_UNAVAILABLE"?"전체 수집 장부 대기":"실제 수집 장부에서 집계"}</span></div>
+      {evidence.collectionPipeline.counts?<div className="scan-metrics">
+        <span>경기 등록 {evidence.collectionPipeline.counts.registered}</span>
+        <span>시작 30분 창 {evidence.collectionPipeline.counts.pregameWindow}</span>
+        <span>진짜 사전 배당 {evidence.collectionPipeline.counts.pregameOdds}</span>
+        <span>시작 전 라인업 {evidence.collectionPipeline.counts.lineupConfirmed}</span>
+        <span>최종 결과 검증 {evidence.collectionPipeline.counts.finalVerified}</span>
+        <span>배당+결과 {evidence.collectionPipeline.counts.verifiedWithOdds}</span>
+        <span>배당+라인업+결과 {evidence.collectionPipeline.counts.verifiedWithLineup}</span>
+        <span>종료 확인 지연 {evidence.collectionPipeline.counts.overduePending}</span>
+      </div>:<p>장부가 확인되지 않아 실제 누적 수를 추정하지 않습니다.</p>}
+      {evidence.collectionPipeline.bySport&&<div className="scan-metrics">
+        {Object.entries(evidence.collectionPipeline.bySport).map(([name,c])=>
+          <span key={name}>{name} · 등록 {c.registered} / 사전 배당 {c.pregameOdds} / 라인업 {c.lineupConfirmed} / 결과 {c.finalVerified}</span>)}
+      </div>}
+    </div>}
     {evidence?.pilot&&<div className="scan-health-box" style={{marginBottom:14}}>
       <div className="scan-head"><strong>28일 TOP1 연구 파일럿 · {evidence.pilot.status==="NOT_STARTED"?"실제 수집 시작 대기":evidence.pilot.status==="FOUR_WEEK_REVIEW_READY"?"4주 분석 보고서 생성":"데이터 검증 중"}</strong>
       <span>{evidence.pilot.startedAt?date(evidence.pilot.startedAt)+" 시작 · "+date(evidence.pilot.endsAt)+" 종료 기준":"첫 정상 실제 수집 이후 28일"}</span></div>
