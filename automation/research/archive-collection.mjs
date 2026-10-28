@@ -6,7 +6,7 @@ import {createHash} from "node:crypto";
 import {pathToFileURL} from "node:url";
 const DAY=86_400_000,ACTIVE_DAYS=120;
 export const ARCHIVE_SCHEMA="wisetoto-collect-archive-v1";
-const fields=["collected","verified","pending","pregameCaptured","verifiedWithPregame","resultOnly","missingFixtureId"];
+const fields=["collected","verified","pending","pregameCaptured","verifiedWithPregame","resultOnly","missingFixtureId","lineupConfirmed","lineupPartial","lineupUnsupported"];
 export function countRows(rows){
  const x=Object.fromEntries(fields.map(k=>[k,0]));
  for(const r of rows){
@@ -16,6 +16,9 @@ export function countRows(rows){
   if(r.verdict==="VERIFIED"&&Number.isFinite(r.pregameCapturedAt)&&r.pregameCapturedAt<r.startMs)x.verifiedWithPregame++;
   if(!Number.isFinite(r.pregameCapturedAt))x.resultOnly++;
   if(r.fixtureId===null)x.missingFixtureId++;
+  if(r.lineup?.status==="CONFIRMED"&&r.lineup.capturedAt<r.startMs)x.lineupConfirmed++;
+  if(r.lineup?.status==="PARTIAL"&&r.lineup.capturedAt<r.startMs)x.lineupPartial++;
+  if(r.lineup?.status==="UNSUPPORTED")x.lineupUnsupported++;
  }
  return x;
 }
