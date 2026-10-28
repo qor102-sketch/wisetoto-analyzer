@@ -167,6 +167,13 @@ export function projection(state,now=Date.now()){
      verifiedWithPregame:all.filter(x=>x.verdict==="VERIFIED"&&
        Number.isFinite(x.pregameCapturedAt)&&x.pregameCapturedAt<x.startMs).length+(state.archiveCounts?.verifiedWithPregame??0),
      resultOnly:all.filter(x=>x.startMs<=now&&!Number.isFinite(x.pregameCapturedAt)).length+(state.archiveCounts?.resultOnly??0),
-     missingFixtureId:all.filter(x=>x.fixtureId===null).length+(state.archiveCounts?.missingFixtureId??0)},
+     missingFixtureId:all.filter(x=>x.fixtureId===null).length+(state.archiveCounts?.missingFixtureId??0),
+     lineupConfirmed:all.filter(x=>x.lineup?.status==="CONFIRMED"&&
+       Number.isFinite(x.lineup.capturedAt)&&x.lineup.capturedAt<x.startMs).length+(state.archiveCounts?.lineupConfirmed??0),
+     lineupPartial:all.filter(x=>x.lineup?.status==="PARTIAL"&&
+       Number.isFinite(x.lineup.capturedAt)&&x.lineup.capturedAt<x.startMs).length+(state.archiveCounts?.lineupPartial??0),
+     lineupUnsupported:all.filter(x=>x.lineup?.status==="UNSUPPORTED").length+(state.archiveCounts?.lineupUnsupported??0),
+     verifiedWithLineup:all.filter(x=>x.verdict==="VERIFIED"&&x.lineup?.status==="CONFIRMED"&&
+       Number.isFinite(x.lineup.capturedAt)&&x.lineup.capturedAt<x.startMs).length},
    records};
 }
