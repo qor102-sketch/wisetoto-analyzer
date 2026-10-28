@@ -40,7 +40,7 @@ test("never classify future or unconfirmed final as completed, and never promote
  const report=buildCollectionFunnel({schema:SCHEMA,records:[future,late]},S,S+4*3600000);
  assert.equal(report.counts.finalVerified,1);
  assert.equal(report.counts.lineupConfirmed,1);
- assert.equal(report.counts.verifiedWithLineup,1);
+ assert.equal(report.counts.verifiedWithLineup,0); // future result and postkickoff XI cannot join
  const stale={...row("3"),verifiedAt:S+8*DAY};
  const r2=buildCollectionFunnel({schema:SCHEMA,records:[stale]},S,S+4*3600000);
  assert.equal(r2.counts.finalVerified,0);
