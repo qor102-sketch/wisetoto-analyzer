@@ -4,6 +4,16 @@
 export const LINEUP_WINDOW_MS=180*60000;
 const norm=v=>String(v??"").normalize("NFKC").toLowerCase().replace(/[^a-z0-9가-힣]/g,"");
 const sideList=v=>Array.isArray(v)?v.filter(p=>p&&typeof p==="object"):[];
+// Naver occasionally returns timezone-less Korea-local "YYYY-MM-DD HH:mm".
+// Never interpret that as UTC on the GitHub runner.
+function providerKickoff(v){
+ if(v==null)return NaN;
+ const s=String(v).trim();
+ if(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(s)&&
+    !/(Z|[+-]\d{2}:?\d{2})$/i.test(s))
+  return Date.parse(s.replace(" ","T")+"+09:00");
+ return Date.parse(s);
+}
 
 export function pregameLineupCandidates(state,now=Date.now(),limit=4){
  return (state?.records??[]).filter(r=>["축구","야구","농구","배구"].includes(r.sport)
@@ -40,7 +50,7 @@ export function lineupEvidence(row,payload,at){
  }
  // If a schedule start is supplied, reject an unrelated fixture kickoff.
  const reported=game.gameDateTime??game.startDateTime??null;
- const parsed=reported?Date.parse(String(reported)):NaN;
+ const parsed=providerKickoff(reported);
  if(reported&&Number.isFinite(parsed)&&Math.abs(parsed-row.startMs)>2*3600000)
   return {status:"UNAVAILABLE",reason:"KICKOFF_MISMATCH"};
  const home=sideList(payload.home),away=sideList(payload.away);
