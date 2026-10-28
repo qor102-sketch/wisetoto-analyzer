@@ -4,6 +4,7 @@ import {loadFeed} from "../feed.mjs";
 import {getRecords,STATE_FILE} from "../logic.mjs";
 import {SCHEMA,collect,settlement,dueResults,mergeProviderFinal,projection,verifiedNaverFinal} from "./collect-first.mjs";
 import {lookupVolleyballFinal} from "./volleyball-result.mjs";
+import {collectLineupSnapshots} from "./pregame-lineup.mjs";
 const dir="automation-state",file=dir+"/collect-first-state.json";
 await fs.mkdir(dir,{recursive:true});
 let state;
@@ -73,6 +74,11 @@ for(const r of dueResults(state,now,6)){
    providerErrors:reasons
  },Date.now());
 }
+// Pre-kickoff lineup checks remain separate from final-result reconciliation.
+// A returned late lineup is never stored as historical pregame evidence.
+const lineupScan=await collectLineupSnapshots(state,{base});
+state=lineupScan.state;
+console.log("PREGAME_LINEUP_AUDIT "+JSON.stringify(lineupScan.summary));
 await fs.writeFile(file,JSON.stringify(state)+"\n");
 await fs.writeFile(dir+"/collect-first-public.json",JSON.stringify(projection(state,Date.now()))+"\n");
 console.log("COLLECT_FIRST_STORED "+JSON.stringify({fresh,counts:projection(state).counts}));
