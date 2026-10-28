@@ -147,7 +147,7 @@ export function verifiedNaverFinal(payload){
 }
 export function dueResults(state,now=Date.now(),limit=6){
  return (state.records||[]).filter(r=>r.verdict==="PENDING"&&
-   r.startMs<=now-2*60*M&&r.startMs>=now-14*D&&
+   r.startMs<=now-2*60*M&&r.startMs>=now-42*D&&
    (!r.lastResultCheckAt||now-r.lastResultCheckAt>=60*M))
    .sort((a,b)=>Number(a.lastResultCheckAt??0)-Number(b.lastResultCheckAt??0)||
      a.startMs-b.startMs).slice(0,limit);
