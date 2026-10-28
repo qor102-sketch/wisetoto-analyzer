@@ -69,10 +69,15 @@ test("browser timeout must not block archived tracker publication",async()=>{
  const w=await readFile(new URL("../.github/workflows/wisetoto-auto-analysis.yml",import.meta.url),"utf8");
  const gen=w.slice(w.indexOf("- name: Generate public read-only dashboard projection"),w.indexOf("- name: Publish site-readable history"));
  const pub=w.slice(w.indexOf("- name: Publish site-readable history"),w.indexOf("- name: Summarize OOS report"));
+ const reconciler=await readFile(new URL("./reconcile-public.mjs",import.meta.url),"utf8");
  assert.ok(gen.includes("if: always()"));
  assert.ok(pub.includes("if: always()"));
- assert.ok(pub.includes("PUBLIC_RECORD_REGRESSION"));
- assert.ok(pub.includes("PUBLIC_LEDGER_RECONCILED"));
+ // The public-regression guard now lives in a dedicated, tested module.
+ assert.match(pub,/node automation\/reconcile-public\.mjs \/tmp\/old-public-history-data\.json automation-state\/public-history\.json/);
+ assert.match(reconciler,/PUBLIC_RECORD_REGRESSION/);
+ assert.match(reconciler,/PUBLIC_LEDGER_RECONCILED/);
+ // JSON file upload prevents ARG_MAX failures for 41+ archived records.
+ assert.match(pub,/--input \/tmp\/public-history-put\.json/);
  assert.ok(!pub.includes("checkpoint-ready"));
 });
 test("public output distinguishes a delayed result without fabricating final score",()=>{
@@ -95,7 +100,9 @@ test("Actions always reconciles results independently of PRE batch and publishes
  const page=await readFile(new URL("../WisetotoAnalyzer-LiveFree/src/app/page.tsx",import.meta.url),"utf8");
  assert.match(workflow,/name: Reconcile ended games independently of PRE batch outcome\s+if: always\(\) && steps\.due\.outputs\.verify_due == 'true'/);
  assert.match(workflow,/node automation\/runner\.mjs --verify-only/);
- assert.match(workflow,/PUBLIC_RECORD_REGRESSION/);
+ const reconciler=await readFile(new URL("./reconcile-public.mjs",import.meta.url),"utf8");
+ assert.match(workflow,/node automation\/reconcile-public\.mjs/);
+ assert.match(reconciler,/PUBLIC_RECORD_REGRESSION/);
  assert.match(runner,/const verifyOnly=process\.argv\.includes\("--verify-only"\)/);
  assert.match(runner,/verificationTimedOut/);
  assert.match(page,/Fair queue: do not keep retrying the same failed first 10 records/);
