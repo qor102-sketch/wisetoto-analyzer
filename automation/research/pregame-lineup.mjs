@@ -74,7 +74,7 @@ export function mergeLineupEvidence(state,key,observation,now){
     detail?{...observation}:prior??{};
   return {...old,lineup:{...captured,status:keepConfirmed?"CONFIRMED":
     (detail?observation.status:prior?.status??observation.status),
-    reason:keepConfirmed?prior.reason:(detail?observation.reason:observation.reason??prior?.reason),
+    reason:keepConfirmed?prior.reason:(detail?observation.reason:prior?.reason??observation.reason),
     lastAttemptAt:now,attempts:(prior?.attempts??0)+1,
     lastError:["UNAVAILABLE","REJECTED"].includes(observation.status)?
       observation.reason:null}};
@@ -88,7 +88,7 @@ export async function collectLineupSnapshots(state,{
  for(const r of pregameLineupCandidates(state,now(),limit)){
   const started=now();
   let observation;
-  if(r.sport==="배구")observation={status:"UNSUPPORTED",reason:"NO_VERIFIED_PREGAME_LINEUP_PROVIDER"};
+  if(r.sport==="배구"||r.sport==="농구")observation={status:"UNSUPPORTED",reason:"NO_VERIFIED_PREGAME_LINEUP_PROVIDER"};
   else try{
     const params=new URLSearchParams({sport:r.sport,league:r.league,home:r.home,
       away:r.away,date:new Date(r.startMs).toISOString()});
