@@ -233,3 +233,12 @@ test("collection no longer silently trims more than 4000 records",()=>{
  assert.equal(c.state.records.length,4020);
  assert.equal(c.summary.new,4020);
 });
+
+test("pending results remain independently retryable through the full 28-day pilot and 14-day grace",()=>{
+ const pre=collect({schema:SCHEMA,records:[]},{ok:true,games:[g("soccer",25)]},T).state;
+ const row=pre.records[0];
+ const day=86400000;
+ assert.equal(dueResults(pre,row.startMs+30*day).length,1);
+ assert.equal(dueResults(pre,row.startMs+41*day).length,1);
+ assert.equal(dueResults(pre,row.startMs+43*day).length,0);
+});
