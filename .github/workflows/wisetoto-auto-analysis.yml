@@ -63,6 +63,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - name: Validate durable public-result reconciliation before publishing
+        run: node --test automation/reconcile-public.test.mjs
       - name: Restore latest automation state artifact
         env:
           GH_TOKEN: ${{ github.token }}
