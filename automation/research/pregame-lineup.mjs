@@ -31,6 +31,12 @@ export function lineupEvidence(row,payload,at){
  if(row.sport==="야구"){
   if(!game.homeTeamName||!game.awayTeamName)
     return {status:"UNAVAILABLE",reason:"BASEBALL_TEAM_IDENTITY_MISSING"};
+  const match=(from,to)=>{
+   const a=norm(from),b=norm(to);
+   return a.length>=2&&b.length>=2&&(a===b||a.includes(b)||b.includes(a));
+  };
+  if(!match(row.home,game.homeTeamName)||!match(row.away,game.awayTeamName))
+    return {status:"UNAVAILABLE",reason:"BASEBALL_TEAM_IDENTITY_MISMATCH"};
  }
  // If a schedule start is supplied, reject an unrelated fixture kickoff.
  const reported=game.gameDateTime??game.startDateTime??null;
