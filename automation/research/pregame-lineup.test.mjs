@@ -29,6 +29,13 @@ test("football XI accepts 11 verified starters per side before match only",()=>{
  const incomplete={...p,home:p.home.slice(0,9)};
  assert.equal(lineupEvidence(r,incomplete,T).status,"PARTIAL");
 });
+test("naive Naver fixture datetime is Korea-local, not runner UTC",()=>{
+ const p=lineup();
+ // T=2026-10-28 09:00 KST, kickoff at 09:25 KST.
+ const koreanLocal=new Date(T+25*M+9*3600000).toISOString().slice(0,16).replace("T"," ");
+ p.game.gameDateTime=koreanLocal;
+ assert.equal(lineupEvidence(row(),p,T).status,"CONFIRMED");
+});
 test("baseball lineup records batters and starters, not fabricated XI",()=>{
  const r=row("야구"),p={ok:true,gameId:"KBO-1",game:{homeTeamName:"Home",awayTeamName:"Away"},
  home:Array.from({length:9},(_,i)=>({name:"Batter H"+i})),
