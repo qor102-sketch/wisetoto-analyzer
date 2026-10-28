@@ -6,6 +6,9 @@ import fs from "node:fs";
 import {pathToFileURL} from "node:url";
 import {scorePlausibility} from "../WisetotoAnalyzer-LiveFree/src/lib/postmatch-guards.mjs";
 const statuses=["HIT","MISS","VOID"];
+const validVerified=r=>r?.status==="VERIFIED"&&r.result&&
+ Number.isFinite(r.verifiedAt)&&r.verifiedAt>r.startMs&&
+ scorePlausibility(r.sport,r.result.homeScore,r.result.awayScore).ok;
 function carryStatus(current,older){
  if(!current||!older||String(current.key)!==String(older.key))return current;
  if(!statuses.includes(older.resultStatus))return current;
@@ -24,14 +27,21 @@ export function reconcilePublishedHistory(old,next){
  const lost=old.records.filter(r=>!nextById.has(r.id));
  if(lost.length)throw Error("PUBLIC_RECORD_REGRESSION: "+lost.slice(0,8).map(r=>r.id).join(","));
  if(next.counts?.total!==next.records.length)throw Error("PUBLIC_COUNT_MISMATCH");
- let repaired=0;
+ let repaired=0,invalidPrior=0;
+ const oldValidVerified=old.records.filter(validVerified).length;
  const records=next.records.map(row=>{
   const prior=oldById.get(row.id);
   if(!prior||prior.status!=="VERIFIED")return row;
   const score=prior.result;
-  if(!score||!Number.isFinite(prior.verifiedAt)||
-    !(prior.verifiedAt>prior.startMs)||!scorePlausibility(prior.sport,score.homeScore,score.awayScore).ok)
-    throw Error("PUBLIC_OLD_FINAL_INVALID_"+row.id);
+  // A previously public 'VERIFIED' volleyball 2:2 is not a valid final!
+  // Keep its original evidence for review, never propagate the bad grade.
+  if(!validVerified(prior)){
+    if(row.status==="VERIFIED")throw Error("PUBLIC_INVALID_FINAL_STILL_VERIFIED_"+row.id);
+    invalidPrior++;
+    const warning="과거 종료 검증 표시가 종목 점수 규칙에 위배됨 — 재검토 필요";
+    return {...row,status:"REVIEW_REQUIRED",
+      warnings:[...new Set([...(row.warnings??[]),warning])]};
+  }
   if(row.status==="VERIFIED"){
    if(!row.result||row.result.homeScore!==score.homeScore||
       row.result.awayScore!==score.awayScore)
@@ -54,9 +64,9 @@ export function reconcilePublishedHistory(old,next){
   hit:records.filter(x=>x.top1?.resultStatus==="HIT").length,
   miss:records.filter(x=>x.top1?.resultStatus==="MISS").length,
   warnings:records.filter(x=>(x.warnings??[]).length>0).length}};
- if(result.counts.verified<old.counts.verified)
-   throw Error("PUBLIC_VERIFIED_COUNT_REGRESSION");
- return {data:result,repaired};
+ if(result.counts.verified<oldValidVerified)
+   throw Error("PUBLIC_VALID_VERIFIED_COUNT_REGRESSION");
+ return {data:result,repaired,invalidPrior};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
  const old=JSON.parse(fs.readFileSync(process.argv[2],"utf8"));
@@ -65,5 +75,5 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
  fs.writeFileSync(process.argv[3],JSON.stringify(output.data)+"\n");
  console.log("PUBLIC_LEDGER_RECONCILED",JSON.stringify({previous:old.records.length,
    current:output.data.records.length,priorVerified:old.counts.verified,
-   currentVerified:output.data.counts.verified,carriedPreviouslyVerified:output.repaired}));
+   currentVerified:output.data.counts.verified,carriedPreviouslyVerified:output.repaired,invalidPriorToReview:output.invalidPrior}));
 }
