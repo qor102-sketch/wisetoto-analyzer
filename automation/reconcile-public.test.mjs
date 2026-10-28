@@ -34,8 +34,10 @@ test("conflicting final scores, disappearing rows, malformed settlement fail clo
  assert.throws(()=>reconcilePublishedHistory(old,pub([{...row("a","VERIFIED"),
   result:{homeScore:1,awayScore:0,source:"SPORTSAPI"}}])),/PUBLIC_FINAL_SCORE_CONFLICT/);
  assert.throws(()=>reconcilePublishedHistory(old,pub([row("a","VOID")])),/PUBLIC_FINAL_STATUS_CONFLICT/);
- assert.throws(()=>reconcilePublishedHistory(pub([{...row("a","VERIFIED"),verifiedAt:null}]),
-  pub([row("a")])),/PUBLIC_OLD_FINAL_INVALID/);
+ const bad=pub([{...row("a","VERIFIED"),verifiedAt:null}]);
+ const review=reconcilePublishedHistory(bad,pub([row("a")]));
+ assert.equal(review.data.records[0].status,"REVIEW_REQUIRED");
+ assert.equal(review.invalidPrior,1);
 });
 test("same completed final is preserved without mutating frozen prediction or duplicate count",()=>{
  const old=pub([row("a","VERIFIED")]),next=pub([row("a","VERIFIED"),row("b")]);
@@ -43,4 +45,18 @@ test("same completed final is preserved without mutating frozen prediction or du
  assert.equal(out.repaired,0);
  assert.equal(out.data.counts.verified,1);
  assert.equal(out.data.records[0].top1.odds,2);
+});
+
+test("historical volleyball 2-2 erroneously marked VERIFIED becomes REVIEW_REQUIRED, never a verified final",()=>{
+ const bad={...row("v","VERIFIED"),sport:"배구",
+   result:{homeScore:2,awayScore:2,source:""}};
+ const reviewed={...row("v"),sport:"배구",status:"REVIEW_REQUIRED",
+  result:{homeScore:2,awayScore:2,source:""},warnings:[]};
+ const output=reconcilePublishedHistory(pub([bad]),pub([reviewed,row("extra")]));
+ assert.equal(output.data.counts.total,2);
+ assert.equal(output.data.counts.verified,0);
+ assert.equal(output.data.counts.review,1);
+ assert.equal(output.data.records[0].status,"REVIEW_REQUIRED");
+ assert.ok(output.data.records[0].warnings.some(x=>x.includes("종목 점수 규칙")));
+ assert.equal(output.invalidPrior,1);
 });
