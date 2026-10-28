@@ -205,17 +205,18 @@ jobs:
             else
               file=automation-state/collect-first-public.json
             fi
-            content="$(base64 -w0 "$file")"
             sha="$(gh api "/repos/$GITHUB_REPOSITORY/contents/$remote_file?ref=automation-data" --jq .sha 2>/dev/null || true)"
-            if [ -n "$sha" ]; then
-              gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$remote_file" \
-                -f branch="automation-data" -f message="Collect-first 30min fixtures and confirmed results" \
-                -f sha="$sha" -f content="$content" >/dev/null
-            else
-              gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$remote_file" \
-                -f branch="automation-data" -f message="Initialize collect-first ledger" \
-                -f content="$content" >/dev/null
-            fi
+            # Pass potentially large base64 content through a file, not a
+            # single CLI argument (Linux MAX_ARG_STRLEN ~128 KiB).
+            LOCAL_FILE="$file" CURRENT_SHA="$sha" node --input-type=module -e '
+              import fs from "node:fs";
+              const body={branch:"automation-data",
+                message:"Collect-first fixture/result ledger",content:fs.readFileSync(process.env.LOCAL_FILE).toString("base64")};
+              if(process.env.CURRENT_SHA)body.sha=process.env.CURRENT_SHA;
+              fs.writeFileSync("/tmp/collect-put.json",JSON.stringify(body));
+            '
+            gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$remote_file" \
+              --input /tmp/collect-put.json >/dev/null
           done
       - name: Gate heavy prediction until collection/results training sample exists
         id: sample_gate
@@ -273,17 +274,16 @@ jobs:
             else
               local_file="automation-state/research-public.json"
             fi
-            content="$(base64 -w 0 "$local_file")"
             sha="$(gh api "/repos/$GITHUB_REPOSITORY/contents/$remote_file?ref=automation-data" --jq .sha 2>/dev/null || true)"
-            if [ -n "$sha" ]; then
-              gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$remote_file" \
-                -f branch="automation-data" -f message="Prekickoff evidence observation" \
-                -f sha="$sha" -f content="$content" >/dev/null
-            else
-              gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$remote_file" \
-                -f branch="automation-data" -f message="Initialize prekickoff evidence archive" \
-                -f content="$content" >/dev/null
-            fi
+            LOCAL_FILE="$local_file" CURRENT_SHA="$sha" node --input-type=module -e '
+              import fs from "node:fs";
+              const body={branch:"automation-data",
+                message:"Persist genuine prekickoff odds research",content:fs.readFileSync(process.env.LOCAL_FILE).toString("base64")};
+              if(process.env.CURRENT_SHA)body.sha=process.env.CURRENT_SHA;
+              fs.writeFileSync("/tmp/research-put.json",JSON.stringify(body));
+            '
+            gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/$remote_file" \
+              --input /tmp/research-put.json >/dev/null
           done
       - name: Open 4-week research TOP1 review issue for manual iteration
         if: always() && steps.evidence_archive.outcome == 'success'
@@ -355,25 +355,19 @@ jobs:
           if [ ! -s automation-state/public-history.json ]; then exit 0; fi
           gh api "/repos/$GITHUB_REPOSITORY/contents/automation-history.json?ref=automation-data" > /tmp/old-public-history.json
           jq -r '.content' /tmp/old-public-history.json | base64 -d > /tmp/old-public-history-data.json
-          node --input-type=module -e '
-            import fs from "node:fs";
-            const old=JSON.parse(fs.readFileSync("/tmp/old-public-history-data.json","utf8"));
-            const next=JSON.parse(fs.readFileSync("automation-state/public-history.json","utf8"));
-            if(old.schema!=="wisetoto-public-history-v1"||next.schema!==old.schema
-               ||!Array.isArray(old.records)||!Array.isArray(next.records))throw Error("PUBLIC_SCHEMA_MISMATCH");
-            const ids=new Set(next.records.map(r=>r.id));
-            const lost=old.records.filter(r=>!ids.has(r.id)).map(r=>r.id);
-            if(lost.length)throw Error("PUBLIC_RECORD_REGRESSION: "+lost.slice(0,12).join(","));
-            if(next.counts.total!==next.records.length)throw Error("PUBLIC_COUNT_MISMATCH");
-            console.log("PUBLIC_LEDGER_RECONCILED",JSON.stringify({previous:old.records.length,current:next.records.length}));
-          '
-          encoded="$(base64 -w 0 automation-state/public-history.json)"
+          node automation/reconcile-public.mjs /tmp/old-public-history-data.json automation-state/public-history.json
           current_sha="$(jq -r .sha /tmp/old-public-history.json)"
+          PUBLIC_SHA="$current_sha" node --input-type=module -e '
+            import fs from "node:fs";
+            fs.writeFileSync("/tmp/public-history-put.json",JSON.stringify({
+              branch:"automation-data",
+              message:"Publish all 41+ immutable PRE and verified finals",
+              sha:process.env.PUBLIC_SHA,
+              content:fs.readFileSync("automation-state/public-history.json").toString("base64")
+            }));
+          '
           gh api --method PUT "/repos/$GITHUB_REPOSITORY/contents/automation-history.json" \
-            -f message="Reconcile all frozen PRE in public dashboard without retrofitting picks" \
-            -f branch="automation-data" \
-            -f sha="$current_sha" \
-            -f content="$encoded" > /dev/null
+            --input /tmp/public-history-put.json >/dev/null
       - name: Summarize OOS report
         if: steps.sample_gate.outputs.browser_needed == 'true'
         run: if [ -s automation-state/report.md ]; then cat automation-state/report.md >> "$GITHUB_STEP_SUMMARY"; fi
