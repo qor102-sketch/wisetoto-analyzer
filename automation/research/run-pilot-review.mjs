@@ -28,7 +28,10 @@ export async function writePilotReview({root="automation-state/",now=Date.now()}
  let previous=null;
  try{previous=JSON.parse(await fs.readFile(root+"research-public.json","utf8"));}
  catch(e){if(e?.code!=="ENOENT")throw e;}
- const changedFunnel=JSON.stringify(previous?.collectionPipeline??null)!==JSON.stringify(funnel);
+ // Ignore the observation clock so a normal 10min heartbeat does not issue
+ // an unnecessary GitHub PUT when no fixture/result/lineup evidence changed.
+ const withoutClock=v=>v?((({asOf,...rest})=>rest)(v)):null;
+ const changedFunnel=JSON.stringify(withoutClock(previous?.collectionPipeline))!==JSON.stringify(withoutClock(funnel));
  if(changed||changedFunnel){
    await fs.writeFile(root+"research-public.json",
      JSON.stringify({...publicEvidence(state,now),collectionPipeline:funnel})+"\n");
