@@ -1,0 +1,46 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {reconcilePublishedHistory} from "./reconcile-public.mjs";
+const row=(id,status="PENDING")=>({
+ id,sport:"축구",home:"Home",away:"Away",startMs:1793022300000,capturedAt:1793021000000,
+ status,verifiedAt:status==="VERIFIED"?1793029999000:null,
+ result:status==="VERIFIED"?{homeScore:2,awayScore:1,source:"NAVER"}:null,
+ top1:{key:"pick-a",odds:2,probability:60,expectedValue:20,
+  resultStatus:status==="VERIFIED"?"HIT":"PENDING",actualLabel:status==="VERIFIED"?"승":null},
+ markets:[{key:"m1",odds:2.1,probability:52,resultStatus:status==="VERIFIED"?"HIT":"PENDING"}],
+ warnings:[]});
+const pub=records=>({schema:"wisetoto-public-history-v1",counts:{
+ total:records.length,verified:records.filter(r=>r.status==="VERIFIED").length,
+ pending:records.filter(r=>r.status==="PENDING").length},records});
+test("backfilled 41 projection carries old independently verified outcomes and immutable picks",()=>{
+ const old=pub([row("a","VERIFIED"),row("b","PENDING")]);
+ const next=pub([row("a"),row("b"),row("c")]);
+ const result=reconcilePublishedHistory(old,next);
+ assert.equal(result.repaired,1);
+ assert.equal(result.data.counts.total,3);
+ assert.equal(result.data.counts.verified,1);
+ assert.equal(result.data.counts.pending,2);
+ const carried=result.data.records[0];
+ assert.equal(carried.status,"VERIFIED");
+ assert.deepEqual(carried.result,{homeScore:2,awayScore:1,source:"NAVER"});
+ assert.equal(carried.top1.resultStatus,"HIT");
+ assert.equal(carried.top1.odds,2);
+ assert.equal(carried.markets[0].resultStatus,"HIT");
+ assert.equal(next.records[0].status,"PENDING");
+});
+test("conflicting final scores, disappearing rows, malformed settlement fail closed",()=>{
+ const old=pub([row("a","VERIFIED")]);
+ assert.throws(()=>reconcilePublishedHistory(old,pub([])),/PUBLIC_RECORD_REGRESSION/);
+ assert.throws(()=>reconcilePublishedHistory(old,pub([{...row("a","VERIFIED"),
+  result:{homeScore:1,awayScore:0,source:"SPORTSAPI"}}])),/PUBLIC_FINAL_SCORE_CONFLICT/);
+ assert.throws(()=>reconcilePublishedHistory(old,pub([row("a","VOID")])),/PUBLIC_FINAL_STATUS_CONFLICT/);
+ assert.throws(()=>reconcilePublishedHistory(pub([{...row("a","VERIFIED"),verifiedAt:null}]),
+  pub([row("a")])),/PUBLIC_OLD_FINAL_INVALID/);
+});
+test("same completed final is preserved without mutating frozen prediction or duplicate count",()=>{
+ const old=pub([row("a","VERIFIED")]),next=pub([row("a","VERIFIED"),row("b")]);
+ const out=reconcilePublishedHistory(old,next);
+ assert.equal(out.repaired,0);
+ assert.equal(out.data.counts.verified,1);
+ assert.equal(out.data.records[0].top1.odds,2);
+});
