@@ -174,6 +174,6 @@ export function projection(state,now=Date.now()){
        Number.isFinite(x.lineup.capturedAt)&&x.lineup.capturedAt<x.startMs).length+(state.archiveCounts?.lineupPartial??0),
      lineupUnsupported:all.filter(x=>x.lineup?.status==="UNSUPPORTED").length+(state.archiveCounts?.lineupUnsupported??0),
      verifiedWithLineup:all.filter(x=>x.verdict==="VERIFIED"&&x.lineup?.status==="CONFIRMED"&&
-       Number.isFinite(x.lineup.capturedAt)&&x.lineup.capturedAt<x.startMs).length},
+       Number.isFinite(x.lineup.capturedAt)&&x.lineup.capturedAt<x.startMs).length+(state.archiveCounts?.verifiedWithLineup??0)},
    records};
 }
