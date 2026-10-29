@@ -129,7 +129,7 @@ export function mergeProviderFinal(state,fixtureKeyValue,payload,now=Date.now())
    r.checkReason="INVALID_SPORT_SCORE";
  }else{
    r.verdict="VERIFIED";r.final={homeScore:Number(payload.result.homeScore),awayScore:Number(payload.result.awayScore)};
-   r.resultSource=["SPORTSAPI","NAVER"].includes(payload.source)
+   r.resultSource=["SPORTSAPI","NAVER","ESPN"].includes(payload.source)
      ?payload.source:"VERIFIED_FINAL_PROVIDER";r.verifiedAt=now;r.checkReason=null;
    // Immutable source identity/proof for postpilot audit. Betman numeric
    // fixtureId is a separate namespace; never replace it with a Naver ID.
