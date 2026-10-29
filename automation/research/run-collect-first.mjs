@@ -5,6 +5,7 @@ import {getRecords,STATE_FILE} from "../logic.mjs";
 import {SCHEMA,collect,settlement,dueResults,mergeProviderFinal,projection,verifiedNaverFinal} from "./collect-first.mjs";
 import {lookupVolleyballFinal} from "./volleyball-result.mjs";
 import {lookupNaverScheduleFinal} from "./naver-fast-final.mjs";
+import {espnLeague,lookupEspnFinal} from "./espn-fast-final.mjs";
 import {collectLineupSnapshots} from "./pregame-lineup.mjs";
 const dir="automation-state",file=dir+"/collect-first-state.json";
 await fs.mkdir(dir,{recursive:true});
@@ -34,6 +35,7 @@ let sportsApiLimited=false;
 const supportedNaver=new Set(["축구","농구","야구"]);
 // One request per (sport, KST date, Naver category) per scan, not per match.
 const scheduleCache=new Map();
+const espnCache=new Map();
 let finalChecked=0,finalConfirmed=0,finalWaitReasons={};
 async function requestFinal(url){
  const response=await fetch(url,{signal:AbortSignal.timeout(16000),cache:"no-store"});
@@ -55,6 +57,16 @@ for(const r of dueResults(state,now,6)){
        confirmed={...p.payload,source:"SPORTSAPI"};
      else reasons.push("SPORTSAPI_HTTP_"+p.status+":"+String(p.payload?.waitReason??p.payload?.error??"UNCONFIRMED").slice(0,65));
    }catch(e){reasons.push("SPORTSAPI_NETWORK:"+String(e).slice(0,65))}
+ }
+ if(!confirmed&&espnLeague(r)){
+   // ESPN is independent of Naver and live-tested from Vercel. Only its
+   // exact league + two teams + kickoff + unique FINAL can settle a row.
+   const candidate=await lookupEspnFinal(r,{base,cache:espnCache,now:Date.now()});
+   if(candidate.ok)confirmed=candidate;
+   else {
+     reasons.push("ESPN_FAST:"+String(candidate.waitReason).slice(0,150));
+     if(Array.isArray(candidate.providerErrors))reasons.push(...candidate.providerErrors);
+   }
  }
  if(!confirmed&&supportedNaver.has(r.sport)){
    // Independent lightweight score-only Naver schedule lookup, no player,
@@ -87,7 +99,7 @@ for(const r of dueResults(state,now,6)){
 }
 console.log("FAST_FINAL_AUDIT "+JSON.stringify({
  checked:finalChecked,confirmed:finalConfirmed,waiting:finalChecked-finalConfirmed,
- sharedScheduleQueries:scheduleCache.size,waitReasons:finalWaitReasons
+ sharedScheduleQueries:scheduleCache.size,sharedEspnQueries:espnCache.size,waitReasons:finalWaitReasons
 }));
 // Pre-kickoff lineup checks remain separate from final-result reconciliation.
 // A returned late lineup is never stored as historical pregame evidence.
