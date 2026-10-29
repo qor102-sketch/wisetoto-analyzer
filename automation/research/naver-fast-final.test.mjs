@@ -81,3 +81,29 @@ test("NBA game requires consistent category, exact away/home and plausible final
  assert.equal(parseNaverFinal(response([g]),nba,{now:S+4*H}).ok,true);
  assert.equal(parseNaverFinal(response([{...g,categoryId:"kbl"}]),nba,{now:S+4*H}).ok,false);
 });
+
+test("production collector requests a fixed lightweight Vercel proxy, not Naver or lineup",async()=>{
+ const requested=[],cache=new Map();
+ const fetchFn=async url=>{
+  requested.push(url);
+  assert.match(url,/^https:\/\/wisetoto-analyzer\.vercel\.app\/api\/naver\/final\?/);
+  assert.match(url,/upperCategoryId=wfootball/);
+  assert.match(url,/date=2026-10-28/);
+  assert.doesNotMatch(url,/lineup|players|api-gw/);
+  return {ok:true,status:200,json:async()=>({ok:true,result:{games:[game()]}})};
+ };
+ for(let i=0;i<3;i++){
+  const result=await lookupNaverScheduleFinal(f(),{
+   base:"https://wisetoto-analyzer.vercel.app",fetchFn,cache,now:S+4*H});
+  assert.equal(result.ok,true);
+ }
+ assert.equal(requested.length,1);
+ assert.equal(cache.size,1);
+});
+test("Vercel proxy errors never certify a final, even if HTTP 200 has ok:false",async()=>{
+ const result=await lookupNaverScheduleFinal(f(),{
+  base:"https://wisetoto-analyzer.vercel.app",now:S+4*H,
+  fetchFn:async()=>({ok:true,status:200,json:async()=>({ok:false,waitReason:"NAVER_PROVIDER_OFFLINE"})})});
+ assert.equal(result.ok,false);
+ assert.match(result.waitReason,/NAVER_PROVIDER_OFFLINE/);
+});
