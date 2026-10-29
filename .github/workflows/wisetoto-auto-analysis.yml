@@ -32,6 +32,8 @@ jobs:
           node-version: "24"
       - name: Run immutable-record unit tests
         run: node --test automation/*.test.mjs automation/repair/*.test.mjs automation/research/*.test.mjs
+      - name: Probe real lightweight Naver schedule without secrets or mutations
+        run: node automation/research/probe-naver-fast-final.mjs
       - name: Install app and browser
         run: |
           cd WisetotoAnalyzer-LiveFree && npm install --no-audit --no-fund

@@ -125,9 +125,11 @@ test("real Node collector preserves a past fixture and settles Naver after Sport
    res.setHeader("Content-Type","application/json");
    if(req.url.startsWith("/api/fixture/result")){
      res.statusCode=429;res.end(JSON.stringify({ok:false,error:"HTTP 429"}));
-   }else if(req.url.startsWith("/api/naver/lineup")){
-     res.end(JSON.stringify({ok:true,completed:true,gameId:"unique-fixture",
-       finalScore:{home:2,away:1}}));
+   }else if(req.url.startsWith("/api/naver/final?")){
+     const started=new Date(game.gameDateMs+9*3600000).toISOString().slice(0,19);
+     res.end(JSON.stringify({result:{games:[{gameId:"unique-fixture",
+       gameDateTime:started,homeTeamName:"Home FC",awayTeamName:"Away FC",
+       statusCode:"RESULT",homeScore:2,awayScore:1}]}}));
    }else{res.statusCode=404;res.end(JSON.stringify({ok:false}));}
  });
  try{
@@ -138,7 +140,7 @@ test("real Node collector preserves a past fixture and settles Naver after Sport
   const port=srv.address().port;
   const result=await new Promise((resolve,reject)=>{
    const child=spawn(process.execPath,[new URL("./run-collect-first.mjs",import.meta.url).pathname],{
-     cwd:root,env:{...process.env,WISETOTO_URL:"http://127.0.0.1:"+port}});
+     cwd:root,env:{...process.env,NODE_ENV:"test",WISETOTO_URL:"http://127.0.0.1:"+port}});
    let stdout="",stderr="";
    child.stdout.on("data",d=>stdout+=d);child.stderr.on("data",d=>stderr+=d);
    child.on("error",reject);
@@ -146,11 +148,16 @@ test("real Node collector preserves a past fixture and settles Naver after Sport
   });
   assert.equal(result.code,0,result.stderr);
   assert.equal(calls.filter(x=>x.startsWith("/api/fixture/result")).length,1);
-  assert.equal(calls.filter(x=>x.startsWith("/api/naver/lineup")).length,1);
+  assert.equal(calls.filter(x=>x.startsWith("/api/naver/final?")).length,1);
+  assert.equal(calls.filter(x=>x.startsWith("/api/naver/lineup")).length,0);
   const state=JSON.parse(await readFile(join(root,"automation-state/collect-first-state.json"),"utf8"));
   const publicData=JSON.parse(await readFile(join(root,"automation-state/collect-first-public.json"),"utf8"));
   assert.equal(state.records[0].verdict,"VERIFIED");
   assert.equal(state.records[0].resultSource,"NAVER");
+  assert.equal(state.records[0].finalProviderGameId,"unique-fixture");
+  assert.equal(state.records[0].finalEvidence,"NAVER_SCHEDULE_FINAL");
+  assert.equal(state.records[0].fixtureId,1357); // do not mix provider-ID namespaces
+  assert.match(result.stdout,/FAST_FINAL_AUDIT/);
   assert.equal(state.records[0].resultChecks,1);
   assert.match(state.records[0].resultErrors[0].reasons.join(" "),/429/);
   assert.equal(state.records[0].pregameCapturedAt,null);

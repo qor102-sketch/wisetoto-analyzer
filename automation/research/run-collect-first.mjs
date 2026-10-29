@@ -4,6 +4,8 @@ import {loadFeed} from "../feed.mjs";
 import {getRecords,STATE_FILE} from "../logic.mjs";
 import {SCHEMA,collect,settlement,dueResults,mergeProviderFinal,projection,verifiedNaverFinal} from "./collect-first.mjs";
 import {lookupVolleyballFinal} from "./volleyball-result.mjs";
+import {lookupNaverScheduleFinal} from "./naver-fast-final.mjs";
+import {espnLeague,lookupEspnFinal} from "./espn-fast-final.mjs";
 import {collectLineupSnapshots} from "./pregame-lineup.mjs";
 const dir="automation-state",file=dir+"/collect-first-state.json";
 await fs.mkdir(dir,{recursive:true});
@@ -31,6 +33,10 @@ console.log("COLLECT_FIRST_TRACKER_VERIFIED "+verified.settled);
 const base=(process.env.WISETOTO_URL||"https://wisetoto-analyzer.vercel.app").replace(/\/+$/,"");
 let sportsApiLimited=false;
 const supportedNaver=new Set(["축구","농구","야구"]);
+// One request per (sport, KST date, Naver category) per scan, not per match.
+const scheduleCache=new Map();
+const espnCache=new Map();
+let finalChecked=0,finalConfirmed=0,finalWaitReasons={};
 async function requestFinal(url){
  const response=await fetch(url,{signal:AbortSignal.timeout(16000),cache:"no-store"});
  let payload;
@@ -52,15 +58,25 @@ for(const r of dueResults(state,now,6)){
      else reasons.push("SPORTSAPI_HTTP_"+p.status+":"+String(p.payload?.waitReason??p.payload?.error??"UNCONFIRMED").slice(0,65));
    }catch(e){reasons.push("SPORTSAPI_NETWORK:"+String(e).slice(0,65))}
  }
+ if(!confirmed&&espnLeague(r)){
+   // ESPN is independent of Naver and live-tested from Vercel. Only its
+   // exact league + two teams + kickoff + unique FINAL can settle a row.
+   const candidate=await lookupEspnFinal(r,{base,cache:espnCache,now:Date.now()});
+   if(candidate.ok)confirmed=candidate;
+   else {
+     reasons.push("ESPN_FAST:"+String(candidate.waitReason).slice(0,150));
+     if(Array.isArray(candidate.providerErrors))reasons.push(...candidate.providerErrors);
+   }
+ }
  if(!confirmed&&supportedNaver.has(r.sport)){
-   try{
-     const params=new URLSearchParams({sport:r.sport,league:r.league,home:r.home,
-       away:r.away,date:new Date(r.startMs).toISOString()});
-     const response=await requestFinal(base+"/api/naver/lineup?"+params.toString());
-     const candidate=verifiedNaverFinal(response.payload);
-     if(candidate.ok)confirmed={...candidate,source:"NAVER"};
-     else reasons.push("NAVER_HTTP_"+response.status+":"+String(candidate.waitReason).slice(0,65));
-   }catch(e){reasons.push("NAVER_NETWORK:"+String(e).slice(0,65))}
+   // Independent lightweight score-only Naver schedule lookup, no player,
+   // preview, browser warm-up or full /api/naver/lineup call.
+   const result=await lookupNaverScheduleFinal(r,{cache:scheduleCache,now:Date.now(),base});
+   if(result.ok)confirmed=result;
+   else {
+     reasons.push("NAVER_FAST:"+String(result.waitReason).slice(0,150));
+     if(Array.isArray(result.providerErrors))reasons.push(...result.providerErrors);
+   }
  }
  if(!confirmed&&r.sport==="배구"){
    // Independent schedule-exact volleyball lookup also works without SportsAPI IDs.
@@ -69,11 +85,22 @@ for(const r of dueResults(state,now,6)){
    else reasons.push("NAVER_VOLLEYBALL:"+String(final.waitReason).slice(0,140));
    if(Array.isArray(final.providerErrors))reasons.push(...final.providerErrors);
  }
+ finalChecked++;
+ if(confirmed)finalConfirmed++;
+ else {
+   const first=String(reasons[0]??"NO_FINAL_PROVIDER");
+   const category=first.split(":")[0];
+   finalWaitReasons[category]=(finalWaitReasons[category]??0)+1;
+ }
  state=mergeProviderFinal(state,r.key,{
    ...(confirmed??{ok:false,waitReason:reasons.join(" | ").slice(0,180)||"SOURCE_NOT_VERIFIED"}),
    providerErrors:reasons
  },Date.now());
 }
+console.log("FAST_FINAL_AUDIT "+JSON.stringify({
+ checked:finalChecked,confirmed:finalConfirmed,waiting:finalChecked-finalConfirmed,
+ sharedScheduleQueries:scheduleCache.size,sharedEspnQueries:espnCache.size,waitReasons:finalWaitReasons
+}));
 // Pre-kickoff lineup checks remain separate from final-result reconciliation.
 // A returned late lineup is never stored as historical pregame evidence.
 const lineupScan=await collectLineupSnapshots(state,{base});
