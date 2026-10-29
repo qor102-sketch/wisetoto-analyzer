@@ -84,3 +84,13 @@ test("ESPN 403/504 and missing data preserve PENDING, do not invent results",asy
    json:async()=>payload([])})});
  assert.equal(p.ok,false);assert.match(p.waitReason,/ESPN_EXACT_IDENTITY_NOT_PROVEN/);
 });
+
+test("soccer penalty/extra-time finals are quarantined from Betman regulation settlement",()=>{
+ for(const statusName of ["STATUS_FINAL_PEN","STATUS_FINAL_ET","STATUS_EXTRA_TIME","STATUS_FINAL_AET"]){
+  const p=parseEspnFinal(payload([event({statusName})]),fixture,{now:S+5*H});
+  assert.equal(p.ok,false);
+  assert.equal(p.waitReason,"ESPN_EXTRA_TIME_OR_PENALTIES_REQUIRE_REGULATION_SCORE");
+ }
+ // An ordinary 90-minute or basketball overtime completed result is distinct.
+ assert.equal(parseEspnFinal(payload([event({statusName:"STATUS_FULL_TIME"})]),fixture,{now:S+5*H}).ok,true);
+});
