@@ -47,10 +47,10 @@ function gameDay(g){
  const s=String(raw).trim();
  const compact=/^(20\d{2})(\d\d)(\d\d)/.exec(s);
  if(compact)return compact[1]+"-"+compact[2]+"-"+compact[3];
- const standard=/^(20\d{2}-\d\d-\d\d)/.exec(s);
- if(standard)return standard[1];
  const ms=naverDateMs(raw);
- return ms===null?null:kstDate(ms);
+ if(ms!==null)return kstDate(ms); // Handles explicit UTC/Z across KST midnight.
+ const standard=/^(20\d{2}-\d\d-\d\d)$/.exec(s);
+ return standard?standard[1]:null;
 }
 const homeOf=g=>String(g.homeTeamName??g.homeTeamShortName??g.homeTeamFullName??g.homeName??g.homeTeam?.name??g.home?.name??"");
 const awayOf=g=>String(g.awayTeamName??g.awayTeamShortName??g.awayTeamFullName??g.awayName??g.awayTeam?.name??g.away?.name??"");
@@ -161,7 +161,7 @@ const profile=fixture=>{
  return [];
 };
 export const scheduleUrls=fixture=>profile(fixture).map(upperCategoryId=>{
- const query=new URLSearchParams({fields:"basic,schedule,football",upperCategoryId,
+ const query=new URLSearchParams({fields:fixture.sport==="축구"?"basic,schedule,football":"basic,schedule,categoryName,statusNum",upperCategoryId,
    fromDate:kstDate(fixture.startMs),toDate:kstDate(fixture.startMs),roundCodes:"",size:"500"});
  return API+"?"+query.toString();
 });
