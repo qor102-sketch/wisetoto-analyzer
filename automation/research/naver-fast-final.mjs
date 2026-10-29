@@ -182,7 +182,7 @@ export async function lookupNaverScheduleFinal(fixture,{
     const res=await fetchFn(url,{cache:"no-store",signal:AbortSignal.timeout(timeoutMs),
       headers:{accept:"application/json, text/plain, */*",
         referer:"https://m.sports.naver.com/", "user-agent":"Mozilla/5.0 WisetotoAnalyzer/13.12"}});
-    const payload=await res.json().catch(()=>null);
+    const payload=typeof res.json==="function"?await res.json().catch(()=>null):null;
     response=res.ok&&payload?.ok!==false?{ok:true,payload}:
       {ok:false,reason:"NAVER_SCHEDULE_HTTP_"+res.status+":"+
         String(payload?.waitReason??"UNCONFIRMED").slice(0,100)};
