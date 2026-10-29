@@ -77,7 +77,7 @@ test("429, network failures, empty schedule and non-final statuses remain PENDIN
 test("NBA game requires consistent category, exact away/home and plausible final points",()=>{
  const nba={...f("농구"),home:"LA 레이커스",away:"포틀랜드 트레일블레이저스"};
  const g=game({categoryId:"nba",homeTeamName:"레이커스",
-   awayTeamName:"포틀랜드 트레일블레이저스",homeTeamScore:109,awayTeamScore:104});
+   awayTeamName:"포틀랜드 트레일블레이저스",homeScore:null,awayScore:null,homeTeamScore:109,awayTeamScore:104});
  assert.equal(parseNaverFinal(response([g]),nba,{now:S+4*H}).ok,true);
  assert.equal(parseNaverFinal(response([{...g,categoryId:"kbl"}]),nba,{now:S+4*H}).ok,false);
 });
