@@ -125,7 +125,7 @@ test("real Node collector preserves a past fixture and settles Naver after Sport
    res.setHeader("Content-Type","application/json");
    if(req.url.startsWith("/api/fixture/result")){
      res.statusCode=429;res.end(JSON.stringify({ok:false,error:"HTTP 429"}));
-   }else if(req.url.startsWith("/schedule/games?")){
+   }else if(req.url.startsWith("/api/naver/final?")){
      const started=new Date(game.gameDateMs+9*3600000).toISOString().slice(0,19);
      res.end(JSON.stringify({result:{games:[{gameId:"unique-fixture",
        gameDateTime:started,homeTeamName:"Home FC",awayTeamName:"Away FC",
@@ -140,7 +140,7 @@ test("real Node collector preserves a past fixture and settles Naver after Sport
   const port=srv.address().port;
   const result=await new Promise((resolve,reject)=>{
    const child=spawn(process.execPath,[new URL("./run-collect-first.mjs",import.meta.url).pathname],{
-     cwd:root,env:{...process.env,NODE_ENV:"test",WISETOTO_URL:"http://127.0.0.1:"+port,WISETOTO_TEST_NAVER_SCHEDULE_BASE:"http://127.0.0.1:"+port+"/schedule/games"}});
+     cwd:root,env:{...process.env,NODE_ENV:"test",WISETOTO_URL:"http://127.0.0.1:"+port}});
    let stdout="",stderr="";
    child.stdout.on("data",d=>stdout+=d);child.stderr.on("data",d=>stderr+=d);
    child.on("error",reject);
@@ -148,7 +148,7 @@ test("real Node collector preserves a past fixture and settles Naver after Sport
   });
   assert.equal(result.code,0,result.stderr);
   assert.equal(calls.filter(x=>x.startsWith("/api/fixture/result")).length,1);
-  assert.equal(calls.filter(x=>x.startsWith("/schedule/games?")).length,1);
+  assert.equal(calls.filter(x=>x.startsWith("/api/naver/final?")).length,1);
   assert.equal(calls.filter(x=>x.startsWith("/api/naver/lineup")).length,0);
   const state=JSON.parse(await readFile(join(root,"automation-state/collect-first-state.json"),"utf8"));
   const publicData=JSON.parse(await readFile(join(root,"automation-state/collect-first-public.json"),"utf8"));
