@@ -88,6 +88,10 @@ export function parseEspnFinal(payload,fixture,{now=Date.now(),league=espnLeague
  if(matched.size!==1)return {ok:false,waitReason:"ESPN_AMBIGUOUS_FIXTURE"};
  const [gameId,event]=[...matched.entries()][0];
  const finalText=String(event.statusName??event.statusDescription??"").toUpperCase();
+ // ESPN cup results can reflect extra time or penalties. Betman 1X2 typically
+ // settles regulation time; without its distinct 90-minute score, quarantine.
+ if(fixture.sport==="축구"&&/PEN|EXTRA|(?:^|_)ET(?:_|$)|AET/.test(finalText))
+  return {ok:false,waitReason:"ESPN_EXTRA_TIME_OR_PENALTIES_REQUIRE_REGULATION_SCORE"};
  if(now<fixture.startMs+2*hours||event.completed!==true||
    !/FINAL|FULL.?TIME|FINISH|COMPLETE/.test(finalText))
   return {ok:false,waitReason:"ESPN_FINAL_STATUS_UNCONFIRMED"};
