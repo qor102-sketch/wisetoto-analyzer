@@ -4,7 +4,7 @@ const NAVER="https://api-gw.sports.naver.com/schedule/games";
 const VALID_UPPER=new Set(["wfootball","kfootball","wbasketball","kbasketball","wbaseball","kbaseball"]);
 const LIMIT=500;
 const DAY=86400000;
-const safe=v=>typeof v==="string"?v.slice(0,220):typeof v==="number"&&Number.isFinite(v)?v:
+const safe=(v:unknown)=>typeof v==="string"?v.slice(0,220):typeof v==="number"&&Number.isFinite(v)?v:
  typeof v==="boolean"?v:null;
 function fixtureRows(root:unknown){
  const obj=root as Record<string,any>|null;
