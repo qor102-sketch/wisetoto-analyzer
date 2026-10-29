@@ -59,7 +59,7 @@ for(const r of dueResults(state,now,6)){
  if(!confirmed&&supportedNaver.has(r.sport)){
    // Independent lightweight score-only Naver schedule lookup, no player,
    // preview, browser warm-up or full /api/naver/lineup call.
-   const result=await lookupNaverScheduleFinal(r,{cache:scheduleCache,now:Date.now()});
+   const result=await lookupNaverScheduleFinal(r,{cache:scheduleCache,now:Date.now(),base});
    if(result.ok)confirmed=result;
    else {
      reasons.push("NAVER_FAST:"+String(result.waitReason).slice(0,150));
