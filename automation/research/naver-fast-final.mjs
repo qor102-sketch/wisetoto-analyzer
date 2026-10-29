@@ -3,7 +3,9 @@
 // per sport/KST calendar day is shared across all due fixtures in a scan.
 // No output is marked VERIFIED unless source proves unique fixture and FINAL.
 import {scorePlausibility} from "../../WisetotoAnalyzer-LiveFree/src/lib/postmatch-guards.mjs";
-const API="https://api-gw.sports.naver.com/schedule/games";
+const API=process.env.NODE_ENV==="test"&&process.env.WISETOTO_TEST_NAVER_SCHEDULE_BASE
+  ?process.env.WISETOTO_TEST_NAVER_SCHEDULE_BASE:
+  "https://api-gw.sports.naver.com/schedule/games";
 const norm=x=>String(x??"").normalize("NFKC").toLowerCase().replace(/[^a-z0-9가-힣]/g,"");
 const aliases=[
  ["맨체스터시티","맨시티","mancity","manchestercity"],
@@ -80,6 +82,7 @@ function finished(g){
 function scoreOf(g){
  const candidates=[
  [g.homeScore,g.awayScore],[g.homeTeamScore,g.awayTeamScore],
+ [g.hScore,g.aScore],
  [g.homeSetScore,g.awaySetScore],[g.finalScore?.home,g.finalScore?.away],
  [g.score?.home,g.score?.away],[g.result?.homeScore,g.result?.awayScore]
  ];
@@ -94,6 +97,15 @@ function leagueOk(g,fixture){
  const c=norm(g.categoryId??g.category??g.leagueId??"");
  const l=norm(fixture.league);
  if(!c)return true; // ambiguous provider category is not proof of mismatch
+ if(fixture.sport==="축구"){
+  const expected=/epl|프리미어리그/.test(l)?"epl":
+   /세리에a|세리에아|seriea/.test(l)?"seria":
+   /리그1|ligue1/.test(l)?"ligue1":
+   /잉글랜드리그컵|eflcup|카라바오컵/.test(l)?"carlingcup":
+   /mls|메이저리그사커/.test(l)?"mls":null;
+  // Explicitly guard competitions with known and audited Naver categories.
+  if(expected&&c!==expected&&c!=="wfootball")return false;
+ }
  if(fixture.sport==="농구"){
   if(/nba/.test(l))return /nba|wbasketball/.test(c);
   if(/wkbl|여자프로농구/.test(l))return /wkbl|kbasketball/.test(c);
