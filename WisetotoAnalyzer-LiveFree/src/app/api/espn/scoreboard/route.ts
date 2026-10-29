@@ -9,7 +9,7 @@ const CODES:Record<string,[string,string]>={
  "uefa.champions":["soccer","uefa.champions"],"uefa.europa":["soccer","uefa.europa"]
 };
 const DAY=86400000;
-const safe=v=>typeof v==="string"?v.slice(0,160):null;
+const safe=(v:unknown)=>typeof v==="string"?v.slice(0,160):null;
 export async function GET(request:Request){
  const p=new URL(request.url).searchParams;
  const league=p.get("league")??"",date=p.get("date")??"";
