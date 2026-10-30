@@ -1,6 +1,6 @@
 {
   "schema": "wisetoto-auto-scan-health-v1",
-  "scannedAt": "2026-10-30T18:37:47.730Z",
+  "scannedAt": "2026-10-30T18:47:46.064Z",
   "expectedIntervalMinutes": 10,
   "sourceOk": false,
   "sourceError": "Error: Betman unavailable after 3 attempts: Error: Betman HTTP 502 ; Error: Betman HTTP 502 ; Error: Betman HTTP 502",
@@ -12,7 +12,7 @@
     "야구": 0,
     "배구": 0
   },
-  "awaitingPostmatch": 15,
+  "awaitingPostmatch": 13,
   "feedOrigin": "none",
   "note": "A completed scan is not proof that every Betman game was captured before kickoff."
 }
