@@ -40,6 +40,35 @@ const aliases=[
  ["멤피스그리즐리스","memphisgrizzlies"],["브루클린네츠","brooklynnets"],
  ["뉴올리언스펠리컨스","neworleanspelicans"],["샬럿호네츠","charlottehornets"],
  ["워싱턴위저즈","washingtonwizards"],
+ ["미들즈브러","middlesbrough"],["찰턴애슬레틱","charltonathletic","charlton"],
+ ["밀월","millwall"],["더비카운티","derbycounty"],["번리","burnley"],
+ ["포츠머스","portsmouth"],["볼턴원더러스","boltonwanderers"],
+ ["브리스틀시티","bristolcity"],["렉섬","wrexham"],["셰필드유나이티드","sheffieldunited"],
+ ["리즈유나이티드","leedsunited"],["웨스트브로미치앨비언","westbromwichalbion","westbrom"],
+ ["퍼스글로리","perthglory"],["애들레이드유나이티드","adelaideunited"],
+ ["멜버른빅토리","melbournevictory"],["센트럴코스트매리너스","centralcoastmariners"],
+ ["맥아서fc","macarthurfc"],["웨스턴시드니원더러스","westernsydneywanderers"],
+ ["멜버른시티","melbournecity"],["시드니fc","sydneyfc"],
+ ["브리즈번로어","brisbaneroarfc","brisbaneroar"],
+ ["오클랜드fc","aucklandfc"],
+ ["아틀레틱빌바오","athleticclub","athleticbilbao"],
+ ["레알소시에다드","realsociedad"],["엘체","elche"],["발렌시아","valencia"],
+ ["라싱산탄데르","racingsantander"],["헤타페","getafe"],["세비야","sevilla"],
+ ["올랭피크드마르세유","마르세유","marseille"],
+ ["올랭피크리옹","리옹","lyon","olympiquelyonnais"],["앙제sco","앙제","angers"],
+ ["파리fc","parisfc"],["as모나코","모나코","monaco"],
+ ["rc스트라스부르","스트라스부르","strasbourg"],["aj오세르","오세르","auxerre"],
+ ["ss라치오","라치오","lazio"],["칼리아리","cagliari"],
+ ["us레체","레체","lecce"],["토리노","torino"],["프로시노네","frosinone"],
+ ["프랑크푸르트","eintrachtfrankfurt","frankfurt"],["함부르크","hamburg","hamburgersv"],
+ ["우니온베를린","unionberlin"],["쾰른","cologne","fckoln"],
+ ["도르트문트","borussiadortmund","dortmund"],
+ ["묀헨글라트바흐","borussiamonchengladbach"],
+ ["파더보른07","scpaderborn07","paderborn"],
+ ["흐로닝언","groningen"],["스파르타로테르담","spartarotterdam"],
+ ["엑셀시오르로테르담","excelsiorrotterdam"],["트벤테","twente"],
+ ["텔스타","telstar"],["위트레흐트","utrecht"],
+ ["pec즈볼러","peczwolle"],["ado덴하흐","adodenhaag"],
  ["뉴욕양키스","newyorkyankees"],["보스턴레드삭스","bostonredsox"],
  ["la다저스","로스앤젤레스다저스","losangelesdodgers"],["시카고컵스","chicagocubs"]
 ].map(group=>group.map(norm));
@@ -57,6 +86,9 @@ export function espnLeague(fixture){
  if(/세리에a|세리에아|seriea/.test(l))return "ita.1";
  if(/잉글랜드리그컵|카라바오컵|eflcup/.test(l))return "eng.league_cup";
  if(/프리미어리그|epl|englishpremier/.test(l))return "eng.1";
+ if(/잉글랜드챔피언십|eflchampionship|engchampionship/.test(l))return "eng.2";
+ if(/호주a리그|호주에이리그|aleague/.test(l))return "aus.1";
+ if(/일본j1리그|j리그1|j1league/.test(l))return "jpn.1";
  if(/스페인라리가|laliga|라리가/.test(l))return "esp.1";
  if(/독일분데스|bundesliga/.test(l))return "ger.1";
  if(/프랑스리그1|ligue1/.test(l))return "fra.1";
@@ -72,7 +104,7 @@ const score=x=>{
  if(x===null||x===undefined||String(x).trim()==="")return null;
  const n=Number(x);return Number.isSafeInteger(n)&&n>=0?n:null;
 };
-export function parseEspnFinal(payload,fixture,{now=Date.now(),league=espnLeague(fixture)}={}){
+export function findEspnFixtureEvent(payload,fixture,{league=espnLeague(fixture)}={}){
  if(!league||payload?.ok!==true||payload.league!==league||!Array.isArray(payload.events))
   return {ok:false,waitReason:"ESPN_LEAGUE_OR_FEED_UNCONFIRMED"};
  const events=payload.events.filter(e=>{
@@ -87,6 +119,14 @@ export function parseEspnFinal(payload,fixture,{now=Date.now(),league=espnLeague
  if(matched.size===0)return {ok:false,waitReason:"ESPN_EXACT_IDENTITY_NOT_PROVEN"};
  if(matched.size!==1)return {ok:false,waitReason:"ESPN_AMBIGUOUS_FIXTURE"};
  const [gameId,event]=[...matched.entries()][0];
+ return {ok:true,gameId,event};
+}
+export function parseEspnFinal(payload,fixture,{now=Date.now(),league=espnLeague(fixture)}={}){
+ if(!league||payload?.ok!==true||payload.league!==league||!Array.isArray(payload.events))
+  return {ok:false,waitReason:"ESPN_LEAGUE_OR_FEED_UNCONFIRMED"};
+ const matched=findEspnFixtureEvent(payload,fixture,{league});
+ if(!matched.ok)return matched;
+ const {gameId,event}=matched;
  const finalText=String(event.statusName??event.statusDescription??"").toUpperCase();
  // ESPN cup results can reflect extra time or penalties. Betman 1X2 typically
  // settles regulation time; without its distinct 90-minute score, quarantine.
