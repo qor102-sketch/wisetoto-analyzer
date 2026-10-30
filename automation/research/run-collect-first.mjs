@@ -31,7 +31,7 @@ try{tracker=JSON.parse(await fs.readFile(STATE_FILE,"utf8"))}catch{}
 let verified=settlement(state,getRecords(tracker),now);state=verified.state;
 console.log("COLLECT_FIRST_TRACKER_VERIFIED "+verified.settled);
 const base=(process.env.WISETOTO_URL||"https://wisetoto-analyzer.vercel.app").replace(/\/+$/,"");
-let sportsApiLimited=false;
+let sportsApiLimited=false,naverUpstreamFailures=0,naverOutageSkipped=0;
 const supportedNaver=new Set(["축구","농구","야구"]);
 // One request per (sport, KST date, Naver category) per scan, not per match.
 const scheduleCache=new Map();
@@ -43,7 +43,7 @@ async function requestFinal(url){
  try{payload=await response.json()}catch{payload={ok:false,error:"MALFORMED_PROVIDER_RESPONSE"}}
  return {status:response.status,payload};
 }
-for(const r of dueResults(state,now,6)){
+for(const r of dueResults(state,now,12)){
  let confirmed=null,reasons=[];
  if(sportsApiLimited&&r.fixtureId!==null)reasons.push("SPORTSAPI_RATE_LIMIT");
  // A provider ID from the Betman row may give an exact match. When that
@@ -69,13 +69,21 @@ for(const r of dueResults(state,now,6)){
    }
  }
  if(!confirmed&&supportedNaver.has(r.sport)){
-   // Independent lightweight score-only Naver schedule lookup, no player,
-   // preview, browser warm-up or full /api/naver/lineup call.
-   const result=await lookupNaverScheduleFinal(r,{cache:scheduleCache,now:Date.now(),base});
-   if(result.ok)confirmed=result;
-   else {
-     reasons.push("NAVER_FAST:"+String(result.waitReason).slice(0,150));
-     if(Array.isArray(result.providerErrors))reasons.push(...result.providerErrors);
+   if(naverUpstreamFailures>=2){
+     // Multiple independent Naver schedule errors in this scan mean an
+     // outage. Do not spend the rest of the scan on the same stalled source.
+     naverOutageSkipped++;
+     reasons.push("NAVER_CIRCUIT_OPEN_RETRY_NEXT_SCAN");
+   }else{
+     const result=await lookupNaverScheduleFinal(r,{cache:scheduleCache,now:Date.now(),base});
+     if(result.ok)confirmed=result;
+     else {
+       const reason=String(result.waitReason);
+       reasons.push("NAVER_FAST:"+reason.slice(0,150));
+       if(Array.isArray(result.providerErrors))reasons.push(...result.providerErrors);
+       if(/HTTP_504|HTTP_502|NETWORK|TIMEOUT|PROVIDER_NETWORK/.test(reason))
+         naverUpstreamFailures++;
+     }
    }
  }
  if(!confirmed&&r.sport==="배구"){
@@ -99,7 +107,8 @@ for(const r of dueResults(state,now,6)){
 }
 console.log("FAST_FINAL_AUDIT "+JSON.stringify({
  checked:finalChecked,confirmed:finalConfirmed,waiting:finalChecked-finalConfirmed,
- sharedScheduleQueries:scheduleCache.size,sharedEspnQueries:espnCache.size,waitReasons:finalWaitReasons
+ sharedScheduleQueries:scheduleCache.size,sharedEspnQueries:espnCache.size,
+ naverUpstreamFailures,naverOutageSkipped,waitReasons:finalWaitReasons
 }));
 // Pre-kickoff lineup checks remain separate from final-result reconciliation.
 // A returned late lineup is never stored as historical pregame evidence.
