@@ -1,6 +1,6 @@
 {
   "schema": "wisetoto-auto-scan-health-v1",
-  "scannedAt": "2026-10-30T01:38:44.319Z",
+  "scannedAt": "2026-10-30T01:48:45.189Z",
   "expectedIntervalMinutes": 10,
   "sourceOk": true,
   "sourceError": null,
