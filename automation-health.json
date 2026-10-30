@@ -1,6 +1,6 @@
 {
   "schema": "wisetoto-auto-scan-health-v1",
-  "scannedAt": "2026-10-30T16:47:21.713Z",
+  "scannedAt": "2026-10-30T16:57:25.458Z",
   "expectedIntervalMinutes": 10,
   "sourceOk": false,
   "sourceError": "Error: Betman unavailable after 3 attempts: Error: Betman HTTP 502 ; Error: Betman HTTP 502 ; Error: Betman HTTP 502",
