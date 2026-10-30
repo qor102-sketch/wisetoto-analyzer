@@ -3,7 +3,8 @@
 const CODES:Record<string,[string,string]>={
  nba:["basketball","nba"],mlb:["baseball","mlb"],
  "ita.1":["soccer","ita.1"],"eng.league_cup":["soccer","eng.league_cup"],
- "eng.1":["soccer","eng.1"],"esp.1":["soccer","esp.1"],
+ "eng.1":["soccer","eng.1"],
+ "eng.2":["soccer","eng.2"],"aus.1":["soccer","aus.1"],"jpn.1":["soccer","jpn.1"],"esp.1":["soccer","esp.1"],
  "ger.1":["soccer","ger.1"],"fra.1":["soccer","fra.1"],
  "usa.1":["soccer","usa.1"],"ned.1":["soccer","ned.1"],
  "uefa.champions":["soccer","uefa.champions"],"uefa.europa":["soccer","uefa.europa"]

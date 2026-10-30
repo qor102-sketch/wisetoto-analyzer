@@ -10,12 +10,12 @@ const lineup=()=>({ok:true,gameId:"naver-1",
  game:{gameDateTime:new Date(T+25*M).toISOString()},
  home:Array.from({length:11},(_,i)=>({name:"H "+i})),
  away:Array.from({length:11},(_,i)=>({name:"A "+i}))});
-test("only future games within 3h are queried; 20min retry spacing",()=>{
+test("only future games within 3h are queried; 10min retry spacing",()=>{
  const rows=[row("축구",T+30*M),row("축구",T+200*M,"far"),row("축구",T-M,"past")];
  assert.deepEqual(pregameLineupCandidates({records:rows},T).map(r=>r.key),["a"]);
  rows[0].lineup={status:"UNAVAILABLE",lastAttemptAt:T-5*M};
  assert.equal(pregameLineupCandidates({records:rows},T).length,0);
- rows[0].lineup.lastAttemptAt=T-21*M;
+ rows[0].lineup.lastAttemptAt=T-11*M;
  assert.equal(pregameLineupCandidates({records:rows},T).length,1);
 });
 test("football XI accepts 11 verified starters per side before match only",()=>{

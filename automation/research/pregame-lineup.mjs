@@ -1,3 +1,4 @@
+import {espnLineupLeague,lookupEspnPregameXi} from "./espn-pregame-lineup.mjs";
 // Read-only independent pre-kickoff Naver lineup audit for the collect-first
 // ledger. Never use post-kickoff lineups as PRE, invent names or alter frozen PRE.
 // The Naver route already resolves exact fixtures; recheck time and identity.
@@ -21,7 +22,7 @@ export function pregameLineupCandidates(state,now=Date.now(),limit=4){
    &&r.lineup?.status!=="CONFIRMED"
    &&r.lineup?.status!=="UNSUPPORTED"
    &&(!Number.isFinite(r.lineup?.lastAttemptAt)
-     ||now-r.lineup.lastAttemptAt>=20*60000))
+     ||now-r.lineup.lastAttemptAt>=10*60000))
   .sort((a,b)=>{
    // Due-soon fixtures first; only real pregame opportunities get requests.
    return a.startMs-b.startMs||a.key.localeCompare(b.key);
@@ -98,14 +99,16 @@ export function mergeLineupEvidence(state,key,observation,now){
  return {...state,records};
 }
 export async function collectLineupSnapshots(state,{
- now=()=>Date.now(),base="https://wisetoto-analyzer.vercel.app",fetcher=fetch,limit=4
+ now=()=>Date.now(),base="https://wisetoto-analyzer.vercel.app",fetcher=fetch,limit=8
 }={}){
  let next=state,attempted=0,confirmed=0,partial=0,unavailable=0,unsupported=0;
+ const espnCache=new Map(),reasons={};
  for(const r of pregameLineupCandidates(state,now(),limit)){
-  const started=now();
   let observation;
   if(r.sport==="배구"||r.sport==="농구")observation={status:"UNSUPPORTED",reason:"NO_VERIFIED_PREGAME_LINEUP_PROVIDER"};
-  else try{
+  else if(r.sport==="축구"&&espnLineupLeague(r)){
+   observation=await lookupEspnPregameXi(r,{now:now(),base,fetchFn:fetcher,cache:espnCache});
+  }else try{
     const params=new URLSearchParams({sport:r.sport,league:r.league,home:r.home,
       away:r.away,date:new Date(r.startMs).toISOString()});
     const res=await fetcher(base.replace(/\/+$/,"")+"/api/naver/lineup?"+params,{
@@ -117,10 +120,12 @@ export async function collectLineupSnapshots(state,{
   const at=now();
   next=mergeLineupEvidence(next,r.key,observation,at);
   attempted++;
+  reasons[observation.reason??observation.status]=(reasons[observation.reason??observation.status]??0)+1;
   if(observation.status==="CONFIRMED")confirmed++;
   else if(observation.status==="PARTIAL")partial++;
   else if(observation.status==="UNSUPPORTED")unsupported++;
   else unavailable++;
  }
- return {state:next,summary:{attempted,confirmed,partial,unavailable,unsupported}};
+ return {state:next,summary:{attempted,confirmed,partial,unavailable,unsupported,
+  sharedEspnScoreboards:espnCache.size,reasonCounts:reasons}};
 }
