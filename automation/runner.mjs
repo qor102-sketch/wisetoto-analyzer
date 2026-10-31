@@ -37,7 +37,7 @@ if(process.argv.includes("--preflight")){
   console.log(JSON.stringify({date:new Date(now).toISOString(),frequency:"10 minutes (best effort)",feedSports:feedCounts,feedOrigin,upcoming:due.length,dueSports:sportCounts(due),verifyPending:pending.length,runBrowser,sourceError}));
   if(process.env.GITHUB_OUTPUT)await fs.appendFile(process.env.GITHUB_OUTPUT,
     "run_browser="+String(runBrowser)+"\n"+"pregame_due="+String(due.length>0)+"\n"+"verify_due="+String(verifyDue)+"\n");
-  if(sourceError&&!pending.length)process.exitCode=1;
+  if(sourceError)process.exitCode=1; // mark source outage even when independent postmatch verification can continue
 }else{
   const {chromium}=await import("playwright");
   const browser=await chromium.launch({headless:true});
