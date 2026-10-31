@@ -105,9 +105,10 @@ export async function collectLineupSnapshots(state,{
  const espnCache=new Map(),reasons={};
  for(const r of pregameLineupCandidates(state,now(),limit)){
   let observation;
-  if(r.sport==="배구"||r.sport==="농구")observation={status:"UNSUPPORTED",reason:"NO_VERIFIED_PREGAME_LINEUP_PROVIDER"};
-  else if(r.sport==="축구"&&espnLineupLeague(r)){
+  if(espnLineupLeague(r)){
    observation=await lookupEspnPregameXi(r,{now:now(),base,fetchFn:fetcher,cache:espnCache});
+  }else if(r.sport==="배구"||r.sport==="농구"){
+   observation={status:"UNSUPPORTED",reason:"NO_VERIFIED_PREGAME_LINEUP_PROVIDER"};
   }else try{
     const params=new URLSearchParams({sport:r.sport,league:r.league,home:r.home,
       away:r.away,date:new Date(r.startMs).toISOString()});
