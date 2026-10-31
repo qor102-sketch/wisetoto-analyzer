@@ -7,6 +7,7 @@ import {lookupVolleyballFinal} from "./volleyball-result.mjs";
 import {lookupNaverScheduleFinal} from "./naver-fast-final.mjs";
 import {espnLeague,lookupEspnFinal} from "./espn-fast-final.mjs";
 import {collectLineupSnapshots} from "./pregame-lineup.mjs";
+import {selectFinalAuditRows} from "./final-scan-plan.mjs";
 const dir="automation-state",file=dir+"/collect-first-state.json";
 await fs.mkdir(dir,{recursive:true});
 let state;
@@ -43,7 +44,7 @@ async function requestFinal(url){
  try{payload=await response.json()}catch{payload={ok:false,error:"MALFORMED_PROVIDER_RESPONSE"}}
  return {status:response.status,payload};
 }
-for(const r of dueResults(state,now,12)){
+for(const r of selectFinalAuditRows(state,now,24)){
  let confirmed=null,reasons=[];
  if(sportsApiLimited&&r.fixtureId!==null)reasons.push("SPORTSAPI_RATE_LIMIT");
  // A provider ID from the Betman row may give an exact match. When that
@@ -112,7 +113,7 @@ console.log("FAST_FINAL_AUDIT "+JSON.stringify({
 }));
 // Pre-kickoff lineup checks remain separate from final-result reconciliation.
 // A returned late lineup is never stored as historical pregame evidence.
-const lineupScan=await collectLineupSnapshots(state,{base});
+const lineupScan=await collectLineupSnapshots(state,{base,limit:12});
 state=lineupScan.state;
 console.log("PREGAME_LINEUP_AUDIT "+JSON.stringify(lineupScan.summary));
 await fs.writeFile(file,JSON.stringify(state)+"\n");
