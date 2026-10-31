@@ -6,9 +6,10 @@ const ms=60_000;
 const scoreboardDates=fixture=>{
  const utc=new Date(fixture.startMs).toISOString().slice(0,10).replace(/-/g,"");
  const prev=new Date(fixture.startMs-12*3600_000).toISOString().slice(0,10).replace(/-/g,"");
- return [...new Set(["usa.1"].includes(espnLeague(fixture))?[utc,prev]:[utc])];
+ return [...new Set(["usa.1","nba"].includes(espnLeague(fixture))?[utc,prev]:[utc])];
 };
-export const espnLineupLeague=fixture=>fixture.sport==="축구"?espnLeague(fixture):null;
+export const espnLineupLeague=fixture=>
+ fixture.sport==="축구"||fixture.sport==="농구"&&espnLeague(fixture)==="nba"?espnLeague(fixture):null;
 export function parseEspnPregameXi(payload,fixture,event,at){
  if(!Number.isFinite(at)||at>=fixture.startMs)
   return {status:"REJECTED",reason:"AFTER_KICKOFF_NOT_PREGAME"};
@@ -35,18 +36,21 @@ export function parseEspnPregameXi(payload,fixture,event,at){
  if([headerHome[0].name,home[0].name].some(x=>norm(x)!==norm(sourceHome))||
     [headerAway[0].name,away[0].name].some(x=>norm(x)!==norm(sourceAway)))
   return {status:"UNAVAILABLE",reason:"ESPN_LINEUP_SCOREBOARD_TEAM_MISMATCH"};
+ const needed=fixture.sport==="농구"?5:11;
  const names=side=>{
   const raw=side.starters;
-  if(!Array.isArray(raw)||raw.length>11)return null;
+  if(!Array.isArray(raw)||raw.length>needed)return null;
   const list=raw.map(x=>String(x??"").trim()).filter(Boolean);
   return list.length===raw.length&&new Set(list.map(norm)).size===list.length?list:null;
  };
  const h=names(home[0]),a=names(away[0]);
  if(h===null||a===null)return {status:"UNAVAILABLE",reason:"ESPN_INVALID_STARTER_NAMES"};
  if(h.length===0&&a.length===0)return {status:"UNAVAILABLE",reason:"ESPN_XI_NOT_PUBLISHED"};
- return {status:h.length===11&&a.length===11?"CONFIRMED":"PARTIAL",
-  reason:h.length===11&&a.length===11?"ESPN_VERIFIED_PREGAME_XI":"ESPN_PARTIAL_PREGAME_XI",
-  source:"ESPN_MATCH_SUMMARY",gameId:String(event.gameId),capturedAt:at,
+ return {status:h.length===needed&&a.length===needed?"CONFIRMED":"PARTIAL",
+  reason:h.length===needed&&a.length===needed?
+   (needed===5?"ESPN_VERIFIED_PREGAME_NBA_STARTERS":"ESPN_VERIFIED_PREGAME_XI"):
+   "ESPN_PARTIAL_PREGAME_LINEUP",
+  source:needed===5?"ESPN_NBA_MATCH_STARTERS":"ESPN_MATCH_SUMMARY",gameId:String(event.gameId),capturedAt:at,
   home:h,away:a,homeCount:h.length,awayCount:a.length,
   homeStarter:null,awayStarter:null,providerCapturedAt:null};
 }
