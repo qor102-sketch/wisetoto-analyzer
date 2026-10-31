@@ -101,3 +101,40 @@ test("expanded result coverage retains fail-closed score rules for added Champio
     {homeAway:"away",name:"Charlton Athletic",score:"0"}]}]};
  assert.equal(parseEspnFinal(final,fixture,{now:START+3*3600000}).ok,true);
 });
+
+test("NBA 5+5 explicitly marked starters captured before tipoff qualify, never after tipoff",async()=>{
+ const nba={...fixture,key:"nba-1",sport:"농구",league:"NBA",
+  home:"보스턴 셀틱스",away:"시카고 불스"};
+ const game={id:"401909278",date:new Date(START).toISOString(),completed:false,
+  competitors:[{homeAway:"home",name:"Boston Celtics"},
+   {homeAway:"away",name:"Chicago Bulls"}]};
+ const response={ok:true,league:"nba",events:[game]};
+ const roster={ok:true,source:"ESPN_MATCH_SUMMARY",league:"nba",eventId:"401909278",
+  eventDate:new Date(START).toISOString(),
+  headerTeams:[{homeAway:"home",name:"Boston Celtics"},
+   {homeAway:"away",name:"Chicago Bulls"}],
+  rosters:[{homeAway:"home",name:"Boston Celtics",starters:names("Celtics",5)},
+   {homeAway:"away",name:"Chicago Bulls",starters:names("Bulls",5)}]};
+ const matched=findEspnFixtureEvent(response,nba);
+ assert.equal(matched.ok,true);
+ const before=parseEspnPregameXi(roster,nba,{...matched,league:"nba"},START-MIN);
+ assert.equal(before.status,"CONFIRMED");
+ assert.equal(before.homeCount,5);
+ assert.equal(before.awayCount,5);
+ assert.equal(before.source,"ESPN_NBA_MATCH_STARTERS");
+ assert.equal(parseEspnPregameXi(roster,nba,{...matched,league:"nba"},START).status,"REJECTED");
+ const missing={...roster,rosters:[{...roster.rosters[0],starters:[]},roster.rosters[1]]};
+ assert.equal(parseEspnPregameXi(missing,nba,{...matched,league:"nba"},START-MIN).status,"PARTIAL");
+ const absent={...roster,rosters:roster.rosters.map(x=>({...x,starters:[]}))};
+ assert.equal(parseEspnPregameXi(absent,nba,{...matched,league:"nba"},START-MIN).reason,
+  "ESPN_XI_NOT_PUBLISHED");
+ let calls=[];
+ const done=await collectLineupSnapshots({records:[nba]},{
+  now:()=>START-20*MIN,base:"https://preview.example",fetcher:async url=>{
+   calls.push(url);return {ok:true,status:200,
+    json:async()=>url.includes("scoreboard?")?response:roster};
+  }});
+ assert.equal(done.summary.confirmed,1);
+ assert.equal(done.state.records[0].lineup.homeCount,5);
+ assert.equal(calls.length,2);
+});
