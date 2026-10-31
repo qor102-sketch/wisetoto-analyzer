@@ -32,6 +32,11 @@ try{tracker=JSON.parse(await fs.readFile(STATE_FILE,"utf8"))}catch{}
 let verified=settlement(state,getRecords(tracker),now);state=verified.state;
 console.log("COLLECT_FIRST_TRACKER_VERIFIED "+verified.settled);
 const base=(process.env.WISETOTO_URL||"https://wisetoto-analyzer.vercel.app").replace(/\/+$/,"");
+// PRE is time-critical: attempt genuine pre-kickoff XI BEFORE slow, overdue
+// postmatch providers. A Naver 502/timeout must not waste the XI window.
+const lineupScan=await collectLineupSnapshots(state,{base,limit:12});
+state=lineupScan.state;
+console.log("PREGAME_LINEUP_AUDIT "+JSON.stringify(lineupScan.summary));
 let sportsApiLimited=false,naverUpstreamFailures=0,naverOutageSkipped=0;
 const supportedNaver=new Set(["축구","농구","야구"]);
 // One request per (sport, KST date, Naver category) per scan, not per match.
@@ -111,11 +116,6 @@ console.log("FAST_FINAL_AUDIT "+JSON.stringify({
  sharedScheduleQueries:scheduleCache.size,sharedEspnQueries:espnCache.size,
  naverUpstreamFailures,naverOutageSkipped,waitReasons:finalWaitReasons
 }));
-// Pre-kickoff lineup checks remain separate from final-result reconciliation.
-// A returned late lineup is never stored as historical pregame evidence.
-const lineupScan=await collectLineupSnapshots(state,{base,limit:12});
-state=lineupScan.state;
-console.log("PREGAME_LINEUP_AUDIT "+JSON.stringify(lineupScan.summary));
 await fs.writeFile(file,JSON.stringify(state)+"\n");
 await fs.writeFile(dir+"/collect-first-public.json",JSON.stringify(projection(state,Date.now()))+"\n");
 console.log("COLLECT_FIRST_STORED "+JSON.stringify({fresh,counts:projection(state).counts}));
