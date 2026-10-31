@@ -29,7 +29,7 @@ export async function GET(request:Request){
   // the generic season roster must never count as announced PRE starters.
   const norm=(v:string)=>v.normalize("NFKC").toLowerCase().replace(/[^a-z0-9가-힣]/g,"");
   const nameOf=(team:any)=>safe(team?.displayName??team?.name);
-  const extract=(group:any,side:string)=>({
+  const extract=(group:any,side:string|null)=>({
    homeAway:side,
    name:nameOf(group?.team),
    starters:(Array.isArray(group?.roster)?group.roster:
