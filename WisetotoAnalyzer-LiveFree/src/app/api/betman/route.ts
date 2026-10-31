@@ -1,10 +1,6 @@
+import {betmanProxyEndpoints,requestBetmanFromProxies} from "../../../lib/betman-proxy-failover.mjs";
 // WISETOTO_ROUTE_DIAG_V4_20260823
-const BETMAN_PROXY_URL =
-  process.env.BETMAN_PROXY_URL?.trim() ||
-  "https://champions-wishes-documented-modification.trycloudflare.com/betman";
-
-const BETMAN_FETCH_TIMEOUT_MS = 20_000;
-const BETMAN_FETCH_RETRIES = 3;
+const BETMAN_PROXY_ENDPOINTS=betmanProxyEndpoints(process.env);
 
 type AnyObj = Record<string, any>;
 
@@ -1010,132 +1006,8 @@ function sportCounts(games: AnyObj[], onlyFuture = false) {
   return base;
 }
 
-async function fetchBetman(gmTs?: number | null, gmId = "G101") {
-  let lastError: Error | null = null;
-
-  for (
-    let attempt = 1;
-    attempt <= BETMAN_FETCH_RETRIES;
-    attempt++
-  ) {
-    const controller =
-      new AbortController();
-
-    const timer =
-      setTimeout(
-        () => controller.abort(),
-        BETMAN_FETCH_TIMEOUT_MS
-      );
-
-    try {
-      const response =
-        await fetch(
-          (() => {
-            const proxyUrl = new URL(BETMAN_PROXY_URL);
-            if (gmTs !== null && gmTs !== undefined && Number.isFinite(gmTs)) {
-              proxyUrl.searchParams.set("gmTs", String(gmTs));
-              proxyUrl.searchParams.set("gmId", gmId || "G101");
-            }
-            return proxyUrl.toString();
-          })(),
-          {
-            method: "GET",
-
-            headers: {
-              Accept:
-                "application/json, text/plain, */*",
-              "User-Agent":
-                "WisetotoAnalyzer/1.0 Vercel",
-              "Cache-Control":
-                "no-cache",
-            },
-
-            cache:
-              "no-store",
-
-            signal:
-              controller.signal,
-          }
-        );
-
-      const raw =
-        await response.text();
-
-      let json: any = null;
-
-      try {
-        json = JSON.parse(raw);
-      } catch {
-        const preview =
-          raw
-            .replace(/\s+/g, " ")
-            .slice(0, 300);
-
-        throw new Error(
-          `Betman 프록시가 JSON이 아닌 응답을 반환했습니다 · HTTP ${response.status} · ${preview || "응답 본문 없음"}`
-        );
-      }
-
-      if (!response.ok) {
-        throw new Error(
-          json?.error ||
-            json?.message ||
-            `Betman 프록시 HTTP ${response.status}`
-        );
-      }
-
-      if (!json?.ok) {
-        throw new Error(
-          json?.error ||
-            json?.message ||
-            "Betman 프록시가 실패 응답을 반환했습니다."
-        );
-      }
-
-      const betmanData =
-        json?.data;
-
-      if (!betmanData) {
-        throw new Error(
-          "Betman 프록시 응답에 data가 없습니다."
-        );
-      }
-
-      return betmanData;
-    } catch (error: any) {
-      const message =
-        error?.name === "AbortError"
-          ? `Betman 프록시 응답 시간 초과 (${BETMAN_FETCH_TIMEOUT_MS / 1000}초)`
-          : error?.message ||
-            "Betman 프록시 호출 실패";
-
-      lastError =
-        new Error(
-          `시도 ${attempt}/${BETMAN_FETCH_RETRIES} · ${message}`
-        );
-
-      if (
-        attempt < BETMAN_FETCH_RETRIES
-      ) {
-        await new Promise(
-          (resolve) =>
-            setTimeout(
-              resolve,
-              700 * attempt
-            )
-        );
-      }
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  throw (
-    lastError ??
-    new Error(
-      "Betman 프록시 호출 실패"
-    )
-  );
+async function fetchBetman(gmTs?:number|null,gmId="G101"){
+ return requestBetmanFromProxies(BETMAN_PROXY_ENDPOINTS,{gmTs,gmId});
 }
 
 export async function GET(
@@ -1153,8 +1025,12 @@ export async function GET(
     const requestedGmId =
       String(url.searchParams.get("gmId") ?? "G101").trim() || "G101";
 
-    const raw =
-      await fetchBetman(requestedGmTs, requestedGmId);
+    const fetched=await fetchBetman(requestedGmTs,requestedGmId);
+    const raw=fetched.data;
+    if(url.searchParams.get("health")==="1")
+      return Response.json({ok:true,source:"Betman",relay:fetched.relayIndex===0?"primary":"fallback",
+        fresh:true,checkedAt:new Date().toISOString()},
+        {headers:{"cache-control":"no-store"}});
 
     /*
      * 예전에는 raw.schedulesList 하나만 읽었습니다.
@@ -1313,7 +1189,7 @@ export async function GET(
         "Betman",
 
       endpoint:
-        BETMAN_PROXY_URL,
+        fetched.relayIndex===0?"primary":"fallback",
 
       fetchedAt:
         new Date().toISOString(),
@@ -1565,8 +1441,9 @@ export async function GET(
           "Betman",
 
         proxyUrl:
-          BETMAN_PROXY_URL,
+          "configured-Betman-relay",
 
+        errorCode:String(e?.code??"BETMAN_RELAY_FETCH_FAILED"),
         error:
           e?.message ||
           "Betman 데이터 수집 실패",
