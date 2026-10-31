@@ -107,3 +107,59 @@ test("Vercel proxy errors never certify a final, even if HTTP 200 has ok:false",
  assert.equal(result.ok,false);
  assert.match(result.waitReason,/NAVER_PROVIDER_OFFLINE/);
 });
+
+test("Vercel 504 falls back only to official raw Naver schedule and still requires unique confirmed FINAL",async()=>{
+ const urls=[],cache=new Map();
+ const directGame=game();
+ const fetchFn=async url=>{
+  urls.push(url);
+  if(url.startsWith("https://wisetoto-analyzer.vercel.app/api/naver/final?"))
+   return {ok:false,status:504,json:async()=>({ok:false,waitReason:"NAVER_PROVIDER_NETWORK:TimeoutError"})};
+  assert.match(url,/^https:\/\/api-gw\.sports\.naver\.com\/schedule\/games\?/);
+  return {ok:true,status:200,json:async()=>({result:{games:[directGame]}})};
+ };
+ const fixture=f();
+ const result=await lookupNaverScheduleFinal(fixture,{
+  base:"https://wisetoto-analyzer.vercel.app",fetchFn,now:S+4*H,cache});
+ assert.equal(result.ok,true);
+ assert.equal(result.source,"NAVER");
+ assert.equal(result.finalConfirmed,true);
+ assert.ok(result.providerErrors.some(x=>/504/.test(x)));
+ assert.equal(urls.length,2);
+ const same=await lookupNaverScheduleFinal(fixture,{
+  base:"https://wisetoto-analyzer.vercel.app",fetchFn,now:S+4*H,cache});
+ assert.equal(same.ok,true);assert.equal(urls.length,2,"both transport attempts are shared per scan");
+});
+test("direct fallback cannot convert unfinished, wrong-identity or invalid provider payload into VERIFIED",async()=>{
+ const fixture=f();
+ for(const games of [[{...game(),completed:false,statusCode:"LIVE"}],
+  [{...game(),homeTeamName:"Wrong Team"}],[]]){
+  const out=await lookupNaverScheduleFinal(fixture,{
+   base:"https://wisetoto-analyzer.vercel.app",now:S+4*H,
+   fetchFn:async url=>url.includes("/api/naver/final?")?
+    {ok:false,status:502,json:async()=>({ok:false,waitReason:"UPSTREAM_502"})}:
+    {ok:true,status:200,json:async()=>({result:{games}})}
+  });
+  assert.equal(out.ok,false);
+ }
+ const corrupt=await lookupNaverScheduleFinal(fixture,{
+  base:"https://wisetoto-analyzer.vercel.app",now:S+4*H,
+  fetchFn:async url=>url.includes("/api/naver/final?")?
+   {ok:false,status:504,json:async()=>({ok:false})}:
+   {ok:true,status:200,json:async()=>({message:"not a schedule",ok:true})}
+ });
+ assert.equal(corrupt.ok,false);
+ assert.match(corrupt.waitReason,/INVALID_SCHEDULE/);
+});
+test("successful primary proxy never makes an unnecessary direct Naver request",async()=>{
+ let requests=0;
+ const result=await lookupNaverScheduleFinal(f(),{
+  base:"https://wisetoto-analyzer.vercel.app",now:S+4*H,
+  fetchFn:async url=>{
+   requests++;
+   assert.match(url,/\/api\/naver\/final\?/);
+   return {ok:true,status:200,json:async()=>({ok:true,result:{games:[game()]}})};
+  }
+ });
+ assert.equal(result.ok,true);assert.equal(requests,1);
+});
