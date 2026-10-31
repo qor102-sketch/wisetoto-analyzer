@@ -22,10 +22,14 @@ export function pregameLineupCandidates(state,now=Date.now(),limit=4){
    &&r.lineup?.status!=="CONFIRMED"
    &&r.lineup?.status!=="UNSUPPORTED"
    &&(!Number.isFinite(r.lineup?.lastAttemptAt)
-     ||now-r.lineup.lastAttemptAt>=10*60000))
+     ||now-r.lineup.lastAttemptAt>=(r.startMs-now>90*60000?30:10)*60000))
   .sort((a,b)=>{
-   // Due-soon fixtures first; only real pregame opportunities get requests.
-   return a.startMs-b.startMs||a.key.localeCompare(b.key);
+   // Urgent games first, ESPN's fast match-specific source before heavyweight
+   // Naver only within the same kickoff window. Don't waste 3h polling on 0-XI.
+   const bucket=r=>r.startMs-now<=30*60000?0:r.startMs-now<=90*60000?1:2;
+   return bucket(a)-bucket(b)||
+     Number(Boolean(espnLineupLeague(b)))-Number(Boolean(espnLineupLeague(a)))||
+     a.startMs-b.startMs||a.key.localeCompare(b.key);
   }).slice(0,limit);
 }
 export function lineupEvidence(row,payload,at){
@@ -55,8 +59,14 @@ export function lineupEvidence(row,payload,at){
  if(reported&&Number.isFinite(parsed)&&Math.abs(parsed-row.startMs)>2*3600000)
   return {status:"UNAVAILABLE",reason:"KICKOFF_MISMATCH"};
  const home=sideList(payload.home),away=sideList(payload.away);
- const names=arr=>arr.map(p=>String(p.name??p.playerName??"").trim()).filter(Boolean).slice(0,11);
+ const names=arr=>arr.map(p=>String(p.name??p.playerName??"").trim()).filter(Boolean);
  const homeNames=names(home),awayNames=names(away);
+ // A starter must be a distinct named athlete, not a truncated or duplicated
+ // squad roster; fail closed instead of manufacturing an eleven.
+ if(homeNames.length>11||awayNames.length>11||
+    new Set(homeNames.map(norm)).size!==homeNames.length||
+    new Set(awayNames.map(norm)).size!==awayNames.length)
+  return {status:"UNAVAILABLE",reason:"DUPLICATE_OR_INVALID_STARTER_NAMES"};
  const starterNames=[payload.homeStarter?.name,payload.awayStarter?.name]
   .map(x=>String(x??"").trim()||null);
  const football=row.sport==="축구";
@@ -98,26 +108,48 @@ export function mergeLineupEvidence(state,key,observation,now){
  });
  return {...state,records};
 }
+// Lightweight independent pregame Naver source. It is only a fallback for an
+// unpublished ESPN soccer XI, never a postgame replacement or inferred player.
+async function lookupNaverPregame(r,{base,fetcher,now,timeoutMs=11000}){
+ try{
+  const params=new URLSearchParams({sport:r.sport,league:r.league,home:r.home,
+   away:r.away,date:new Date(r.startMs).toISOString()});
+  const res=await fetcher(base.replace(/\/+$/,"")+"/api/naver/lineup?"+params,{
+   cache:"no-store",signal:AbortSignal.timeout(timeoutMs)});
+  const data=typeof res.json==="function"?await res.json().catch(()=>null):null;
+  return res.ok?lineupEvidence(r,data,now()):
+   {status:"UNAVAILABLE",reason:"LINEUP_HTTP_"+res.status};
+ }catch(e){return {status:"UNAVAILABLE",reason:"LINEUP_NETWORK:"+String(e).slice(0,90)};}
+}
 export async function collectLineupSnapshots(state,{
  now=()=>Date.now(),base="https://wisetoto-analyzer.vercel.app",fetcher=fetch,limit=8
 }={}){
  let next=state,attempted=0,confirmed=0,partial=0,unavailable=0,unsupported=0;
  const espnCache=new Map(),reasons={};
+ let naverFailures=0,naverSkipped=0,naverFallbacks=0;
  for(const r of pregameLineupCandidates(state,now(),limit)){
   let observation;
-  if(espnLineupLeague(r)){
+  const viaEspn=Boolean(espnLineupLeague(r));
+  if(viaEspn){
    observation=await lookupEspnPregameXi(r,{now:now(),base,fetchFn:fetcher,cache:espnCache});
-  }else if(r.sport==="배구"||r.sport==="농구"){
+  }
+  if((!viaEspn||(observation.status==="UNAVAILABLE"&&r.sport==="축구"&&
+       r.startMs-now()<=75*60000))&&r.sport!=="배구"&&r.sport!=="농구"){
+   if(naverFailures>=2){
+    // Skip, don't store a false attempt or overwrite genuine PRE evidence.
+    naverSkipped++;
+    if(!viaEspn)continue;
+   }else{
+    if(viaEspn)naverFallbacks++;
+    const independent=await lookupNaverPregame(r,{base,fetcher,now});
+    if(!viaEspn||independent.status==="CONFIRMED"||independent.status==="PARTIAL")
+     observation=independent;
+    if(/LINEUP_NETWORK|LINEUP_HTTP_50[24]/.test(independent.reason??""))
+      naverFailures++;
+   }
+  }
+  if(!observation)
    observation={status:"UNSUPPORTED",reason:"NO_VERIFIED_PREGAME_LINEUP_PROVIDER"};
-  }else try{
-    const params=new URLSearchParams({sport:r.sport,league:r.league,home:r.home,
-      away:r.away,date:new Date(r.startMs).toISOString()});
-    const res=await fetcher(base.replace(/\/+$/,"")+"/api/naver/lineup?"+params,{
-      cache:"no-store",signal:AbortSignal.timeout(20000)});
-    const data=await res.json();
-    observation=res.ok?lineupEvidence(r,data,now()):
-      {status:"UNAVAILABLE",reason:"LINEUP_HTTP_"+res.status};
-  }catch(e){observation={status:"UNAVAILABLE",reason:"LINEUP_NETWORK:"+String(e).slice(0,90)}}
   const at=now();
   next=mergeLineupEvidence(next,r.key,observation,at);
   attempted++;
@@ -128,5 +160,6 @@ export async function collectLineupSnapshots(state,{
   else unavailable++;
  }
  return {state:next,summary:{attempted,confirmed,partial,unavailable,unsupported,
-  sharedEspnScoreboards:espnCache.size,reasonCounts:reasons}};
+  sharedEspnScoreboards:espnCache.size,naverFailures,naverSkipped,naverFallbacks,
+  reasonCounts:reasons}};
 }
