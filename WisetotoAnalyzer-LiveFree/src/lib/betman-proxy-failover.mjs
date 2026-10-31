@@ -22,6 +22,8 @@ const makeError=(code,details=[])=>{
  err.code=code;
  return err;
 };
+/** @param {string[]} endpoints
+ * @param {{gmTs?: number|null, gmId?:string, fetchFn?:typeof fetch, timeoutMs?:number}} [options] */
 export async function requestBetmanFromProxies(endpoints,{
  gmTs=null,gmId="G101",fetchFn=fetch,timeoutMs=16000
 }={}){
