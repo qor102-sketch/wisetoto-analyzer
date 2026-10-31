@@ -1189,7 +1189,7 @@ export async function GET(
         "Betman",
 
       endpoint:
-        BETMAN_PROXY_URL,
+        fetched.relayIndex===0?"primary":"fallback",
 
       fetchedAt:
         new Date().toISOString(),
