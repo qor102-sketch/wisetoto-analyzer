@@ -1,6 +1,6 @@
 {
   "schema": "wisetoto-auto-scan-health-v1",
-  "scannedAt": "2026-10-31T15:26:41.176Z",
+  "scannedAt": "2026-10-31T15:36:46.864Z",
   "expectedIntervalMinutes": 10,
   "sourceOk": true,
   "sourceError": null,
@@ -18,6 +18,6 @@
     "배구": 0
   },
   "awaitingPostmatch": 7,
-  "feedOrigin": "fresh-fetch-attempt-1",
+  "feedOrigin": "fresh-fetch-attempt-2",
   "note": "A completed scan is not proof that every Betman game was captured before kickoff."
 }
