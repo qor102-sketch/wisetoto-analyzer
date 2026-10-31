@@ -92,3 +92,32 @@ test("network failure preserves previous partial observation, error and attempts
  assert.equal(out.state.records[0].lineup.homeCount,6);
  assert.match(out.state.records[0].lineup.lastError,/LINEUP_NETWORK/);
 });
+
+test("lineup retry backs off for 90-180m away while preserving urgent 10-minute polling",()=>{
+ const far=row("축구",T+160*M,"far");
+ far.lineup={status:"UNAVAILABLE",lastAttemptAt:T-15*M};
+ assert.equal(pregameLineupCandidates({records:[far]},T).length,0);
+ far.lineup.lastAttemptAt=T-31*M;
+ assert.equal(pregameLineupCandidates({records:[far]},T).length,1);
+ const near=row("축구",T+35*M,"near");
+ near.lineup={status:"UNAVAILABLE",lastAttemptAt:T-11*M};
+ assert.deepEqual(pregameLineupCandidates({records:[near]},T).map(x=>x.key),["near"]);
+});
+test("Naver may never certify duplicate starting names or silently truncate twelve players",()=>{
+ const fixture=row(),p=lineup();
+ const sameName={...p,home:[...p.home.slice(0,10),p.home[0]]};
+ assert.equal(lineupEvidence(fixture,sameName,T).reason,"DUPLICATE_OR_INVALID_STARTER_NAMES");
+ const twelve={...p,home:[...p.home,{name:"Extra player"}]};
+ assert.equal(lineupEvidence(fixture,twelve,T).status,"UNAVAILABLE");
+});
+test("two Naver network timeouts open temporary per-scan lineup circuit while keeping ESPN independent",async()=>{
+ let calls=0;
+ const rows=["a","b","c"].map((key,i)=>row("축구",T+(20+i)*M,key));
+ const done=await collectLineupSnapshots({records:rows},{now:()=>T,base:"https://local.test",
+  fetcher:async()=>{calls++;throw Error("provider network timeout");}});
+ assert.equal(calls,2);
+ assert.equal(done.summary.naverFailures,2);
+ assert.equal(done.summary.naverSkipped,1);
+ assert.equal(done.summary.attempted,2);
+ assert.equal(done.state.records[2].lineup,undefined);
+});
