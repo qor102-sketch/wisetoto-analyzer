@@ -6,10 +6,12 @@ export async function GET(req:Request){
  oldProxy:"https://champions-wishes-documented-modification.trycloudflare.com/betman",
  officialSite:"https://www.betman.co.kr/",
  nbaSummary:"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=401909278",
- nbaEnded:"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=401909277"};
+ nbaEnded:"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=401909277",
+ nbaScore:"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=20261030",
+ mlbSummary:"https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/summary?event=401899111"};
  if(!allowed[kind])return Response.json({ok:false},{status:400});
  try{const res=await fetch(allowed[kind],{cache:"no-store",signal:AbortSignal.timeout(6000),
- headers:{accept:"application/json, text/plain, */*"}});
+ headers:{accept:"application/json, text/plain, */*","user-agent":"Mozilla/5.0 WisetotoAnalyzer/13.12.34","referer":"https://www.espn.com/"}});
  const body=await res.text();
  let json:any=null;try{json=JSON.parse(body)}catch{}
  if(!kind.startsWith("nba"))
