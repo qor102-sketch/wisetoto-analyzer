@@ -94,3 +94,38 @@ test("soccer penalty/extra-time finals are quarantined from Betman regulation se
  // An ordinary 90-minute or basketball overtime completed result is distinct.
  assert.equal(parseEspnFinal(payload([event({statusName:"STATUS_FULL_TIME"})]),fixture,{now:S+5*H}).ok,true);
 });
+
+test("actual 2026-10-31 J1 and A-League scoreboard clubs now match both exact teams",()=>{
+ const observed=[
+  ["일본 J1리그","가시마 앤틀러스","세레소 오사카","Kashima Antlers","Cerezo Osaka","jpn.1"],
+  ["일본 J1리그","비셀 고베","나고야 그램퍼스","Vissel Kobe","Nagoya Grampus","jpn.1"],
+  ["일본 J1리그","교토 상가FC","시미즈 에스펄스","Kyoto Sanga","Shimizu S-Pulse","jpn.1"],
+  ["일본 J1리그","미토 홀리호크","산프레체 히로시마","Mito Hollyhock","Sanfrecce Hiroshima","jpn.1"],
+  ["호주 A리그","멜버른 시티","시드니FC","Melbourne City FC","Sydney FC","aus.1"],
+  ["호주 A리그","맥아서FC","웨스턴시드니 원더러스","Macarthur FC","Western Sydney Wanderers FC","aus.1"],
+  ["호주 A리그","뉴캐슬 제츠","웰링턴 피닉스","Newcastle Jets","Wellington Phoenix","aus.1"],
+  ["잉글랜드 챔피언십","노리치 시티","왓포드","Norwich City","Watford","eng.2"],
+ ];
+ for(const [league,home,away,eh,ea,code] of observed){
+  const fixture={sport:"축구",league,home,away,startMs:S};
+  const score={ok:true,league:code,events:[{id:"401900001",date:new Date(S).toISOString(),completed:true,
+   statusName:"STATUS_FULL_TIME",competitors:[{homeAway:"home",name:eh,score:"2"},
+    {homeAway:"away",name:ea,score:"1"}]}]};
+  const result=parseEspnFinal(score,fixture,{now:S+4*H});
+  assert.equal(result.ok,true,home+" v "+away+": "+result.waitReason);
+  assert.equal(result.gameId,"401900001");
+  const wrongHome={...score,events:[{...score.events[0],
+   competitors:[{homeAway:"home",name:"Different Club",score:"2"},score.events[0].competitors[1]]}]};
+  assert.equal(parseEspnFinal(wrongHome,fixture,{now:S+4*H}).ok,false);
+ }
+});
+test("added team aliases never settle an ambiguous or nonfinal J1 fixture",()=>{
+ const f={sport:"축구",league:"일본 J1리그",home:"가시마 앤틀러스",away:"세레소 오사카",startMs:S};
+ const event={id:"401900001",date:new Date(S).toISOString(),completed:false,
+  statusName:"STATUS_SCHEDULED",competitors:[{homeAway:"home",name:"Kashima Antlers",score:"0"},
+   {homeAway:"away",name:"Cerezo Osaka",score:"0"}]};
+ const p={ok:true,league:"jpn.1",events:[event]};
+ assert.equal(parseEspnFinal(p,f,{now:S+4*H}).ok,false);
+ assert.equal(parseEspnFinal({...p,events:[{...event,completed:true,statusName:"STATUS_FINAL"},{
+  ...event,id:"401900002",completed:true,statusName:"STATUS_FINAL"}]},f,{now:S+4*H}).ok,false);
+});

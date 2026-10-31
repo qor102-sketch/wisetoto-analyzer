@@ -138,3 +138,42 @@ test("NBA 5+5 explicitly marked starters captured before tipoff qualify, never a
  assert.equal(done.state.records[0].lineup.homeCount,5);
  assert.equal(calls.length,2);
 });
+
+test("unpublished ESPN soccer XI can use independent strict Naver PRE evidence before kickoff only",async()=>{
+ const now=START-30*MIN;
+ const noXi=summary(0,0),p=summary(11,11);
+ let calls=[];
+ const result=await collectLineupSnapshots({records:[fixture]},{
+  now:()=>now,base:"https://local.test",
+  fetcher:async url=>{
+   calls.push(url);
+   if(url.includes("/scoreboard?"))return {ok:true,status:200,json:async()=>scoreboard};
+   if(url.includes("/api/espn/lineup?"))return {ok:true,status:200,json:async()=>noXi};
+   if(url.includes("/api/naver/lineup?")){
+    return {ok:true,status:200,json:async()=>({
+     ok:true,gameId:"naver-game-id",footballIdentity:{valid:true},
+     game:{gameDateTime:new Date(START).toISOString()},
+     footballPlayers:{startingHome:11,startingAway:11},
+     home:names("Verified home",11).map(name=>({name})),
+     away:names("Verified away",11).map(name=>({name}))
+    })};
+   }
+   throw Error("unexpected provider request");
+  }
+ });
+ assert.equal(result.summary.confirmed,1);
+ assert.equal(result.summary.naverFallbacks,1);
+ assert.equal(result.state.records[0].lineup.source,"NAVER_FOOTBALL_PLAYERS");
+ assert.equal(result.state.records[0].lineup.capturedAt,now);
+ assert.equal(calls.length,3);
+ const noNaver=await collectLineupSnapshots({records:[fixture]},{
+  now:()=>START-120*MIN,base:"https://local.test",fetcher:async url=>{
+   if(url.includes("/scoreboard?"))return {ok:true,status:200,json:async()=>scoreboard};
+   if(url.includes("/espn/lineup?"))return {ok:true,status:200,json:async()=>noXi};
+   throw Error("too early for costly Naver backup");
+  }
+ });
+ assert.equal(noNaver.summary.naverFallbacks,0);
+ assert.equal(noNaver.summary.confirmed,0);
+ assert.equal(noNaver.state.records[0].lineup.capturedAt,undefined);
+});

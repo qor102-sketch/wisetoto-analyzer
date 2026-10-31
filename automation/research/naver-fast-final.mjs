@@ -189,6 +189,32 @@ export async function lookupNaverScheduleFinal(fixture,{
    }catch(e){response={ok:false,reason:"NAVER_SCHEDULE_NETWORK:"+String(e).slice(0,80)};}
    cache.set(url,response);
   }
+  if(!response.ok&&base&&/HTTP_50[24]|NETWORK|TIMEOUT/.test(response.reason??"")){
+   // When the Vercel->Naver relay is unhealthy, attempt the SAME official
+   // Naver schedule from the GitHub runner. This is not an alternate score
+   // provider and never bypasses identity/FINAL/status/time checks.
+   let directResponse=cache.get(directUrl);
+   if(!directResponse){
+    try{
+     const res=await fetchFn(directUrl,{cache:"no-store",
+      signal:AbortSignal.timeout(Math.min(timeoutMs,5000)),
+      headers:{accept:"application/json, text/plain, */*",
+       referer:"https://m.sports.naver.com/","user-agent":"Mozilla/5.0 WisetotoAnalyzer/13.12.34"}});
+     const payload=typeof res.json==="function"?await res.json().catch(()=>null):null;
+     const hasGames=Array.isArray(payload?.result?.games)||Array.isArray(payload?.games)||
+      Array.isArray(payload?.data?.games)||Array.isArray(payload?.result?.schedule?.games);
+     directResponse=res.ok&&hasGames&&payload?.ok!==false?
+      {ok:true,payload}:
+      {ok:false,reason:"NAVER_DIRECT_HTTP_"+res.status+":"+
+       (res.ok?"INVALID_SCHEDULE":"UNAVAILABLE")};
+    }catch(e){directResponse={ok:false,reason:"NAVER_DIRECT_NETWORK:"+String(e).slice(0,90)};}
+    cache.set(directUrl,directResponse);
+   }
+   if(directResponse.ok){
+    reasons.push(response.reason); // Retain Vercel upstream outage for audit.
+    response=directResponse;
+   }else reasons.push(directResponse.reason);
+  }
   if(!response.ok){reasons.push(response.reason);continue;}
   const result=parseNaverFinal(response.payload,fixture,{now});
   if(result.ok)return {...result,providerErrors:reasons};
