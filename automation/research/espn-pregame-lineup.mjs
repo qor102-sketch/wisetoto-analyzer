@@ -22,6 +22,8 @@ export function parseEspnPregameXi(payload,fixture,event,at){
   return {status:"UNAVAILABLE",reason:"ESPN_KICKOFF_IDENTITY_UNCONFIRMED"};
  const exact=(v,side)=>Array.isArray(v)&&v.length===1&&v[0].homeAway===side;
  const head=payload.headerTeams??[],roster=payload.rosters??[];
+ if(fixture.sport==="농구"&&roster.length===0)
+  return {status:"UNAVAILABLE",reason:"ESPN_NBA_STARTERS_NOT_PUBLISHED"};
  const headerHome=head.filter(v=>v?.homeAway==="home");
  const headerAway=head.filter(v=>v?.homeAway==="away");
  const home=roster.filter(v=>v?.homeAway==="home");
@@ -33,8 +35,20 @@ export function parseEspnPregameXi(payload,fixture,event,at){
  const sourceAway=event.event.competitors.find(v=>v.homeAway==="away")?.name;
  // Header + roster team labels must match exactly the independently
  // matched scoreboard's source labels. No fuzzy match after fixture proof.
- if([headerHome[0].name,home[0].name].some(x=>norm(x)!==norm(sourceHome))||
-    [headerAway[0].name,away[0].name].some(x=>norm(x)!==norm(sourceAway)))
+ const scoreboardHome=event.event.competitors.find(v=>v.homeAway==="home");
+ const scoreboardAway=event.event.competitors.find(v=>v.homeAway==="away");
+ // Exact, present IDs across independently matched scoreboard, event
+ // header and match-specific roster prove identity even when ESPN switches
+ // shortDisplayName and displayName. A missing ID never grants an exception.
+ const identity=(rosterSide,headerSide,scoreSide)=>{
+  const id=[rosterSide.teamId,headerSide.teamId,scoreSide?.teamId].map(String);
+  if(id.every(v=>v&&v!=="undefined"&&v!=="null")&&new Set(id).size===1)
+    return true;
+  return norm(rosterSide.name)===norm(scoreSide?.name)&&
+    norm(headerSide.name)===norm(scoreSide?.name);
+ };
+ if(!identity(home[0],headerHome[0],scoreboardHome)||
+    !identity(away[0],headerAway[0],scoreboardAway))
   return {status:"UNAVAILABLE",reason:"ESPN_LINEUP_SCOREBOARD_TEAM_MISMATCH"};
  const needed=fixture.sport==="농구"?5:11;
  const names=side=>{
