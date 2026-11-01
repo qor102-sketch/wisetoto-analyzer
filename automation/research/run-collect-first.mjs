@@ -4,7 +4,7 @@ import {loadFeed} from "../feed.mjs";
 import {getRecords,STATE_FILE} from "../logic.mjs";
 import {SCHEMA,collect,settlement,dueResults,mergeProviderFinal,projection,verifiedNaverFinal} from "./collect-first.mjs";
 import {lookupVolleyballFinal} from "./volleyball-result.mjs";
-import {lookupNaverScheduleFinal} from "./naver-fast-final.mjs";
+import {lookupNaverScheduleFinal,scheduleUrls,kstDate} from "./naver-fast-final.mjs";
 import {espnLeague,lookupEspnFinal} from "./espn-fast-final.mjs";
 import {collectLineupSnapshots} from "./pregame-lineup.mjs";
 import {selectFinalAuditRows} from "./final-scan-plan.mjs";
@@ -38,6 +38,7 @@ const lineupScan=await collectLineupSnapshots(state,{base,limit:12});
 state=lineupScan.state;
 console.log("PREGAME_LINEUP_AUDIT "+JSON.stringify(lineupScan.summary));
 let sportsApiLimited=false,naverUpstreamFailures=0,naverOutageSkipped=0;
+const naverFailureGroups=new Map();
 const supportedNaver=new Set(["축구","농구","야구"]);
 // One request per (sport, KST date, Naver category) per scan, not per match.
 const scheduleCache=new Map();
@@ -75,7 +76,12 @@ for(const r of selectFinalAuditRows(state,now,24)){
    }
  }
  if(!confirmed&&supportedNaver.has(r.sport)){
-   if(naverUpstreamFailures>=2){
+   // A failed Naver football category must not silence NBA/KBL/baseball,
+   // nor a different match day. Failed URLs are already cached per scan.
+   const providerPrimary=scheduleUrls(r)[0];
+   const upper=providerPrimary?new URL(providerPrimary).searchParams.get("upperCategoryId"):"unknown";
+   const group=String(upper)+":"+kstDate(r.startMs);
+   if((naverFailureGroups.get(group)??0)>=2){
      // Multiple independent Naver schedule errors in this scan mean an
      // outage. Do not spend the rest of the scan on the same stalled source.
      naverOutageSkipped++;
@@ -87,8 +93,10 @@ for(const r of selectFinalAuditRows(state,now,24)){
        const reason=String(result.waitReason);
        reasons.push("NAVER_FAST:"+reason.slice(0,150));
        if(Array.isArray(result.providerErrors))reasons.push(...result.providerErrors);
-       if(/HTTP_504|HTTP_502|NETWORK|TIMEOUT|PROVIDER_NETWORK/.test(reason))
+       if(/HTTP_504|HTTP_502|NETWORK|TIMEOUT|PROVIDER_NETWORK/.test(reason)){
          naverUpstreamFailures++;
+         naverFailureGroups.set(group,(naverFailureGroups.get(group)??0)+1);
+       }
      }
    }
  }
@@ -114,7 +122,8 @@ for(const r of selectFinalAuditRows(state,now,24)){
 console.log("FAST_FINAL_AUDIT "+JSON.stringify({
  checked:finalChecked,confirmed:finalConfirmed,waiting:finalChecked-finalConfirmed,
  sharedScheduleQueries:scheduleCache.size,sharedEspnQueries:espnCache.size,
- naverUpstreamFailures,naverOutageSkipped,waitReasons:finalWaitReasons
+ naverUpstreamFailures,naverOutageSkipped,
+ naverCircuitGroups:Object.fromEntries(naverFailureGroups),waitReasons:finalWaitReasons
 }));
 await fs.writeFile(file,JSON.stringify(state)+"\n");
 await fs.writeFile(dir+"/collect-first-public.json",JSON.stringify(projection(state,Date.now()))+"\n");
