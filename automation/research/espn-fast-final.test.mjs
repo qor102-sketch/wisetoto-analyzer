@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {espnLeague,parseEspnFinal,lookupEspnFinal} from "./espn-fast-final.mjs";
+import {espnLeague,parseEspnFinal,lookupEspnFinal,findEspnFixtureEvent} from "./espn-fast-final.mjs";
 const S=Date.parse("2026-10-28T17:30:00Z"),H=3600000;
 const fixture={key:"test-seriea",sport:"축구",league:"이탈리아 세리에A",
  home:"AC밀란",away:"볼로냐",startMs:S,fixtureId:null};
@@ -128,4 +128,33 @@ test("added team aliases never settle an ambiguous or nonfinal J1 fixture",()=>{
  assert.equal(parseEspnFinal(p,f,{now:S+4*H}).ok,false);
  assert.equal(parseEspnFinal({...p,events:[{...event,completed:true,statusName:"STATUS_FINAL"},{
   ...event,id:"401900002",completed:true,statusName:"STATUS_FINAL"}]},f,{now:S+4*H}).ok,false);
+});
+
+test("verified NBA aliases and soccer club labels from 2026-10-31 independent ESPN scoreboards",()=>{
+ const labels=[
+  ["농구","NBA","휴스턴 로케츠","오클라호마시티 썬더","Houston Rockets","Oklahoma City Thunder","nba","401909902"],
+  ["농구","NBA","샬럿 호네츠","필라델피아 76s","Charlotte Hornets","Philadelphia 76ers","nba","401909897"],
+  ["축구","미국 메이저리그사커","LA 갤럭시","오스틴FC","LA Galaxy","Austin FC","usa.1","761925"],
+  ["축구","미국 메이저리그사커","콜로라도 래피즈","시카고 파이어FC","Colorado Rapids","Chicago Fire FC","usa.1","761923"],
+  ["축구","미국 메이저리그사커","뉴욕 시티FC","CF몽레알","New York City FC","CF Montréal","usa.1","761930"],
+  ["축구","네덜란드 에레디비시","AFC아약스","AZ알크마르","Ajax Amsterdam","AZ Alkmaar","ned.1","401875562"],
+  ["축구","네덜란드 에레디비시","SC캄뷔르","고어헤드 이글스","SC Cambuur","Go Ahead Eagles","ned.1","401875561"],
+  ["축구","네덜란드 에레디비시","PSV에인트호번","빌럼II","PSV Eindhoven","Willem II","ned.1","401875564"],
+  ["축구","스페인 라리가","레반테","아틀레티코 마드리드","Levante","Atlético Madrid","esp.1","401882820"],
+  ["축구","스페인 라리가","바르셀로나","알라베스","Barcelona","Alavés","esp.1","401882822"],
+  ["축구","스페인 라리가","레알 베티스","말라가","Real Betis","Málaga","esp.1","401882825"],
+  ["축구","프랑스 리그1","트루아AC","르망FC","Troyes","Le Mans","fra.1","401876413"]
+ ];
+ for(const [sport,league,home,away,h,a,code,id] of labels){
+  const fx={sport,league,home,away,startMs:S};
+  const e={id,date:new Date(S).toISOString(),competitors:[
+   {homeAway:"home",name:h},{homeAway:"away",name:a}]};
+  const match=findEspnFixtureEvent({ok:true,league:code,events:[e]},fx);
+  assert.equal(match.ok,true,home+"-"+away+":"+match.waitReason);
+  assert.equal(match.gameId,id);
+  const wrong={...e,competitors:[{homeAway:"home",name:"Different Club"},e.competitors[1]]};
+  assert.equal(findEspnFixtureEvent({ok:true,league:code,events:[wrong]},fx).ok,false);
+  assert.equal(findEspnFixtureEvent({ok:true,league:code,events:[{...e,date:new Date(S+4*H).toISOString()}]},fx).ok,false);
+  assert.equal(findEspnFixtureEvent({ok:true,league:code,events:[e,{...e,id:id+"9"}]},fx).ok,false);
+ }
 });
