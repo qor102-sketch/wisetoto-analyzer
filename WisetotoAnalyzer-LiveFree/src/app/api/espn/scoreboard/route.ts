@@ -39,7 +39,7 @@ export async function GET(request:Request){
    competitors:(Array.isArray(e.competitions?.[0]?.competitors)?
      e.competitions[0].competitors:[]).slice(0,2).map((c:any)=>({
     homeAway:c.homeAway==="home"?"home":c.homeAway==="away"?"away":null,
-    name:safe(c.team?.displayName),
+    name:safe(c.team?.displayName),teamId:safe(c.team?.id),
     shortName:safe(c.team?.shortDisplayName),
     abbreviation:safe(c.team?.abbreviation),
     score:typeof c.score==="number"||typeof c.score==="string"?String(c.score).slice(0,8):null

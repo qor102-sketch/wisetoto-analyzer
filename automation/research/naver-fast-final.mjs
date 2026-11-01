@@ -166,7 +166,7 @@ export const scheduleUrls=fixture=>profile(fixture).map(upperCategoryId=>{
  return API+"?"+query.toString();
 });
 export async function lookupNaverScheduleFinal(fixture,{
- fetchFn=fetch,timeoutMs=12000,now=Date.now(),cache=new Map(),base=null
+ fetchFn=fetch,timeoutMs=10000,now=Date.now(),cache=new Map(),base=null
 }={}){
  if(!["축구","농구","야구"].includes(fixture.sport))
    return {ok:false,waitReason:"NAVER_SPORT_UNSUPPORTED"};
@@ -197,7 +197,7 @@ export async function lookupNaverScheduleFinal(fixture,{
    if(!directResponse){
     try{
      const res=await fetchFn(directUrl,{cache:"no-store",
-      signal:AbortSignal.timeout(Math.min(timeoutMs,5000)),
+      signal:AbortSignal.timeout(Math.min(timeoutMs,3500)),
       headers:{accept:"application/json, text/plain, */*",
        referer:"https://m.sports.naver.com/","user-agent":"Mozilla/5.0 WisetotoAnalyzer/13.12.34"}});
      const payload=typeof res.json==="function"?await res.json().catch(()=>null):null;
