@@ -23,7 +23,7 @@ export async function GET(request:Request){
    return Response.json({ok:false,waitReason:"ESPN_EVENT_ID_UNCONFIRMED"},{status:409});
   const headerTeams=(Array.isArray(competition?.competitors)?competition.competitors:[])
    .map((c:any)=>({homeAway:c.homeAway==="home"?"home":c.homeAway==="away"?"away":null,
-    name:safe(c.team?.displayName??c.team?.name)}));
+    name:safe(c.team?.displayName??c.team?.name),teamId:safe(c.team?.id)}));
   // Soccer: ESPN marks exactly who started in match-specific rosters.
   // NBA: explicit starter=true lives on match-specific boxscore players;
   // the generic season roster must never count as announced PRE starters.
@@ -31,7 +31,7 @@ export async function GET(request:Request){
   const nameOf=(team:any)=>safe(team?.displayName??team?.name);
   const extract=(group:any,side:string|null)=>({
    homeAway:side,
-   name:nameOf(group?.team),
+   name:nameOf(group?.team),teamId:safe(group?.team?.id),
    starters:(Array.isArray(group?.roster)?group.roster:
     Array.isArray(group?.statistics)?
       group.statistics.flatMap((stat:any)=>Array.isArray(stat.athletes)?stat.athletes:[]):[])
@@ -44,7 +44,10 @@ export async function GET(request:Request){
    (Array.isArray(data?.rosters)?data.rosters:[]);
   const rosters=groups.map((side:any)=>{
     const sourceName=nameOf(side?.team);
-    const candidates=headerTeams.filter((team:any)=>norm(team.name)===norm(sourceName));
+    const sourceId=safe(side?.team?.id);
+    const candidates=headerTeams.filter((team:any)=>
+      (sourceId&&team.teamId&&sourceId===team.teamId)||
+      (sourceName&&norm(team.name)===norm(sourceName)));
     const orientation=league==="nba"?(candidates.length===1?candidates[0].homeAway:null):
       (side.homeAway==="home"?"home":side.homeAway==="away"?"away":null);
     return extract(side,orientation);
