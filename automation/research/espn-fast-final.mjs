@@ -1,7 +1,8 @@
 // Independent ESPN verified-score fallback. NEVER grades raw/live results:
 // league, two teams, kickoff, unique ESPN event, FINAL and score must all match.
 import {scorePlausibility} from "../../WisetotoAnalyzer-LiveFree/src/lib/postmatch-guards.mjs";
-const norm=x=>String(x??"").normalize("NFKC").toLowerCase().replace(/[^a-z0-9가-힣]/g,"");
+const norm=x=>String(x??"").normalize("NFKD").replace(/[\u0300-\u036f]/g,"")
+ .normalize("NFC").toLowerCase().replace(/[^a-z0-9가-힣]/g,"");
 const aliases=[
  ["ac밀란","acmilan","milan"],["볼로냐","bologna"],
  ["베네치아","venezia"],["인테르나치오날레밀라노","인테르밀란","인테르","intermilan","internazionale"],
