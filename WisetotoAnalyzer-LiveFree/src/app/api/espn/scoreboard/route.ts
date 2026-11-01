@@ -7,7 +7,11 @@ const CODES:Record<string,[string,string]>={
  "eng.2":["soccer","eng.2"],"aus.1":["soccer","aus.1"],"jpn.1":["soccer","jpn.1"],"esp.1":["soccer","esp.1"],
  "ger.1":["soccer","ger.1"],"fra.1":["soccer","fra.1"],
  "usa.1":["soccer","usa.1"],"ned.1":["soccer","ned.1"],
- "uefa.champions":["soccer","uefa.champions"],"uefa.europa":["soccer","uefa.europa"]
+ "uefa.champions":["soccer","uefa.champions"],"uefa.europa":["soccer","uefa.europa"],
+ "uefa.europa.conf":["soccer","uefa.europa.conf"],"afc.champions":["soccer","afc.champions"],
+ "eng.fa":["soccer","eng.fa"],"eng.3":["soccer","eng.3"],
+ "esp.2":["soccer","esp.2"],"ita.2":["soccer","ita.2"],
+ "ger.2":["soccer","ger.2"],"fra.2":["soccer","fra.2"],"ned.2":["soccer","ned.2"]
 };
 const DAY=86400000;
 const safe=(v:unknown)=>typeof v==="string"?v.slice(0,160):null;
