@@ -4,7 +4,8 @@ import {loadFeed} from "../feed.mjs";
 import {getRecords,STATE_FILE} from "../logic.mjs";
 import {SCHEMA,collect,settlement,dueResults,mergeProviderFinal,projection,verifiedNaverFinal} from "./collect-first.mjs";
 import {lookupVolleyballFinal} from "./volleyball-result.mjs";
-import {lookupNaverScheduleFinal,scheduleUrls,kstDate} from "./naver-fast-final.mjs";
+import {lookupNaverScheduleFinal} from "./naver-fast-final.mjs";
+import {naverOutageGroup} from "./naver-outage-group.mjs";
 import {espnLeague,lookupEspnFinal} from "./espn-fast-final.mjs";
 import {collectLineupSnapshots} from "./pregame-lineup.mjs";
 import {selectFinalAuditRows} from "./final-scan-plan.mjs";
@@ -78,9 +79,7 @@ for(const r of selectFinalAuditRows(state,now,24)){
  if(!confirmed&&supportedNaver.has(r.sport)){
    // A failed Naver football category must not silence NBA/KBL/baseball,
    // nor a different match day. Failed URLs are already cached per scan.
-   const providerPrimary=scheduleUrls(r)[0];
-   const upper=providerPrimary?new URL(providerPrimary).searchParams.get("upperCategoryId"):"unknown";
-   const group=String(upper)+":"+kstDate(r.startMs);
+   const group=naverOutageGroup(r);
    if((naverFailureGroups.get(group)??0)>=2){
      // Multiple independent Naver schedule errors in this scan mean an
      // outage. Do not spend the rest of the scan on the same stalled source.
