@@ -3,6 +3,16 @@ import {espnLineupLeague,lookupEspnPregameXi} from "./espn-pregame-lineup.mjs";
 // ledger. Never use post-kickoff lineups as PRE, invent names or alter frozen PRE.
 // The Naver route already resolves exact fixtures; recheck time and identity.
 export const LINEUP_WINDOW_MS=180*60000;
+export const NBA_TIPOFF_RESERVE_MS=45*60000;
+export const NBA_FOCUSED_RECHECK_MS=30*1000;
+const nbaFocusedReason=new Set(["ESPN_NBA_STARTERS_NOT_PUBLISHED","ESPN_XI_NOT_PUBLISHED"]);
+export function nbaFocusedRecheckEligible(row,observation,at,used=0){
+ const remaining=row.startMs-at;
+ return row.sport==="농구"&&espnLineupLeague(row)==="nba"&&
+  used<2&&observation?.status==="UNAVAILABLE"&&
+  nbaFocusedReason.has(observation.reason)&&remaining>NBA_FOCUSED_RECHECK_MS+60000&&
+  remaining<=15*60000;
+}
 const norm=v=>String(v??"").normalize("NFKC").toLowerCase().replace(/[^a-z0-9가-힣]/g,"");
 const sideList=v=>Array.isArray(v)?v.filter(p=>p&&typeof p==="object"):[];
 // Naver occasionally returns timezone-less Korea-local "YYYY-MM-DD HH:mm".
@@ -17,7 +27,7 @@ function providerKickoff(v){
 }
 
 export function pregameLineupCandidates(state,now=Date.now(),limit=4){
- return (state?.records??[]).filter(r=>["축구","야구","농구","배구"].includes(r.sport)
+ const eligible=(state?.records??[]).filter(r=>["축구","야구","농구","배구"].includes(r.sport)
    &&r.startMs>now&&r.startMs-now<=LINEUP_WINDOW_MS
    &&r.lineup?.status!=="CONFIRMED"
    &&r.lineup?.status!=="UNSUPPORTED"
@@ -30,7 +40,15 @@ export function pregameLineupCandidates(state,now=Date.now(),limit=4){
    return bucket(a)-bucket(b)||
      Number(Boolean(espnLineupLeague(b)))-Number(Boolean(espnLineupLeague(a)))||
      a.startMs-b.startMs||a.key.localeCompare(b.key);
-  }).slice(0,limit);
+  });
+ // Reserve a bounded share of each scan for NBA starters as tipoff approaches,
+ // even when many soccer fixtures have the same or earlier start time. Fill the
+ // remaining slots with the ordinary all-sport order to prevent starvation.
+ const urgentNba=eligible.filter(r=>r.sport==="농구"&&
+   espnLineupLeague(r)==="nba"&&r.startMs-now<=NBA_TIPOFF_RESERVE_MS);
+ const reserve=urgentNba.slice(0,Math.min(4,Math.max(1,Math.ceil(limit/3))));
+ const picked=new Set(reserve.map(r=>r.key));
+ return [...reserve,...eligible.filter(r=>!picked.has(r.key))].slice(0,limit);
 }
 export function lineupEvidence(row,payload,at){
  if(!Number.isFinite(at)||at>=row.startMs)return {status:"REJECTED",reason:"AFTER_KICKOFF_NOT_PREGAME"};
@@ -122,16 +140,32 @@ async function lookupNaverPregame(r,{base,fetcher,now,timeoutMs=11000}){
  }catch(e){return {status:"UNAVAILABLE",reason:"LINEUP_NETWORK:"+String(e).slice(0,90)};}
 }
 export async function collectLineupSnapshots(state,{
- now=()=>Date.now(),base="https://wisetoto-analyzer.vercel.app",fetcher=fetch,limit=8
+ now=()=>Date.now(),base="https://wisetoto-analyzer.vercel.app",fetcher=fetch,limit=8,
+ sleepFn=ms=>new Promise(resolve=>setTimeout(resolve,ms))
 }={}){
  let next=state,attempted=0,confirmed=0,partial=0,unavailable=0,unsupported=0;
  const espnCache=new Map(),reasons={};
  let naverFailures=0,naverSkipped=0,naverFallbacks=0;
+ let nbaFocusedRechecks=0,nbaFocusedRecovered=0;
  for(const r of pregameLineupCandidates(state,now(),limit)){
   let observation;
   const viaEspn=Boolean(espnLineupLeague(r));
   if(viaEspn){
    observation=await lookupEspnPregameXi(r,{now:now(),base,fetchFn:fetcher,cache:espnCache});
+   // ESPN's actual 5+5 may be announced shortly before NBA tipoff. Make at
+   // most two focused, fresh SUMMARY rechecks across the entire scan; the
+   // scoreboard identity can be cached, but the match lineup never is.
+   // Time is re-read after sleeping and after the network response. At/after
+   // tipoff the downstream merge rejects any new PRE evidence.
+   if(nbaFocusedRecheckEligible(r,observation,now(),nbaFocusedRechecks)){
+    nbaFocusedRechecks++;
+    await sleepFn(NBA_FOCUSED_RECHECK_MS);
+    if(now()<r.startMs){
+     const updated=await lookupEspnPregameXi(r,{now:now(),base,fetchFn:fetcher,cache:espnCache});
+     if(updated.status==="CONFIRMED"||updated.status==="PARTIAL")nbaFocusedRecovered++;
+     observation=updated;
+    }else observation={status:"REJECTED",reason:"AFTER_KICKOFF_NOT_PREGAME"};
+   }
   }
   if((!viaEspn||(observation.status==="UNAVAILABLE"&&r.sport==="축구"&&
        r.startMs-now()<=75*60000))&&r.sport!=="배구"&&r.sport!=="농구"){
@@ -161,5 +195,5 @@ export async function collectLineupSnapshots(state,{
  }
  return {state:next,summary:{attempted,confirmed,partial,unavailable,unsupported,
   sharedEspnScoreboards:espnCache.size,naverFailures,naverSkipped,naverFallbacks,
-  reasonCounts:reasons}};
+  nbaFocusedRechecks,nbaFocusedRecovered,reasonCounts:reasons}};
 }

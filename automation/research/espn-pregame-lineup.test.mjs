@@ -207,3 +207,80 @@ test("NBA match-specific verified team IDs resolve display-name drift, but swapp
  const missingIds={...roster,rosters:roster.rosters.map(({teamId,...rest})=>rest)};
  assert.equal(parseEspnPregameXi(missingIds,matchFixture,{...match,league:"nba"},START-10*MIN).status,"UNAVAILABLE");
 });
+
+test("focused NBA pretipoff retry observes newly published genuine 5+5 without postgame backfill",async()=>{
+ let clock=START-8*MIN,summaryFetches=0,sleeps=0;
+ const nba={...fixture,key:"nba-window",sport:"농구",league:"NBA",home:"보스턴 셀틱스",
+  away:"시카고 불스",startMs:START};
+ const ev={id:"401909500",date:new Date(START).toISOString(),competitors:[
+  {homeAway:"home",name:"Boston Celtics",teamId:"2"},
+  {homeAway:"away",name:"Chicago Bulls",teamId:"4"}]};
+ const scoreboard={ok:true,league:"nba",events:[ev]};
+ const announced={ok:true,source:"ESPN_MATCH_SUMMARY",league:"nba",
+  eventId:ev.id,eventDate:ev.date,
+  headerTeams:[{homeAway:"home",name:"Boston Celtics",teamId:"2"},
+   {homeAway:"away",name:"Chicago Bulls",teamId:"4"}],
+  rosters:[{homeAway:"home",name:"Boston Celtics",teamId:"2",starters:names("Boston",5)},
+   {homeAway:"away",name:"Chicago Bulls",teamId:"4",starters:names("Chicago",5)}]};
+ const observed=await collectLineupSnapshots({records:[nba]},{
+  now:()=>clock,base:"https://local.test",
+  sleepFn:async ms=>{sleeps++;clock+=ms;},
+  fetcher:async url=>{
+   if(url.includes("/scoreboard?"))return {ok:true,status:200,json:async()=>scoreboard};
+   if(url.includes("/api/espn/lineup?")){
+    summaryFetches++;
+    return {ok:true,status:200,json:async()=>summaryFetches===1?
+     {...announced,rosters:[]}:announced};
+   }
+   throw Error("Unexpected provider");
+  }
+ });
+ assert.equal(sleeps,1);assert.equal(summaryFetches,2);
+ assert.equal(observed.summary.nbaFocusedRechecks,1);
+ assert.equal(observed.summary.nbaFocusedRecovered,1);
+ assert.equal(observed.state.records[0].lineup.status,"CONFIRMED");
+ assert.equal(observed.state.records[0].lineup.capturedAt,START-8*MIN+30_000);
+ assert.equal(observed.state.records[0].lineup.source,"ESPN_NBA_MATCH_STARTERS");
+ assert.equal(observed.state.records[0].lineup.homeCount,5);
+ assert.equal(observed.state.records[0].lineup.awayCount,5);
+});
+test("focused NBA retry never fabricates a starting five if still unpublished, too early or crossed tipoff",async()=>{
+ let summaryFetches=0,sleeps=0;
+ const nba={...fixture,key:"nba-empty",sport:"농구",league:"NBA",home:"보스턴 셀틱스",
+  away:"시카고 불스",startMs:START};
+ const ev={id:"401909500",date:new Date(START).toISOString(),competitors:[
+  {homeAway:"home",name:"Boston Celtics"},{homeAway:"away",name:"Chicago Bulls"}]};
+ const scoreboard={ok:true,league:"nba",events:[ev]};
+ const unavailable={ok:true,source:"ESPN_MATCH_SUMMARY",league:"nba",eventId:ev.id,
+  eventDate:ev.date,headerTeams:[{homeAway:"home",name:"Boston Celtics"},
+   {homeAway:"away",name:"Chicago Bulls"}],rosters:[]};
+ const fetcher=async url=>{
+  if(url.includes("/scoreboard?"))return {ok:true,status:200,json:async()=>scoreboard};
+  summaryFetches++;
+  return {ok:true,status:200,json:async()=>unavailable};
+ };
+ const t=START-8*MIN;
+ const done=await collectLineupSnapshots({records:[nba]},{
+  now:()=>t,base:"https://local.test",fetcher,
+  sleepFn:async()=>{sleeps++;}
+ });
+ assert.equal(done.summary.nbaFocusedRechecks,1);
+ assert.equal(done.summary.nbaFocusedRecovered,0);
+ assert.equal(summaryFetches,2);
+ assert.equal(done.state.records[0].lineup.status,"UNAVAILABLE");
+ assert.equal(done.state.records[0].lineup.capturedAt,undefined);
+ const early=await collectLineupSnapshots({records:[nba]},{
+  now:()=>START-50*MIN,base:"https://local.test",fetcher,
+  sleepFn:async()=>{throw Error("no focused retry at T-50m");}
+ });
+ assert.equal(early.summary.nbaFocusedRechecks,0);
+ let now=START-3*MIN;
+ const late=await collectLineupSnapshots({records:[nba]},{
+  now:()=>now,base:"https://local.test",fetcher,
+  sleepFn:async()=>{now=START+MIN;}
+ });
+ assert.equal(late.summary.nbaFocusedRechecks,1);
+ assert.equal(late.state.records[0].lineup.status,"UNAVAILABLE");
+ assert.equal(late.state.records[0].lineup.capturedAt,undefined);
+ assert.equal(late.state.records[0].lineup.lastError,"AFTER_KICKOFF_NOT_PREGAME");
+});

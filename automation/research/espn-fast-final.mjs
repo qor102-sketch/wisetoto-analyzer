@@ -97,6 +97,9 @@ const aliases=[
  ["말라가","malaga"],
  ["트루아ac","troyes"],
  ["르망fc","lemans"],
+ // Cross-checked with ESPN 2026-11-02 AFC Elite event 401912631,
+ // Pakhtakor (home) vs Al Nassr (away), 13:45 UTC.
+ ["파흐타코르","pakhtakor"],["s알나스르","알나스르","alnassr"],
  ["미들즈브러","middlesbrough"],["찰턴애슬레틱","charltonathletic","charlton"],
  ["밀월","millwall"],["더비카운티","derbycounty"],["번리","burnley"],
  ["포츠머스","portsmouth"],["볼턴원더러스","boltonwanderers"],
@@ -140,18 +143,30 @@ export function espnLeague(fixture){
  if(fixture.sport==="농구")return /nba|미프로농구|미국프로농구/.test(l)?"nba":null;
  if(fixture.sport==="야구")return /mlb|미국프로야구|메이저리그/.test(l)?"mlb":null;
  if(fixture.sport!=="축구")return null;
+ // Extra independent ESPN scoreboard competitions remain fail-closed:
+ // a league slug alone cannot verify a match without unique ID, both teams,
+ // kickoff, final-only status and plausible regulation score.
+ if(/세리에b|serieb|이탈리아2부리그/.test(l))return "ita.2";
  if(/세리에a|세리에아|seriea/.test(l))return "ita.1";
+ if(/잉글랜드fa컵|잉글랜드에프에이컵|facup/.test(l))return "eng.fa";
+ if(/잉글랜드리그1|잉글랜드3부|eflleagueone/.test(l))return "eng.3";
  if(/잉글랜드리그컵|카라바오컵|eflcup/.test(l))return "eng.league_cup";
  if(/프리미어리그|epl|englishpremier/.test(l))return "eng.1";
  if(/잉글랜드챔피언십|eflchampionship|engchampionship/.test(l))return "eng.2";
  if(/호주a리그|호주에이리그|aleague/.test(l))return "aus.1";
  if(/일본j1리그|j리그1|j1league/.test(l))return "jpn.1";
+ if(/스페인라리가2|라리가2|세군다디비시온|laliga2/.test(l))return "esp.2";
  if(/스페인라리가|laliga|라리가/.test(l))return "esp.1";
+ if(/독일분데스리가2|독일2분데스리가|분데스리가2|2bundesliga/.test(l))return "ger.2";
  if(/독일분데스|bundesliga/.test(l))return "ger.1";
+ if(/프랑스리그2|ligue2/.test(l))return "fra.2";
  if(/프랑스리그1|ligue1/.test(l))return "fra.1";
  if(/미국메이저리그사커|mls|미국프로축구/.test(l))return "usa.1";
+ if(/네덜란드2부|에이르스터디비시|eerste divisie|eerstedivisie/.test(l))return "ned.2";
  if(/네덜란드에레디비시|eredivisie/.test(l))return "ned.1";
+ if(/afc챔피언스리그엘리트|afc챔피언스엘리트|아시아챔피언스리그엘리트/.test(l))return "afc.champions";
  if(/uefa챔피언스|유럽챔피언스리그/.test(l))return "uefa.champions";
+ if(/유로파컨퍼런스|uefa컨퍼런스|uefaconference/.test(l))return "uefa.europa.conf";
  if(/유로파리그|uefa유로파/.test(l))return "uefa.europa";
  return null;
 }

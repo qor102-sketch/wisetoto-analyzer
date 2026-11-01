@@ -158,3 +158,64 @@ test("verified NBA aliases and soccer club labels from 2026-10-31 independent ES
   assert.equal(findEspnFixtureEvent({ok:true,league:code,events:[e,{...e,id:id+"9"}]},fx).ok,false);
  }
 });
+
+test("expanded independent ESPN competitions require explicit correct league source",()=>{
+ const mapped=[
+  ["AFC 챔피언스리그 엘리트","afc.champions"],
+  ["UEFA 유로파 컨퍼런스리그","uefa.europa.conf"],
+  ["잉글랜드 FA컵","eng.fa"],
+  ["잉글랜드 리그1","eng.3"],
+  ["스페인 라리가2","esp.2"],
+  ["이탈리아 세리에B","ita.2"],
+  ["독일 분데스리가2","ger.2"],
+  ["프랑스 리그2","fra.2"],
+  ["네덜란드 2부","ned.2"]
+ ];
+ for(const [league,code] of mapped){
+  const f={...fixture,league};
+  assert.equal(espnLeague(f),code,league);
+  const good={ok:true,league:code,events:[event()]};
+  assert.equal(parseEspnFinal(good,f,{now:S+5*H}).ok,true,league);
+  assert.equal(parseEspnFinal({...good,league:"eng.1"},f,{now:S+5*H}).ok,false);
+  assert.equal(parseEspnFinal({...good,events:[event({completed:false})]},f,{now:S+5*H}).ok,false);
+  assert.equal(parseEspnFinal({...good,events:[event({date:new Date(S+4*H).toISOString()})]},f,{now:S+5*H}).ok,false);
+  assert.equal(parseEspnFinal({...good,events:[event(),event({id:"401998887"})]},f,{now:S+5*H}).ok,false);
+ }
+ // ESPN coverage must never claim leagues not backed by a supported source.
+ for(const league of ["일본 J2리그","K리그1","K리그2","KBL","WKBL"]){
+  const sport=/KBL|WKBL/.test(league)?"농구":"축구";
+  assert.equal(espnLeague({...fixture,sport,league}),null,league);
+ }
+});
+test("new cup coverage rejects extra time, penalties, missing scores and wrong teams",()=>{
+ const f={...fixture,league:"AFC 챔피언스리그 엘리트"};
+ const p={ok:true,league:"afc.champions",events:[event()]};
+ assert.equal(parseEspnFinal(p,f,{now:S+5*H}).ok,true);
+ for(const statusName of ["STATUS_FINAL_PEN","STATUS_FINAL_ET","STATUS_FINAL_AET"]){
+  assert.equal(parseEspnFinal({...p,events:[event({statusName})]},f,{now:S+5*H}).ok,false);
+ }
+ assert.equal(parseEspnFinal({...p,events:[event({competitors:[{homeAway:"home",name:"Wrong",score:"2"},
+  {homeAway:"away",name:"Bologna",score:"1"}]})]},f,{now:S+5*H}).ok,false);
+ assert.equal(parseEspnFinal({...p,events:[event({competitors:[{homeAway:"home",name:"AC Milan",score:""},
+  {homeAway:"away",name:"Bologna",score:"1"}]})]},f,{now:S+5*H}).ok,false);
+});
+
+test("observed AFC Elite Pakhtakor–Al Nassr 2026-11-02 exact ESPN ID maps but never pre-verifies",()=>{
+ const startMs=Date.parse("2026-11-02T13:45:00Z");
+ const row={key:"afc-20261102",sport:"축구",league:"AFC 챔피언스리그 엘리트",
+  home:"파흐타코르",away:"S알나스르",startMs};
+ const e={id:"401912631",date:"2026-11-02T13:45Z",completed:false,
+  statusName:"STATUS_SCHEDULED",competitors:[
+   {homeAway:"home",name:"Pakhtakor",score:null},
+   {homeAway:"away",name:"Al Nassr",score:null}]};
+ const data={ok:true,source:"ESPN_SCOREBOARD",league:"afc.champions",events:[e]};
+ assert.equal(espnLeague(row),"afc.champions");
+ assert.equal(findEspnFixtureEvent(data,row).gameId,e.id);
+ assert.equal(parseEspnFinal(data,row,{now:startMs-3600000}).ok,false);
+ assert.equal(parseEspnFinal({...data,events:[{...e,completed:true,statusName:"STATUS_FINAL",
+  competitors:e.competitors.map(x=>({...x,score:x.homeAway==="home"?"2":"1"}))}]},
+  row,{now:startMs+3*3600000}).ok,true);
+ assert.equal(parseEspnFinal({...data,events:[{...e,completed:true,statusName:"STATUS_FINAL",
+  competitors:[{homeAway:"home",name:"Al Nassr",score:"1"},
+   {homeAway:"away",name:"Pakhtakor",score:"2"}]}]},row,{now:startMs+3*3600000}).ok,false);
+});
