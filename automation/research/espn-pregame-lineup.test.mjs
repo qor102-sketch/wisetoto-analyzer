@@ -177,3 +177,33 @@ test("unpublished ESPN soccer XI can use independent strict Naver PRE evidence b
  assert.equal(noNaver.summary.confirmed,0);
  assert.equal(noNaver.state.records[0].lineup.capturedAt,undefined);
 });
+
+test("NBA match-specific verified team IDs resolve display-name drift, but swapped IDs fail closed",()=>{
+ const matchFixture={...fixture,sport:"농구",league:"NBA",
+  home:"휴스턴 로케츠",away:"오클라호마시티 썬더"};
+ const game={id:"401909902",date:new Date(START).toISOString(),
+  competitors:[{homeAway:"home",name:"Houston Rockets",teamId:"10"},
+   {homeAway:"away",name:"Oklahoma City Thunder",teamId:"25"}]};
+ const source={ok:true,league:"nba",events:[game]};
+ const match=findEspnFixtureEvent(source,matchFixture);
+ assert.equal(match.ok,true);
+ const roster={ok:true,source:"ESPN_MATCH_SUMMARY",league:"nba",eventId:game.id,
+  eventDate:game.date,
+  headerTeams:[{homeAway:"home",name:"Houston Rockets",teamId:"10"},
+   {homeAway:"away",name:"Oklahoma City Thunder",teamId:"25"}],
+  rosters:[{homeAway:"home",name:"Houston",teamId:"10",starters:names("Rocket",5)},
+   {homeAway:"away",name:"Thunder",teamId:"25",starters:names("Thunder",5)}]};
+ const verified=parseEspnPregameXi(roster,matchFixture,{...match,league:"nba"},START-10*MIN);
+ assert.equal(verified.status,"CONFIRMED");
+ assert.equal(verified.homeCount,5);
+ assert.equal(verified.awayCount,5);
+ const absent={...roster,rosters:[]};
+ const missed=parseEspnPregameXi(absent,matchFixture,{...match,league:"nba"},START-10*MIN);
+ assert.equal(missed.reason,"ESPN_NBA_STARTERS_NOT_PUBLISHED");
+ assert.equal(missed.status,"UNAVAILABLE");
+ const swap={...roster,rosters:[{...roster.rosters[0],teamId:"25"},roster.rosters[1]]};
+ assert.equal(parseEspnPregameXi(swap,matchFixture,{...match,league:"nba"},START-10*MIN).status,"UNAVAILABLE");
+ assert.equal(parseEspnPregameXi(roster,matchFixture,{...match,league:"nba"},START).status,"REJECTED");
+ const missingIds={...roster,rosters:roster.rosters.map(({teamId,...rest})=>rest)};
+ assert.equal(parseEspnPregameXi(missingIds,matchFixture,{...match,league:"nba"},START-10*MIN).status,"UNAVAILABLE");
+});
