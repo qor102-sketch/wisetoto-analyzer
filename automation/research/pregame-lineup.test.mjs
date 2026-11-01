@@ -121,3 +121,18 @@ test("two Naver network timeouts open temporary per-scan lineup circuit while ke
  assert.equal(done.summary.attempted,2);
  assert.equal(done.state.records[2].lineup,undefined);
 });
+
+test("NBA inside 45 minutes receives bounded reserved slots despite a crowded soccer slate",()=>{
+ const soccer=Array.from({length:11},(_,i)=>({...row("축구",T+(5+i)*M,"soc"+i),
+  league:"잉글랜드 프리미어리그"}));
+ const nba=Array.from({length:5},(_,i)=>({...row("농구",T+(18+i)*M,"nba"+i),league:"NBA"}));
+ const selected=pregameLineupCandidates({records:[...soccer,...nba]},T,9);
+ const reserved=selected.filter(v=>v.sport==="농구");
+ assert.equal(reserved.length,3);
+ assert.equal(selected.length,9);
+ assert.equal(selected.filter(v=>v.sport==="축구").length,6);
+ assert.ok(reserved.every(v=>v.startMs>T&&v.startMs-T<=45*M));
+ const tooEarly={...row("농구",T+75*M,"early"),league:"NBA"};
+ const early=pregameLineupCandidates({records:[...soccer,tooEarly]},T,5);
+ assert.equal(early[0].sport,"축구","NBA with no near-tipoff published XI does not starve soccer");
+});
