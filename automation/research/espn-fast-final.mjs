@@ -97,6 +97,9 @@ const aliases=[
  ["말라가","malaga"],
  ["트루아ac","troyes"],
  ["르망fc","lemans"],
+ // Cross-checked with ESPN 2026-11-02 AFC Elite event 401912631,
+ // Pakhtakor (home) vs Al Nassr (away), 13:45 UTC.
+ ["파흐타코르","pakhtakor"],["s알나스르","알나스르","alnassr"],
  ["미들즈브러","middlesbrough"],["찰턴애슬레틱","charltonathletic","charlton"],
  ["밀월","millwall"],["더비카운티","derbycounty"],["번리","burnley"],
  ["포츠머스","portsmouth"],["볼턴원더러스","boltonwanderers"],
