@@ -18,7 +18,22 @@ type CollectionFunnel={status:string;startedAt?:number;endsAt?:number;counts?:Co
 type ResearchEvidence={generatedAt:string;counts:{future:number;observed:number;researchTop1:number;insufficient:number};records:EvidenceRow[];collectionPipeline?:CollectionFunnel;
  pilot?:PilotReport;pilotTop1?:{id:string;sport:string;league:string;home:string;away:string;startMs:number;side:string;label:string;odds:number;marketProbability:number;shift:number;observedAt:number;grade:string;note:string}|null};
 type CollectedRow={key:string;sport:string;league:string;home:string;away:string;startMs:number;firstSeenAt:number;pregameCapturedAt:number|null;firstOddsAt?:number|null;latestOddsAt?:number|null;seenCount:number;oddsCount:number;resultChecks?:number;resultErrors?:Array<{at:number;reasons:string[]}>;captureIssue?:string|null;verdict:string;final:{homeScore:number;awayScore:number}|null;checkReason:string|null;lineup?:{status:string;source?:string;capturedAt?:number;homeCount?:number;awayCount?:number;homeStarter?:string|null;awayStarter?:string|null;reason?:string;lastAttemptAt?:number;lastError?:string;attempts?:number}};
-type CollectedLedger={generatedAt:string;resultAudit?:{future:number;awaitingLikelyFinish:number;dueNow:number;coolingDown:number;overdueSixHours:number;overdue24Hours:number;outsideRetryHorizon:number};source?:{lastFeedAt:number|null;ok:boolean;error:string|null;lastCaptureSummary?:{listed:number;window:number;new:number;noOdds:number;missingIdentity:number;missedWindow:number;watchlistMissing?:number;delayedScan?:boolean;sinceLastScanMs?:number|null}|null};counts:{collected:number;active?:number;archived?:number;verified:number;pending:number;pregameCaptured:number;verifiedWithPregame:number;resultOnly:number;missingFixtureId:number;lineupConfirmed?:number;lineupPartial?:number;lineupUnsupported?:number;verifiedWithLineup?:number};records:CollectedRow[]};
+type EffectTotals={collected:number;pregameCaptured:number;pregameOdds:number;verified:number;
+ verifiedWithPregame:number;verifiedWithPregameOdds:number;lineupConfirmed:number;nba5v5Confirmed:number};
+type EffectScan={id:string;at:number;commit:string;sourceFresh:boolean;
+ capture:{listed:number;inThirtyMinuteWindow:number;captured:number;missingIdentity:number;watchlistMissing:number;delayed:boolean};
+ lineup:{attempted:number;confirmed:number;nbaAttempted:number;nba5v5Confirmed:number;
+  nbaFocusedRechecks:number;nbaFocusedRecovered:number;reasons:Record<string,number>};
+ final:{checked:number;providerConfirmed:number;newVerified:number;selectedBySport:Record<string,number>;
+  confirmedBySource:Record<string,number>;waitReasons:Record<string,number>;
+  naverUpstreamFailures:number;naverCircuitSkipped:number};
+ changes:EffectTotals;totals:EffectTotals};
+type OperationalEffect={schema:string;baseline:{at:number;origin:string;totals:EffectTotals};
+ latest:EffectScan;delta:EffectTotals;regressions:string[];historySize:number;recentScans:EffectScan[];
+ current:{activeNbaFixtures:number;activeNbaAttempted:number;nbaLineupReasons:Record<string,number>;
+  verifiedSources:Record<string,number>;pendingReasons:Record<string,number>};
+ note:string};
+type CollectedLedger={generatedAt:string;operationalEffect?:OperationalEffect|null;resultAudit?:{future:number;awaitingLikelyFinish:number;dueNow:number;coolingDown:number;overdueSixHours:number;overdue24Hours:number;outsideRetryHorizon:number};source?:{lastFeedAt:number|null;ok:boolean;error:string|null;lastCaptureSummary?:{listed:number;window:number;new:number;noOdds:number;missingIdentity:number;missedWindow:number;watchlistMissing?:number;delayedScan?:boolean;sinceLastScanMs?:number|null}|null};counts:{collected:number;active?:number;archived?:number;verified:number;pending:number;pregameCaptured:number;verifiedWithPregame:number;resultOnly:number;missingFixtureId:number;lineupConfirmed?:number;lineupPartial?:number;lineupUnsupported?:number;verifiedWithLineup?:number};records:CollectedRow[]};
 type History={scanHealth?:ScanHealth|null;schema:string;publishedAt:string;lastRunAt:number|null;source:string;counts:{total:number;pending:number;verified:number;review?:number;void:number;hit:number;miss:number;warnings:number;overdue?:number};records:Match[]};
 function date(ms:number|null|undefined){return typeof ms==="number"&&Number.isFinite(ms)?new Date(ms).toLocaleString("ko-KR",{timeZone:"Asia/Seoul",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}):"—";}
 function num(v:number|null|undefined,d=1){return typeof v==="number"&&Number.isFinite(v)?v.toFixed(d):"—";}
@@ -82,6 +97,45 @@ export default function AutomationDashboard(){
       <p>예측과 별도 저장 · 경기 전 관측만 기록 · 공식 최종 결과 확인 전에는 PENDING 유지</p>
     </div><strong>{collection?collection.counts.collected+"경기 수집":"수집 시작 대기"}</strong></div>
     {collection?<><div className="auto-explainer">등록된 경기 {collection.counts.collected} (최근 장부 {collection.counts.active??collection.counts.collected} · 장기 보관 {collection.counts.archived??0}) · 30분 전 자료 수집 {collection.counts.pregameCaptured??0} · 종료 검증 {collection.counts.verified} · 사전 수집+종료 검증 표본 {collection.counts.verifiedWithPregame??0}/40 · 검증 대기 {collection.counts.pending} · 사전 수집 누락(결과만) {collection.counts.resultOnly??0} · 외부 경기 ID 부족 {collection.counts.missingFixtureId} · <strong>시작 전 확정 라인업 {collection.counts.lineupConfirmed??0}건</strong> · 부분 라인업 {collection.counts.lineupPartial??0}건 · 제공처 미지원 {collection.counts.lineupUnsupported??0}건 · 라인업+종료 검증 동시 완료 {collection.counts.verifiedWithLineup??0}건</div>
+      {collection.operationalEffect?<div className="scan-health-box" style={{marginBottom:14}}>
+        <div className="scan-head"><strong>실측 운영 효과 · 실제 GitHub 수집·검증 장부</strong>
+          <span>첫 계측 전 장부 {date(collection.operationalEffect.baseline.at)} KST → 마지막 계측 {date(collection.operationalEffect.latest.at)} KST · 실행 {collection.operationalEffect.latest.id}</span></div>
+        <div className="auto-explainer">
+          실행 코드 {collection.operationalEffect.latest.commit.slice(0,12)} · 최신 스캔 {collection.operationalEffect.latest.sourceFresh?"Betman 정상":"Betman 미확인 / 재시도"} ·
+          {Date.now()-collection.operationalEffect.latest.at>30*60000?<strong> 기록 갱신 30분 초과 · 자동 실행 확인 필요</strong>:" 측정 장부 정상 갱신 구간"}
+        </div>
+        <div className="scan-metrics">
+          <span>경기 등록 {collection.operationalEffect.latest.totals.collected} (증가 {collection.operationalEffect.delta.collected>=0?"+":""}{collection.operationalEffect.delta.collected})</span>
+          <span>진짜 시작 전 배당 {collection.operationalEffect.latest.totals.pregameOdds} (증가 {collection.operationalEffect.delta.pregameOdds>=0?"+":""}{collection.operationalEffect.delta.pregameOdds})</span>
+          <span>최종 점수 검증 {collection.operationalEffect.latest.totals.verified} (증가 {collection.operationalEffect.delta.verified>=0?"+":""}{collection.operationalEffect.delta.verified})</span>
+          <span>시작 전 배당+결과 {collection.operationalEffect.latest.totals.verifiedWithPregameOdds} (증가 {collection.operationalEffect.delta.verifiedWithPregameOdds>=0?"+":""}{collection.operationalEffect.delta.verifiedWithPregameOdds})</span>
+          <span>실제 선발 확정 {collection.operationalEffect.latest.totals.lineupConfirmed} (증가 {collection.operationalEffect.delta.lineupConfirmed>=0?"+":""}{collection.operationalEffect.delta.lineupConfirmed})</span>
+          <span>NBA 시작 전 5+5명 {collection.operationalEffect.latest.totals.nba5v5Confirmed} (증가 {collection.operationalEffect.delta.nba5v5Confirmed>=0?"+":""}{collection.operationalEffect.delta.nba5v5Confirmed})</span>
+        </div>
+        <div className="auto-explainer">
+          <strong>최신 스캔 실측</strong> · NBA 실제 조회 {collection.operationalEffect.latest.lineup.nbaAttempted}경기 / 5+5명 신규 확보 {collection.operationalEffect.latest.lineup.nba5v5Confirmed}경기 ·
+          30초 집중 재조회 {collection.operationalEffect.latest.lineup.nbaFocusedRechecks}회 (확보 {collection.operationalEffect.latest.lineup.nbaFocusedRecovered}회) ·
+          종료 결과 조회 {collection.operationalEffect.latest.final.checked}건 / 제공처 최종 확인 {collection.operationalEffect.latest.final.providerConfirmed}건 / 장부 검증 증가 {collection.operationalEffect.latest.final.newVerified}건 ·
+          네이버 원본 장애 {collection.operationalEffect.latest.final.naverUpstreamFailures}건 / 동일 그룹 회로 차단 {collection.operationalEffect.latest.final.naverCircuitSkipped}건.
+        </div>
+        <div className="auto-explainer">
+          <strong>NBA 전체 활성 경기 {collection.operationalEffect.current.activeNbaFixtures}건 중 실제 사전 조회 이력 {collection.operationalEffect.current.activeNbaAttempted}건</strong> ·
+          선발 미확인 사유 {Object.entries(collection.operationalEffect.current.nbaLineupReasons).slice(0,5).map(([k,v])=>k+" "+v+"건").join(" / ")||"이력 없음"} ·
+          최신 종료 조회 실패 분류 {Object.entries(collection.operationalEffect.latest.final.waitReasons).slice(0,5).map(([k,v])=>k+" "+v+"건").join(" / ")||"실패 없음"}.
+        </div>
+        <div className="auto-explainer">
+          <strong>최근 자동 실행 이력 ({collection.operationalEffect.historySize}회 보존, 최근 5회 표시)</strong>:
+          {collection.operationalEffect.recentScans.slice(-5).reverse().map(scan=><div key={scan.id}>
+            {date(scan.at)} KST · {scan.sourceFresh?"수집 정상":"수집 장애"} ·
+            경기 전 배당 증가 {scan.changes.pregameOdds} · NBA 5+5명 증가 {scan.changes.nba5v5Confirmed} ·
+            종료 결과 확정 증가 {scan.changes.verified} · 종료 조회 {scan.final.checked}건
+          </div>)}
+        </div>
+        {collection.operationalEffect.regressions.length>0?<div className="auto-explainer">
+          <strong>수집/검증 누적 건수 감소 감지: {collection.operationalEffect.regressions.join(", ")} · 원본 장부 감사 필요</strong>
+        </div>:null}
+        <div className="auto-explainer">측정 시작 전 장부를 기준으로 자동 비교합니다. 이전에 확인되지 않은 경기 전 자료를 소급 생성하지 않으며, 누적 증가만으로 PR의 인과적 성능 개선을 단정하지 않습니다. 점수는 독립 제공처의 정확한 FINAL 확인 이후에만 검증 완료로 집계합니다.</div>
+      </div>:<div className="auto-explainer">운영 효과 계측 초기화 대기 · 수집 장부의 다음 정상 자동 실행부터 실제 경기별 증가분과 실패 원인을 기록합니다. 이전 자료를 소급 추정하지 않습니다.</div>}
       {collection.resultAudit&&<div className="auto-explainer">미검증 대기열 (활성 장부 기준) · 미래 경기 {collection.resultAudit.future}건 · 종목별 조회 가능 시점 전 {collection.resultAudit.awaitingLikelyFinish}건 · 종료 여부 확인 대상 {collection.resultAudit.dueNow}건 · 재조회 간격 대기 {collection.resultAudit.coolingDown}건 · 시작 후 6시간 이상 미확정 {collection.resultAudit.overdueSixHours}건 (24시간 이상 {collection.resultAudit.overdue24Hours}건) · 42일 재조회 범위 초과 {collection.resultAudit.outsideRetryHorizon}건. <strong>시각 기준 대상 분류는 실제 경기 종료 확인이 아니며, 독립 제공처의 FINAL 증거로만 VERIFIED 처리합니다.</strong></div>}
       {collection.source&&<div className="auto-explainer">
         Betman 최신 상태: {collection.source.ok?"정상":"수집 오류 · 이전 장부 유지"} · 마지막 정상 목록 조회 {date(collection.source.lastFeedAt)} KST

@@ -6,13 +6,22 @@ import {createHash} from "node:crypto";
 import {pathToFileURL} from "node:url";
 const DAY=86_400_000,ACTIVE_DAYS=120;
 export const ARCHIVE_SCHEMA="wisetoto-collect-archive-v1";
-const fields=["collected","verified","pending","pregameCaptured","verifiedWithPregame","resultOnly","missingFixtureId","lineupConfirmed","lineupPartial","lineupUnsupported","verifiedWithLineup"];
+const fields=["collected","verified","pending","pregameCaptured","verifiedWithPregame","resultOnly","missingFixtureId","lineupConfirmed","lineupPartial","lineupUnsupported","verifiedWithLineup",
+ "pregameOdds","verifiedWithPregameOdds","nba5v5Confirmed"];
 export function countRows(rows){
  const x=Object.fromEntries(fields.map(k=>[k,0]));
  for(const r of rows){
   x.collected++;
   if(r.verdict==="VERIFIED")x.verified++;else x.pending++;
   if(Number.isFinite(r.pregameCapturedAt))x.pregameCaptured++;
+  const genuineOdds=Number.isFinite(r.firstOddsAt)&&r.firstOddsAt<r.startMs;
+  if(genuineOdds)x.pregameOdds++;
+  if(r.verdict==="VERIFIED"&&genuineOdds)x.verifiedWithPregameOdds++;
+  if(r.sport==="농구"&&/^nba$/i.test(String(r.league??"").trim())&&
+   r.lineup?.status==="CONFIRMED"&&Number.isFinite(r.lineup.capturedAt)&&
+   r.lineup.capturedAt<r.startMs&&r.lineup.homeCount===5&&r.lineup.awayCount===5&&
+   Array.isArray(r.lineup.home)&&r.lineup.home.length===5&&
+   Array.isArray(r.lineup.away)&&r.lineup.away.length===5)x.nba5v5Confirmed++;
   if(r.verdict==="VERIFIED"&&Number.isFinite(r.pregameCapturedAt)&&r.pregameCapturedAt<r.startMs)x.verifiedWithPregame++;
   if(!Number.isFinite(r.pregameCapturedAt))x.resultOnly++;
   if(r.fixtureId===null)x.missingFixtureId++;

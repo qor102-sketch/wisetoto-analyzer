@@ -9,13 +9,17 @@ import {naverOutageGroup} from "./naver-outage-group.mjs";
 import {espnLeague,lookupEspnFinal} from "./espn-fast-final.mjs";
 import {collectLineupSnapshots} from "./pregame-lineup.mjs";
 import {selectFinalAuditRows} from "./final-scan-plan.mjs";
+import {effectTotals,recordOperationalEffect} from "./operational-effect.mjs";
 const dir="automation-state",file=dir+"/collect-first-state.json";
 await fs.mkdir(dir,{recursive:true});
 let state;
 try{state=JSON.parse(await fs.readFile(file,"utf8"))}
 catch(e){if(e?.code==="ENOENT")state={schema:SCHEMA,records:[]};else throw e;}
 if(state.schema!==SCHEMA)throw Error("ledger schema incompatible: refuse data loss");
-const now=Date.now();
+const priorLedgerAt=state.updatedAt??null;
+const beforeTotals=effectTotals(state);
+const scanStartedAt=Date.now();
+const now=scanStartedAt;
 let fresh=false;
 try{
  const feed=await loadFeed(now);
@@ -44,7 +48,7 @@ const supportedNaver=new Set(["축구","농구","야구"]);
 // One request per (sport, KST date, Naver category) per scan, not per match.
 const scheduleCache=new Map();
 const espnCache=new Map();
-let finalChecked=0,finalConfirmed=0,finalWaitReasons={};
+let finalChecked=0,finalConfirmed=0,finalWaitReasons={},confirmedBySource={};
 async function requestFinal(url){
  const response=await fetch(url,{signal:AbortSignal.timeout(16000),cache:"no-store"});
  let payload;
@@ -110,7 +114,11 @@ for(const r of finalQueue){
    if(Array.isArray(final.providerErrors))reasons.push(...final.providerErrors);
  }
  finalChecked++;
- if(confirmed)finalConfirmed++;
+ if(confirmed){
+   finalConfirmed++;
+   const provider=String(confirmed.source??"UNKNOWN").slice(0,30);
+   confirmedBySource[provider]=(confirmedBySource[provider]??0)+1;
+ }
  else {
    const first=String(reasons[0]??"NO_FINAL_PROVIDER");
    const category=first.split(":")[0];
@@ -127,6 +135,24 @@ console.log("FAST_FINAL_AUDIT "+JSON.stringify({
  sharedScheduleQueries:scheduleCache.size,sharedEspnQueries:espnCache.size,
  naverUpstreamFailures,naverOutageSkipped,
  naverCircuitGroups:Object.fromEntries(naverFailureGroups),waitReasons:finalWaitReasons
+}));
+// A measured transition compares the restored ledger before this scan with
+// the saved AFTER state, using only independently accepted observations.
+state=recordOperationalEffect(state,{
+ beforeTotals,priorLedgerAt,startedAt:scanStartedAt,finishedAt:Date.now(),
+ runId:process.env.GITHUB_RUN_ID?
+  process.env.GITHUB_RUN_ID+"-"+(process.env.GITHUB_RUN_ATTEMPT||"1"):null,
+ commit:process.env.GITHUB_SHA??"local",sourceFresh:fresh,
+ lineupSummary:lineupScan.summary,
+ backlog:finalAuditBacklog(state,Date.now()),
+ finalSummary:{checked:finalChecked,confirmed:finalConfirmed,
+  selectedBySport:Object.fromEntries(["축구","농구","야구","배구"].map(s=>[s,
+   finalQueue.filter(r=>r.sport===s).length])),
+  confirmedBySource,waitReasons:finalWaitReasons,naverUpstreamFailures,naverOutageSkipped}
+});
+console.log("OPERATIONAL_EFFECT "+JSON.stringify({
+ baseline:state.operationalEffect.baseline,latest:state.operationalEffect.latest,
+ delta:state.operationalEffect.delta,regressions:state.operationalEffect.regressions
 }));
 await fs.writeFile(file,JSON.stringify(state)+"\n");
 await fs.writeFile(dir+"/collect-first-public.json",JSON.stringify(projection(state,Date.now()))+"\n");

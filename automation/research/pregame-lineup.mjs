@@ -163,10 +163,11 @@ export async function collectLineupSnapshots(state,{
  const espnCache=new Map(),reasons={};
  let naverFailures=0,naverSkipped=0,naverFallbacks=0;
  let nbaFocusedRechecks=0,nbaFocusedRecovered=0;
+ let nbaAttempted=0,nbaConfirmed=0;
  const selected=pregameLineupCandidates(state,now(),limit);
  const nbaPrioritySelected=selected.filter(r=>r.sport==="농구"&&espnLineupLeague(r)==="nba").length;
  for(const r of selected){
-  let observation;
+  let observation,focusedRetried=false;
   const viaEspn=Boolean(espnLineupLeague(r));
   if(viaEspn){
    observation=await lookupEspnPregameXi(r,{now:now(),base,fetchFn:fetcher,cache:espnCache});
@@ -177,10 +178,10 @@ export async function collectLineupSnapshots(state,{
    // tipoff the downstream merge rejects any new PRE evidence.
    if(nbaFocusedRecheckEligible(r,observation,now(),nbaFocusedRechecks)){
     nbaFocusedRechecks++;
+    focusedRetried=true;
     await sleepFn(NBA_FOCUSED_RECHECK_MS);
     if(now()<r.startMs){
      const updated=await lookupEspnPregameXi(r,{now:now(),base,fetchFn:fetcher,cache:espnCache});
-     if(updated.status==="CONFIRMED"||updated.status==="PARTIAL")nbaFocusedRecovered++;
      observation=updated;
     }else observation={status:"REJECTED",reason:"AFTER_KICKOFF_NOT_PREGAME"};
    }
@@ -204,7 +205,19 @@ export async function collectLineupSnapshots(state,{
    observation={status:"UNSUPPORTED",reason:"NO_VERIFIED_PREGAME_LINEUP_PROVIDER"};
   const at=now();
   next=mergeLineupEvidence(next,r.key,observation,at);
+  // "Recovered" means a genuine saved PRE 5+5, not a partial source reply
+  // and never a response that arrived after tipoff.
+  if(focusedRetried&&observation.status==="CONFIRMED"&&at<r.startMs&&
+    observation.homeCount===5&&observation.awayCount===5&&
+    next.records.find(v=>v.key===r.key)?.lineup?.status==="CONFIRMED")
+   nbaFocusedRecovered++;
+
   attempted++;
+  if(r.sport==="농구"&&espnLineupLeague(r)==="nba"){
+   nbaAttempted++;
+   if(observation.status==="CONFIRMED"&&at<r.startMs&&
+      observation.homeCount===5&&observation.awayCount===5)nbaConfirmed++;
+  }
   reasons[observation.reason??observation.status]=(reasons[observation.reason??observation.status]??0)+1;
   if(observation.status==="CONFIRMED")confirmed++;
   else if(observation.status==="PARTIAL")partial++;
@@ -213,5 +226,5 @@ export async function collectLineupSnapshots(state,{
  }
  return {state:next,summary:{attempted,confirmed,partial,unavailable,unsupported,
   sharedEspnScoreboards:espnCache.size,naverFailures,naverSkipped,naverFallbacks,
-  nbaFocusedRechecks,nbaFocusedRecovered,nbaPrioritySelected,reasonCounts:reasons}};
+  nbaFocusedRechecks,nbaFocusedRecovered,nbaPrioritySelected,nbaAttempted,nbaConfirmed,reasonCounts:reasons}};
 }

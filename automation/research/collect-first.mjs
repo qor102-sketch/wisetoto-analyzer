@@ -2,6 +2,7 @@
 // Zero predictions. Results are added ONLY when a provider confirms final.
 import {sportName} from "../logic.mjs";
 import {scorePlausibility} from "../../WisetotoAnalyzer-LiveFree/src/lib/postmatch-guards.mjs";
+import {publicOperationalEffect} from "./operational-effect.mjs";
 const M=60000,D=86400000;
 export const SCHEMA="wisetoto-collect-first-v1";
 const key=v=>String(v??"").normalize("NFKC").toLowerCase().replace(/[^가-힣a-z0-9]/g,"");
@@ -185,6 +186,7 @@ export function projection(state,now=Date.now()){
  const all=state.records||[];
  return {schema:"wisetoto-collect-first-public-v1",generatedAt:new Date(now).toISOString(),
    resultAudit:finalAuditBacklog(state,now),
+   operationalEffect:publicOperationalEffect(state),
    source:{lastFeedAt:state?.lastFeedAt??null,ok:state?.lastFeedOk===true,error:state?.lastFeedError??null,
      lastCaptureSummary:state?.lastCaptureSummary??null},
    counts:{collected:all.length+(state.archiveCounts?.collected??0),
