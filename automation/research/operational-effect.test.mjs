@@ -159,3 +159,16 @@ test("dashboard shows first measured scan, NBA 5+5 and postmatch source failures
  assert.match(page,/naverUpstreamFailures/);
  assert.match(page,/recentScans/);
 });
+
+test("one-scan evidence loss is flagged even if the monitor baseline is still lower",()=>{
+ const r=nba("one"),s1={records:[],lastFeedOk:true};
+ const stateA={records:[r],lastFeedOk:true};
+ const monitored=recordOperationalEffect(stateA,context(s1));
+ assert.equal(monitored.operationalEffect.delta.collected,1);
+ const stateB={...monitored,records:[]};
+ const decreased=recordOperationalEffect(stateB,{...context(monitored,T+MIN),
+  beforeTotals:effectTotals(monitored),runId:"declining-1"});
+ assert.equal(decreased.operationalEffect.delta.collected,0);
+ assert.equal(decreased.operationalEffect.latest.changes.collected,-1);
+ assert.ok(decreased.operationalEffect.regressions.includes("collected"));
+});
