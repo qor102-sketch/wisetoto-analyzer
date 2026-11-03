@@ -163,6 +163,7 @@ export async function collectLineupSnapshots(state,{
  const espnCache=new Map(),reasons={};
  let naverFailures=0,naverSkipped=0,naverFallbacks=0;
  let nbaFocusedRechecks=0,nbaFocusedRecovered=0;
+ let nbaAttempted=0,nbaConfirmed=0;
  const selected=pregameLineupCandidates(state,now(),limit);
  const nbaPrioritySelected=selected.filter(r=>r.sport==="농구"&&espnLineupLeague(r)==="nba").length;
  for(const r of selected){
@@ -205,6 +206,11 @@ export async function collectLineupSnapshots(state,{
   const at=now();
   next=mergeLineupEvidence(next,r.key,observation,at);
   attempted++;
+  if(r.sport==="농구"&&espnLineupLeague(r)==="nba"){
+   nbaAttempted++;
+   if(observation.status==="CONFIRMED"&&at<r.startMs&&
+      observation.homeCount===5&&observation.awayCount===5)nbaConfirmed++;
+  }
   reasons[observation.reason??observation.status]=(reasons[observation.reason??observation.status]??0)+1;
   if(observation.status==="CONFIRMED")confirmed++;
   else if(observation.status==="PARTIAL")partial++;
@@ -213,5 +219,5 @@ export async function collectLineupSnapshots(state,{
  }
  return {state:next,summary:{attempted,confirmed,partial,unavailable,unsupported,
   sharedEspnScoreboards:espnCache.size,naverFailures,naverSkipped,naverFallbacks,
-  nbaFocusedRechecks,nbaFocusedRecovered,nbaPrioritySelected,reasonCounts:reasons}};
+  nbaFocusedRechecks,nbaFocusedRecovered,nbaPrioritySelected,nbaAttempted,nbaConfirmed,reasonCounts:reasons}};
 }
