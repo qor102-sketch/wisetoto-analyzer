@@ -9,7 +9,7 @@ import {naverOutageGroup} from "./naver-outage-group.mjs";
 import {espnLeague,lookupEspnFinal} from "./espn-fast-final.mjs";
 import {collectLineupSnapshots} from "./pregame-lineup.mjs";
 import {selectFinalAuditRows} from "./final-scan-plan.mjs";
-import {effectTotals,recordOperationalEffect,publicOperationalEffect} from "./operational-effect.mjs";
+import {effectTotals,recordOperationalEffect} from "./operational-effect.mjs";
 const dir="automation-state",file=dir+"/collect-first-state.json";
 await fs.mkdir(dir,{recursive:true});
 let state;
@@ -144,6 +144,7 @@ state=recordOperationalEffect(state,{
   process.env.GITHUB_RUN_ID+"-"+(process.env.GITHUB_RUN_ATTEMPT||"1"):null,
  commit:process.env.GITHUB_SHA??"local",sourceFresh:fresh,
  lineupSummary:lineupScan.summary,
+ backlog:finalAuditBacklog(state,Date.now()),
  finalSummary:{checked:finalChecked,confirmed:finalConfirmed,
   selectedBySport:Object.fromEntries(["축구","농구","야구","배구"].map(s=>[s,
    finalQueue.filter(r=>r.sport===s).length])),
