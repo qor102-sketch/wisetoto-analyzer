@@ -149,9 +149,32 @@ export function verifiedNaverFinal(payload){
    return {ok:false,waitReason:"NAVER_SCORE_MISSING"};
  return {ok:true,finalConfirmed:true,result:{homeScore:Number(home),awayScore:Number(away)}};
 }
+// Clock time is a candidate filter, NEVER proof that a game actually ended.
+// NBA, baseball and volleyball need longer than the soccer minimum; provider
+// FINAL + exact identity + valid score remain mandatory for VERIFIED.
+export function earliestFinalAuditMs(r){
+ return ({"축구":150,"농구":165,"야구":240,"배구":150}[r.sport]??180)*M;
+}
+export function finalAuditBacklog(state,now=Date.now()){
+ const result={future:0,awaitingLikelyFinish:0,dueNow:0,coolingDown:0,
+  overdueSixHours:0,overdue24Hours:0,outsideRetryHorizon:0};
+ for(const r of state?.records??[]){
+  if(r.verdict!=="PENDING")continue;
+  if(!Number.isFinite(r.startMs)||r.startMs>now){result.future++;continue;}
+  const age=now-r.startMs;
+  if(age>42*D){result.outsideRetryHorizon++;continue;}
+  if(age<earliestFinalAuditMs(r)){result.awaitingLikelyFinish++;continue;}
+  if(age>=6*60*M)result.overdueSixHours++;
+  if(age>=24*60*M)result.overdue24Hours++;
+  if(!r.lastResultCheckAt||now-r.lastResultCheckAt>=60*M)result.dueNow++;
+  else result.coolingDown++;
+ }
+ return result;
+}
 export function dueResults(state,now=Date.now(),limit=6){
  return (state.records||[]).filter(r=>r.verdict==="PENDING"&&
-   r.startMs<=now-2*60*M&&r.startMs>=now-42*D&&
+   Number.isFinite(r.startMs)&&r.startMs<=now-earliestFinalAuditMs(r)&&
+   r.startMs>=now-42*D&&
    (!r.lastResultCheckAt||now-r.lastResultCheckAt>=60*M))
    .sort((a,b)=>Number(a.lastResultCheckAt??0)-Number(b.lastResultCheckAt??0)||
      a.startMs-b.startMs).slice(0,limit);
@@ -161,6 +184,7 @@ export function projection(state,now=Date.now()){
    .sort((a,b)=>b.startMs-a.startMs).slice(0,150);
  const all=state.records||[];
  return {schema:"wisetoto-collect-first-public-v1",generatedAt:new Date(now).toISOString(),
+   resultAudit:finalAuditBacklog(state,now),
    source:{lastFeedAt:state?.lastFeedAt??null,ok:state?.lastFeedOk===true,error:state?.lastFeedError??null,
      lastCaptureSummary:state?.lastCaptureSummary??null},
    counts:{collected:all.length+(state.archiveCounts?.collected??0),
