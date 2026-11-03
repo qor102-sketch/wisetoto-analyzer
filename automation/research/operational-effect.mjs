@@ -85,16 +85,17 @@ export function recordOperationalEffect(state,{
   totals:{...beforeTotals}
  };
  const id=String(runId??"manual-"+finishedAt).slice(0,90);
+ const freshSource=sourceFresh===true&&state.lastFeedOk===true;
  const scan={
   id,at:finishedAt,commit:String(commit??"unknown").slice(0,45),
-  sourceFresh:sourceFresh===true&&state.lastFeedOk===true,
+  sourceFresh:freshSource,
   capture:{
-   listed:n(state.lastCaptureSummary?.listed),
-   inThirtyMinuteWindow:n(state.lastCaptureSummary?.window),
-   captured:n(sourceFresh?state.lastCaptureSummary?.new:0),
-   missingIdentity:n(sourceFresh?state.lastCaptureSummary?.missingIdentity:0),
-   watchlistMissing:n(sourceFresh?state.lastCaptureSummary?.watchlistMissing:0),
-   delayed:state.lastCaptureSummary?.delayedScan===true
+   listed:n(freshSource?state.lastCaptureSummary?.listed:0),
+   inThirtyMinuteWindow:n(freshSource?state.lastCaptureSummary?.window:0),
+   captured:n(freshSource?state.lastCaptureSummary?.new:0),
+   missingIdentity:n(freshSource?state.lastCaptureSummary?.missingIdentity:0),
+   watchlistMissing:n(freshSource?state.lastCaptureSummary?.watchlistMissing:0),
+   delayed:freshSource&&state.lastCaptureSummary?.delayedScan===true
   },
   lineup:{
    attempted:n(lineupSummary.attempted),
