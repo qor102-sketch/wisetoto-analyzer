@@ -2,7 +2,7 @@
 import fs from "node:fs/promises";
 import {loadFeed} from "../feed.mjs";
 import {getRecords,STATE_FILE} from "../logic.mjs";
-import {SCHEMA,collect,settlement,dueResults,mergeProviderFinal,projection,verifiedNaverFinal} from "./collect-first.mjs";
+import {SCHEMA,collect,settlement,mergeProviderFinal,projection,finalAuditBacklog} from "./collect-first.mjs";
 import {lookupVolleyballFinal} from "./volleyball-result.mjs";
 import {lookupNaverScheduleFinal} from "./naver-fast-final.mjs";
 import {naverOutageGroup} from "./naver-outage-group.mjs";
@@ -51,7 +51,10 @@ async function requestFinal(url){
  try{payload=await response.json()}catch{payload={ok:false,error:"MALFORMED_PROVIDER_RESPONSE"}}
  return {status:response.status,payload};
 }
-for(const r of selectFinalAuditRows(state,now,24)){
+const finalQueue=selectFinalAuditRows(state,Date.now(),24);
+console.log("FINAL_BACKLOG_BEFORE "+JSON.stringify({...finalAuditBacklog(state,Date.now()),selected:finalQueue.length,
+ selectedBySport:Object.fromEntries(["축구","농구","야구","배구"].map(s=>[s,finalQueue.filter(r=>r.sport===s).length]))}));
+for(const r of finalQueue){
  let confirmed=null,reasons=[];
  if(sportsApiLimited&&r.fixtureId!==null)reasons.push("SPORTSAPI_RATE_LIMIT");
  // A provider ID from the Betman row may give an exact match. When that
@@ -118,6 +121,7 @@ for(const r of selectFinalAuditRows(state,now,24)){
    providerErrors:reasons
  },Date.now());
 }
+console.log("FINAL_BACKLOG_AFTER "+JSON.stringify(finalAuditBacklog(state,Date.now())));
 console.log("FAST_FINAL_AUDIT "+JSON.stringify({
  checked:finalChecked,confirmed:finalConfirmed,waiting:finalChecked-finalConfirmed,
  sharedScheduleQueries:scheduleCache.size,sharedEspnQueries:espnCache.size,
