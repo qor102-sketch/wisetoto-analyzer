@@ -26,27 +26,43 @@ function providerKickoff(v){
  return Date.parse(s);
 }
 
+// A 10-minute cron is best-effort. More frequent eligibility does NOT claim
+// that the source publishes NBA starters early; it prevents cooldown from
+// discarding a delayed/extra scan shortly before the published tipoff.
+export function lineupRetryIntervalMs(r,now){
+ const remaining=r.startMs-now;
+ if(r.sport==="농구"&&espnLineupLeague(r)==="nba"){
+  if(remaining<=15*60000)return 2*60000;
+  if(remaining<=NBA_TIPOFF_RESERVE_MS)return 5*60000;
+ }
+ return (remaining>90*60000?30:10)*60000;
+}
 export function pregameLineupCandidates(state,now=Date.now(),limit=4){
+ if(!Number.isInteger(limit)||limit<=0)return [];
  const eligible=(state?.records??[]).filter(r=>["축구","야구","농구","배구"].includes(r.sport)
-   &&r.startMs>now&&r.startMs-now<=LINEUP_WINDOW_MS
-   &&r.lineup?.status!=="CONFIRMED"
-   &&r.lineup?.status!=="UNSUPPORTED"
+   &&Number.isFinite(r.startMs)&&r.startMs>now&&r.startMs-now<=LINEUP_WINDOW_MS
+   &&r.lineup?.status!=="CONFIRMED"&&r.lineup?.status!=="UNSUPPORTED"
    &&(!Number.isFinite(r.lineup?.lastAttemptAt)
-     ||now-r.lineup.lastAttemptAt>=(r.startMs-now>90*60000?30:10)*60000))
+     ||now-r.lineup.lastAttemptAt>=lineupRetryIntervalMs(r,now)))
   .sort((a,b)=>{
-   // Urgent games first, ESPN's fast match-specific source before heavyweight
-   // Naver only within the same kickoff window. Don't waste 3h polling on 0-XI.
    const bucket=r=>r.startMs-now<=30*60000?0:r.startMs-now<=90*60000?1:2;
    return bucket(a)-bucket(b)||
      Number(Boolean(espnLineupLeague(b)))-Number(Boolean(espnLineupLeague(a)))||
      a.startMs-b.startMs||a.key.localeCompare(b.key);
   });
- // Reserve a bounded share of each scan for NBA starters as tipoff approaches,
- // even when many soccer fixtures have the same or earlier start time. Fill the
- // remaining slots with the ordinary all-sport order to prevent starvation.
+ // Rotate the NBA reserve by oldest attempt, not fixed team/fixture order:
+ // simultaneous NBA starts must not always consume the same first four slots.
  const urgentNba=eligible.filter(r=>r.sport==="농구"&&
-   espnLineupLeague(r)==="nba"&&r.startMs-now<=NBA_TIPOFF_RESERVE_MS);
- const reserve=urgentNba.slice(0,Math.min(4,Math.max(1,Math.ceil(limit/3))));
+   espnLineupLeague(r)==="nba"&&r.startMs-now<=NBA_TIPOFF_RESERVE_MS)
+  .sort((a,b)=>Number(a.lineup?.lastAttemptAt??0)-
+   Number(b.lineup?.lastAttemptAt??0)||a.startMs-b.startMs||a.key.localeCompare(b.key));
+ const closing=urgentNba.some(r=>r.startMs-now<=15*60000);
+ // At T-15 use up to 2/3 for NBA, leaving two non-NBA slots when available.
+ // At T-45 keep the previous bounded 1/3 reserve for other four-sport work.
+ const reserveSize=closing?
+   Math.min(urgentNba.length,Math.min(Math.max(0,limit-2),Math.ceil(limit*2/3))):
+   Math.min(urgentNba.length,Math.min(4,Math.max(1,Math.ceil(limit/3))));
+ const reserve=urgentNba.slice(0,reserveSize);
  const picked=new Set(reserve.map(r=>r.key));
  return [...reserve,...eligible.filter(r=>!picked.has(r.key))].slice(0,limit);
 }
@@ -147,7 +163,9 @@ export async function collectLineupSnapshots(state,{
  const espnCache=new Map(),reasons={};
  let naverFailures=0,naverSkipped=0,naverFallbacks=0;
  let nbaFocusedRechecks=0,nbaFocusedRecovered=0;
- for(const r of pregameLineupCandidates(state,now(),limit)){
+ const selected=pregameLineupCandidates(state,now(),limit);
+ const nbaPrioritySelected=selected.filter(r=>r.sport==="농구"&&espnLineupLeague(r)==="nba").length;
+ for(const r of selected){
   let observation;
   const viaEspn=Boolean(espnLineupLeague(r));
   if(viaEspn){
@@ -195,5 +213,5 @@ export async function collectLineupSnapshots(state,{
  }
  return {state:next,summary:{attempted,confirmed,partial,unavailable,unsupported,
   sharedEspnScoreboards:espnCache.size,naverFailures,naverSkipped,naverFallbacks,
-  nbaFocusedRechecks,nbaFocusedRecovered,reasonCounts:reasons}};
+  nbaFocusedRechecks,nbaFocusedRecovered,nbaPrioritySelected,reasonCounts:reasons}};
 }
