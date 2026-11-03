@@ -120,7 +120,8 @@ export function recordOperationalEffect(state,{
  };
  const history=[...(prior?.history??[]).filter(h=>h.id!==id),scan].slice(-144);
  const delta=effectDelta(totals,baseline.totals);
- const regressions=Object.entries(delta).filter(([k,v])=>
+ // A loss in any individual scan is a warning even if the total remains above the original baseline.
+ const regressions=Object.entries(scan.changes).filter(([k,v])=>
   ["collected","pregameCaptured","verified","lineupConfirmed","nba5v5Confirmed"].includes(k)&&v<0)
   .map(([k])=>k);
  return {...state,operationalEffect:{
