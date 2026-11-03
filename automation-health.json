@@ -1,23 +1,18 @@
 {
   "schema": "wisetoto-auto-scan-health-v1",
-  "scannedAt": "2026-11-03T07:43:20.072Z",
+  "scannedAt": "2026-11-03T07:53:18.478Z",
   "expectedIntervalMinutes": 10,
-  "sourceOk": true,
-  "sourceError": null,
-  "feedSports": {
-    "축구": 57,
-    "농구": 24,
-    "야구": 3,
-    "배구": 4
-  },
-  "eligibleForPregame": 7,
+  "sourceOk": false,
+  "sourceError": "Error: Betman unavailable after 3 attempts: Error: Betman HTTP 502 ; Error: Betman HTTP 502 ; Error: Betman HTTP 502",
+  "feedSports": {},
+  "eligibleForPregame": 0,
   "eligibleBySport": {
-    "축구": 3,
-    "농구": 1,
-    "야구": 1,
-    "배구": 2
+    "축구": 0,
+    "농구": 0,
+    "야구": 0,
+    "배구": 0
   },
   "awaitingPostmatch": 0,
-  "feedOrigin": "fresh-fetch-attempt-1",
+  "feedOrigin": "none",
   "note": "A completed scan is not proof that every Betman game was captured before kickoff."
 }
