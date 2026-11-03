@@ -1,15 +1,12 @@
 // Persisted, read-only measurement of real collect/lineup/FINAL transitions.
 // A scheduling heuristic or an HTTP 200 is never evidence of a verified match.
-import {finalAuditBacklog} from "./collect-first.mjs";
 import {espnLineupLeague} from "./espn-pregame-lineup.mjs";
 export const EFFECT_SCHEMA="wisetoto-operational-effect-v1";
-const M=60_000;
 const fields=["collected","pregameCaptured","pregameOdds","verified",
  "verifiedWithPregame","verifiedWithPregameOdds","lineupConfirmed","nba5v5Confirmed"];
 const n=x=>Number.isFinite(x)&&x>=0?x:0;
 const addArchive=(state,name,active)=>
  active+n(state?.archiveCounts?.[name]);
-const kst=at=>Number.isFinite(at)?new Date(at).toISOString():null;
 const exactPregameLineup=r=>r.lineup?.status==="CONFIRMED"&&
  Number.isFinite(r.lineup.capturedAt)&&r.lineup.capturedAt<r.startMs;
 const nba=r=>espnLineupLeague(r)==="nba";
@@ -55,7 +52,7 @@ const countsByReason=(records,field)=>{
  return Object.fromEntries(Object.entries(counts).sort((a,b)=>b[1]-a[1]||
   a[0].localeCompare(b[0])).slice(0,8));
 };
-export function effectCurrentDetail(state,at){
+export function effectCurrentDetail(state,backlog){
  const rows=state?.records??[];
  const nbaRows=rows.filter(nba);
  const verified=rows.filter(r=>r.verdict==="VERIFIED");
@@ -67,14 +64,14 @@ export function effectCurrentDetail(state,at){
    r.lineup?.lastError??r.lineup?.reason??"NOT_YET_QUERIED"),
   verifiedSources:countsByReason(verified,r=>r.resultSource??"UNKNOWN"),
   pendingReasons:countsByReason(pending,r=>String(r.checkReason??"WAITING_FOR_END").split(":")[0]),
-  backlog:finalAuditBacklog(state,at)
+  backlog:backlog??null
  };
 }
 const smallCounts=o=>Object.fromEntries(Object.entries(o??{})
  .sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,8));
 export function recordOperationalEffect(state,{
  beforeTotals,priorLedgerAt,startedAt,finishedAt,runId,commit,sourceFresh,
- lineupSummary={},finalSummary={}
+ lineupSummary={},finalSummary={},backlog=null
 }){
  if(state.operationalEffect&&state.operationalEffect.schema!==EFFECT_SCHEMA)
   throw Error("operational effect schema incompatible — do not discard historic evidence");
@@ -128,7 +125,7 @@ export function recordOperationalEffect(state,{
   .map(([k])=>k);
  return {...state,operationalEffect:{
   schema:EFFECT_SCHEMA,baseline,latest:scan,delta,history,
-  regressions,current:effectCurrentDetail(state,finishedAt)
+  regressions,current:effectCurrentDetail(state,backlog)
  }};
 }
 export function publicOperationalEffect(state){
