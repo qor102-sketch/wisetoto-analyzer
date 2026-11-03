@@ -64,6 +64,7 @@ test("provider outage preserves PENDING, no fabricated 5+5 or FINAL measured",()
  const before={schema:"wisetoto-collect-first-v1",records:[r]};
  const failed=mergeProviderFinal(before,r.key,{ok:false,waitReason:"NAVER_504"},T);
  const state={...failed,lastFeedOk:false,lastFeedError:"source offline",
+  lastCaptureSummary:{listed:88,window:5,new:5,missingIdentity:3},
   records:[{...failed.records[0],lineup:{
    status:"UNAVAILABLE",reason:"ESPN_NBA_STARTERS_NOT_PUBLISHED",
    lastAttemptAt:T-4*3600_000,attempts:2}}]};
@@ -76,6 +77,9 @@ test("provider outage preserves PENDING, no fabricated 5+5 or FINAL measured",()
  const report=publicOperationalEffect(monitored);
  assert.equal(report.latest.sourceFresh,false);
  assert.equal(report.latest.capture.captured,0);
+ assert.equal(report.latest.capture.listed,0);
+ assert.equal(report.latest.capture.inThirtyMinuteWindow,0);
+ assert.equal(report.latest.capture.missingIdentity,0);
  assert.equal(report.latest.totals.verified,0);
  assert.equal(report.latest.totals.nba5v5Confirmed,0);
  assert.equal(report.latest.final.newVerified,0);
@@ -171,4 +175,35 @@ test("one-scan evidence loss is flagged even if the monitor baseline is still lo
  assert.equal(decreased.operationalEffect.delta.collected,0);
  assert.equal(decreased.operationalEffect.latest.changes.collected,-1);
  assert.ok(decreased.operationalEffect.regressions.includes("collected"));
+});
+
+test("late 5+5 source response during focused recheck cannot inflate recovered counters",async()=>{
+ const {collectLineupSnapshots}=await import("./pregame-lineup.mjs");
+ let clock=T-8*MIN,summaryCalls=0;
+ const game=nba("nba-time-sensitive",T);
+ const event={id:"401909500",date:new Date(T).toISOString(),
+  competitors:[{homeAway:"home",name:"Boston Celtics",teamId:"2"},
+   {homeAway:"away",name:"Chicago Bulls",teamId:"4"}]};
+ const roster={ok:true,source:"ESPN_MATCH_SUMMARY",league:"nba",eventId:event.id,
+  eventDate:new Date(T).toISOString(),
+  headerTeams:[{homeAway:"home",name:"Boston Celtics",teamId:"2"},
+   {homeAway:"away",name:"Chicago Bulls",teamId:"4"}],
+  rosters:[{homeAway:"home",name:"Boston",teamId:"2",starters:["B1","B2","B3","B4","B5"]},
+   {homeAway:"away",name:"Chicago",teamId:"4",starters:["C1","C2","C3","C4","C5"]}]};
+ const out=await collectLineupSnapshots({records:[game]},{
+  now:()=>clock,base:"https://preview.local",
+  sleepFn:async()=>{clock=T-20_000;},
+  fetcher:async url=>{
+   if(url.includes("/scoreboard?"))return {ok:true,status:200,json:async()=>({ok:true,league:"nba",events:[event]})};
+   summaryCalls++;
+   if(summaryCalls===2)clock=T+MIN;
+   return {ok:true,status:200,json:async()=>summaryCalls===1?{...roster,rosters:[]}:roster};
+  }
+ });
+ assert.equal(summaryCalls,2);
+ assert.equal(out.summary.nbaFocusedRechecks,1);
+ assert.equal(out.summary.nbaFocusedRecovered,0);
+ assert.equal(out.summary.nbaConfirmed,0);
+ assert.equal(out.state.records[0].lineup.status,"UNAVAILABLE");
+ assert.equal(out.state.records[0].lineup.capturedAt,undefined);
 });
