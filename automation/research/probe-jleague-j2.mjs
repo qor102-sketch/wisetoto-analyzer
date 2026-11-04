@@ -45,6 +45,27 @@ for(const url of endpoints){
     away:e.awayTeam?{name:e.awayTeam.name,fullName:e.awayTeam.fullName,score:e.awayTeam.score}:null
    })):null
   }));
+  if(endpoints.indexOf(url)===0){
+   const {officialJ2Matches,parseJleagueJ2Final}=await import("./jleague-j2-final.mjs");
+   const parsed=officialJ2Matches(html);
+   const anchor=decoded.indexOf('"matchDate":"$D2026-11-03');
+   const around=anchor>=0?decoded.slice(anchor,anchor+260):"NOT_FOUND";
+   const probe=parseJleagueJ2Final(html,{
+    key:"probe-only",sport:"축구",league:"일본 J2리그",
+    home:"카탈레 도야마",away:"베갈타 센다이",
+    startMs:Date.parse("2026-11-03T05:00:00Z")
+   },{now:Date.parse("2026-11-04T05:00:00Z")});
+   console.log("JLEAGUE_J2_LIVE_ADAPTER "+JSON.stringify({
+    parsed:parsed.ok,reason:parsed.reason,count:parsed.matches?.length,
+    first:parsed.matches?.slice(0,2).map(x=>({
+     id:x.id,state:x.state,detailHref:x.detailHref,time:x.time,
+     matchDate:x.officialDate,home:x.homeTeam?.fullName??x.homeTeam?.name,
+     away:x.awayTeam?.fullName??x.awayTeam?.name,
+     homeScore:x.homeTeam?.score,awayScore:x.awayTeam?.score
+    })),
+    officialFixtureProof:probe,segmentAroundMatchDate:around.slice(0,260)
+   }));
+  }
   const structure=[];
   for(const tag of ['"homeTeam":','"awayTeam":','"matchId":','"matchStatus":','"statusName":','"score":']){
    const at=decoded.indexOf(tag);
