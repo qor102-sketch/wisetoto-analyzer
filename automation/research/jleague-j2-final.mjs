@@ -2,7 +2,7 @@
 // Strictly fail closed. NEVER infer FINAL from elapsed time or a score alone.
 import {scorePlausibility} from "../../WisetotoAnalyzer-LiveFree/src/lib/postmatch-guards.mjs";
 const DAY=86400000,MIN=60000,JST=9*3600000;
-const norm=s=>String(s??"").normalize("NFKC").toLowerCase().replace(/[^a-z0-9가-힣]/g,"");
+const norm=s=>String(s??"").normalize("NFKC").toLowerCase().replace(/[^a-z0-9가-힣一-龯ぁ-んァ-ヶ]/g,"");
 const teams=[
  ["카탈레도야마","카탈레토야마","katallertoyama"],
  ["베갈타센다이","vegaltasendai"],
@@ -88,7 +88,7 @@ export function officialJ2Matches(html){
 const finalStates=new Set([
  "FULL_TIME","FULLTIME","FINISHED","FINAL","MATCH_FINISHED","MATCH_END","END",
  "試合終了","試合終了済"
-].map(norm));
+].map(norm).filter(Boolean));
 function officialId(v,href,day){
  // Every match must carry a unique official href AND an independent schedule
  // ID for its correct calendar day. Never generate/synthesize an ID.
@@ -128,7 +128,7 @@ export function parseJleagueJ2Final(html,fixture,{now=Date.now()}={}){
    "JLEAGUE_J2_AMBIGUOUS_FIXTURE":"JLEAGUE_J2_EXACT_FIXTURE_NOT_FOUND"};
  const [gameId,match]=[...candidates.entries()][0];
  const state=norm(match.state);
- if(!finalStates.has(state))return {ok:false,waitReason:"JLEAGUE_J2_FINAL_STATUS_UNCONFIRMED"};
+ if(!state||!finalStates.has(state))return {ok:false,waitReason:"JLEAGUE_J2_FINAL_STATUS_UNCONFIRMED"};
  const home=match.homeTeam?.score,away=match.awayTeam?.score;
  if(!validScore(home)||!validScore(away)||Number(home)>20||Number(away)>20||
    !scorePlausibility("축구",Number(home),Number(away)).ok)
