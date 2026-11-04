@@ -7,6 +7,7 @@ import {lookupVolleyballFinal} from "./volleyball-result.mjs";
 import {lookupNaverScheduleFinal} from "./naver-fast-final.mjs";
 import {naverOutageGroup} from "./naver-outage-group.mjs";
 import {espnLeague,lookupEspnFinal} from "./espn-fast-final.mjs";
+import {isJleagueJ2,lookupJleagueJ2Final} from "./jleague-j2-final.mjs";
 import {collectLineupSnapshots} from "./pregame-lineup.mjs";
 import {selectFinalAuditRows} from "./final-scan-plan.mjs";
 import {effectTotals,recordOperationalEffect} from "./operational-effect.mjs";
@@ -48,6 +49,7 @@ const supportedNaver=new Set(["축구","농구","야구"]);
 // One request per (sport, KST date, Naver category) per scan, not per match.
 const scheduleCache=new Map();
 const espnCache=new Map();
+const jleagueCache=new Map();
 let finalChecked=0,finalConfirmed=0,finalWaitReasons={},confirmedBySource={};
 async function requestFinal(url){
  const response=await fetch(url,{signal:AbortSignal.timeout(16000),cache:"no-store"});
@@ -84,6 +86,14 @@ for(const r of finalQueue){
      reasons.push("ESPN_FAST:"+String(candidate.waitReason).slice(0,150));
      if(Array.isArray(candidate.providerErrors))reasons.push(...candidate.providerErrors);
    }
+ }
+ if(!confirmed&&isJleagueJ2(r)){
+   // Official J.LEAGUE match list only; one bounded network read per JST
+   // day, shared across candidates. A score or elapsed time is never FINAL.
+   providerAttempted=true;
+   const official=await lookupJleagueJ2Final(r,{cache:jleagueCache,now:Date.now()});
+   if(official.ok)confirmed=official;
+   else reasons.push("JLEAGUE_J2:"+String(official.waitReason).slice(0,150));
  }
  if(!confirmed&&supportedNaver.has(r.sport)){
    // A failed Naver football category must not silence NBA/KBL/baseball,
@@ -149,6 +159,7 @@ console.log("FINAL_BACKLOG_AFTER "+JSON.stringify(finalAuditBacklog(state,Date.n
 console.log("FAST_FINAL_AUDIT "+JSON.stringify({
  checked:finalChecked,confirmed:finalConfirmed,deferred:finalDeferred,waiting:finalChecked-finalConfirmed,
  sharedScheduleQueries:scheduleCache.size,sharedEspnQueries:espnCache.size,
+ sharedOfficialJ2Queries:jleagueCache.size,
  naverUpstreamFailures,naverFailedRows,naverOutageSkipped,
  naverCircuitGroups:Object.fromEntries(naverFailureGroups),waitReasons:finalWaitReasons
 }));
