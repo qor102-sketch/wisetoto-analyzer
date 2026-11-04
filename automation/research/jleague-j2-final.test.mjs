@@ -56,7 +56,8 @@ test("J2 2026/27 season date check and true official URL are mandatory",()=>{
 test("never infer FINAL from plausible score, kickoff, fixture age or a page title",()=>{
  const f=row("toy");
  for(const state of ["SCHEDULED","LIVE","HALF_TIME","EXTRA_TIME","POSTPONED",null,undefined]){
-  assert.equal(parseJleagueJ2Final(makeHtml([{...card(),state}]),f,{now:T+10*H}).ok,false);
+  const verdict=parseJleagueJ2Final(makeHtml([{...card(),state}]),f,{now:T+10*H});
+  assert.equal(verdict.ok,false,"unexpected accepted state "+String(state)+" "+JSON.stringify(verdict));
  }
  for(const scores of [[null,0],[1,null],[-1,0],[1.1,0],["",0],[99,0]]){
   const c=card();c.homeTeam.score=scores[0];c.awayTeam.score=scores[1];
@@ -105,7 +106,7 @@ test("HTTP/timeout/invalid official HTML cannot convert pending game to VERIFIED
   assert.equal(candidate.ok,false);
   const next=mergeProviderFinal(prior,fixture.key,candidate,T+5*H);
   assert.equal(next.records[0].verdict,"PENDING");
-  assert.equal(next.records[0].final,null);
+  assert.ok(next.records[0].final==null);
  }
  const confirmed=mergeProviderFinal(prior,fixture.key,
   parseJleagueJ2Final(makeHtml(),fixture,{now:T+5*H}),T+5*H);
