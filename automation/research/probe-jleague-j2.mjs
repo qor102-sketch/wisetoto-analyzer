@@ -62,6 +62,31 @@ for(const url of endpoints){
     process.exitCode=1;
     console.error("JLEAGUE_J2_LIVE_PARSER_REJECTED_"+String(probe.waitReason??parsed.reason??"IDENTITY"));
    }
+
+   const candidates=[
+    ["FC이마바리","콘사도레 삿포로","2026-11-03T05:50:00Z"],
+    ["RB오미야 아르디자","이와키FC","2026-11-03T05:00:00Z"],
+    ["몬테디오 야마가타","도쿠시마 보르티스","2026-11-03T05:00:00Z"],
+    ["반포레 고후","알비렉스 니가타","2026-11-03T05:00:00Z"],
+    ["쇼난 벨마레","사간 도스","2026-11-03T05:00:00Z"],
+    ["오이타 트리니타","반라우레 하치노헤FC","2026-11-03T05:00:00Z"],
+    ["요코하마FC","블라우블리츠 아키타","2026-11-03T05:00:00Z"],
+    ["테게바자로 미야자키","도치기 시티FC","2026-11-03T05:00:00Z"],
+    ["후지에다 MYFC","주빌로 이와타","2026-11-03T05:00:00Z"],
+    ["카탈레 도야마","베갈타 센다이","2026-11-03T04:55:00Z"]
+   ];
+   const coverage=candidates.map(([home,away,start])=>{
+    const result=parseJleagueJ2Final(html,{
+     key:"audit-only",sport:"축구",league:"일본 J2리그",
+     home,away,startMs:Date.parse(start)
+    },{now:Date.parse("2026-11-04T05:00:00Z")});
+    return {home,away,confirmed:result.ok,reason:result.waitReason??null,
+     officialId:result.gameId??null};
+   });
+   console.log("JLEAGUE_J2_REAL_COVERAGE "+JSON.stringify({
+    checked:coverage.length,confirmed:coverage.filter(c=>c.confirmed).length,
+    failures:coverage.filter(c=>!c.confirmed)
+   }));
    console.log("JLEAGUE_J2_LIVE_ADAPTER "+JSON.stringify({
     parsed:parsed.ok,reason:parsed.reason,count:parsed.matches?.length,
     first:parsed.matches?.slice(0,2).map(x=>({
