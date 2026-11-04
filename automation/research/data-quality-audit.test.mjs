@@ -32,7 +32,8 @@ test("observed 2026-11-03 NBA Korean team spellings map to independent ESPN labe
   assert.equal(parseEspnFinal(source,fixture,{now:T}).ok,true);
   assert.equal(parseEspnFinal({...source,events:[{...game,completed:false}]},fixture,{now:T}).ok,false);
   assert.equal(parseEspnFinal({...source,events:[{...game,date:new Date(startMs+4*H).toISOString()}]},fixture,{now:T}).ok,false);
-  assert.equal(parseEspnFinal({...source,events:[{...game,competitors:game.competitors.slice().reverse()}]},fixture,{now:T}).ok,false);
+  assert.equal(parseEspnFinal({...source,events:[{...game,competitors:[{...game.competitors[1],homeAway:"home"},
+    {...game.competitors[0],homeAway:"away"}]}]},fixture,{now:T}).ok,false);
   assert.equal(parseEspnFinal({...source,events:[game,{...game,id:String(401001100+i)}]},fixture,{now:T}).ok,false);
  });
 });
