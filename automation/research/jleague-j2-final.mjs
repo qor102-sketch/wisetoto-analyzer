@@ -86,13 +86,13 @@ export function officialJ2Matches(html){
  return {ok:true,matches:found};
 }
 const finalStates=new Set([
- "FULL_TIME","FULLTIME","FINISHED","FINAL","MATCH_FINISHED","MATCH_END","END",
+ "GAME-OVER","FULL_TIME","FULLTIME","FINISHED","FINAL","MATCH_FINISHED","MATCH_END","END",
  "試合終了","試合終了済"
 ].map(norm).filter(Boolean));
 function officialId(v,href,day){
  // Every match must carry a unique official href AND an independent schedule
  // ID for its correct calendar day. Never generate/synthesize an ID.
- const m=/^\/(?:en\/)?match\/j2\/(20\d\d)\/(\d{6})\/$/.exec(String(href??""));
+ const m=/^\/(?:en\/)?match\/j2\/(20\d\d)\/(\d{6})\/?$/.exec(String(href??""));
  if(!m)return null;
  const season=Number(day.slice(0,4))-(Number(day.slice(5,7))<=6?1:0);
  if(Number(m[1])!==season)return null;
