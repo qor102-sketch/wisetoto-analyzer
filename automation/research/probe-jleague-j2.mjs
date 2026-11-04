@@ -18,6 +18,33 @@ for(const url of endpoints){
   const decoded=chunks.map(m=>{try{return JSON.parse(m[1])}catch{return ""}}).join("");
   const keyCounts=Object.fromEntries(["homeTeam","awayTeam","playerScoreList","matchStatus","matchState","status","score","date"].map(k=>
    [k,(decoded.match(new RegExp('"'+k+'":','g'))??[]).length]));
+  // Read only match identity/status field values, not article or lineup data.
+  function parseValue(text,key){
+   let p=text.indexOf('"'+key+'":');if(p<0)return null;
+   p+=key.length+3;const open=text[p];
+   if(open!=="["&&open!=="{")return null;
+   let close,depth=0,quote=false,escaped=false;
+   for(let i=p;i<Math.min(text.length,p+85000);i++){
+    const ch=text[i];
+    if(quote){if(escaped)escaped=false;else if(ch==="\\\\")escaped=true;else if(ch==='"')quote=false;continue;}
+    if(ch==='"'){quote=true;continue;}
+    if(ch==="["||ch==="{")depth++;
+    if(ch==="]"||ch==="}"){depth--;if(depth===0){close=i+1;break;}}
+   }
+   if(close===undefined)return null;
+   try{return JSON.parse(text.slice(p,close))}catch{return null}
+  }
+  const matches=parseValue(decoded,"matches");
+  const matchDates=[...decoded.matchAll(/"matchDate":"([^"]+)"/g)].slice(0,5).map(m=>m[1]);
+  console.log("JLEAGUE_J2_RECORDS "+JSON.stringify({
+   kind:endpoints.indexOf(url)?"detail":"listing",
+   parseOk:Array.isArray(matches),matchDates,
+   sample:Array.isArray(matches)?matches.slice(0,3).map(e=>({
+    id:e.id,state:e.state,detailHref:e.detailHref,time:e.time,
+    home:e.homeTeam?{name:e.homeTeam.name,fullName:e.homeTeam.fullName,score:e.homeTeam.score}:null,
+    away:e.awayTeam?{name:e.awayTeam.name,fullName:e.awayTeam.fullName,score:e.awayTeam.score}:null
+   })):null
+  }));
   const structure=[];
   for(const tag of ['"homeTeam":','"awayTeam":','"matchId":','"matchStatus":','"statusName":','"score":']){
    const at=decoded.indexOf(tag);
