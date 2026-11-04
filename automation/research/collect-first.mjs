@@ -3,6 +3,7 @@
 import {sportName} from "../logic.mjs";
 import {scorePlausibility} from "../../WisetotoAnalyzer-LiveFree/src/lib/postmatch-guards.mjs";
 import {publicOperationalEffect} from "./operational-effect.mjs";
+import {diagnoseDataQuality} from "./data-quality-audit.mjs";
 const M=60000,D=86400000;
 export const SCHEMA="wisetoto-collect-first-v1";
 const key=v=>String(v??"").normalize("NFKC").toLowerCase().replace(/[^가-힣a-z0-9]/g,"");
@@ -139,6 +140,17 @@ export function mergeProviderFinal(state,fixtureKeyValue,payload,now=Date.now())
  }
  return {...state,updatedAt:now,records:rows};
 }
+// Circuit-open or provider-unavailable rows were NOT queried. Preserve the
+// last real result check timestamp and its evidence; record deferrals apart.
+export function deferFinalWithoutProvider(state,fixtureKeyValue,reason,now=Date.now()){
+ const records=(state.records??[]).map(r=>{
+  if(r.key!==fixtureKeyValue||r.verdict!=="PENDING")return r;
+  return {...r,lastResultDeferredAt:now,
+   resultDeferredCount:(Number(r.resultDeferredCount)||0)+1,
+   resultDeferredReason:String(reason??"PROVIDER_UNAVAILABLE").slice(0,120)};
+ });
+ return {...state,records};
+}
 export function verifiedNaverFinal(payload){
  // Naver route returns only schedule-exact matched event rows; recent-only
  // football responses are explicitly incomplete. Reject any ambiguous ones.
@@ -186,6 +198,7 @@ export function projection(state,now=Date.now()){
  const all=state.records||[];
  return {schema:"wisetoto-collect-first-public-v1",generatedAt:new Date(now).toISOString(),
    resultAudit:finalAuditBacklog(state,now),
+   qualityAudit:diagnoseDataQuality(state,now),
    operationalEffect:publicOperationalEffect(state),
    source:{lastFeedAt:state?.lastFeedAt??null,ok:state?.lastFeedOk===true,error:state?.lastFeedError??null,
      lastCaptureSummary:state?.lastCaptureSummary??null},
