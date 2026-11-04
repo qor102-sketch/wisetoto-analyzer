@@ -55,6 +55,13 @@ for(const url of endpoints){
     home:"카탈레 도야마",away:"베갈타 센다이",
     startMs:Date.parse("2026-11-03T05:00:00Z")
    },{now:Date.parse("2026-11-04T05:00:00Z")});
+   // A successfully retrieved official source must actually parse the exact
+   // publicly completed historical fixture before this adapter can roll out.
+   if(response.ok&&(!parsed.ok||!probe.ok||probe.gameId!=="2026/110307"||
+     probe.result.homeScore!==1||probe.result.awayScore!==0)){
+    process.exitCode=1;
+    console.error("JLEAGUE_J2_LIVE_PARSER_REJECTED_"+String(probe.waitReason??parsed.reason??"IDENTITY"));
+   }
    console.log("JLEAGUE_J2_LIVE_ADAPTER "+JSON.stringify({
     parsed:parsed.ok,reason:parsed.reason,count:parsed.matches?.length,
     first:parsed.matches?.slice(0,2).map(x=>({
