@@ -85,10 +85,9 @@ export function officialJ2Matches(html){
  if(!found.length)return {ok:false,reason:"JLEAGUE_OFFICIAL_LIST_FORMAT_UNKNOWN",matches:[]};
  return {ok:true,matches:found};
 }
-const finalStates=new Set([
- "GAME-OVER","FULL_TIME","FULLTIME","FINISHED","FINAL","MATCH_FINISHED","MATCH_END","END",
- "試合終了","試合終了済"
-].map(norm).filter(Boolean));
+// Only the actual observed J.LEAGUE official game-over state is trusted.
+// Future provider status values need a separately verified fixture example.
+const finalStates=new Set(["game-over"].map(norm));
 function officialId(v,href,day){
  // Every match must carry a unique official href AND an independent schedule
  // ID for its correct calendar day. Never generate/synthesize an ID.
