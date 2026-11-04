@@ -12,7 +12,7 @@ for(const url of endpoints){
    headers:{accept:"text/html","user-agent":"Mozilla/5.0 (Wisetoto Analyzer read-only fixture audit)"},
    redirect:"error",cache:"no-store"});
   const html=await response.text();
-  const ids=[...html.matchAll(/(?:\\?\/|%2F)(?:en\\?\/|%2F)?match(?:\\?\/|%2F)j2(?:\\?\/|%2F)(2026)(?:\\?\/|%2F)(\\d{6})/gi)]
+  const ids=[...html.replaceAll("\\/","/").matchAll(/\/(?:en\/)?match\/j2\/(2026)\/(\d{6})/gi)]
    .map(m=>m[2]);
   const chunks=[...html.matchAll(/self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)/g)];
   const decoded=chunks.map(m=>{try{return JSON.parse(m[1])}catch{return ""}}).join("");
@@ -26,7 +26,7 @@ for(const url of endpoints){
    let close,depth=0,quote=false,escaped=false;
    for(let i=p;i<Math.min(text.length,p+85000);i++){
     const ch=text[i];
-    if(quote){if(escaped)escaped=false;else if(ch==="\\\\")escaped=true;else if(ch==='"')quote=false;continue;}
+    if(quote){if(escaped)escaped=false;else if(ch==="\\")escaped=true;else if(ch==='"')quote=false;continue;}
     if(ch==='"'){quote=true;continue;}
     if(ch==="["||ch==="{")depth++;
     if(ch==="]"||ch==="}"){depth--;if(depth===0){close=i+1;break;}}
