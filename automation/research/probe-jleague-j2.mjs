@@ -18,6 +18,18 @@ for(const url of endpoints){
   const decoded=chunks.map(m=>{try{return JSON.parse(m[1])}catch{return ""}}).join("");
   const keyCounts=Object.fromEntries(["homeTeam","awayTeam","playerScoreList","matchStatus","matchState","status","score","date"].map(k=>
    [k,(decoded.match(new RegExp('"'+k+'":','g'))??[]).length]));
+  const structure=[];
+  for(const tag of ['"homeTeam":','"awayTeam":','"matchId":','"matchStatus":','"statusName":','"score":']){
+   const at=decoded.indexOf(tag);
+   const keys=at>=0?[...decoded.slice(Math.max(0,at-300),at+900).matchAll(/"([a-zA-Z][a-zA-Z0-9_]*)":/g)]
+    .map(x=>x[1]).slice(0,35):[];
+   structure.push({tag,at,keys});
+  }
+  const idAt=html.indexOf("110307");
+  const idContext=idAt>=0?html.slice(Math.max(0,idAt-105),idAt+65)
+   .replace(/[^a-zA-Z0-9\\/=?.:"'_%+-]/g," "):"";
+  console.log("JLEAGUE_J2_SHAPE "+JSON.stringify({kind:endpoints.indexOf(url)?"detail":"listing",
+   structure,idContext}));
   console.log("JLEAGUE_J2_PROBE "+JSON.stringify({kind:endpoints.indexOf(url)?"detail":"listing",status:response.status,
    length:html.length,contentType:response.headers.get("content-type"),
    uniqueIds:[...new Set(ids)].length,idSample:[...new Set(ids)].slice(0,15),
