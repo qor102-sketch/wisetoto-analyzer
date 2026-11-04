@@ -10,7 +10,7 @@ const row=(key,home="카탈레 도야마",away="베갈타 센다이")=>({
  lastResultCheckAt:null,fixtureId:null,odds:[],latestOdds:[]
 });
 function card(id="2026110307",home="Kataller Toyama",away="Vegalta Sendai"){
- return {id,state:"FULL_TIME",detailHref:"/en/match/j2/2026/110307/",
+ return {id,state:"game-over",detailHref:"/match/j2/2026/110307",
   time:"13:57",homeTeam:{name:home,fullName:home,score:1},
   awayTeam:{name:away,fullName:away,score:0}};
 }
