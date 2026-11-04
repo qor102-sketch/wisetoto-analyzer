@@ -114,6 +114,8 @@ export function recordOperationalEffect(state,{
    confirmedBySource:finalSummary.confirmedBySource??{},
    waitReasons:smallCounts(finalSummary.waitReasons),
    naverUpstreamFailures:n(finalSummary.naverUpstreamFailures),
+   naverFailedRows:n(finalSummary.naverFailedRows),
+   deferred:n(finalSummary.finalDeferred),
    naverCircuitSkipped:n(finalSummary.naverOutageSkipped)
   },
   changes:effectDelta(totals,beforeTotals),

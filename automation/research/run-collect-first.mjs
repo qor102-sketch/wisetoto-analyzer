@@ -2,7 +2,7 @@
 import fs from "node:fs/promises";
 import {loadFeed} from "../feed.mjs";
 import {getRecords,STATE_FILE} from "../logic.mjs";
-import {SCHEMA,collect,settlement,mergeProviderFinal,projection,finalAuditBacklog} from "./collect-first.mjs";
+import {SCHEMA,collect,settlement,mergeProviderFinal,deferFinalWithoutProvider,projection,finalAuditBacklog} from "./collect-first.mjs";
 import {lookupVolleyballFinal} from "./volleyball-result.mjs";
 import {lookupNaverScheduleFinal} from "./naver-fast-final.mjs";
 import {naverOutageGroup} from "./naver-outage-group.mjs";
@@ -42,7 +42,7 @@ const base=(process.env.WISETOTO_URL||"https://wisetoto-analyzer.vercel.app").re
 const lineupScan=await collectLineupSnapshots(state,{base,limit:12});
 state=lineupScan.state;
 console.log("PREGAME_LINEUP_AUDIT "+JSON.stringify(lineupScan.summary));
-let sportsApiLimited=false,naverUpstreamFailures=0,naverOutageSkipped=0;
+let sportsApiLimited=false,naverFailedRows=0,naverOutageSkipped=0,finalDeferred=0;
 const naverFailureGroups=new Map();
 const supportedNaver=new Set(["축구","농구","야구"]);
 // One request per (sport, KST date, Naver category) per scan, not per match.
@@ -59,11 +59,12 @@ const finalQueue=selectFinalAuditRows(state,Date.now(),24);
 console.log("FINAL_BACKLOG_BEFORE "+JSON.stringify({...finalAuditBacklog(state,Date.now()),selected:finalQueue.length,
  selectedBySport:Object.fromEntries(["축구","농구","야구","배구"].map(s=>[s,finalQueue.filter(r=>r.sport===s).length]))}));
 for(const r of finalQueue){
- let confirmed=null,reasons=[];
+ let confirmed=null,reasons=[],providerAttempted=false;
  if(sportsApiLimited&&r.fixtureId!==null)reasons.push("SPORTSAPI_RATE_LIMIT");
  // A provider ID from the Betman row may give an exact match. When that
  // endpoint fails, a separately matched Naver result can still rescue it.
  if(r.fixtureId!==null&&!sportsApiLimited){
+   providerAttempted=true;
    try{
      const p=await requestFinal(base+"/api/fixture/result?id="+r.fixtureId+
        "&sport="+encodeURIComponent(r.sport));
@@ -74,6 +75,7 @@ for(const r of finalQueue){
    }catch(e){reasons.push("SPORTSAPI_NETWORK:"+String(e).slice(0,65))}
  }
  if(!confirmed&&espnLeague(r)){
+   providerAttempted=true;
    // ESPN is independent of Naver and live-tested from Vercel. Only its
    // exact league + two teams + kickoff + unique FINAL can settle a row.
    const candidate=await lookupEspnFinal(r,{base,cache:espnCache,now:Date.now()});
@@ -93,6 +95,7 @@ for(const r of finalQueue){
      naverOutageSkipped++;
      reasons.push("NAVER_CIRCUIT_OPEN_RETRY_NEXT_SCAN");
    }else{
+     providerAttempted=true;
      const result=await lookupNaverScheduleFinal(r,{cache:scheduleCache,now:Date.now(),base});
      if(result.ok)confirmed=result;
      else {
@@ -100,18 +103,27 @@ for(const r of finalQueue){
        reasons.push("NAVER_FAST:"+reason.slice(0,150));
        if(Array.isArray(result.providerErrors))reasons.push(...result.providerErrors);
        if(/HTTP_504|HTTP_502|NETWORK|TIMEOUT|PROVIDER_NETWORK/.test(reason)){
-         naverUpstreamFailures++;
+         naverFailedRows++;
          naverFailureGroups.set(group,(naverFailureGroups.get(group)??0)+1);
        }
      }
    }
  }
  if(!confirmed&&r.sport==="배구"){
+   providerAttempted=true;
    // Independent schedule-exact volleyball lookup also works without SportsAPI IDs.
    const final=await lookupVolleyballFinal(r);
    if(final.ok)confirmed=final;
    else reasons.push("NAVER_VOLLEYBALL:"+String(final.waitReason).slice(0,140));
    if(Array.isArray(final.providerErrors))reasons.push(...final.providerErrors);
+ }
+ if(!providerAttempted){
+   // A circuit-open group is not a real provider query. Never manufacture a
+   // resultChecks increment or consume its last genuine retry timestamp.
+   finalDeferred++;
+   finalWaitReasons.PROVIDER_DEFERRED=(finalWaitReasons.PROVIDER_DEFERRED??0)+1;
+   state=deferFinalWithoutProvider(state,r.key,reasons.join(" | ")||"SOURCE_CIRCUIT_OPEN",Date.now());
+   continue;
  }
  finalChecked++;
  if(confirmed){
@@ -129,11 +141,15 @@ for(const r of finalQueue){
    providerErrors:reasons
  },Date.now());
 }
+// A cached failed URL was fetched once (or reused), not N independent
+// provider failures just because N fixtures shared the same schedule day.
+const naverUpstreamFailures=[...scheduleCache.values()].filter(v=>v?.ok===false&&
+ /HTTP_50[24]|NETWORK|TIMEOUT|PROVIDER_NETWORK/.test(String(v.reason??""))).length;
 console.log("FINAL_BACKLOG_AFTER "+JSON.stringify(finalAuditBacklog(state,Date.now())));
 console.log("FAST_FINAL_AUDIT "+JSON.stringify({
- checked:finalChecked,confirmed:finalConfirmed,waiting:finalChecked-finalConfirmed,
+ checked:finalChecked,confirmed:finalConfirmed,deferred:finalDeferred,waiting:finalChecked-finalConfirmed,
  sharedScheduleQueries:scheduleCache.size,sharedEspnQueries:espnCache.size,
- naverUpstreamFailures,naverOutageSkipped,
+ naverUpstreamFailures,naverFailedRows,naverOutageSkipped,
  naverCircuitGroups:Object.fromEntries(naverFailureGroups),waitReasons:finalWaitReasons
 }));
 // A measured transition compares the restored ledger before this scan with
@@ -148,7 +164,8 @@ state=recordOperationalEffect(state,{
  finalSummary:{checked:finalChecked,confirmed:finalConfirmed,
   selectedBySport:Object.fromEntries(["축구","농구","야구","배구"].map(s=>[s,
    finalQueue.filter(r=>r.sport===s).length])),
-  confirmedBySource,waitReasons:finalWaitReasons,naverUpstreamFailures,naverOutageSkipped}
+  confirmedBySource,waitReasons:finalWaitReasons,naverUpstreamFailures,naverFailedRows,
+  naverOutageSkipped,finalDeferred}
 });
 console.log("OPERATIONAL_EFFECT "+JSON.stringify({
  baseline:state.operationalEffect.baseline,latest:state.operationalEffect.latest,
