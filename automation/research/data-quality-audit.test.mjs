@@ -68,7 +68,7 @@ test("24h overdue rows explicitly identify unsupported ESPN coverage and upstrea
  assert.equal(q.byReason.NAVER_SOURCE_OUTAGE,1);
  assert.equal(q.byReason.ESPN_EXACT_IDENTITY_MISSING,1);
  assert.equal(q.byProvider.ESPN_SUPPORTED,1);
- assert.equal(q.byProvider.NO_ESPN_FOR_LEAGUE,1);
+ assert.equal(q.byProvider.JLEAGUE_OFFICIAL_J2_SUPPORTED,1);
  assert.equal(q.byLeague["일본 J2리그"],1);
  assert.equal(q.bySport["농구"],1);
  assert.equal(projection(state,T).qualityAudit.overdue24h,2);
@@ -95,8 +95,8 @@ test("NBA diagnostics distinguish unpublished, unmatched, unqueried, and real 5+
  assert.equal(nbaPregameFailureCategory(rows[2]),"ESPN_IDENTITY_UNCONFIRMED");
 });
 
-test("a failing Naver J2 date gets two probes, not 24 repeated skipped audits",()=>{
- const failed=Array.from({length:30},(_,i)=>({...row("j2-"+i),
+test("a failing Naver-only K League date gets two probes, not 24 repeated skipped audits",()=>{
+ const failed=Array.from({length:30},(_,i)=>({...row("dom-"+i,"축구","K리그2"),
   home:"H"+i,checkReason:"NAVER_CIRCUIT_OPEN_RETRY_NEXT_SCAN"}));
  const selected=selectFinalAuditRows({records:failed},T,24);
  assert.equal(selected.length,2);
@@ -106,9 +106,9 @@ test("a failing Naver J2 date gets two probes, not 24 repeated skipped audits",(
  assert.equal(selectFinalAuditRows({records:healthy},T,24).length,24);
 });
 test("Naver outage cap does not throttle independent ESPN or other healthy groups",()=>{
- const bad=Array.from({length:12},(_,i)=>({...row("bad-"+i),
+ const bad=Array.from({length:12},(_,i)=>({...row("bad-"+i,"축구","K리그2"),
   checkReason:"NAVER_FAST:NAVER_DIRECT_NETWORK:TimeoutError"}));
- const healthy=Array.from({length:12},(_,i)=>({...row("healthy-"+i,"축구","K리그2",T-34*H),
+ const healthy=Array.from({length:12},(_,i)=>({...row("healthy-"+i,"축구","일본 J3리그",T-34*H),
   home:"H"+i,checkReason:"WAITING_FOR_END",startMs:T-35*H}));
  const supported=Array.from({length:25},(_,i)=>({...row("espn-"+i,"농구","NBA",T-31*H),
   checkReason:"ESPN_FAST:ESPN_EXACT_IDENTITY_NOT_PROVEN"}));

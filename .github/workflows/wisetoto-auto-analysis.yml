@@ -34,6 +34,8 @@ jobs:
         run: node --test automation/*.test.mjs automation/repair/*.test.mjs automation/research/*.test.mjs
       - name: Probe real lightweight Naver schedule without secrets or mutations
         run: node automation/research/probe-naver-fast-final.mjs
+      - name: Probe official J.League J2 format (read-only, no result mutations)
+        run: node automation/research/probe-jleague-j2.mjs
       - name: Install app and browser
         run: |
           cd WisetotoAnalyzer-LiveFree && npm install --no-audit --no-fund
