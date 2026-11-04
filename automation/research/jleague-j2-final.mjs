@@ -130,7 +130,7 @@ export function parseJleagueJ2Final(html,fixture,{now=Date.now()}={}){
  const state=norm(match.state);
  if(!finalStates.has(state))return {ok:false,waitReason:"JLEAGUE_J2_FINAL_STATUS_UNCONFIRMED"};
  const home=match.homeTeam?.score,away=match.awayTeam?.score;
- if(!validScore(home)||!validScore(away)||
+ if(!validScore(home)||!validScore(away)||Number(home)>20||Number(away)>20||
    !scorePlausibility("축구",Number(home),Number(away)).ok)
   return {ok:false,waitReason:"JLEAGUE_J2_INVALID_REGULATION_SCORE"};
  return {ok:true,finalConfirmed:true,source:"JLEAGUE",gameId,
