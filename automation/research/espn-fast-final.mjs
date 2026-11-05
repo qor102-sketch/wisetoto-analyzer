@@ -103,6 +103,12 @@ const aliases=[
  // Cross-checked with ESPN 2026-11-02 AFC Elite event 401912631,
  // Pakhtakor (home) vs Al Nassr (away), 13:45 UTC.
  ["파흐타코르","pakhtakor"],["s알나스르","알나스르","alnassr"],
+ // Independent ESPN afc.cup full-time events 401912770/771 (2026-11-03).
+ // Team-name mappings alone grant no result without both sides/time/event/FINAL.
+ ["이스트벵골","eastbengalfc"],
+ ["알시브클럽","alseebclub"],
+ ["j알후세인","알후세인","alhusseinsc"],
+ ["알쇼르타","alshortasc"],
  ["미들즈브러","middlesbrough"],["찰턴애슬레틱","charltonathletic","charlton"],
  ["밀월","millwall"],["더비카운티","derbycounty"],["번리","burnley"],
  ["포츠머스","portsmouth"],["볼턴원더러스","boltonwanderers"],
@@ -167,6 +173,7 @@ export function espnLeague(fixture){
  if(/미국메이저리그사커|mls|미국프로축구/.test(l))return "usa.1";
  if(/네덜란드2부|에이르스터디비시|eerste divisie|eerstedivisie/.test(l))return "ned.2";
  if(/네덜란드에레디비시|eredivisie/.test(l))return "ned.1";
+ if(/afc챔피언스리그2|afc챔피언스리그투|아시아챔피언스리그2|afcchampionsleaguetwo/.test(l))return "afc.cup";
  if(/afc챔피언스리그엘리트|afc챔피언스엘리트|아시아챔피언스리그엘리트/.test(l))return "afc.champions";
  if(/uefa챔피언스|유럽챔피언스리그/.test(l))return "uefa.champions";
  if(/유로파컨퍼런스|uefa컨퍼런스|uefaconference/.test(l))return "uefa.europa.conf";
