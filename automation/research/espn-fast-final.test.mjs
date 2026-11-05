@@ -82,7 +82,7 @@ test("ESPN 403/504 and missing data preserve PENDING, do not invent results",asy
  const p=await lookupEspnFinal(fixture,{
   base:"https://local.test",now:S+5*H,fetchFn:async()=>({ok:true,status:200,
    json:async()=>payload([])})});
- assert.equal(p.ok,false);assert.match(p.waitReason,/ESPN_EXACT_IDENTITY_NOT_PROVEN/);
+ assert.equal(p.ok,false);assert.match(p.waitReason,/ESPN_SCOREBOARD_EMPTY/);
 });
 
 test("soccer penalty/extra-time finals are quarantined from Betman regulation settlement",()=>{
