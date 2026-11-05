@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {diagnoseEspnIdentity,espnScoreboardDates,parseEspnFinal,lookupEspnFinal}
  from "./espn-fast-final.mjs";
-import {diagnoseDataQuality} from "./data-quality-audit.mjs";
+import {diagnoseDataQuality,nbaPregameFailureCategory} from "./data-quality-audit.mjs";
 const T=Date.parse("2026-11-04T23:30:00Z"),H=3600000;
 const fixture={key:"fixture",sport:"축구",league:"UEFA 챔피언스리그",
  home:"리버풀",away:"첼시",startMs:T,verdict:"PENDING"};
@@ -72,4 +72,15 @@ test("quality audit exposes overlapping ESPN absence and Naver outage without do
  assert.equal(audit.byConcurrentFailure.ESPN_IDENTITY_OR_SCHEDULE,1);
  assert.equal(audit.byConcurrentFailure.NAVER_NETWORK_OR_50X,1);
  assert.equal(audit.bySport["축구"],1);
+});
+
+test("NBA genuine PRE diagnostics separate source unlisted from not-published starters",()=>{
+ const startMs=T-3*H,base={sport:"농구",league:"NBA",startMs};
+ const pending=(reason)=>({...base,lineup:{status:"UNAVAILABLE",attempts:2,lastError:reason}});
+ assert.equal(nbaPregameFailureCategory(pending("ESPN_SCOREBOARD_EMPTY")),"ESPN_FIXTURE_NOT_LISTED");
+ assert.equal(nbaPregameFailureCategory(pending("ESPN_NO_EVENTS_NEAR_KICKOFF")),"ESPN_FIXTURE_NOT_LISTED");
+ assert.equal(nbaPregameFailureCategory(pending("ESPN_HOME_AWAY_REVERSED")),"ESPN_IDENTITY_UNCONFIRMED");
+ assert.equal(nbaPregameFailureCategory(pending("ESPN_KICKOFF_MISMATCH")),"ESPN_IDENTITY_UNCONFIRMED");
+ assert.equal(nbaPregameFailureCategory(pending("ESPN_NBA_STARTERS_NOT_PUBLISHED")),"NBA_STARTERS_UNPUBLISHED");
+ assert.notEqual(nbaPregameFailureCategory(pending("ESPN_NBA_STARTERS_NOT_PUBLISHED")),"CONFIRMED_5V5");
 });
