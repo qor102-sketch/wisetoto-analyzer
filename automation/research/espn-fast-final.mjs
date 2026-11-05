@@ -175,26 +175,54 @@ export function espnLeague(fixture){
 }
 const dateKey=ms=>new Date(ms).toISOString().slice(0,10).replace(/-/g,"");
 const hours=3600000;
+// ESPN buckets some leagues by calendar day in a competition-local timezone.
+// Alternate dates expand discovery only, never fixture matching proof.
+export function espnScoreboardDates(fixture){
+ if(!Number.isFinite(fixture?.startMs))return [];
+ return [...new Set([fixture.startMs,fixture.startMs-12*hours,fixture.startMs+12*hours]
+  .map(dateKey))];
+}
 const score=x=>{
  if(x===null||x===undefined||String(x).trim()==="")return null;
  const n=Number(x);return Number.isSafeInteger(n)&&n>=0?n:null;
 };
-export function findEspnFixtureEvent(payload,fixture,{league=espnLeague(fixture)}={}){
+// Explain why ESPN failed to identify a game. Never accept partial matches.
+export function diagnoseEspnIdentity(payload,fixture,{league=espnLeague(fixture)}={}){
  if(!league||payload?.ok!==true||payload.league!==league||!Array.isArray(payload.events))
   return {ok:false,waitReason:"ESPN_LEAGUE_OR_FEED_UNCONFIRMED"};
- const events=payload.events.filter(e=>{
-  const ms=Date.parse(String(e?.date??""));
-  if(!Number.isFinite(ms)||Math.abs(ms-fixture.startMs)>2*hours)return false;
-  const home=e?.competitors?.find(c=>c.homeAway==="home");
-  const away=e?.competitors?.find(c=>c.homeAway==="away");
-  return home&&away&&
-    teamEq(fixture.home,home.name)&&teamEq(fixture.away,away.name);
+ const valid=payload.events.filter(e=>e&&Number.isFinite(Date.parse(String(e.date??""))));
+ const inTime=valid.filter(e=>Math.abs(Date.parse(String(e.date))-fixture.startMs)<=2*hours);
+ const sourceSides=e=>({
+  home:e.competitors?.find(c=>c.homeAway==="home")?.name,
+  away:e.competitors?.find(c=>c.homeAway==="away")?.name
  });
- const matched=new Map(events.filter(e=>/^\d+$/.test(String(e?.id??""))).map(e=>[String(e.id),e]));
- if(matched.size===0)return {ok:false,waitReason:"ESPN_EXACT_IDENTITY_NOT_PROVEN"};
- if(matched.size!==1)return {ok:false,waitReason:"ESPN_AMBIGUOUS_FIXTURE"};
- const [gameId,event]=[...matched.entries()][0];
- return {ok:true,gameId,event};
+ const matched=inTime.filter(e=>{
+  const {home,away}=sourceSides(e);
+  return teamEq(fixture.home,home)&&teamEq(fixture.away,away);
+ });
+ const exact=new Map(matched.filter(e=>/^\d+$/.test(String(e.id??""))).map(e=>[String(e.id),e]));
+ if(exact.size>1)return {ok:false,waitReason:"ESPN_AMBIGUOUS_FIXTURE"};
+ if(exact.size===1)return {ok:true,gameId:[...exact.keys()][0],
+  event:[...exact.values()][0]};
+ if(matched.length)return {ok:false,waitReason:"ESPN_MISSING_NUMERIC_EVENT_ID"};
+ if(!payload.events.length)return {ok:false,waitReason:"ESPN_SCOREBOARD_EMPTY"};
+ if(valid.some(e=>{
+  const {home,away}=sourceSides(e);
+  return teamEq(fixture.home,home)&&teamEq(fixture.away,away);
+ }))return {ok:false,waitReason:"ESPN_KICKOFF_MISMATCH"};
+ if(inTime.some(e=>{
+  const {home,away}=sourceSides(e);
+  return teamEq(fixture.home,away)&&teamEq(fixture.away,home);
+ }))return {ok:false,waitReason:"ESPN_HOME_AWAY_REVERSED"};
+ if(inTime.some(e=>teamEq(fixture.home,sourceSides(e).home)))
+  return {ok:false,waitReason:"ESPN_AWAY_TEAM_NOT_MATCHED"};
+ if(inTime.some(e=>teamEq(fixture.away,sourceSides(e).away)))
+  return {ok:false,waitReason:"ESPN_HOME_TEAM_NOT_MATCHED"};
+ if(!inTime.length)return {ok:false,waitReason:"ESPN_NO_EVENTS_NEAR_KICKOFF"};
+ return {ok:false,waitReason:"ESPN_TEAMS_NOT_ON_SCOREBOARD"};
+}
+export function findEspnFixtureEvent(payload,fixture,{league=espnLeague(fixture)}={}){
+ return diagnoseEspnIdentity(payload,fixture,{league});
 }
 export function parseEspnFinal(payload,fixture,{now=Date.now(),league=espnLeague(fixture)}={}){
  if(!league||payload?.ok!==true||payload.league!==league||!Array.isArray(payload.events))
@@ -225,9 +253,7 @@ export async function lookupEspnFinal(fixture,{
  const league=espnLeague(fixture);
  if(!league)return {ok:false,waitReason:"ESPN_LEAGUE_UNSUPPORTED"};
  if(!base)return {ok:false,waitReason:"ESPN_PROXY_BASE_REQUIRED"};
- // North American scoreboards can bucket games by local prior calendar date.
- const dates=[dateKey(fixture.startMs)];
- if(["nba","mlb","usa.1"].includes(league))dates.push(dateKey(fixture.startMs-12*hours));
+ const dates=espnScoreboardDates(fixture);
  const reasons=[];
  for(const date of new Set(dates)){
   const url=base.replace(/\/+$/,"")+"/api/espn/scoreboard?"+
