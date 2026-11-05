@@ -11,7 +11,7 @@ for(const date of dates){
   const root=response.ok?await response.json():null;
   const matches=Array.isArray(root?.events)?root.events:[];
   if(response.ok&&Array.isArray(root?.events))reachable++;
-  if(date==="20261103"&&response.ok&&Array.isArray(root?.events)){
+  if(response.ok&&Array.isArray(root?.events)){
    const normalized=matches.map(e=>({
     id:String(e.id??""),date:e.date,completed:e.status?.type?.completed===true,
     statusName:e.status?.type?.name,
@@ -19,9 +19,18 @@ for(const date of dates){
      homeAway:c.homeAway,name:c.team?.displayName,score:c.score==null?null:String(c.score)
     }))
    }));
-   const cases=[
+   const cases=date==="20261103"?[
     ["이스트 벵골","알시브 클럽","2026-11-03T13:45:00Z","401912771",0,2],
     ["J알후세인","알쇼르타","2026-11-03T16:00:00Z","401912770",0,3]
+   ]:[
+    ["멜버른 빅토리","페르십 반둥","2026-11-04T07:45:00Z","401912769",1,2],
+    ["FC서울","테꽁 비엣텔","2026-11-04T10:00:00Z","401912768",3,0],
+    ["아르카다그","골고하르 시르잔","2026-11-04T13:45:00Z","401912767",1,0],
+    ["U알와흐다","알칼디야SC","2026-11-04T16:00:00Z","401912766",1,2],
+    ["알라이얀","O알나흐다","2026-11-04T16:00:00Z","401912764",2,0],
+    ["쿠웨이트SC","PFC나사프","2026-11-04T16:00:00Z","401912765",2,3],
+    ["알타아원","J알파이살리","2026-11-04T18:15:00Z","401912762",3,1],
+    ["무하라크 클럽","U알자지라","2026-11-04T18:15:00Z","401912763",0,3]
    ];
    const proofs=cases.map(([home,away,date,id,homeScore,awayScore])=>{
     const p=parseEspnFinal({ok:true,league:"afc.cup",events:normalized},{
