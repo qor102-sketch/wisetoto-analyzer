@@ -9,6 +9,7 @@ const CODES:Record<string,[string,string]>={
  "usa.1":["soccer","usa.1"],"ned.1":["soccer","ned.1"],
  "uefa.champions":["soccer","uefa.champions"],"uefa.europa":["soccer","uefa.europa"],
  "uefa.europa.conf":["soccer","uefa.europa.conf"],"afc.champions":["soccer","afc.champions"],
+ "afc.cup":["soccer","afc.cup"],
  "eng.fa":["soccer","eng.fa"],"eng.3":["soccer","eng.3"],
  "esp.2":["soccer","esp.2"],"ita.2":["soccer","ita.2"],
  "ger.2":["soccer","ger.2"],"fra.2":["soccer","fra.2"],"ned.2":["soccer","ned.2"]

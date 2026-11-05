@@ -36,6 +36,8 @@ jobs:
         run: node automation/research/probe-naver-fast-final.mjs
       - name: Probe official J.League J2 format (read-only, no result mutations)
         run: node automation/research/probe-jleague-j2.mjs
+      - name: Probe ESPN AFC Champions League Two scoreboards (read-only)
+        run: node automation/research/probe-espn-afc-cup.mjs
       - name: Install app and browser
         run: |
           cd WisetotoAnalyzer-LiveFree && npm install --no-audit --no-fund

@@ -51,6 +51,7 @@ const scheduleCache=new Map();
 const espnCache=new Map();
 const jleagueCache=new Map();
 let finalChecked=0,finalConfirmed=0,finalWaitReasons={},confirmedBySource={};
+const espnFailureReasons={};
 async function requestFinal(url){
  const response=await fetch(url,{signal:AbortSignal.timeout(16000),cache:"no-store"});
  let payload;
@@ -84,6 +85,12 @@ for(const r of finalQueue){
    if(candidate.ok)confirmed=candidate;
    else {
      reasons.push("ESPN_FAST:"+String(candidate.waitReason).slice(0,150));
+     // Per-source response categories (not distinct fixtures): adjacent
+     // scoreboard days can each explain why the exact match is unavailable.
+     for(const issue of candidate.providerErrors??[candidate.waitReason]){
+      const code=String(issue??"UNKNOWN").split(":")[0].trim().slice(0,70);
+      espnFailureReasons[code]=(espnFailureReasons[code]??0)+1;
+     }
      if(Array.isArray(candidate.providerErrors))reasons.push(...candidate.providerErrors);
    }
  }
@@ -161,7 +168,8 @@ console.log("FAST_FINAL_AUDIT "+JSON.stringify({
  sharedScheduleQueries:scheduleCache.size,sharedEspnQueries:espnCache.size,
  sharedOfficialJ2Queries:jleagueCache.size,
  naverUpstreamFailures,naverFailedRows,naverOutageSkipped,
- naverCircuitGroups:Object.fromEntries(naverFailureGroups),waitReasons:finalWaitReasons
+ naverCircuitGroups:Object.fromEntries(naverFailureGroups),waitReasons:finalWaitReasons,
+ espnFailureReasons
 }));
 // A measured transition compares the restored ledger before this scan with
 // the saved AFTER state, using only independently accepted observations.
@@ -175,7 +183,8 @@ state=recordOperationalEffect(state,{
  finalSummary:{checked:finalChecked,confirmed:finalConfirmed,
   selectedBySport:Object.fromEntries(["축구","농구","야구","배구"].map(s=>[s,
    finalQueue.filter(r=>r.sport===s).length])),
-  confirmedBySource,waitReasons:finalWaitReasons,naverUpstreamFailures,naverFailedRows,
+  confirmedBySource,waitReasons:finalWaitReasons,espnFailureReasons,
+  naverUpstreamFailures,naverFailedRows,
   naverOutageSkipped,finalDeferred}
 });
 console.log("OPERATIONAL_EFFECT "+JSON.stringify({

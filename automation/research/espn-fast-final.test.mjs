@@ -82,7 +82,7 @@ test("ESPN 403/504 and missing data preserve PENDING, do not invent results",asy
  const p=await lookupEspnFinal(fixture,{
   base:"https://local.test",now:S+5*H,fetchFn:async()=>({ok:true,status:200,
    json:async()=>payload([])})});
- assert.equal(p.ok,false);assert.match(p.waitReason,/ESPN_EXACT_IDENTITY_NOT_PROVEN/);
+ assert.equal(p.ok,false);assert.match(p.waitReason,/ESPN_SCOREBOARD_EMPTY/);
 });
 
 test("soccer penalty/extra-time finals are quarantined from Betman regulation settlement",()=>{
@@ -162,6 +162,7 @@ test("verified NBA aliases and soccer club labels from 2026-10-31 independent ES
 test("expanded independent ESPN competitions require explicit correct league source",()=>{
  const mapped=[
   ["AFC 챔피언스리그 엘리트","afc.champions"],
+  ["AFC 챔피언스리그2","afc.cup"],
   ["UEFA 유로파 컨퍼런스리그","uefa.europa.conf"],
   ["잉글랜드 FA컵","eng.fa"],
   ["잉글랜드 리그1","eng.3"],

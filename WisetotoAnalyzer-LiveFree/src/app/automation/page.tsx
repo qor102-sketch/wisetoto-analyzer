@@ -25,7 +25,7 @@ type EffectScan={id:string;at:number;commit:string;sourceFresh:boolean;
  lineup:{attempted:number;confirmed:number;nbaAttempted:number;nba5v5Confirmed:number;
   nbaFocusedRechecks:number;nbaFocusedRecovered:number;reasons:Record<string,number>};
  final:{checked:number;providerConfirmed:number;newVerified:number;selectedBySport:Record<string,number>;
-  confirmedBySource:Record<string,number>;waitReasons:Record<string,number>;
+  confirmedBySource:Record<string,number>;waitReasons:Record<string,number>;espnFailureReasons?:Record<string,number>;
   naverUpstreamFailures:number;naverFailedRows?:number;deferred?:number;naverCircuitSkipped:number};
  changes:EffectTotals;totals:EffectTotals};
 type OperationalEffect={schema:string;baseline:{at:number;origin:string;totals:EffectTotals};
@@ -35,6 +35,7 @@ type OperationalEffect={schema:string;baseline:{at:number;origin:string;totals:E
  note:string};
 type DataQualityAudit={at:number;overdue24h:number;bySport:Record<string,number>;
  byLeague:Record<string,number>;byReason:Record<string,number>;byProvider:Record<string,number>;
+ byConcurrentFailure?:Record<string,number>;
  nbaPast:number;nbaPregame:Record<string,number>;nbaFuture:number;note:string};
 type CollectedLedger={generatedAt:string;qualityAudit?:DataQualityAudit;operationalEffect?:OperationalEffect|null;resultAudit?:{future:number;awaitingLikelyFinish:number;dueNow:number;coolingDown:number;overdueSixHours:number;overdue24Hours:number;outsideRetryHorizon:number};source?:{lastFeedAt:number|null;ok:boolean;error:string|null;lastCaptureSummary?:{listed:number;window:number;new:number;noOdds:number;missingIdentity:number;missedWindow:number;watchlistMissing?:number;delayedScan?:boolean;sinceLastScanMs?:number|null}|null};counts:{collected:number;active?:number;archived?:number;verified:number;pending:number;pregameCaptured:number;verifiedWithPregame:number;resultOnly:number;missingFixtureId:number;lineupConfirmed?:number;lineupPartial?:number;lineupUnsupported?:number;verifiedWithLineup?:number};records:CollectedRow[]};
 type History={scanHealth?:ScanHealth|null;schema:string;publishedAt:string;lastRunAt:number|null;source:string;counts:{total:number;pending:number;verified:number;review?:number;void:number;hit:number;miss:number;warnings:number;overdue?:number};records:Match[]};
@@ -127,6 +128,11 @@ export default function AutomationDashboard(){
           최신 종료 조회 실패 분류 {Object.entries(collection.operationalEffect.latest.final.waitReasons).slice(0,5).map(([k,v])=>k+" "+v+"건").join(" / ")||"실패 없음"}.
         </div>
         <div className="auto-explainer">
+          <strong>최근 ESPN 조회별 실패 이유</strong> ·
+          {Object.entries(collection.operationalEffect.latest.final.espnFailureReasons??{}).slice(0,8).map(([k,v])=>k+" "+v+"회").join(" / ")||"기록 없음"}.
+          경기 한 건에 여러 날짜 조회가 포함될 수 있어 경기 수와 합산하지 않습니다.
+        </div>
+        <div className="auto-explainer">
           <strong>최근 자동 실행 이력 ({collection.operationalEffect.historySize}회 보존, 최근 5회 표시)</strong>:
           {collection.operationalEffect.recentScans.slice(-5).reverse().map(scan=><div key={scan.id}>
             {date(scan.at)} KST · {scan.sourceFresh?"수집 정상":"수집 장애"} ·
@@ -149,6 +155,10 @@ export default function AutomationDashboard(){
         <div className="auto-explainer">
           <strong>장기 미확정 원인 (최근 실제 조회 오류 분류)</strong> ·
           {Object.entries(collection.qualityAudit.byReason).map(([name,count])=>name+" "+count+"건").join(" / ")||"분류 대기"}
+        </div>
+        <div className="auto-explainer">
+          <strong>중복 발생한 제공처 장애 (서로 중복 집계 가능)</strong> ·
+          {Object.entries(collection.qualityAudit.byConcurrentFailure??{}).map(([name,count])=>name+" "+count+"경기").join(" / ")||"추가 분류 대기"}
         </div>
         <div className="auto-explainer">
           <strong>지연 리그 상위</strong> ·

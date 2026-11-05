@@ -3,7 +3,7 @@
 // collector independently proves the fixture and capture-before-kickoff time.
 const LEAGUES=new Set(["nba","ita.1","eng.league_cup","eng.1","eng.2","esp.1",
  "ger.1","fra.1","usa.1","ned.1","jpn.1","aus.1","uefa.champions","uefa.europa",
- "uefa.europa.conf","afc.champions","eng.fa","eng.3","esp.2",
+ "uefa.europa.conf","afc.champions","afc.cup","eng.fa","eng.3","esp.2",
  "ita.2","ger.2","fra.2","ned.2"]);
 const safe=(v:unknown)=>typeof v==="string"?v.trim().slice(0,100):"";
 export async function GET(request:Request){

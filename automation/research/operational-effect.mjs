@@ -113,6 +113,7 @@ export function recordOperationalEffect(state,{
    selectedBySport:finalSummary.selectedBySport??{},
    confirmedBySource:finalSummary.confirmedBySource??{},
    waitReasons:smallCounts(finalSummary.waitReasons),
+   espnFailureReasons:smallCounts(finalSummary.espnFailureReasons),
    naverUpstreamFailures:n(finalSummary.naverUpstreamFailures),
    naverFailedRows:n(finalSummary.naverFailedRows),
    deferred:n(finalSummary.finalDeferred),
