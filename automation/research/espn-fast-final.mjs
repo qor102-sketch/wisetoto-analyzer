@@ -200,7 +200,14 @@ export function diagnoseEspnIdentity(payload,fixture,{league=espnLeague(fixture)
   const {home,away}=sourceSides(e);
   return teamEq(fixture.home,home)&&teamEq(fixture.away,away);
  });
- const exact=new Map(matched.filter(e=>/^\d+$/.test(String(e.id??""))).map(e=>[String(e.id),e]));
+ const numeric=matched.filter(e=>/^\d+$/.test(String(e.id??"")));
+ const exact=new Map();
+ for(const e of numeric){
+  const id=String(e.id);
+  if(exact.has(id)&&JSON.stringify(exact.get(id))!==JSON.stringify(e))
+   return {ok:false,waitReason:"ESPN_CONFLICTING_EVENT_ID"};
+  exact.set(id,e);
+ }
  if(exact.size>1)return {ok:false,waitReason:"ESPN_AMBIGUOUS_FIXTURE"};
  if(exact.size===1)return {ok:true,gameId:[...exact.keys()][0],
   event:[...exact.values()][0]};
