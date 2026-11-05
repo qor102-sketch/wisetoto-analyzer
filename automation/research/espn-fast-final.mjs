@@ -109,6 +109,17 @@ const aliases=[
  ["알시브클럽","alseebclub"],
  ["j알후세인","알후세인","alhusseinsc"],
  ["알쇼르타","alshortasc"],
+ // Independently observed ESPN afc.cup 2026-11-04 matches, all eight
+ // full-time scores and event IDs independently logged in official probe.
+ ["무하라크클럽","almuharraqsc"],["u알자지라","알자지라","aljaziraclub"],
+ ["알타아원","altaawoun"],["j알파이살리","알파이살리","alfaisalysc"],
+ ["u알와흐다","알와흐다","alwahdafc"],
+ ["알칼디야sc","alkhaldiyasc"],
+ ["알라이얀","alrayyansc"],["o알나흐다","알나흐다","alnahdaclub"],
+ ["쿠웨이트sc","kuwaitsc"],["pfc나사프","나사프","fcnasaf"],
+ ["아르카다그","arkadagfk"],["골고하르시르잔","golgoharsirjanfc"],
+ ["fc서울","fcseoul"],["테꽁비엣텔","thecongviettelfc"],
+ ["페르십반둥","persibbandung"],
  ["미들즈브러","middlesbrough"],["찰턴애슬레틱","charltonathletic","charlton"],
  ["밀월","millwall"],["더비카운티","derbycounty"],["번리","burnley"],
  ["포츠머스","portsmouth"],["볼턴원더러스","boltonwanderers"],
