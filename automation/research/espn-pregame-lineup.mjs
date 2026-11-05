@@ -1,13 +1,9 @@
 // Strict PRE-only ESPN announced XI. Never use a postmatch box score,
 // generic team roster or a later fetch to backfill PRE.
-import {espnLeague,findEspnFixtureEvent} from "./espn-fast-final.mjs";
+import {espnLeague,findEspnFixtureEvent,espnScoreboardDates} from "./espn-fast-final.mjs";
 const norm=v=>String(v??"").normalize("NFKC").toLowerCase().replace(/[^a-z0-9가-힣]/g,"");
 const ms=60_000;
-const scoreboardDates=fixture=>{
- const utc=new Date(fixture.startMs).toISOString().slice(0,10).replace(/-/g,"");
- const prev=new Date(fixture.startMs-12*3600_000).toISOString().slice(0,10).replace(/-/g,"");
- return [...new Set(["usa.1","nba"].includes(espnLeague(fixture))?[utc,prev]:[utc])];
-};
+const scoreboardDates=espnScoreboardDates;
 export const espnLineupLeague=fixture=>
  fixture.sport==="축구"||fixture.sport==="농구"&&espnLeague(fixture)==="nba"?espnLeague(fixture):null;
 export function parseEspnPregameXi(payload,fixture,event,at){
