@@ -17,7 +17,7 @@ export function finalFailureCategory(row){
  if(/ESPN_AMBIGUOUS_FIXTURE/.test(joined))return "ESPN_AMBIGUOUS_ID";
  // The new reasons distinguish absent upstream schedule, mismatched kickoff,
  // swapped sides and a known source-side name mismatch. Never infer FINAL.
- if(/ESPN_AMBIGUOUS_FIXTURE|ESPN_MISSING_NUMERIC_EVENT_ID/.test(joined))
+ if(/ESPN_AMBIGUOUS_FIXTURE|ESPN_MISSING_NUMERIC_EVENT_ID|ESPN_CONFLICTING_EVENT_ID/.test(joined))
   return "ESPN_ID_UNSAFE";
  if(/ESPN_KICKOFF_MISMATCH|ESPN_NO_EVENTS_NEAR_KICKOFF/.test(joined))
   return "ESPN_KICKOFF_UNPROVEN";
@@ -49,8 +49,10 @@ export function nbaPregameFailureCategory(row){
  if(!Number(row.lineup?.attempts))return "NO_PREGAME_ATTEMPT_RECORDED";
  const reason=String(row.lineup?.lastError??row.lineup?.reason??"");
  if(/AFTER_KICKOFF/.test(reason))return "AFTER_TIPOFF_REJECTED";
- if(/EXACT_IDENTITY|LINEUP_TEAMS_MISSING|TEAM_MISMATCH|EVENT_ID/.test(reason))
+ if(/EXACT_IDENTITY|LINEUP_TEAMS_MISSING|TEAM_MISMATCH|EVENT_ID|KICKOFF_MISMATCH|HOME_TEAM_NOT_MATCHED|AWAY_TEAM_NOT_MATCHED|HOME_AWAY_REVERSED/.test(reason))
   return "ESPN_IDENTITY_UNCONFIRMED";
+ if(/ESPN_SCOREBOARD_EMPTY|ESPN_NO_EVENTS_NEAR_KICKOFF|ESPN_TEAMS_NOT_ON_SCOREBOARD/.test(reason))
+  return "ESPN_FIXTURE_NOT_LISTED";
  if(/NOT_PUBLISHED|XI_NOT_PUBLISHED|PARTIAL/.test(reason))return "NBA_STARTERS_UNPUBLISHED";
  if(/NETWORK|HTTP_50[24]/.test(reason))return "PROVIDER_TIMEOUT";
  if(/NO_VERIFIED_PREGAME_LINEUP_PROVIDER|UNSUPPORTED/.test(reason))return "LEGACY_NO_PROVIDER";
@@ -69,7 +71,7 @@ export function diagnoseDataQuality(state,now=Date.now()){
   // the same fixture. The older exclusive byReason chart hides this overlap.
   const evidence=String(r.checkReason??"")+" | "+
    (Array.isArray(r.resultErrors)?(r.resultErrors.at(-1)?.reasons??[]).join(" | "):"");
-  if(/ESPN_(?:EXACT_IDENTITY_NOT_PROVEN|SCOREBOARD_EMPTY|TEAMS_NOT_ON_SCOREBOARD|KICKOFF_MISMATCH|HOME_AWAY_REVERSED|HOME_TEAM_NOT_MATCHED|AWAY_TEAM_NOT_MATCHED|NO_EVENTS_NEAR_KICKOFF)/.test(evidence))
+  if(/ESPN_(?:EXACT_IDENTITY_NOT_PROVEN|SCOREBOARD_EMPTY|TEAMS_NOT_ON_SCOREBOARD|KICKOFF_MISMATCH|HOME_AWAY_REVERSED|HOME_TEAM_NOT_MATCHED|AWAY_TEAM_NOT_MATCHED|NO_EVENTS_NEAR_KICKOFF|MISSING_NUMERIC_EVENT_ID|CONFLICTING_EVENT_ID)/.test(evidence))
    increment(byConcurrentFailure,"ESPN_IDENTITY_OR_SCHEDULE");
   if(/NAVER_CIRCUIT_OPEN|NAVER_(?:FAST|DIRECT|SCHEDULE).*?(?:NETWORK|HTTP_50[24]|TIMEOUT)|NAVER_PROVIDER_NETWORK/.test(evidence))
    increment(byConcurrentFailure,"NAVER_NETWORK_OR_50X");
