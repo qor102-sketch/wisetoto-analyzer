@@ -4,7 +4,7 @@ import {officialKLeagueId,officialKLeagueRequest,parseOfficialKLeagueFinal,
  lookupOfficialKLeagueFinal} from "./kleague-official-final.mjs";
 import {selectFinalAuditRows} from "./final-scan-plan.mjs";
 import {mergeProviderFinal,recordEspnKickoffEvidence} from "./collect-first.mjs";
-import {diagnoseDataQuality} from "./data-quality-audit.mjs";
+import {diagnoseDataQuality,finalFailureCategory} from "./data-quality-audit.mjs";
 import {inspectEspnKickoffMismatch,parseEspnFinal} from "./espn-fast-final.mjs";
 
 const T=Date.parse("2026-11-01T05:00:00Z"),H=3600000;
@@ -135,4 +135,15 @@ test("ESPN ambiguous or conflicting club pairs do not produce misleading clock e
  const source={ok:true,league:"uefa.champions",events:[one]};
  assert.equal(inspectEspnKickoffMismatch(source,{...row,home:"첼시"}),null);
  assert.equal(recordEspnKickoffEvidence({records:[row]},row.key,null).records[0].espnKickoffEvidence,undefined);
+});
+
+test("empty adjacent ESPN schedule is not falsely classified as proven kickoff clock mismatch",()=>{
+ const base={...fixture("리버풀","첼시","UEFA 챔피언스리그"),startMs:T,
+  verdict:"PENDING"};
+ assert.equal(finalFailureCategory({...base,
+  checkReason:"ESPN_FAST:ESPN_NO_EVENTS_NEAR_KICKOFF"}),
+  "ESPN_NO_SOURCE_FIXTURE_NEAR_KICKOFF");
+ assert.equal(finalFailureCategory({...base,
+  checkReason:"ESPN_FAST:ESPN_KICKOFF_MISMATCH"}),
+  "ESPN_KICKOFF_UNPROVEN");
 });
