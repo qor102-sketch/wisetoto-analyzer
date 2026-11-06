@@ -49,7 +49,16 @@ export function interleaveRecentAndBacklog(rows,now){
 export function selectFinalAuditRows(state,now=Date.now(),limit=24){
  if(!Number.isInteger(limit)||limit<=0)return [];
  const pool=dueResults(state,now,Number.MAX_SAFE_INTEGER);
- const supported=interleaveRecentAndBacklog(pool.filter(row=>Boolean(espnLeague(row))||isJleagueJ2(row)||officialKLeagueNumber(row)),now);
+ // Official K League monthly results are already live-proven. Reserve a
+ // bounded share of the provider-independent quota for old K1/K2 rows:
+ // otherwise a large ESPN identity backlog can starve the newly healthy source.
+ // Keep at least ten ESPN/J.LEAGUE supported slots at limit=24.
+ const officialKLeague=interleaveRecentAndBacklog(pool.filter(row=>Boolean(officialKLeagueNumber(row))),now);
+ const otherSupported=interleaveRecentAndBacklog(pool.filter(row=>
+  !officialKLeagueNumber(row)&&(Boolean(espnLeague(row))||isJleagueJ2(row))),now);
+ const officialReserve=Math.min(officialKLeague.length,Math.min(6,Math.max(1,Math.floor(limit/4))));
+ const supported=[...officialKLeague.slice(0,officialReserve),
+  ...otherSupported,...officialKLeague.slice(officialReserve)];
  const others=interleaveRecentAndBacklog(
   limitFailingNaverGroups(pool.filter(row=>!espnLeague(row)&&!isJleagueJ2(row)&&!officialKLeagueNumber(row))),now);
  // Preserve provider-independent ESPN quota and healthy Naver-only access.
