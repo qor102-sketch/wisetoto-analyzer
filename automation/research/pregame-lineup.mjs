@@ -5,6 +5,24 @@ import {espnLineupLeague,lookupEspnPregameXi} from "./espn-pregame-lineup.mjs";
 export const LINEUP_WINDOW_MS=180*60000;
 export const NBA_TIPOFF_RESERVE_MS=45*60000;
 export const NBA_FOCUSED_RECHECK_MS=30*1000;
+/** Observational only. Pre-tipoff source absence is not a 5+5 claim. */
+export function classifyNbaPregamePublication(row,observation,attemptAt,recordedAt){
+ if(row?.sport!=="농구"||espnLineupLeague(row)!=="nba"||
+   !Number.isFinite(attemptAt)||attemptAt>=row.startMs)
+  return null;
+ const minutesToTipoff=(row.startMs-attemptAt)/60000;
+ const reason=String(observation?.reason??"");
+ return {
+  inside45:minutesToTipoff<=45,
+  inside15:minutesToTipoff<=15,
+  unpublished:/NOT_PUBLISHED|XI_NOT_PUBLISHED/.test(reason),
+  identityUnproven:/EXACT_IDENTITY|LINEUP_TEAMS_MISSING|TEAM_MISMATCH|EVENT_ID|KICKOFF_MISMATCH|HOME_AWAY/.test(reason),
+  networkFailure:/NETWORK|HTTP_50[24]|TIMEOUT/.test(reason),
+  afterTipoffRejected:recordedAt>=row.startMs||/AFTER_KICKOFF/.test(reason),
+  confirmedBeforeTipoff:observation?.status==="CONFIRMED"&&
+   recordedAt<row.startMs&&observation?.homeCount===5&&observation?.awayCount===5
+ };
+}
 const nbaFocusedReason=new Set(["ESPN_NBA_STARTERS_NOT_PUBLISHED","ESPN_XI_NOT_PUBLISHED"]);
 export function nbaFocusedRecheckEligible(row,observation,at,used=0){
  const remaining=row.startMs-at;
@@ -164,10 +182,13 @@ export async function collectLineupSnapshots(state,{
  let naverFailures=0,naverSkipped=0,naverFallbacks=0;
  let nbaFocusedRechecks=0,nbaFocusedRecovered=0;
  let nbaAttempted=0,nbaConfirmed=0;
+ let nbaInside45=0,nbaInside15=0,nbaUnpublished=0,
+  nbaIdentityUnproven=0,nbaNetworkFailure=0,nbaAfterTipoffRejected=0;
  const selected=pregameLineupCandidates(state,now(),limit);
  const nbaPrioritySelected=selected.filter(r=>r.sport==="농구"&&espnLineupLeague(r)==="nba").length;
  for(const r of selected){
   let observation,focusedRetried=false;
+  const requestStartedAt=now();
   const viaEspn=Boolean(espnLineupLeague(r));
   if(viaEspn){
    observation=await lookupEspnPregameXi(r,{now:now(),base,fetchFn:fetcher,cache:espnCache});
@@ -215,6 +236,13 @@ export async function collectLineupSnapshots(state,{
   attempted++;
   if(r.sport==="농구"&&espnLineupLeague(r)==="nba"){
    nbaAttempted++;
+   const publication=classifyNbaPregamePublication(r,observation,requestStartedAt,at);
+   if(publication?.inside45)nbaInside45++;
+   if(publication?.inside15)nbaInside15++;
+   if(publication?.unpublished)nbaUnpublished++;
+   if(publication?.identityUnproven)nbaIdentityUnproven++;
+   if(publication?.networkFailure)nbaNetworkFailure++;
+   if(publication?.afterTipoffRejected)nbaAfterTipoffRejected++;
    if(observation.status==="CONFIRMED"&&at<r.startMs&&
       observation.homeCount===5&&observation.awayCount===5)nbaConfirmed++;
   }
@@ -226,5 +254,7 @@ export async function collectLineupSnapshots(state,{
  }
  return {state:next,summary:{attempted,confirmed,partial,unavailable,unsupported,
   sharedEspnScoreboards:espnCache.size,naverFailures,naverSkipped,naverFallbacks,
-  nbaFocusedRechecks,nbaFocusedRecovered,nbaPrioritySelected,nbaAttempted,nbaConfirmed,reasonCounts:reasons}};
+  nbaFocusedRechecks,nbaFocusedRecovered,nbaPrioritySelected,nbaAttempted,nbaConfirmed,
+  nbaInside45,nbaInside15,nbaUnpublished,nbaIdentityUnproven,nbaNetworkFailure,nbaAfterTipoffRejected,
+  reasonCounts:reasons}};
 }

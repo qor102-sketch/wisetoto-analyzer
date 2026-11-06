@@ -23,7 +23,9 @@ type EffectTotals={collected:number;pregameCaptured:number;pregameOdds:number;ve
 type EffectScan={id:string;at:number;commit:string;sourceFresh:boolean;
  capture:{listed:number;inThirtyMinuteWindow:number;captured:number;missingIdentity:number;watchlistMissing:number;delayed:boolean};
  lineup:{attempted:number;confirmed:number;nbaAttempted:number;nba5v5Confirmed:number;
-  nbaFocusedRechecks:number;nbaFocusedRecovered:number;reasons:Record<string,number>};
+  nbaFocusedRechecks:number;nbaFocusedRecovered:number;reasons:Record<string,number>;
+  nbaInside45?:number;nbaInside15?:number;nbaUnpublished?:number;
+  nbaIdentityUnproven?:number;nbaNetworkFailure?:number;nbaAfterTipoffRejected?:number};
  final:{checked:number;providerConfirmed:number;newVerified:number;selectedBySport:Record<string,number>;
   confirmedBySource:Record<string,number>;waitReasons:Record<string,number>;espnFailureReasons?:Record<string,number>;
   naverUpstreamFailures:number;naverFailedRows?:number;deferred?:number;naverCircuitSkipped:number};
@@ -123,6 +125,16 @@ export default function AutomationDashboard(){
           네이버 실패 조회 주소 {collection.operationalEffect.latest.final.naverUpstreamFailures}개 / 영향받은 경기 {collection.operationalEffect.latest.final.naverFailedRows??0}건 / 실제 조회 없이 보류 {collection.operationalEffect.latest.final.deferred??0}건 / 동일 그룹 회로 차단 {collection.operationalEffect.latest.final.naverCircuitSkipped}건.
         </div>
         <div className="auto-explainer">
+          <strong>NBA 실제 경기 시작 전 발표 여부 · 최신 스캔</strong> ·
+          T-45분 안에 공식 제공처 조회 {collection.operationalEffect.latest.lineup.nbaInside45??0}경기 /
+          T-15분 안에 조회 {collection.operationalEffect.latest.lineup.nbaInside15??0}경기 ·
+          선발 미공개 응답 {collection.operationalEffect.latest.lineup.nbaUnpublished??0}건 /
+          경기 식별 미확인 {collection.operationalEffect.latest.lineup.nbaIdentityUnproven??0}건 /
+          제공처 통신 장애 {collection.operationalEffect.latest.lineup.nbaNetworkFailure??0}건 /
+          킥오프 후 선발 PRE 거부 {collection.operationalEffect.latest.lineup.nbaAfterTipoffRejected??0}건.
+          공식 발표되지 않은 5+5명을 추정 명단으로 대체하지 않습니다.
+        </div>
+        <div className="auto-explainer">
           <strong>NBA 전체 활성 경기 {collection.operationalEffect.current.activeNbaFixtures}건 중 실제 사전 조회 이력 {collection.operationalEffect.current.activeNbaAttempted}건</strong> ·
           선발 미확인 사유 {Object.entries(collection.operationalEffect.current.nbaLineupReasons).slice(0,5).map(([k,v])=>k+" "+v+"건").join(" / ")||"이력 없음"} ·
           최신 종료 조회 실패 분류 {Object.entries(collection.operationalEffect.latest.final.waitReasons).slice(0,5).map(([k,v])=>k+" "+v+"건").join(" / ")||"실패 없음"}.
@@ -149,12 +161,13 @@ export default function AutomationDashboard(){
         <div className="scan-head"><strong>데이터 품질 감사 · 경기 시작 후 24시간 이상 미확정</strong>
           <span>{collection.qualityAudit.overdue24h}경기 · 마지막 집계 {date(collection.qualityAudit.at)} KST</span></div>
         <div className="auto-explainer">
-          <strong>독립 ESPN 지원 {collection.qualityAudit.byProvider.ESPN_SUPPORTED??0}건 / J.LEAGUE 공식 J2 지원 {collection.qualityAudit.byProvider.JLEAGUE_OFFICIAL_J2_SUPPORTED??0}건 / 기타 독립 리그 제공처 미확보 {collection.qualityAudit.byProvider.NO_INDEPENDENT_LEAGUE_SOURCE??0}건</strong> ·
+          <strong>독립 ESPN 지원 {collection.qualityAudit.byProvider.ESPN_SUPPORTED??0}건 / J.LEAGUE 공식 J2 지원 {collection.qualityAudit.byProvider.JLEAGUE_OFFICIAL_J2_SUPPORTED??0}건 / K LEAGUE 공식 K1·K2 지원 {collection.qualityAudit.byProvider.KLEAGUE_OFFICIAL_1_2_SUPPORTED??0}건 / 기타 독립 리그 제공처 미확보 {collection.qualityAudit.byProvider.NO_INDEPENDENT_LEAGUE_SOURCE??0}건</strong> ·
           NBA 시작 시각이 지난 경기 {collection.qualityAudit.nbaPast}건 (미래 {collection.qualityAudit.nbaFuture}건).
         </div>
         <div className="auto-explainer">
           <strong>장기 미확정 원인 (최근 실제 조회 오류 분류)</strong> ·
           {Object.entries(collection.qualityAudit.byReason).map(([name,count])=>name+" "+count+"건").join(" / ")||"분류 대기"}
+          <span> · ESPN_NO_EVENTS_NEAR_KICKOFF은 경기 자체가 제공처 목록에 없다는 뜻으로, 실제 시각 차이가 증명됐다는 뜻이 아닙니다.</span>
         </div>
         <div className="auto-explainer">
           <strong>중복 발생한 제공처 장애 (서로 중복 집계 가능)</strong> ·

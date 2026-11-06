@@ -104,6 +104,12 @@ export function recordOperationalEffect(state,{
    nba5v5Confirmed:n(lineupSummary.nbaConfirmed),
    nbaFocusedRechecks:n(lineupSummary.nbaFocusedRechecks),
    nbaFocusedRecovered:n(lineupSummary.nbaFocusedRecovered),
+   nbaInside45:n(lineupSummary.nbaInside45),
+   nbaInside15:n(lineupSummary.nbaInside15),
+   nbaUnpublished:n(lineupSummary.nbaUnpublished),
+   nbaIdentityUnproven:n(lineupSummary.nbaIdentityUnproven),
+   nbaNetworkFailure:n(lineupSummary.nbaNetworkFailure),
+   nbaAfterTipoffRejected:n(lineupSummary.nbaAfterTipoffRejected),
    reasons:smallCounts(lineupSummary.reasonCounts)
   },
   final:{

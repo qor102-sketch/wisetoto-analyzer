@@ -8,6 +8,7 @@ import {lookupNaverScheduleFinal} from "./naver-fast-final.mjs";
 import {naverOutageGroup} from "./naver-outage-group.mjs";
 import {espnLeague,lookupEspnFinal} from "./espn-fast-final.mjs";
 import {isJleagueJ2,lookupJleagueJ2Final} from "./jleague-j2-final.mjs";
+import {officialKLeagueNumber,lookupOfficialKLeagueFinal} from "./kleague-official-final.mjs";
 import {collectLineupSnapshots} from "./pregame-lineup.mjs";
 import {selectFinalAuditRows} from "./final-scan-plan.mjs";
 import {effectTotals,recordOperationalEffect} from "./operational-effect.mjs";
@@ -50,6 +51,7 @@ const supportedNaver=new Set(["축구","농구","야구"]);
 const scheduleCache=new Map();
 const espnCache=new Map();
 const jleagueCache=new Map();
+const kleagueCache=new Map();
 let finalChecked=0,finalConfirmed=0,finalWaitReasons={},confirmedBySource={};
 const espnFailureReasons={};
 async function requestFinal(url){
@@ -101,6 +103,14 @@ for(const r of finalQueue){
    const official=await lookupJleagueJ2Final(r,{cache:jleagueCache,now:Date.now()});
    if(official.ok)confirmed=official;
    else reasons.push("JLEAGUE_J2:"+String(official.waitReason).slice(0,150));
+ }
+ if(!confirmed&&officialKLeagueNumber(r)){
+   // League-owned official FE+endYn result only. Cache source months across
+   // all K1/K2 fixtures; never infer a FINAL from Naver error/elapsed time.
+   providerAttempted=true;
+   const official=await lookupOfficialKLeagueFinal(r,{cache:kleagueCache,now:Date.now()});
+   if(official.ok)confirmed=official;
+   else reasons.push("KLEAGUE_OFFICIAL:"+String(official.waitReason).slice(0,145));
  }
  if(!confirmed&&supportedNaver.has(r.sport)){
    // A failed Naver football category must not silence NBA/KBL/baseball,
@@ -167,6 +177,7 @@ console.log("FAST_FINAL_AUDIT "+JSON.stringify({
  checked:finalChecked,confirmed:finalConfirmed,deferred:finalDeferred,waiting:finalChecked-finalConfirmed,
  sharedScheduleQueries:scheduleCache.size,sharedEspnQueries:espnCache.size,
  sharedOfficialJ2Queries:jleagueCache.size,
+ sharedOfficialKLeagueQueries:kleagueCache.size,
  naverUpstreamFailures,naverFailedRows,naverOutageSkipped,
  naverCircuitGroups:Object.fromEntries(naverFailureGroups),waitReasons:finalWaitReasons,
  espnFailureReasons

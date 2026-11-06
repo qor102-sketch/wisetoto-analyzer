@@ -95,8 +95,8 @@ test("NBA diagnostics distinguish unpublished, unmatched, unqueried, and real 5+
  assert.equal(nbaPregameFailureCategory(rows[2]),"ESPN_IDENTITY_UNCONFIRMED");
 });
 
-test("a failing Naver-only K League date gets two probes, not 24 repeated skipped audits",()=>{
- const failed=Array.from({length:30},(_,i)=>({...row("dom-"+i,"축구","K리그2"),
+test("a failing Naver-only unsupported football date gets two probes, not 24 repeated skipped audits",()=>{
+ const failed=Array.from({length:30},(_,i)=>({...row("dom-"+i,"축구","K리그3"),
   home:"H"+i,checkReason:"NAVER_CIRCUIT_OPEN_RETRY_NEXT_SCAN"}));
  const selected=selectFinalAuditRows({records:failed},T,24);
  assert.equal(selected.length,2);
@@ -106,7 +106,7 @@ test("a failing Naver-only K League date gets two probes, not 24 repeated skippe
  assert.equal(selectFinalAuditRows({records:healthy},T,24).length,24);
 });
 test("Naver outage cap does not throttle independent ESPN or other healthy groups",()=>{
- const bad=Array.from({length:12},(_,i)=>({...row("bad-"+i,"축구","K리그2"),
+ const bad=Array.from({length:12},(_,i)=>({...row("bad-"+i,"축구","K리그3"),
   checkReason:"NAVER_FAST:NAVER_DIRECT_NETWORK:TimeoutError"}));
  const healthy=Array.from({length:12},(_,i)=>({...row("healthy-"+i,"축구","일본 J3리그",T-34*H),
   home:"H"+i,checkReason:"WAITING_FOR_END",startMs:T-35*H}));

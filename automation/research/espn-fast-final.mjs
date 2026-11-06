@@ -33,7 +33,7 @@ const aliases=[
  ["파지아노오카야마","fagianookayama"],
  ["fc도쿄","fctokyo"],
  ["가시와레이솔","kashiwareysol"],
- ["우라와레즈","우라와레드다이아몬즈","urawareds","urawareddiamonds"],
+ ["우라와레즈","우라와레드","우라와레드다이아몬즈","urawareds","urawareddiamonds"],
  ["멜버른시티","멜버른시티fc","melbournecityfc","melbournecity"],
  ["웨스턴시드니원더러스","웨스턴시드니원더러스fc","westernsydneywanderersfc","westernsydneywanderers"],
  ["뉴캐슬제츠","뉴캐슬제트","newcastlejets"],
@@ -100,6 +100,38 @@ const aliases=[
  ["말라가","malaga"],
  ["트루아ac","troyes"],
  ["르망fc","lemans"],
+ // Audited 2026-10-28 through 11-04 against ESPN official fixture IDs,
+ // exact competition, both sides at exactly the Betman kickoff, and FULL_TIME.
+ // These are narrowly source-proven spelling aliases, NOT loose substring
+ // matching or a substitute for the strict unique event/FINAL/score gate.
+ ["클뤼프브뤼허","clubbrugge"],
+ ["울버햄튼원더러스","wolverhamptonwanderers"],
+ ["슬라비아프라하","slaviaprague"],
+ ["포르투","fcporto"],
+ ["페네르바흐체sk","fenerbahce"],
+ ["부리람유나이티드","buriramunited"],
+ ["as로마","asroma"],
+ ["사우샘프턴","southampton"],
+ ["블랙번로버스","blackburnrovers"],
+ ["퀸즈파크레인저스","queensparkrangers"],
+ ["스완지시티","swanseacity"],
+ ["꽁안하노이","conganhanoi"],
+ ["대전하나시티즌","daejeonhanacitizenfc"],
+ ["랏차부리","ratchaburifc"],
+ ["에버턴","everton"],
+ ["휴스턴다이너모fc","houstondynamofc"],
+ ["뉴욕레드불스","redbullnewyork"],
+ ["코모1907","como"],
+ ["센트럴코스트매리너스","centralcoastmarinersfc"],
+ ["노팅엄포리스트","nottinghamforest"],
+ ["웨스트햄유나이티드","westhamunited"],
+ ["코번트리시티","coventrycity"],
+ ["밴쿠버화이트캡스fc","vancouverwhitecaps"],
+ ["미네소타유나이티드fc","minnesotaunitedfc"],
+ ["애틀랜타유나이티드fc","atlantaunitedfc"],
+ ["인터마이애미cf","intermiamicf"],
+ ["토론토fc","torontofc"],
+ ["포항스틸러스","pohangsteelers"],
  // Cross-checked with ESPN 2026-11-02 AFC Elite event 401912631,
  // Pakhtakor (home) vs Al Nassr (away), 13:45 UTC.
  ["파흐타코르","pakhtakor"],["s알나스르","알나스르","alnassr"],
@@ -136,8 +168,8 @@ const aliases=[
  ["라싱산탄데르","racingsantander"],["헤타페","getafe"],["세비야","sevilla"],
  ["올랭피크드마르세유","마르세유","marseille"],
  ["올랭피크리옹","리옹","lyon","olympiquelyonnais"],["앙제sco","앙제","angers"],
- ["파리fc","parisfc"],["as모나코","모나코","monaco"],
- ["rc스트라스부르","스트라스부르","strasbourg"],["aj오세르","오세르","auxerre"],
+ ["파리fc","parisfc"],["as모나코","모나코","monaco","asmonaco"],
+ ["rc스트라스부르","스트라스부르","strasbourg"],["aj오세르","오세르","auxerre","ajauxerre"],
  ["ss라치오","라치오","lazio"],["칼리아리","cagliari"],
  ["us레체","레체","lecce"],["토리노","torino"],["프로시노네","frosinone"],
  ["프랑크푸르트","eintrachtfrankfurt","frankfurt"],["함부르크","hamburg","hamburgersv"],
@@ -245,6 +277,56 @@ export function diagnoseEspnIdentity(payload,fixture,{league=espnLeague(fixture)
   return {ok:false,waitReason:"ESPN_HOME_TEAM_NOT_MATCHED"};
  if(!inTime.length)return {ok:false,waitReason:"ESPN_NO_EVENTS_NEAR_KICKOFF"};
  return {ok:false,waitReason:"ESPN_TEAMS_NOT_ON_SCOREBOARD"};
+}
+// Diagnostic only: a source event at another kickoff does not authorize a
+// result, identity correction, calendar rewrite or retrospective PRE. Only
+// the normal strict +/-2h path in findEspnFixtureEvent can accept FINAL.
+// Diagnostic candidate inspection: a one-sided name match is NOT fixture
+// proof and is never fed to result settlement. Display only source names/IDs
+// so a maintainer can add a genuinely corroborated, narrow team alias.
+export function espnSideCandidates(payload,fixture){
+ const league=espnLeague(fixture);
+ if(!league||payload?.ok!==true||payload.league!==league||
+  !Array.isArray(payload.events)||!Number.isFinite(fixture.startMs))return [];
+ const seen=new Set(),found=[];
+ for(const e of payload.events){
+  const at=Date.parse(String(e?.date??""));
+  if(!Number.isFinite(at)||Math.abs(at-fixture.startMs)>2*3600000)continue;
+  const home=e?.competitors?.find(c=>c.homeAway==="home")?.name;
+  const away=e?.competitors?.find(c=>c.homeAway==="away")?.name;
+  const homeMatched=teamEq(fixture.home,home);
+  const awayMatched=teamEq(fixture.away,away);
+  if(!homeMatched&&!awayMatched)continue;
+  const id=String(e?.id??"");if(!/^\d+$/.test(id)||seen.has(id))continue;
+  seen.add(id);
+  found.push({id,home,away,homeMatched,awayMatched,
+   date:new Date(at).toISOString(),completed:e?.completed===true,
+   statusName:String(e?.statusName??"").slice(0,40)});
+  if(found.length>=5)break;
+ }
+ return found;
+}
+export function espnKickoffCandidateInfo(payload,fixture){
+ const league=espnLeague(fixture);
+ if(!league||payload?.ok!==true||payload.league!==league||
+   !Array.isArray(payload.events)||!Number.isFinite(fixture.startMs))
+  return {unique:false,candidates:0};
+ const matches=new Map();
+ for(const e of payload.events){
+  const id=String(e?.id??"");
+  const sourceAt=Date.parse(String(e?.date??""));
+  if(!/^\d+$/.test(id)||!Number.isFinite(sourceAt))continue;
+  const home=e?.competitors?.find(c=>c.homeAway==="home")?.name;
+  const away=e?.competitors?.find(c=>c.homeAway==="away")?.name;
+  if(!teamEq(fixture.home,home)||!teamEq(fixture.away,away))continue;
+  const prior=matches.get(id);
+  if(prior&&prior.sourceAt!==sourceAt)return {unique:false,candidates:2,reason:"SOURCE_ID_CONFLICT"};
+  matches.set(id,{sourceAt});
+ }
+ if(matches.size!==1)return {unique:false,candidates:matches.size};
+ const [gameId,event]=[...matches.entries()][0];
+ return {unique:true,candidates:1,gameId,sourceAt:new Date(event.sourceAt).toISOString(),
+  deltaMinutes:Math.round((event.sourceAt-fixture.startMs)/60000)};
 }
 export function findEspnFixtureEvent(payload,fixture,{league=espnLeague(fixture)}={}){
  return diagnoseEspnIdentity(payload,fixture,{league});
