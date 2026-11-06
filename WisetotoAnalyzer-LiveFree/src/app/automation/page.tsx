@@ -36,6 +36,9 @@ type OperationalEffect={schema:string;baseline:{at:number;origin:string;totals:E
 type DataQualityAudit={at:number;overdue24h:number;bySport:Record<string,number>;
  byLeague:Record<string,number>;byReason:Record<string,number>;byProvider:Record<string,number>;
  byConcurrentFailure?:Record<string,number>;
+ espnKickoffOffsets?:Record<string,number>;
+ espnKickoffSamples?:Array<{sport:string;league:string;home:string;away:string;
+ fixtureStartMs:number;officialEspnStartMs:number;deltaMinutes:number;espnEventId:string;note:string}>;
  nbaPast:number;nbaPregame:Record<string,number>;nbaFuture:number;note:string};
 type CollectedLedger={generatedAt:string;qualityAudit?:DataQualityAudit;operationalEffect?:OperationalEffect|null;resultAudit?:{future:number;awaitingLikelyFinish:number;dueNow:number;coolingDown:number;overdueSixHours:number;overdue24Hours:number;outsideRetryHorizon:number};source?:{lastFeedAt:number|null;ok:boolean;error:string|null;lastCaptureSummary?:{listed:number;window:number;new:number;noOdds:number;missingIdentity:number;missedWindow:number;watchlistMissing?:number;delayedScan?:boolean;sinceLastScanMs?:number|null}|null};counts:{collected:number;active?:number;archived?:number;verified:number;pending:number;pregameCaptured:number;verifiedWithPregame:number;resultOnly:number;missingFixtureId:number;lineupConfirmed?:number;lineupPartial?:number;lineupUnsupported?:number;verifiedWithLineup?:number};records:CollectedRow[]};
 type History={scanHealth?:ScanHealth|null;schema:string;publishedAt:string;lastRunAt:number|null;source:string;counts:{total:number;pending:number;verified:number;review?:number;void:number;hit:number;miss:number;warnings:number;overdue?:number};records:Match[]};
@@ -149,7 +152,7 @@ export default function AutomationDashboard(){
         <div className="scan-head"><strong>데이터 품질 감사 · 경기 시작 후 24시간 이상 미확정</strong>
           <span>{collection.qualityAudit.overdue24h}경기 · 마지막 집계 {date(collection.qualityAudit.at)} KST</span></div>
         <div className="auto-explainer">
-          <strong>독립 ESPN 지원 {collection.qualityAudit.byProvider.ESPN_SUPPORTED??0}건 / J.LEAGUE 공식 J2 지원 {collection.qualityAudit.byProvider.JLEAGUE_OFFICIAL_J2_SUPPORTED??0}건 / 기타 독립 리그 제공처 미확보 {collection.qualityAudit.byProvider.NO_INDEPENDENT_LEAGUE_SOURCE??0}건</strong> ·
+          <strong>독립 ESPN 지원 {collection.qualityAudit.byProvider.ESPN_SUPPORTED??0}건 / J.LEAGUE 공식 J2 지원 {collection.qualityAudit.byProvider.JLEAGUE_OFFICIAL_J2_SUPPORTED??0}건 / K리그 공식 결과 지원 {collection.qualityAudit.byProvider.KLEAGUE_OFFICIAL_SOURCE_SUPPORTED??0}건 / 기타 독립 리그 제공처 미확보 {collection.qualityAudit.byProvider.NO_INDEPENDENT_LEAGUE_SOURCE??0}건</strong> ·
           NBA 시작 시각이 지난 경기 {collection.qualityAudit.nbaPast}건 (미래 {collection.qualityAudit.nbaFuture}건).
         </div>
         <div className="auto-explainer">
@@ -160,6 +163,17 @@ export default function AutomationDashboard(){
           <strong>중복 발생한 제공처 장애 (서로 중복 집계 가능)</strong> ·
           {Object.entries(collection.qualityAudit.byConcurrentFailure??{}).map(([name,count])=>name+" "+count+"경기").join(" / ")||"추가 분류 대기"}
         </div>
+        <div className="auto-explainer">
+          <strong>ESPN 실제 동일 팀 경기의 시작 시각 차이 (진단 전용)</strong> ·
+          {Object.entries(collection.qualityAudit.espnKickoffOffsets??{}).map(([name,count])=>name+" "+count+"건").join(" / ")||"동일 팀의 공식 시각 대조 자료 미확보"}
+        </div>
+        {(collection.qualityAudit.espnKickoffSamples??[]).length>0&&<div className="auto-explainer">
+          <strong>ESPN 시각 오차 경기별 근거 (최대 12건, 결과 검증 아님)</strong>
+          {collection.qualityAudit.espnKickoffSamples?.map((r,i)=><div key={r.espnEventId+"-"+i}>
+            {r.league} · {r.home} vs {r.away} · 원본 {date(r.fixtureStartMs)} KST /
+            ESPN {date(r.officialEspnStartMs)} KST · 차이 {r.deltaMinutes}분 · ESPN ID {r.espnEventId}
+          </div>)}
+        </div>}
         <div className="auto-explainer">
           <strong>지연 리그 상위</strong> ·
           {Object.entries(collection.qualityAudit.byLeague).map(([name,count])=>name+" "+count+"건").join(" / ")||"없음"}
