@@ -252,7 +252,7 @@ export function inspectEspnKickoffMismatch(payload,fixture,{league=espnLeague(fi
     !Array.isArray(payload.events))return null;
  const byId=new Map();
  for(const e of payload.events){
-  if(!/^\\d+$/.test(String(e?.id??"")))continue;
+  if(!/^\d+$/.test(String(e?.id??"")))continue;
   const at=Date.parse(String(e?.date??""));
   if(!Number.isFinite(at)||!Number.isFinite(fixture?.startMs))continue;
   const c=Array.isArray(e.competitors)?e.competitors:[];
