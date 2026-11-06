@@ -115,7 +115,7 @@ const aliases=[
  ["블랙번로버스","blackburnrovers"],
  ["퀸즈파크레인저스","queensparkrangers"],
  ["스완지시티","swanseacity"],
- ["꽁안하노이","congannanoi"],
+ ["꽁안하노이","conganhanoi"],
  ["대전하나시티즌","daejeonhanacitizenfc"],
  ["랏차부리","ratchaburifc"],
  ["에버턴","everton"],
