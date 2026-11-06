@@ -103,6 +103,7 @@ async function auditKLeague(state){
    console.log("KLEAGUE_OFFICIAL_SHAPE "+JSON.stringify({leagueId,status:response.status,
     isJson:!!json,keys:Object.keys(data).slice(0,15),
     schedule:matches.length,clubs:clubs.length,states:counts,
+    clubsSample:clubs.map(c=>({code:c.teamId??c.code,short:c.teamNameShort,name:c.teamName,full:c.teamNameFull})),
     examples:matches.filter(m=>m.gameStatus==="FE"||m.endYn==="Y").slice(0,4)
      .map(m=>({id:m.gameId,year:m.year,leagueId:m.leagueId,meetSeq:m.meetSeq,
       homeTeam:m.homeTeam,awayTeam:m.awayTeam,homeTeamName:m.homeTeamName,
@@ -112,4 +113,11 @@ async function auditKLeague(state){
  }
 }
 const state=await restoredLedger();
+console.log("KLEAGUE_FULL_LEDGER_OVERDUE "+JSON.stringify(state.records.filter(r=>
+ ["K리그1","K리그2"].includes(String(r.league??"").trim())&&
+ r.verdict==="PENDING"&&r.startMs<now-86400000).map(r=>({
+ league:r.league,home:r.home,away:r.away,start:new Date(r.startMs).toISOString(),
+ reason:String(r.checkReason??"").slice(0,115)
+}))));
+
 await Promise.all([auditKickoff(state),auditKLeague(state)]);
