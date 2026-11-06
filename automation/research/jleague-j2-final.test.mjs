@@ -115,10 +115,10 @@ test("HTTP/timeout/invalid official HTML cannot convert pending game to VERIFIED
  assert.equal(confirmed.records[0].finalProviderGameId,"2026/110307");
  assert.deepEqual(confirmed.records[0].final,{homeScore:1,awayScore:0});
 });
-test("J2 official source gets independent retry share; Naver-only K league circuit quota remains",()=>{
+test("J2 official source gets independent retry share; Naver-only K3 circuit quota remains",()=>{
  const j2=Array.from({length:12},(_,i)=>({...row("j2-"+i),checkReason:"NAVER_CIRCUIT_OPEN_RETRY_NEXT_SCAN"}));
- const domestic=Array.from({length:12},(_,i)=>({...row("k-"+i),league:"K리그2",checkReason:"NAVER_CIRCUIT_OPEN_RETRY_NEXT_SCAN"}));
+ const domestic=Array.from({length:12},(_,i)=>({...row("k-"+i),league:"K리그3",checkReason:"NAVER_CIRCUIT_OPEN_RETRY_NEXT_SCAN"}));
  const picked=selectFinalAuditRows({records:[...domestic,...j2]},T+5*H,24);
  assert.equal(picked.filter(r=>r.league==="일본 J2리그").length,12);
- assert.equal(picked.filter(r=>r.league==="K리그2").length,2);
+ assert.equal(picked.filter(r=>r.league==="K리그3").length,2);
 });
