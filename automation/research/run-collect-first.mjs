@@ -2,7 +2,7 @@
 import fs from "node:fs/promises";
 import {loadFeed} from "../feed.mjs";
 import {getRecords,STATE_FILE} from "../logic.mjs";
-import {SCHEMA,collect,settlement,mergeProviderFinal,deferFinalWithoutProvider,projection,finalAuditBacklog} from "./collect-first.mjs";
+import {SCHEMA,collect,settlement,mergeProviderFinal,deferFinalWithoutProvider,recordEspnKickoffEvidence,projection,finalAuditBacklog} from "./collect-first.mjs";
 import {lookupVolleyballFinal} from "./volleyball-result.mjs";
 import {lookupNaverScheduleFinal} from "./naver-fast-final.mjs";
 import {naverOutageGroup} from "./naver-outage-group.mjs";
@@ -84,6 +84,8 @@ for(const r of finalQueue){
    const candidate=await lookupEspnFinal(r,{base,cache:espnCache,now:Date.now()});
    if(candidate.ok)confirmed=candidate;
    else {
+     if(candidate.kickoffAudit)
+      state=recordEspnKickoffEvidence(state,r.key,candidate.kickoffAudit,Date.now());
      reasons.push("ESPN_FAST:"+String(candidate.waitReason).slice(0,150));
      // Per-source response categories (not distinct fixtures): adjacent
      // scoreboard days can each explain why the exact match is unavailable.
