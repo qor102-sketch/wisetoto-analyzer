@@ -21,6 +21,24 @@ for(const params of queries){
     gameId:x.gameId,date:x.gameDate,time:x.gameTime,status:x.gameStatus,
     endYn:x.endYn,homeGoal:x.homeGoal,awayGoal:x.awayGoal
    }))}));
+  if(res.ok&&schedules.length){
+   const {parseOfficialKLeagueFinal}=await import("./kleague-official-final.mjs");
+   const fixture=params.leagueId===1?
+    {sport:"축구",league:"K리그1",home:"포항",away:"제주",
+     startMs:Date.parse("2026-11-01T05:00:00Z")}:
+    {sport:"축구",league:"K리그2",home:"수원FC",away:"안산",
+     startMs:Date.parse("2026-11-01T05:00:00Z")};
+   const proof=parseOfficialKLeagueFinal(raw,fixture,{now:Date.parse("2026-11-06T00:00:00Z")});
+   const expected=params.leagueId===1?{id:"2026/1/1/201",home:1,away:1}:
+    {id:"2026/2/2/245",home:1,away:0};
+   console.log("KLEAGUE_LIVE_PROOF "+JSON.stringify({
+    leagueId:params.leagueId,verified:proof.ok,gameId:proof.gameId,
+    scores:proof.result,reason:proof.waitReason
+   }));
+   if(!proof.ok||proof.gameId!==expected.id||
+    proof.result.homeScore!==expected.home||proof.result.awayScore!==expected.away)
+    process.exitCode=1;
+  }
   console.log("KLEAGUE_OFFICIAL_PROBE "+JSON.stringify({leagueId:params.leagueId,status:res.status,
    validSchema:Array.isArray(data?.scheduleList),count:schedules.length,fields:sample.length?Object.keys(sample[0]):[],
    sample:sample.map(x=>({gameId:x.gameId,leagueId:x.leagueId,year:x.year,meetSeq:x.meetSeq,
