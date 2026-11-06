@@ -136,3 +136,45 @@ test("NBA inside 45 minutes receives bounded reserved slots despite a crowded so
  const early=pregameLineupCandidates({records:[...soccer,tooEarly]},T,5);
  assert.equal(early[0].sport,"축구","NBA with no near-tipoff published XI does not starve soccer");
 });
+
+test("legacy NBA UNSUPPORTED becomes eligible for real pretipoff ESPN 5+5 only",()=>{
+ const before={...row("농구",T+25*M,"legacy-nba"),league:"NBA",
+  home:"보스턴 셀틱스",away:"시카고 불스",
+  lineup:{status:"UNSUPPORTED",reason:"NO_VERIFIED_PREGAME_LINEUP_PROVIDER",
+   lastAttemptAt:T-11*M,attempts:1}};
+ assert.deepEqual(pregameLineupCandidates({records:[before]},T).map(v=>v.key),["legacy-nba"]);
+ const past={...before,startMs:T-5*M};
+ assert.equal(pregameLineupCandidates({records:[past]},T).length,0);
+ const unsupportedKbl={...before,league:"KBL"};
+ assert.equal(pregameLineupCandidates({records:[unsupportedKbl]},T).length,0);
+});
+test("legacy NBA unsupported flag is retired by genuine fresh ESPN failure, never invented 5+5",async()=>{
+ const start=T+25*M;
+ const nba={...row("농구",start,"nba-old"),league:"NBA",
+  home:"보스턴 셀틱스",away:"시카고 불스",
+  lineup:{status:"UNSUPPORTED",reason:"NO_VERIFIED_PREGAME_LINEUP_PROVIDER",
+   lastAttemptAt:T-20*M,attempts:2}};
+ const scoreboard={ok:true,league:"nba",events:[{
+  id:"401998881",date:new Date(start).toISOString(),
+  competitors:[{homeAway:"home",name:"Boston Celtics"},
+   {homeAway:"away",name:"Chicago Bulls"}]}]};
+ const summary={ok:true,source:"ESPN_MATCH_SUMMARY",league:"nba",
+  eventId:"401998881",eventDate:new Date(start).toISOString(),
+  headerTeams:[{homeAway:"home",name:"Boston Celtics"},
+   {homeAway:"away",name:"Chicago Bulls"}],rosters:[]};
+ const req=async url=>({ok:true,status:200,json:async()=>url.includes("scoreboard?")?
+  scoreboard:summary});
+ const one=await collectLineupSnapshots({records:[nba]},{
+  now:()=>T,base:"https://preview.example",fetcher:req,limit:4});
+ assert.equal(one.summary.nbaAttempted,1);
+ assert.equal(one.summary.nbaConfirmed,0);
+ assert.equal(one.state.records[0].lineup.status,"UNAVAILABLE");
+ assert.equal(one.state.records[0].lineup.reason,"ESPN_NBA_STARTERS_NOT_PUBLISHED");
+ assert.equal(one.state.records[0].lineup.attempts,3);
+ assert.equal(one.state.records[0].lineup.capturedAt,undefined);
+ assert.equal(one.state.records[0].startMs,start);
+ const after=await collectLineupSnapshots({records:[nba]},{
+  now:()=>start+M,base:"https://preview.example",fetcher:async()=>{throw Error("NEVER_AFTER_TIPOFF")}});
+ assert.equal(after.summary.attempted,0);
+ assert.equal(after.state.records[0].lineup.status,"UNSUPPORTED");
+});
