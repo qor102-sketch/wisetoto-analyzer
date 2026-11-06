@@ -75,10 +75,10 @@ export function diagnoseDataQuality(state,now=Date.now()){
   increment(bySport,String(r.sport??"UNKNOWN"));
   increment(byLeague,String(r.league??"UNKNOWN").slice(0,55));
   increment(byReason,finalFailureCategory(r));
-  const evidence=r.espnKickoffEvidence;
-  if(evidence?.status==="DIAGNOSTIC_ONLY"&&
-     Number.isInteger(evidence.deltaMinutes)&&Number.isFinite(evidence.sourceKickoffAt)){
-   const minutes=evidence.deltaMinutes,abs=Math.abs(minutes);
+  const kickoffEvidence=r.espnKickoffEvidence;
+  if(kickoffEvidence?.status==="DIAGNOSTIC_ONLY"&&
+     Number.isInteger(kickoffEvidence.deltaMinutes)&&Number.isFinite(kickoffEvidence.sourceKickoffAt)){
+   const minutes=kickoffEvidence.deltaMinutes,abs=Math.abs(minutes);
    const bucket=abs<=120?"WITHIN_STRICT_WINDOW":
     abs<=240?"TWO_TO_FOUR_HOURS":abs<=720?"FOUR_TO_TWELVE_HOURS":
     "TWELVE_TO_THIRTY_SIX_HOURS";
@@ -86,8 +86,8 @@ export function diagnoseDataQuality(state,now=Date.now()){
    if(abs>120&&kickoffSamples.length<12)kickoffSamples.push({
     sport:r.sport,league:String(r.league).slice(0,60),
     home:String(r.home).slice(0,60),away:String(r.away).slice(0,60),
-    fixtureStartMs:r.startMs,officialEspnStartMs:evidence.sourceKickoffAt,
-    deltaMinutes:minutes,espnEventId:evidence.eventId,
+    fixtureStartMs:r.startMs,officialEspnStartMs:kickoffEvidence.sourceKickoffAt,
+    deltaMinutes:minutes,espnEventId:kickoffEvidence.eventId,
     note:"DIAGNOSTIC_ONLY_NOT_FINAL"
    });
   }
