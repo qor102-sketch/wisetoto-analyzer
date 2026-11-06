@@ -5,25 +5,29 @@ import {scorePlausibility} from "../../WisetotoAnalyzer-LiveFree/src/lib/postmat
 const KST=9*3600_000,MIN=60000;
 const normalize=x=>String(x??"").normalize("NFKC").toLowerCase()
  .replace(/[^a-z0-9가-힣]/g,"");
+// All additional Korean variants were cross-checked against actual official
+// K LEAGUE match cards 2026-10-31 and 2026-11-01: 7 exact same-day
+// home/away fixtures with source game IDs 199,200,201,202,243,247,248.
+// A team alias by itself never proves score, league, kickoff, match ID or FE+Y.
 const names=[
  ["포항","포항스틸러스","pohang","pohangsteelers"],
- ["제주","제주sk","jeju","jejusk"],
- ["울산","울산hd","ulsan","ulsanhd"],
+ ["제주","제주sk","제주skfc","jeju","jejusk"],
+ ["울산","울산hd","울산hdfc","ulsan","ulsanhd"],
  ["강원","강원fc","gangwon","gangwonfc"],
  ["서울","fc서울","fcseoul","seoul"],
  ["인천","인천유나이티드","incheon","incheonunited"],
  ["안양","fc안양","anyang","fcanyang"],
  ["부천","부천fc1995","bucheon","bucheonfc"],
  ["광주","광주fc","gwangju","gwangjufc"],
- ["김천","김천상무","gimcheon","gimcheonsangmu"],
+ ["김천","김천상무","김천상무프로축구단","gimcheon","gimcheonsangmu"],
  ["대전","대전하나시티즌","daejeon","daejeonhana"],
- ["전북","전북현대","jeonbuk","jeonbukhyundai"],
+ ["전북","전북현대","전북현대모터스","jeonbuk","jeonbukhyundai"],
  ["수원fc","suwonfc"],["안산","안산그리너스","ansan"],
  ["전남","전남드래곤즈","jeonnam"],
  ["성남","성남fc","seongnam"],
- ["충북청주","충북청주fc","chungbukcheongju"],
- ["파주","파주시민축구단","paju"],
- ["김해","김해fc","gimhae"],
+ ["충북청주","충북청주fc","충북청주프로축구단","chungbukcheongju"],
+ ["파주","파주시민축구단","파주프런티어","paju"],
+ ["김해","김해fc","김해fc2008","gimhae"],
  ["천안","천안시티fc","cheonan"],
  ["경남","경남fc","gyeongnam"],
  ["김포","김포fc","gimpo"],
@@ -33,7 +37,7 @@ const names=[
  ["수원","수원삼성블루윙즈","suwon","suwonsamsung"],
  ["용인","용인fc","yongin"],
  ["화성","화성fc","hwaseong"],
- ["충남아산","충남아산fc","chungnamasan"]
+ ["충남아산","충남아산fc","충남아산프로축구단","chungnamasan"]
 ].map(group=>group.map(normalize));
 const sameClub=(a,b)=>{
  const x=normalize(a),y=normalize(b);
