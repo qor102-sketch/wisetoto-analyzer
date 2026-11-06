@@ -7,7 +7,7 @@ import {selectFinalAuditRows} from "./final-scan-plan.mjs";
 const T=Date.parse("2026-11-01T05:00:00Z"),H=3600000;
 const base=(home="포항 스틸러스",away="제주 SKFC",startMs=T)=>({
  key:"soccer|"+startMs+"|"+home+"|"+away,home,away,sport:"축구",
- league:"K리그1",startMs,verdict:"PENDING",lastResultCheckAt:null});
+ league:"K리그1",startMs,verdict:"PENDING",lastResultCheckAt:null,odds:[],latestOdds:[]});
 const club=(id,name)=>({teamId:id,teamNameShort:name,teamName:name,teamNameFull:name});
 const item=(id=201,homeTeam="K03",awayTeam="K04",hname="POHANG",aname="JEJU")=>({
  gameId:id,year:2026,meetSeq:1,leagueId:1,
