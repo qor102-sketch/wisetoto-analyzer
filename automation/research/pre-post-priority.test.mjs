@@ -101,14 +101,14 @@ test("freshly likely-finished and long-overdue matches each get ESPN and Naver-o
   ...Array.from({length:24},(_,i)=>final("eo"+i,"농구","NBA",T-30*H))
  ];
  const domestic=[
-  ...Array.from({length:12},(_,i)=>final("nr"+i,"축구","K리그1",T-5*H)),
-  ...Array.from({length:12},(_,i)=>final("no"+i,"축구","K리그1",T-30*H))
+  ...Array.from({length:12},(_,i)=>final("nr"+i,"축구","K리그3",T-5*H)),
+  ...Array.from({length:12},(_,i)=>final("no"+i,"축구","K리그3",T-30*H))
  ];
  const selected=selectFinalAuditRows({records:[...espn,...domestic]},T,24);
  assert.equal(selected.length,24);
  assert.equal(new Set(selected.map(x=>x.key)).size,24);
  assert.equal(selected.filter(r=>r.league==="NBA").length,16);
- assert.equal(selected.filter(r=>r.league==="K리그1").length,8);
+ assert.equal(selected.filter(r=>r.league==="K리그3").length,8);
  assert.equal(selected.filter(r=>r.key.startsWith("er")).length,8);
  assert.equal(selected.filter(r=>r.key.startsWith("eo")).length,8);
  assert.equal(selected.filter(r=>r.key.startsWith("nr")).length,4);

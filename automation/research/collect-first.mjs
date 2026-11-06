@@ -131,7 +131,7 @@ export function mergeProviderFinal(state,fixtureKeyValue,payload,now=Date.now())
    r.checkReason="INVALID_SPORT_SCORE";
  }else{
    r.verdict="VERIFIED";r.final={homeScore:Number(payload.result.homeScore),awayScore:Number(payload.result.awayScore)};
-   r.resultSource=["SPORTSAPI","NAVER","ESPN","JLEAGUE"].includes(payload.source)
+   r.resultSource=["SPORTSAPI","NAVER","ESPN","JLEAGUE","KLEAGUE"].includes(payload.source)
      ?payload.source:"VERIFIED_FINAL_PROVIDER";r.verifiedAt=now;r.checkReason=null;
    // Immutable source identity/proof for postpilot audit. Betman numeric
    // fixtureId is a separate namespace; never replace it with a Naver ID.
@@ -142,6 +142,19 @@ export function mergeProviderFinal(state,fixtureKeyValue,payload,now=Date.now())
 }
 // Circuit-open or provider-unavailable rows were NOT queried. Preserve the
 // last real result check timestamp and its evidence; record deferrals apart.
+// Non-settlement audit metadata. Keep the Betman fixture kickoff immutable,
+// never replace it with ESPN metadata, and never turn PENDING into VERIFIED.
+export function recordEspnKickoffEvidence(state,fixtureKeyValue,evidence,now=Date.now()){
+ if(!evidence||!Number.isFinite(evidence.sourceKickoffAt)||
+   !Number.isInteger(evidence.deltaMinutes)||Math.abs(evidence.deltaMinutes)>2160||
+   !/^\d+$/.test(String(evidence.eventId??"")))return state;
+ return {...state,records:(state.records??[]).map(r=>
+   r.key===fixtureKeyValue&&r.verdict==="PENDING"?
+   {...r,espnKickoffEvidence:{eventId:String(evidence.eventId),
+    sourceKickoffAt:evidence.sourceKickoffAt,
+    deltaMinutes:evidence.deltaMinutes,checkedAt:now,
+    status:"DIAGNOSTIC_ONLY"}}:r)};
+}
 export function deferFinalWithoutProvider(state,fixtureKeyValue,reason,now=Date.now()){
  const records=(state.records??[]).map(r=>{
   if(r.key!==fixtureKeyValue||r.verdict!=="PENDING")return r;

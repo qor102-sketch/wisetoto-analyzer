@@ -2,6 +2,7 @@
 // FINAL or a pre-tipoff starting five from time elapsed or a network response.
 import {espnLeague} from "./espn-fast-final.mjs";
 import {isJleagueJ2} from "./jleague-j2-final.mjs";
+import {officialKLeagueId} from "./kleague-official-final.mjs";
 const H=3600000;
 const top=(counts,limit=8)=>Object.fromEntries(Object.entries(counts)
  .sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,limit));
@@ -11,6 +12,12 @@ export function finalFailureCategory(row){
  const history=Array.isArray(row.resultErrors)?
   (row.resultErrors.at(-1)?.reasons??[]).join(" | "):"";
  const joined=reason+" | "+history;
+ if(/KLEAGUE_OFFICIAL:.*?SOURCE_(?:NETWORK|HTTP_50[24])/.test(joined))
+  return "KLEAGUE_OFFICIAL_SOURCE_OUTAGE";
+ if(/KLEAGUE_OFFICIAL:.*?(?:EXACT_FIXTURE_NOT_FOUND|AMBIGUOUS_FIXTURE)/.test(joined))
+  return "KLEAGUE_OFFICIAL_IDENTITY_UNCONFIRMED";
+ if(/KLEAGUE_OFFICIAL:.*?FINAL_STATUS_UNCONFIRMED/.test(joined))
+  return "KLEAGUE_OFFICIAL_FINAL_UNCONFIRMED";
  if(/JLEAGUE_J2:.*?(?:NETWORK|HTTP_50[24])/.test(joined))return "JLEAGUE_OFFICIAL_SOURCE_OUTAGE";
  if(/JLEAGUE_J2:.*?EXACT_FIXTURE_NOT_FOUND/.test(joined))return "JLEAGUE_OFFICIAL_IDENTITY_UNCONFIRMED";
  if(/JLEAGUE_J2:.*?FINAL_STATUS_UNCONFIRMED/.test(joined))return "JLEAGUE_OFFICIAL_FINAL_UNCONFIRMED";
@@ -19,8 +26,11 @@ export function finalFailureCategory(row){
  // swapped sides and a known source-side name mismatch. Never infer FINAL.
  if(/ESPN_AMBIGUOUS_FIXTURE|ESPN_MISSING_NUMERIC_EVENT_ID|ESPN_CONFLICTING_EVENT_ID/.test(joined))
   return "ESPN_ID_UNSAFE";
- if(/ESPN_KICKOFF_MISMATCH|ESPN_NO_EVENTS_NEAR_KICKOFF/.test(joined))
-  return "ESPN_KICKOFF_UNPROVEN";
+ // An empty near-kickoff scoreboard is NOT proof of a clock discrepancy.
+ // The audited 43 rows had no uniquely matched official home+away event.
+ if(/ESPN_KICKOFF_MISMATCH/.test(joined))return "ESPN_KICKOFF_UNPROVEN";
+ if(/ESPN_NO_EVENTS_NEAR_KICKOFF/.test(joined))
+  return "ESPN_NO_SOURCE_FIXTURE_NEAR_KICKOFF";
  if(/ESPN_HOME_AWAY_REVERSED/.test(joined))return "ESPN_HOME_AWAY_MISMATCH";
  if(/ESPN_HOME_TEAM_NOT_MATCHED|ESPN_AWAY_TEAM_NOT_MATCHED/.test(joined))
   return "ESPN_TEAM_IDENTITY_MISMATCH";
@@ -37,7 +47,7 @@ export function finalFailureCategory(row){
   return "NAVER_SOURCE_OUTAGE";
  if(/ESPN_FINAL_SCORE_MISSING|NAVER_FINAL_SCORE_MISSING/.test(joined))
   return "FINAL_SCORE_MISSING";
- if(!espnLeague(row)&&!isJleagueJ2(row)&&["축구","농구","야구"].includes(row.sport))
+ if(!espnLeague(row)&&!isJleagueJ2(row)&&!officialKLeagueId(row)&&["축구","농구","야구"].includes(row.sport))
   return "NO_INDEPENDENT_ESPN_LEAGUE";
  if(/WAITING_FOR_END/.test(reason))return "NO_FINAL_AUDIT_YET";
  return "OTHER_UNCONFIRMED";
@@ -63,10 +73,27 @@ export function diagnoseDataQuality(state,now=Date.now()){
  const overdue=unresolved.filter(r=>Number.isFinite(r.startMs)&&
    r.startMs<=now-24*H);
  const bySport={},byLeague={},byReason={},byProvider={},byConcurrentFailure={};
+ const kickoffOffsets={},kickoffSamples=[];
  for(const r of overdue){
   increment(bySport,String(r.sport??"UNKNOWN"));
   increment(byLeague,String(r.league??"UNKNOWN").slice(0,55));
   increment(byReason,finalFailureCategory(r));
+  const kickoffEvidence=r.espnKickoffEvidence;
+  if(kickoffEvidence?.status==="DIAGNOSTIC_ONLY"&&
+     Number.isInteger(kickoffEvidence.deltaMinutes)&&Number.isFinite(kickoffEvidence.sourceKickoffAt)){
+   const minutes=kickoffEvidence.deltaMinutes,abs=Math.abs(minutes);
+   const bucket=abs<=120?"WITHIN_STRICT_WINDOW":
+    abs<=240?"TWO_TO_FOUR_HOURS":abs<=720?"FOUR_TO_TWELVE_HOURS":
+    "TWELVE_TO_THIRTY_SIX_HOURS";
+   increment(kickoffOffsets,bucket);
+   if(abs>120&&kickoffSamples.length<12)kickoffSamples.push({
+    sport:r.sport,league:String(r.league).slice(0,60),
+    home:String(r.home).slice(0,60),away:String(r.away).slice(0,60),
+    fixtureStartMs:r.startMs,officialEspnStartMs:kickoffEvidence.sourceKickoffAt,
+    deltaMinutes:minutes,espnEventId:kickoffEvidence.eventId,
+    note:"DIAGNOSTIC_ONLY_NOT_FINAL"
+   });
+  }
   // Overlap is intentional: ESPN identity failures and Naver 504 can affect
   // the same fixture. The older exclusive byReason chart hides this overlap.
   const evidence=String(r.checkReason??"")+" | "+
@@ -78,7 +105,8 @@ export function diagnoseDataQuality(state,now=Date.now()){
   if(/ESPN_.*?(?:PROXY_HTTP_50[24]|PROXY_NETWORK)/.test(evidence))
    increment(byConcurrentFailure,"ESPN_UPSTREAM_50X");
   increment(byProvider,espnLeague(r)?"ESPN_SUPPORTED":isJleagueJ2(r)?
-   "JLEAGUE_OFFICIAL_J2_SUPPORTED":"NO_INDEPENDENT_LEAGUE_SOURCE");
+   "JLEAGUE_OFFICIAL_J2_SUPPORTED":officialKLeagueId(r)?
+   "KLEAGUE_OFFICIAL_SOURCE_SUPPORTED":"NO_INDEPENDENT_LEAGUE_SOURCE");
  }
  const nbaRows=rows.filter(r=>r.sport==="농구"&&espnLeague(r)==="nba");
  const nba={},nbaPast=nbaRows.filter(r=>r.startMs<=now);
@@ -86,6 +114,7 @@ export function diagnoseDataQuality(state,now=Date.now()){
  return {at:now,overdue24h:overdue.length,bySport:top(bySport),
   byLeague:top(byLeague),byReason:top(byReason),
   byConcurrentFailure:top(byConcurrentFailure),
+  espnKickoffOffsets:top(kickoffOffsets),espnKickoffSamples:kickoffSamples,
   byProvider:top(byProvider),nbaPast:nbaPast.length,
   nbaPregame:top(nba),nbaFuture:nbaRows.length-nbaPast.length,
   note:"Source coverage/identity categories identify audit bottlenecks; no pending row is upgraded to VERIFIED without an independent FINAL."};

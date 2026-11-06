@@ -246,6 +246,28 @@ export function diagnoseEspnIdentity(payload,fixture,{league=espnLeague(fixture)
  if(!inTime.length)return {ok:false,waitReason:"ESPN_NO_EVENTS_NEAR_KICKOFF"};
  return {ok:false,waitReason:"ESPN_TEAMS_NOT_ON_SCOREBOARD"};
 }
+// Audit metadata ONLY: never relax kickoff tolerance or accept a FINAL.
+export function inspectEspnKickoffMismatch(payload,fixture,{league=espnLeague(fixture)}={}){
+ if(!league||payload?.ok!==true||payload.league!==league||
+    !Array.isArray(payload.events))return null;
+ const byId=new Map();
+ for(const e of payload.events){
+  if(!/^\d+$/.test(String(e?.id??"")))continue;
+  const at=Date.parse(String(e?.date??""));
+  if(!Number.isFinite(at)||!Number.isFinite(fixture?.startMs))continue;
+  const c=Array.isArray(e.competitors)?e.competitors:[];
+  const home=c.find(x=>x.homeAway==="home")?.name;
+  const away=c.find(x=>x.homeAway==="away")?.name;
+  if(!teamEq(fixture.home,home)||!teamEq(fixture.away,away))continue;
+  const deltaMinutes=Math.round((at-fixture.startMs)/60000);
+  if(Math.abs(deltaMinutes)>2160)continue;
+  const key=String(e.id);
+  if(byId.has(key)&&byId.get(key).deltaMinutes!==deltaMinutes)return null;
+  byId.set(key,{eventId:key,sourceKickoffAt:at,deltaMinutes});
+ }
+ const found=[...byId.values()];
+ return found.length===1?found[0]:null;
+}
 export function findEspnFixtureEvent(payload,fixture,{league=espnLeague(fixture)}={}){
  return diagnoseEspnIdentity(payload,fixture,{league});
 }
@@ -280,6 +302,7 @@ export async function lookupEspnFinal(fixture,{
  if(!base)return {ok:false,waitReason:"ESPN_PROXY_BASE_REQUIRED"};
  const dates=espnScoreboardDates(fixture);
  const reasons=[];
+ let kickoffAudit=null;
  for(const date of new Set(dates)){
   const url=base.replace(/\/+$/,"")+"/api/espn/scoreboard?"+
     new URLSearchParams({league,date});
@@ -295,11 +318,14 @@ export async function lookupEspnFinal(fixture,{
    cache.set(url,response);
   }
   if(!response.ok){reasons.push(response.reason);continue;}
+  const evidence=inspectEspnKickoffMismatch(response.payload,fixture,{league});
+  if(evidence&&(!kickoffAudit||Math.abs(evidence.deltaMinutes)<Math.abs(kickoffAudit.deltaMinutes)))
+   kickoffAudit=evidence;
   const result=parseEspnFinal(response.payload,fixture,{now,league});
   if(result.ok)return {...result,providerErrors:reasons};
   reasons.push(result.waitReason);
   if(["ESPN_AMBIGUOUS_FIXTURE","ESPN_INVALID_SPORT_SCORE"].includes(result.waitReason))break;
  }
  return {ok:false,waitReason:reasons.join(" | ").slice(0,180)||"ESPN_NO_CONFIRMED_FINAL",
-  providerErrors:reasons};
+  providerErrors:reasons,kickoffAudit};
 }
