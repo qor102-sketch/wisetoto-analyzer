@@ -26,8 +26,11 @@ export function finalFailureCategory(row){
  // swapped sides and a known source-side name mismatch. Never infer FINAL.
  if(/ESPN_AMBIGUOUS_FIXTURE|ESPN_MISSING_NUMERIC_EVENT_ID|ESPN_CONFLICTING_EVENT_ID/.test(joined))
   return "ESPN_ID_UNSAFE";
- if(/ESPN_KICKOFF_MISMATCH|ESPN_NO_EVENTS_NEAR_KICKOFF/.test(joined))
-  return "ESPN_KICKOFF_UNPROVEN";
+ // An empty near-kickoff scoreboard is NOT proof of a clock discrepancy.
+ // The audited 43 rows had no uniquely matched official home+away event.
+ if(/ESPN_KICKOFF_MISMATCH/.test(joined))return "ESPN_KICKOFF_UNPROVEN";
+ if(/ESPN_NO_EVENTS_NEAR_KICKOFF/.test(joined))
+  return "ESPN_NO_SOURCE_FIXTURE_NEAR_KICKOFF";
  if(/ESPN_HOME_AWAY_REVERSED/.test(joined))return "ESPN_HOME_AWAY_MISMATCH";
  if(/ESPN_HOME_TEAM_NOT_MATCHED|ESPN_AWAY_TEAM_NOT_MATCHED/.test(joined))
   return "ESPN_TEAM_IDENTITY_MISMATCH";
