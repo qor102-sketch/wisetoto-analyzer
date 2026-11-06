@@ -1,7 +1,7 @@
 // Read-only audit of actual persistent K League 1/2 overdue fixtures.
 // Must never settle results or rewrite frozen PRE/experiment data.
 import fs from "node:fs/promises";
-import {officialKLeagueId,officialKLeagueRequest} from "./kleague-official-final.mjs";
+import {officialKLeagueId,officialKLeagueRequest,parseOfficialKLeagueFinal} from "./kleague-official-final.mjs";
 import {finalFailureCategory} from "./data-quality-audit.mjs";
 const input=process.argv[2];
 if(!input)throw Error("missing original ledger path");
@@ -32,6 +32,15 @@ async function official(req){
 const audits=[];
 for(const r of rows){
  const req=officialKLeagueRequest(r),res=await official(req);
+ const proof=res.ok?parseOfficialKLeagueFinal({data:{scheduleList:res.games}},r,{now}):
+  {ok:false,waitReason:res.reason};
+ const historicKnown=r.startMs>=Date.parse("2026-10-31T00:00:00Z")&&
+  r.startMs<Date.parse("2026-11-02T00:00:00Z");
+ if(historicKnown&&res.ok&&!proof.ok){
+  process.exitCode=1;
+  console.error("SOURCE_PROVEN_KLEAGUE_IDENTITY_STILL_UNMATCHED "+
+    JSON.stringify({home:r.home,away:r.away,league:r.league,why:proof.waitReason}));
+ }
  let candidates=[];
  if(res.ok){
   const dayStr=new Date(r.startMs+9*3600000).toISOString().slice(0,10).replace(/-/g,".");
@@ -49,6 +58,10 @@ for(const r of rows){
  audits.push({league:r.league,home:r.home,away:r.away,
   kickoff:new Date(r.startMs).toISOString(),failure:r.checkReason,
   officialQuery:req?.key,response:res.ok?"OK":res.reason,
+  matchedOfficialFinal:proof.ok,
+  matchedOfficialId:proof.gameId??null,
+  matchedOfficialScore:proof.result??null,
+  sourceProofFailure:proof.waitReason??null,
   closestOfficialCandidates:candidates.slice(0,15)});
 }
 console.log("ORIGINAL_KLEAGUE_BACKLOG_AUDIT "+JSON.stringify({
