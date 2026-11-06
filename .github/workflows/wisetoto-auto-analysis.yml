@@ -45,7 +45,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh api "/repos/$GITHUB_REPOSITORY/contents/collect-first-state.json.gz?ref=automation-data" --jq '.content' |
-            tr -d '\\n' | base64 -d | gzip -dc > /tmp/wisetoto-readonly-current-ledger.json
+            base64 -d | gzip -dc > /tmp/wisetoto-readonly-current-ledger.json
           node automation/research/probe-espn-clock-live.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Install app and browser
         run: |
