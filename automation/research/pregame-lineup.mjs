@@ -132,14 +132,19 @@ export function mergeLineupEvidence(state,key,observation,now){
      lastAttemptAt:now,lastError:"AFTER_KICKOFF_NOT_PREGAME"}};
   }
   const keepConfirmed=prior?.status==="CONFIRMED";
+  // An old NBA UNSUPPORTED flag reflects the former lack of a provider.
+  // Once an actual strictly timed ESPN request is made, expose its real
+  // UNAVAILABLE/PARTIAL/CONFIRMED status instead of keeping stale UNSUPPORTED.
+  const supersededNbaUnsupported=old.sport==="농구"&&espnLineupLeague(old)==="nba"&&
+    prior?.status==="UNSUPPORTED";
   const detail=observation.status==="CONFIRMED"||
     (observation.status==="PARTIAL"&&!["CONFIRMED"].includes(prior?.status));
   // First valid lineup remains unchanged; no later overwrite.
   const captured=keepConfirmed?prior:
     detail?{...observation}:prior??{};
   return {...old,lineup:{...captured,status:keepConfirmed?"CONFIRMED":
-    (detail?observation.status:prior?.status??observation.status),
-    reason:keepConfirmed?prior.reason:(detail?observation.reason:prior?.reason??observation.reason),
+    (detail?observation.status:supersededNbaUnsupported?observation.status:prior?.status??observation.status),
+    reason:keepConfirmed?prior.reason:(detail||supersededNbaUnsupported?observation.reason:prior?.reason??observation.reason),
     lastAttemptAt:now,attempts:(prior?.attempts??0)+1,
     lastError:["UNAVAILABLE","REJECTED"].includes(observation.status)?
       observation.reason:null}};
