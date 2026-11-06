@@ -41,7 +41,11 @@ export function pregameLineupCandidates(state,now=Date.now(),limit=4){
  if(!Number.isInteger(limit)||limit<=0)return [];
  const eligible=(state?.records??[]).filter(r=>["축구","야구","농구","배구"].includes(r.sport)
    &&Number.isFinite(r.startMs)&&r.startMs>now&&r.startMs-now<=LINEUP_WINDOW_MS
-   &&r.lineup?.status!=="CONFIRMED"&&r.lineup?.status!=="UNSUPPORTED"
+   &&r.lineup?.status!=="CONFIRMED"&&
+   // Historical NBA UNSUPPORTED was recorded before ESPN match-specific
+   // starters were added. It is not a permanent verdict on *future* games.
+   // This only re-opens strict pre-tipoff ESPN queries, never old PRE.
+   (r.lineup?.status!=="UNSUPPORTED"||espnLineupLeague(r)==="nba")
    &&(!Number.isFinite(r.lineup?.lastAttemptAt)
      ||now-r.lineup.lastAttemptAt>=lineupRetryIntervalMs(r,now)))
   .sort((a,b)=>{
