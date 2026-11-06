@@ -3,7 +3,7 @@
 // rather than the newest 150 rows exposed in the public UI.
 import {gunzipSync} from "node:zlib";
 import {espnLeague,espnScoreboardDates,diagnoseEspnIdentity,
- parseEspnFinal,espnKickoffCandidateInfo} from "./espn-fast-final.mjs";
+ parseEspnFinal,espnKickoffCandidateInfo,espnSideCandidates} from "./espn-fast-final.mjs";
 import {finalFailureCategory} from "./data-quality-audit.mjs";
 import {officialKLeagueNumber,officialKLeagueMonth,parseOfficialKLeagueFinal} from "./kleague-official-final.mjs";
 const BASE="https://wisetoto-analyzer.vercel.app";
@@ -80,7 +80,9 @@ async function auditKickoff(state){
    league:r.league,home:r.home,away:r.away,scheduled:new Date(r.startMs).toISOString(),
    reason,nearSourceCount:events.length,sourceDays:available.length,
    exactCandidate:timing.unique?{gameId:timing.gameId,
-    kickoffDeltaMin:timing.deltaMinutes,sourceAt:timing.sourceAt}:null
+    kickoffDeltaMin:timing.deltaMinutes,sourceAt:timing.sourceAt}:null,
+   partialSideSourceCandidates:reason.includes("TEAM")||reason==="ESPN_HOME_AWAY_REVERSED"?
+    espnSideCandidates(payload,r):[]
   }));
  }
  console.log("ESPN_CLOCK_AUDIT_SUMMARY "+JSON.stringify({
