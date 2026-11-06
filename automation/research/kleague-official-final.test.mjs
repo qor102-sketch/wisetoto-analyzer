@@ -113,3 +113,18 @@ test("Naver-only circuit cannot suppress a supported official K League final",()
  assert.equal(chosen.filter(r=>r.league==="K리그1").length,15);
  assert.equal(chosen.filter(r=>r.league==="K리그3").length,2);
 });
+
+test("a large failing ESPN backlog cannot starve verified official K League slots",()=>{
+ const now=T+30*H;
+ const nba=Array.from({length:40},(_,i)=>({...base("Home","Away",now-8*H),
+  key:"nba-"+i,sport:"농구",league:"NBA"}));
+ const domestic=Array.from({length:14},(_,i)=>({...base("FC서울","인천 유나이티드",now-8*H),
+  key:"kleague-"+i,league:"K리그1"}));
+ const unsupported=Array.from({length:24},(_,i)=>({...base("Bad","Bad",now-8*H),
+  key:"naver-"+i,league:"K리그3"}));
+ const rows=selectFinalAuditRows({records:[...nba,...domestic,...unsupported]},now,24);
+ assert.equal(rows.length,24);
+ assert.equal(rows.filter(r=>r.league==="K리그1").length,6);
+ assert.equal(rows.filter(r=>r.league==="NBA").length,10);
+ assert.equal(rows.filter(r=>r.league==="K리그3").length,8);
+});
