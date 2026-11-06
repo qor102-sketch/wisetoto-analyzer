@@ -149,12 +149,13 @@ export default function AutomationDashboard(){
         <div className="scan-head"><strong>데이터 품질 감사 · 경기 시작 후 24시간 이상 미확정</strong>
           <span>{collection.qualityAudit.overdue24h}경기 · 마지막 집계 {date(collection.qualityAudit.at)} KST</span></div>
         <div className="auto-explainer">
-          <strong>독립 ESPN 지원 {collection.qualityAudit.byProvider.ESPN_SUPPORTED??0}건 / J.LEAGUE 공식 J2 지원 {collection.qualityAudit.byProvider.JLEAGUE_OFFICIAL_J2_SUPPORTED??0}건 / 기타 독립 리그 제공처 미확보 {collection.qualityAudit.byProvider.NO_INDEPENDENT_LEAGUE_SOURCE??0}건</strong> ·
+          <strong>독립 ESPN 지원 {collection.qualityAudit.byProvider.ESPN_SUPPORTED??0}건 / J.LEAGUE 공식 J2 지원 {collection.qualityAudit.byProvider.JLEAGUE_OFFICIAL_J2_SUPPORTED??0}건 / K LEAGUE 공식 K1·K2 지원 {collection.qualityAudit.byProvider.KLEAGUE_OFFICIAL_1_2_SUPPORTED??0}건 / 기타 독립 리그 제공처 미확보 {collection.qualityAudit.byProvider.NO_INDEPENDENT_LEAGUE_SOURCE??0}건</strong> ·
           NBA 시작 시각이 지난 경기 {collection.qualityAudit.nbaPast}건 (미래 {collection.qualityAudit.nbaFuture}건).
         </div>
         <div className="auto-explainer">
           <strong>장기 미확정 원인 (최근 실제 조회 오류 분류)</strong> ·
           {Object.entries(collection.qualityAudit.byReason).map(([name,count])=>name+" "+count+"건").join(" / ")||"분류 대기"}
+          <span> · ESPN_NO_EVENTS_NEAR_KICKOFF은 경기 자체가 제공처 목록에 없다는 뜻으로, 실제 시각 차이가 증명됐다는 뜻이 아닙니다.</span>
         </div>
         <div className="auto-explainer">
           <strong>중복 발생한 제공처 장애 (서로 중복 집계 가능)</strong> ·
