@@ -158,6 +158,8 @@ function teamEq(a,b){
  if(x===y)return true;
  return aliases.some(group=>group.includes(x)&&group.includes(y));
 }
+// Read-only name-equivalence predicate for auditing one-sided source gaps.
+export {teamEq as espnTeamEq};
 export function espnLeague(fixture){
  const l=norm(fixture.league);
  if(fixture.sport==="농구")return /nba|미프로농구|미국프로농구/.test(l)?"nba":null;
