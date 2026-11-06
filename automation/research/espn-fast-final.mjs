@@ -246,6 +246,31 @@ export function diagnoseEspnIdentity(payload,fixture,{league=espnLeague(fixture)
  if(!inTime.length)return {ok:false,waitReason:"ESPN_NO_EVENTS_NEAR_KICKOFF"};
  return {ok:false,waitReason:"ESPN_TEAMS_NOT_ON_SCOREBOARD"};
 }
+// Diagnostic only: a source event at another kickoff does not authorize a
+// result, identity correction, calendar rewrite or retrospective PRE. Only
+// the normal strict +/-2h path in findEspnFixtureEvent can accept FINAL.
+export function espnKickoffCandidateInfo(payload,fixture){
+ const league=espnLeague(fixture);
+ if(!league||payload?.ok!==true||payload.league!==league||
+   !Array.isArray(payload.events)||!Number.isFinite(fixture.startMs))
+  return {unique:false,candidates:0};
+ const matches=new Map();
+ for(const e of payload.events){
+  const id=String(e?.id??"");
+  const sourceAt=Date.parse(String(e?.date??""));
+  if(!/^\d+$/.test(id)||!Number.isFinite(sourceAt))continue;
+  const home=e?.competitors?.find(c=>c.homeAway==="home")?.name;
+  const away=e?.competitors?.find(c=>c.homeAway==="away")?.name;
+  if(!teamEq(fixture.home,home)||!teamEq(fixture.away,away))continue;
+  const prior=matches.get(id);
+  if(prior&&prior.sourceAt!==sourceAt)return {unique:false,candidates:2,reason:"SOURCE_ID_CONFLICT"};
+  matches.set(id,{sourceAt});
+ }
+ if(matches.size!==1)return {unique:false,candidates:matches.size};
+ const [gameId,event]=[...matches.entries()][0];
+ return {unique:true,candidates:1,gameId,sourceAt:new Date(event.sourceAt).toISOString(),
+  deltaMinutes:Math.round((event.sourceAt-fixture.startMs)/60000)};
+}
 export function findEspnFixtureEvent(payload,fixture,{league=espnLeague(fixture)}={}){
  return diagnoseEspnIdentity(payload,fixture,{league});
 }
