@@ -5,6 +5,7 @@ import {gunzipSync} from "node:zlib";
 import {espnLeague,espnScoreboardDates,diagnoseEspnIdentity,
  parseEspnFinal,espnKickoffCandidateInfo} from "./espn-fast-final.mjs";
 import {finalFailureCategory} from "./data-quality-audit.mjs";
+import {officialKLeagueNumber,officialKLeagueMonth,parseOfficialKLeagueFinal} from "./kleague-official-final.mjs";
 const BASE="https://wisetoto-analyzer.vercel.app";
 const now=Date.now();
 async function restoredLedger(){
@@ -86,21 +87,39 @@ async function auditKickoff(state){
   rows:rows.length,uniqueSourceDates:responses.size,outcomes,offsets,byLeague}));
 }
 async function auditKLeague(state){
- const urls=[1,2].map(leagueId=>({leagueId,url:"https://www.kleague.com/getScheduleList.do"}));
- for(const {leagueId,url} of urls){
+ const rows=state.records.filter(r=>r.verdict==="PENDING"&&
+  officialKLeagueNumber(r)&&r.startMs<now-86400000);
+ const urls=[1,2].flatMap(leagueId=>["10","11"].map(month=>({
+  leagueId,month,url:"https://www.kleague.com/getScheduleList.do"
+ })));
+ let confirmed=0,notMatched=0,missingSource=0;
+ for(const {leagueId,month,url} of urls){
   try{
    const response=await fetch(url,{method:"POST",headers:{
     "content-type":"application/json; charset=utf-8",
     "accept":"application/json, text/plain, */*",
     "user-agent":"Mozilla/5.0 (Wisetoto read-only source shape check)"},
-    body:JSON.stringify({year:"2026",month:"11",leagueId}),
+    body:JSON.stringify({year:"2026",month,leagueId}),
     signal:AbortSignal.timeout(12500)});
    const raw=await response.text();
    let json=null;try{json=JSON.parse(raw)}catch{}
    const data=json?.data??json??{},matches=Array.isArray(data.scheduleList)?data.scheduleList:[];
    const clubs=Array.isArray(data.clubList)?data.clubList:[];
    const counts={};for(const m of matches){const k=m.gameStatus??m.endYn??"UNKNOWN";counts[k]=(counts[k]??0)+1;}
-   console.log("KLEAGUE_OFFICIAL_SHAPE "+JSON.stringify({leagueId,status:response.status,
+   const backlog=rows.filter(r=>{
+    const period=officialKLeagueMonth(r);
+    return period?.year==="2026"&&period.month===month&&period.leagueId===leagueId;
+   });
+   const proofs=backlog.map(r=>{
+    const found=parseOfficialKLeagueFinal(json,r,{now});
+    if(found.ok)confirmed++;else notMatched++;
+    return {home:r.home,away:r.away,at:new Date(r.startMs).toISOString(),
+      ok:found.ok,gameId:found.gameId??null,
+      reason:found.waitReason??null,score:found.ok?found.result:null};
+   });
+   console.log("KLEAGUE_REAL_BACKLOG_PROOF "+JSON.stringify({leagueId,month,rows:proofs.length,proofs}));
+
+   console.log("KLEAGUE_OFFICIAL_SHAPE "+JSON.stringify({leagueId,month,status:response.status,
     isJson:!!json,keys:Object.keys(data).slice(0,15),
     schedule:matches.length,clubs:clubs.length,states:counts,
     clubsSample:clubs.map(c=>({code:c.teamId??c.code,short:c.teamNameShort,name:c.teamName,full:c.teamNameFull})),
@@ -109,8 +128,9 @@ async function auditKLeague(state){
       homeTeam:m.homeTeam,awayTeam:m.awayTeam,homeTeamName:m.homeTeamName,
       awayTeamName:m.awayTeamName,gameDate:m.gameDate,gameTime:m.gameTime,
       status:m.gameStatus,endYn:m.endYn,homeGoal:m.homeGoal,awayGoal:m.awayGoal}))}));
-  }catch(e){console.log("KLEAGUE_OFFICIAL_SHAPE "+JSON.stringify({leagueId,error:String(e).slice(0,140)}))}
+  }catch(e){missingSource++;console.log("KLEAGUE_OFFICIAL_SHAPE "+JSON.stringify({leagueId,month,error:String(e).slice(0,140)}))}
  }
+ console.log("KLEAGUE_FULL_SOURCE_AUDIT_SUMMARY "+JSON.stringify({rows:rows.length,confirmed,notMatched,missingSource}));
 }
 const state=await restoredLedger();
 console.log("KLEAGUE_FULL_LEDGER_OVERDUE "+JSON.stringify(state.records.filter(r=>
