@@ -249,6 +249,31 @@ export function diagnoseEspnIdentity(payload,fixture,{league=espnLeague(fixture)
 // Diagnostic only: a source event at another kickoff does not authorize a
 // result, identity correction, calendar rewrite or retrospective PRE. Only
 // the normal strict +/-2h path in findEspnFixtureEvent can accept FINAL.
+// Diagnostic candidate inspection: a one-sided name match is NOT fixture
+// proof and is never fed to result settlement. Display only source names/IDs
+// so a maintainer can add a genuinely corroborated, narrow team alias.
+export function espnSideCandidates(payload,fixture){
+ const league=espnLeague(fixture);
+ if(!league||payload?.ok!==true||payload.league!==league||
+  !Array.isArray(payload.events)||!Number.isFinite(fixture.startMs))return [];
+ const seen=new Set(),found=[];
+ for(const e of payload.events){
+  const at=Date.parse(String(e?.date??""));
+  if(!Number.isFinite(at)||Math.abs(at-fixture.startMs)>2*3600000)continue;
+  const home=e?.competitors?.find(c=>c.homeAway==="home")?.name;
+  const away=e?.competitors?.find(c=>c.homeAway==="away")?.name;
+  const homeMatched=teamEq(fixture.home,home);
+  const awayMatched=teamEq(fixture.away,away);
+  if(!homeMatched&&!awayMatched)continue;
+  const id=String(e?.id??"");if(!/^\d+$/.test(id)||seen.has(id))continue;
+  seen.add(id);
+  found.push({id,home,away,homeMatched,awayMatched,
+   date:new Date(at).toISOString(),completed:e?.completed===true,
+   statusName:String(e?.statusName??"").slice(0,40)});
+  if(found.length>=5)break;
+ }
+ return found;
+}
 export function espnKickoffCandidateInfo(payload,fixture){
  const league=espnLeague(fixture);
  if(!league||payload?.ok!==true||payload.league!==league||
