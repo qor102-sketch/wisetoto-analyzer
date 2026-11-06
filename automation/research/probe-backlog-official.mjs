@@ -131,6 +131,12 @@ async function auditKLeague(state){
   }catch(e){missingSource++;console.log("KLEAGUE_OFFICIAL_SHAPE "+JSON.stringify({leagueId,month,error:String(e).slice(0,140)}))}
  }
  console.log("KLEAGUE_FULL_SOURCE_AUDIT_SUMMARY "+JSON.stringify({rows:rows.length,confirmed,notMatched,missingSource}));
+ // Fail the PR verification gate when a real listed backlog cannot be safely
+ // identified from the official league site. No ledger updates are made.
+ if(rows.length>0&&(confirmed!==rows.length||missingSource>0)){
+  console.error("KLEAGUE_SOURCE_PROOF_INCOMPLETE: refuse rollout");
+  process.exitCode=1;
+ }
 }
 const state=await restoredLedger();
 console.log("KLEAGUE_FULL_LEDGER_OVERDUE "+JSON.stringify(state.records.filter(r=>
