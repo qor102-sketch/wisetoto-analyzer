@@ -23,7 +23,9 @@ type EffectTotals={collected:number;pregameCaptured:number;pregameOdds:number;ve
 type EffectScan={id:string;at:number;commit:string;sourceFresh:boolean;
  capture:{listed:number;inThirtyMinuteWindow:number;captured:number;missingIdentity:number;watchlistMissing:number;delayed:boolean};
  lineup:{attempted:number;confirmed:number;nbaAttempted:number;nba5v5Confirmed:number;
-  nbaFocusedRechecks:number;nbaFocusedRecovered:number;reasons:Record<string,number>};
+  nbaFocusedRechecks:number;nbaFocusedRecovered:number;reasons:Record<string,number>;
+  nbaInside45?:number;nbaInside15?:number;nbaUnpublished?:number;
+  nbaIdentityUnproven?:number;nbaNetworkFailure?:number;nbaAfterTipoffRejected?:number};
  final:{checked:number;providerConfirmed:number;newVerified:number;selectedBySport:Record<string,number>;
   confirmedBySource:Record<string,number>;waitReasons:Record<string,number>;espnFailureReasons?:Record<string,number>;
   naverUpstreamFailures:number;naverFailedRows?:number;deferred?:number;naverCircuitSkipped:number};
@@ -121,6 +123,16 @@ export default function AutomationDashboard(){
           30초 집중 재조회 {collection.operationalEffect.latest.lineup.nbaFocusedRechecks}회 (확보 {collection.operationalEffect.latest.lineup.nbaFocusedRecovered}회) ·
           종료 결과 조회 {collection.operationalEffect.latest.final.checked}건 / 제공처 최종 확인 {collection.operationalEffect.latest.final.providerConfirmed}건 / 장부 검증 증가 {collection.operationalEffect.latest.final.newVerified}건 ·
           네이버 실패 조회 주소 {collection.operationalEffect.latest.final.naverUpstreamFailures}개 / 영향받은 경기 {collection.operationalEffect.latest.final.naverFailedRows??0}건 / 실제 조회 없이 보류 {collection.operationalEffect.latest.final.deferred??0}건 / 동일 그룹 회로 차단 {collection.operationalEffect.latest.final.naverCircuitSkipped}건.
+        </div>
+        <div className="auto-explainer">
+          <strong>NBA 실제 경기 시작 전 발표 여부 · 최신 스캔</strong> ·
+          T-45분 안에 공식 제공처 조회 {collection.operationalEffect.latest.lineup.nbaInside45??0}경기 /
+          T-15분 안에 조회 {collection.operationalEffect.latest.lineup.nbaInside15??0}경기 ·
+          선발 미공개 응답 {collection.operationalEffect.latest.lineup.nbaUnpublished??0}건 /
+          경기 식별 미확인 {collection.operationalEffect.latest.lineup.nbaIdentityUnproven??0}건 /
+          제공처 통신 장애 {collection.operationalEffect.latest.lineup.nbaNetworkFailure??0}건 /
+          킥오프 후 선발 PRE 거부 {collection.operationalEffect.latest.lineup.nbaAfterTipoffRejected??0}건.
+          공식 발표되지 않은 5+5명을 추정 명단으로 대체하지 않습니다.
         </div>
         <div className="auto-explainer">
           <strong>NBA 전체 활성 경기 {collection.operationalEffect.current.activeNbaFixtures}건 중 실제 사전 조회 이력 {collection.operationalEffect.current.activeNbaAttempted}건</strong> ·
