@@ -147,7 +147,7 @@ export function mergeProviderFinal(state,fixtureKeyValue,payload,now=Date.now())
 export function recordEspnKickoffEvidence(state,fixtureKeyValue,evidence,now=Date.now()){
  if(!evidence||!Number.isFinite(evidence.sourceKickoffAt)||
    !Number.isInteger(evidence.deltaMinutes)||Math.abs(evidence.deltaMinutes)>2160||
-   !/^\\d+$/.test(String(evidence.eventId??"")))return state;
+   !/^\d+$/.test(String(evidence.eventId??"")))return state;
  return {...state,records:(state.records??[]).map(r=>
    r.key===fixtureKeyValue&&r.verdict==="PENDING"?
    {...r,espnKickoffEvidence:{eventId:String(evidence.eventId),
