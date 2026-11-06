@@ -11,6 +11,16 @@ for(const params of queries){
   const data=raw?.data??raw;
   const schedules=Array.isArray(data?.scheduleList)?data.scheduleList:[];
   const sample=schedules.filter(x=>/2026.11.0[1-6]/.test(String(x.gameDate??""))).slice(0,8);
+  const allClubs=(Array.isArray(data?.clubList)?data.clubList:[]).slice(0,36);
+  console.log("KLEAGUE_OFFICIAL_TEAMS "+JSON.stringify({leagueId:params.leagueId,
+   clubs:allClubs.map(c=>({id:c.teamId,name:c.teamName,nameShort:c.teamNameShort,
+     nameFull:c.teamNameFull})),
+   uniquePairs:schedules.slice(0,24).map(x=>({
+    homeId:x.homeTeam,homeName:x.homeTeamName,
+    awayId:x.awayTeam,awayName:x.awayTeamName,
+    gameId:x.gameId,date:x.gameDate,time:x.gameTime,status:x.gameStatus,
+    endYn:x.endYn,homeGoal:x.homeGoal,awayGoal:x.awayGoal
+   }))}));
   console.log("KLEAGUE_OFFICIAL_PROBE "+JSON.stringify({leagueId:params.leagueId,status:res.status,
    validSchema:Array.isArray(data?.scheduleList),count:schedules.length,fields:sample.length?Object.keys(sample[0]):[],
    sample:sample.map(x=>({gameId:x.gameId,leagueId:x.leagueId,year:x.year,meetSeq:x.meetSeq,
