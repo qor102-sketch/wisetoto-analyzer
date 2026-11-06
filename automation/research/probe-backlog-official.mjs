@@ -39,10 +39,21 @@ async function fetchPool(urls,fetchFn,concurrency=5){
  return results;
 }
 async function auditKickoff(state){
+ const candidates=new Set([
+  "ESPN_KICKOFF_UNPROVEN", // older ledger versions
+  "ESPN_MATCH_TEAMS_DIFFERENT_KICKOFF",
+  "ESPN_NO_EVENTS_NEAR_KICKOFF",
+  "ESPN_TEAM_IDENTITY_MISMATCH",
+  "ESPN_TEAMS_NOT_LISTED",
+  "ESPN_SCHEDULE_EMPTY",
+  "ESPN_EXACT_IDENTITY_MISSING",
+  "ESPN_HOME_AWAY_MISMATCH"
+ ]);
  const rows=state.records.filter(r=>r.verdict==="PENDING"&&
   Number.isFinite(r.startMs)&&r.startMs<=now-86400000&&
-  finalFailureCategory(r)==="ESPN_KICKOFF_UNPROVEN"&&Boolean(espnLeague(r)));
+  candidates.has(finalFailureCategory(r))&&Boolean(espnLeague(r)));
  console.log("ESPN_CLOCK_AUDIT_START "+JSON.stringify({rows:rows.length,
+  classifiedFailures:[...new Set(rows.map(finalFailureCategory))],
   leagues:rows.reduce((o,r)=>(o[r.league]=(o[r.league]??0)+1,o),{})}));
  const urls=rows.flatMap(r=>espnScoreboardDates(r).map(date=>BASE+
   "/api/espn/scoreboard?"+new URLSearchParams({league:espnLeague(r),date})));
