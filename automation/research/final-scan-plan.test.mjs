@@ -8,7 +8,7 @@ const fixture=(id,league,sport="축구",lastResultCheckAt=0)=>({
 });
 test("allocates majority of 24 attempts to independently supported final provider and preserves domestic quota",()=>{
  const soccer=Array.from({length:42},(_,i)=>fixture("espn"+i,"잉글랜드 챔피언십"));
- const domestic=Array.from({length:30},(_,i)=>fixture("dom"+i,"K리그2"));
+ const domestic=Array.from({length:30},(_,i)=>fixture("dom"+i,"K리그3"));
  const rows=selectFinalAuditRows({records:[...domestic,...soccer]},NOW,24);
  assert.equal(rows.length,24);
  assert.equal(rows.filter(x=>x.key.startsWith("espn")).length,16);
@@ -16,7 +16,7 @@ test("allocates majority of 24 attempts to independently supported final provide
  assert.equal(new Set(rows.map(x=>x.key)).size,24);
 });
 test("fills unused supported quota without losing overdue domestics",()=>{
- const domestic=Array.from({length:12},(_,i)=>fixture("dom"+i,"K리그1"));
+ const domestic=Array.from({length:12},(_,i)=>fixture("dom"+i,"K리그3"));
  const soccer=Array.from({length:3},(_,i)=>fixture("espn"+i,"잉글랜드 챔피언십"));
  assert.equal(selectFinalAuditRows({records:[...domestic,...soccer]},NOW,24).length,15);
 });
