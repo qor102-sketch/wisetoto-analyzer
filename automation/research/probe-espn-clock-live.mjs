@@ -14,7 +14,7 @@ if(!Array.isArray(state.records)||state.records.length===0)
 const now=Date.now(),DAY=86400000;
 const all=state.records.filter(r=>r.verdict==="PENDING"&&
  Number.isFinite(r.startMs)&&r.startMs<=now-DAY&&espnLeague(r)&&
- finalFailureCategory(r)==="ESPN_KICKOFF_UNPROVEN");
+ ["ESPN_KICKOFF_UNPROVEN","ESPN_NO_SOURCE_FIXTURE_NEAR_KICKOFF"].includes(finalFailureCategory(r)));
 const leagueCounts={};
 for(const r of all)leagueCounts[r.league]=(leagueCounts[r.league]??0)+1;
 // Cap network reads and share the exact same official league-date response
