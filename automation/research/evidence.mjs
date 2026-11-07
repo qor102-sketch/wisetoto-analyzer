@@ -1,6 +1,7 @@
 // Separate pregame market-evidence research. This is NOT the existing PRE engine.
 // Never backfill past kickoff, never use final scores as pregame features.
 import {sportName} from "../logic.mjs";
+import {isNbaGame,withoutNba} from "../nba-policy.mjs";
 import {buildPilotReport,selectPostPilotTop1} from "./pilot-top1.mjs";
 export const SCHEMA="wisetoto-market-evidence-v1";
 const MINUTE=60_000,HOUR=60*MINUTE,DAY=24*HOUR;
@@ -131,10 +132,11 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now)
  if(!feed?.ok||!Array.isArray(feed.games))throw Error("official feed required");
  if(!Number.isFinite(observedAt)||observedAt>now||now-observedAt>5*MINUTE)
    throw Error("Never backdate a stale research feed");
- const existing=Array.isArray(state?.fixtures)?state.fixtures:[];
+ const existing=withoutNba(state?.fixtures);
  const byId=new Map(existing.filter(f=>f?.id&&Number.isFinite(f.startMs)).map(f=>[f.id,{...f,snapshots:[...(f.snapshots||[])]}]));
  let captured=0,examined=0,settled=0;
  for(const g of feed.games){
+   if(isNbaGame(g))continue;
    const id=fixtureId(g),start=Number(g.gameDateMs??new Date(g.gameDate).getTime());
    if(!id||start-now<10*MINUTE||start-now>7*DAY)continue;
    examined++;
@@ -159,7 +161,7 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now)
    }
    f.lastSeenAt=observedAt;
  }
- const records=Array.isArray(verifiedRecords)?verifiedRecords:[];
+ const records=withoutNba(verifiedRecords);
  for(const record of records){
    if(record?.verificationStatus!=="VERIFIED"||!Number.isFinite(Number(record?.verifiedAt))||
      Number(record.verifiedAt)>now||
@@ -202,7 +204,7 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now)
  return {state:{...state,schema:SCHEMA,updatedAt:now,fixtures,pilot},stats};
 }
 export function publicEvidence(state,now=Date.now()){
- const upcoming=(state?.fixtures||[]).filter(f=>f.startMs>now&&f.startMs<now+7*DAY)
+ const upcoming=withoutNba(state?.fixtures).filter(f=>f.startMs>now&&f.startMs<now+7*DAY)
    .sort((a,b)=>a.startMs-b.startMs);
  const rows=upcoming.slice(0,150).map(f=>({
      id:f.id,sport:f.sport,league:f.league,home:f.home,away:f.away,
