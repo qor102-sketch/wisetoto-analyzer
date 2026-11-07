@@ -1,7 +1,7 @@
 // Read-only ESPN match-specific announced XI, not generic season rosters.
 // Source sports/soccer/{league}/summary?event={id}. Never claim PRE on its own:
 // collector independently proves the fixture and capture-before-kickoff time.
-const LEAGUES=new Set(["nba","ita.1","eng.league_cup","eng.1","eng.2","esp.1",
+const LEAGUES=new Set(["ita.1","eng.league_cup","eng.1","eng.2","esp.1",
  "ger.1","fra.1","usa.1","ned.1","jpn.1","aus.1","uefa.champions","uefa.europa",
  "uefa.europa.conf","afc.champions","afc.cup","eng.fa","eng.3","esp.2",
  "ita.2","ger.2","fra.2","ned.2"]);
