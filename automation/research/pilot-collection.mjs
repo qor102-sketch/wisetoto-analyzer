@@ -2,7 +2,7 @@
 import {withoutNba} from "../nba-policy.mjs";
 // Unlike market research, includes games without qualifying betting markets.
 const DAY=86400000;
-const SPORTS=["축구","야구","배구"];
+const SPORTS=["축구","농구","야구","배구"]; // KBL and other non-NBA basketball stay
 const empty=()=>({registered:0,pregameWindow:0,pregameOdds:0,
  finalVerified:0,verifiedWithOdds:0,verifiedWithLineup:0,
  lineupConfirmed:0,lineupPartial:0,lineupUnsupported:0,
