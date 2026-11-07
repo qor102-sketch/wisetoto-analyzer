@@ -47,6 +47,10 @@ jobs:
           gh api "/repos/$GITHUB_REPOSITORY/contents/collect-first-state.json.gz?ref=automation-data" --jq '.content' |
             base64 -d | gzip -dc > /tmp/wisetoto-readonly-current-ledger.json
           node automation/research/probe-espn-clock-live.mjs /tmp/wisetoto-readonly-current-ledger.json
+      - name: Audit unresolved official K League identities in original ledger (read-only)
+        run: node automation/research/probe-kleague-backlog.mjs /tmp/wisetoto-readonly-current-ledger.json
+      - name: Audit original overdue ESPN one-sided team identities (read-only)
+        run: node automation/research/probe-espn-team-gaps.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Install app and browser
         run: |
           cd WisetotoAnalyzer-LiveFree && npm install --no-audit --no-fund
