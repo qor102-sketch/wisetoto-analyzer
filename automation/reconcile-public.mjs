@@ -5,6 +5,7 @@
 import fs from "node:fs";
 import {pathToFileURL} from "node:url";
 import {scorePlausibility} from "../WisetotoAnalyzer-LiveFree/src/lib/postmatch-guards.mjs";
+import {isNbaGame} from "./nba-policy.mjs";
 const statuses=["HIT","MISS","VOID"];
 const validVerified=r=>r?.status==="VERIFIED"&&r.result&&
  Number.isFinite(r.verifiedAt)&&r.verifiedAt>r.startMs&&
@@ -22,13 +23,19 @@ export function reconcilePublishedHistory(old,next){
  if(old?.schema!=="wisetoto-public-history-v1"||next?.schema!==old.schema
    ||!Array.isArray(old.records)||!Array.isArray(next.records))
    throw Error("PUBLIC_SCHEMA_MISMATCH");
- const oldById=new Map(old.records.map(r=>[r.id,r]));
+ const exclusion=next.policy?.nbaExcluded===true;
+ if(exclusion&&next.records.some(isNbaGame))
+  throw Error("PUBLIC_NBA_POLICY_VIOLATION");
+ // User-directed optout is the ONLY valid deletion exception. Everything
+ // else stays immutable, especially already-verified non-NBA frozen PRE.
+ const oldActive=exclusion?old.records.filter(r=>!isNbaGame(r)):old.records;
+ const oldById=new Map(oldActive.map(r=>[r.id,r]));
  const nextById=new Set(next.records.map(r=>r.id));
- const lost=old.records.filter(r=>!nextById.has(r.id));
+ const lost=oldActive.filter(r=>!nextById.has(r.id));
  if(lost.length)throw Error("PUBLIC_RECORD_REGRESSION: "+lost.slice(0,8).map(r=>r.id).join(","));
  if(next.counts?.total!==next.records.length)throw Error("PUBLIC_COUNT_MISMATCH");
  let repaired=0,invalidPrior=0;
- const oldValidVerified=old.records.filter(validVerified).length;
+ const oldValidVerified=oldActive.filter(validVerified).length;
  const records=next.records.map(row=>{
   const prior=oldById.get(row.id);
   if(!prior||prior.status!=="VERIFIED")return row;
