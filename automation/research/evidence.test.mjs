@@ -148,7 +148,7 @@ test("bounded evidence archive always retains authentic opening odds",()=>{
 
 test("public card limit never understates full seven-day fixture coverage",()=>{
  const fixtures=Array.from({length:161},(_,i)=>({
-  id:"f-"+i,sport:"농구",league:"NBA",home:"A"+i,away:"B"+i,
+  id:"f-"+i,sport:"농구",league:"KBL",home:"A"+i,away:"B"+i,
   startMs:T+(i+20)*MIN,firstSeenAt:T,lastSeenAt:T,snapshots:[{at:T}],
   lastEvidence:{stage:"COLLECTING",reason:"first scan",top1:null}
  }));

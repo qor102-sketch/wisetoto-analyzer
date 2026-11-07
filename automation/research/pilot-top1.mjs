@@ -1,9 +1,10 @@
 // Fixed 28-day research pilot. Report the measured cohort even with few/no
 // confirmed outcomes; never manufacture verified accuracy or retrofit a pick.
 // Current official PRE/TOP1 is entirely separate.
+import {isNbaGame,withoutNba} from "../nba-policy.mjs";
 export const PILOT_DAYS=28;
 const DAY=86400000;
-const SPORTS=["축구","농구","야구","배구"];
+const SPORTS=["축구","농구","야구","배구"]; // KBL and other non-NBA basketball stay
 const safe=(v)=>Number.isFinite(v)?v:null;
 const round=(v,n=4)=>safe(v)===null?null:Number(v.toFixed(n));
 const validCandidate=f=>{
@@ -45,7 +46,7 @@ export function buildPilotReport(state,now=Date.now()){
  const endsAt=startedAt+PILOT_DAYS*DAY;
  const complete=now>=endsAt;
  const completedDays=Math.min(PILOT_DAYS,Math.max(0,Math.floor((now-startedAt)/DAY)));
- const rows=allRows(state.fixtures,startedAt,endsAt);
+ const rows=allRows(withoutNba(state.fixtures),startedAt,endsAt);
  const confirmed=rows.filter(f=>verified(f)&&f.truth.verifiedAt<=now);
  const frozen=rows.filter(validCandidate);
  const pending=frozen.filter(f=>f.startMs<=now&&
@@ -67,7 +68,12 @@ export function buildPilotReport(state,now=Date.now()){
  // The final result is used ONLY for scoring, never for picking.
  const byDay=new Map();
  const fmt=new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"});
+ const excludedShadowDays=new Set(state?.pilot?.nbaExcludedShadowDates??[]);
+ const kstDay=ms=>new Date(ms+9*3600_000).toISOString().slice(0,10);
  for(const f of frozen){
+  // If the original immutable daily shadow choice was NBA, do NOT select
+  // another match retrospectively after outcomes are known.
+  if(excludedShadowDays.has(kstDay(f.startMs)))continue;
   const date=fmt.format(new Date(f.startMs)),prior=byDay.get(date);
   const stronger=!prior||f.frozenCandidate.shift>prior.frozenCandidate.shift||
    (f.frozenCandidate.shift===prior.frozenCandidate.shift&&recordId(f)<recordId(prior));
@@ -115,7 +121,7 @@ export function buildPilotReport(state,now=Date.now()){
   proposals.push("4%p 이상 강한 시장 이동 전략은 비교 실험 제안 가능; 이 28일 표본만으로 확정하거나 소급 재선정하지 말 것");
  proposals.push("다음 4주는 기존 2%p 전략과 시험 후보를 병렬 그림자 운영하여 별도 기간에서 검증");
  proposals.push("기존 frozen PRE/공식 TOP1 절대 수정 금지; 변경안은 별도 테스트·PR 검토");
- const grade=allMetric.decisions>=10&&walkForward.improved&&shadowMetric.decisions>=5
+ const grade=!state.nbaExclusion&&allMetric.decisions>=10&&walkForward.improved&&shadowMetric.decisions>=5
    ?"PROMISING_RESEARCH":"EXPLORATORY_ONLY";
  return {schema:"wisetoto-28day-top1-pilot-v1",status:complete?"FOUR_WEEK_REVIEW_READY":"COLLECTING",
   startedAt,endsAt,completedDays,durationDays:PILOT_DAYS,
@@ -123,13 +129,15 @@ export function buildPilotReport(state,now=Date.now()){
     pendingFinal:pending.length,shadowDays:shadow.length},
   bySport,weeks,all:allMetric,strategies,shadowTop1:shadowMetric,shadowHistory:shadow.slice(-28),
   walkForward,grade,proposals,reportUpdatedAt:now,
-  note:complete?"28일 코호트 연구 분석. 표본이 작으면 결론과 추천이 아닌 탐색 신호로만 해석.":
-   "일자별 그림자 TOP1은 경기 시작 전 시점으로만 선정하며 결과를 뒤늦게 선택에 반영하지 않음."};
+  note:state.nbaExclusion?
+   "2026-11-07 NBA 제외 정책으로 과거 NBA 표본이 삭제됨. 전환 전 통계와 직접 비교 불가. 기존 NBA 그림자 선정일에 대체 경기를 소급 선정하지 않음.":
+   (complete?"28일 코호트 연구 분석. 표본이 작으면 결론과 추천이 아닌 탐색 신호로만 해석.":
+   "일자별 그림자 TOP1은 경기 시작 전 시점으로만 선정하며 결과를 뒤늦게 선택에 반영하지 않음.")};
 }
 export function selectPostPilotTop1(state,now=Date.now()){
  const report=buildPilotReport(state,now);
  if(report.status!=="FOUR_WEEK_REVIEW_READY")return null;
- const fixture=(state.fixtures??[]).filter(f=>f.startMs>now&&f.startMs<now+7*DAY&&
+ const fixture=withoutNba(state.fixtures).filter(f=>f.startMs>now&&f.startMs<now+7*DAY&&
    f.lastEvidence?.top1&&Number.isFinite(f.lastEvidence.top1.asOf)&&
    f.lastEvidence.top1.asOf<now&&f.lastEvidence.top1.asOf<f.startMs)
    .sort((a,b)=>b.lastEvidence.top1.shift-a.lastEvidence.top1.shift||

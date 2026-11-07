@@ -54,7 +54,9 @@ test("first measured run uses restored ledger as baseline, not synthetic histori
  assert.equal(o.latest.final.confirmedBySource.ESPN,1);
  assert.equal(o.historySize,1);
  assert.equal(p.operationalEffect.latest.totals.nba5v5Confirmed,1);
- assert.equal(p.counts.verified,1);
+ // The live public projection removes legacy NBA entries even when this
+ // internal metrics compatibility test still measures its old fixture.
+ assert.equal(p.counts.verified,0);
  assert.equal(before.records[0].lineup,null);
  assert.equal(before.records[0].verdict,"PENDING");
 });

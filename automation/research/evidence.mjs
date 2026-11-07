@@ -1,6 +1,7 @@
 // Separate pregame market-evidence research. This is NOT the existing PRE engine.
 // Never backfill past kickoff, never use final scores as pregame features.
 import {sportName} from "../logic.mjs";
+import {isNbaGame,withoutNba,purgeNbaResearchState} from "../nba-policy.mjs";
 import {buildPilotReport,selectPostPilotTop1} from "./pilot-top1.mjs";
 export const SCHEMA="wisetoto-market-evidence-v1";
 const MINUTE=60_000,HOUR=60*MINUTE,DAY=24*HOUR;
@@ -8,6 +9,7 @@ const MAX_SNAPSHOTS=24;
 const clean=v=>String(v??"").normalize("NFKC").toLowerCase().replace(/\([^)]*\)|\[[^\]]*\]/g,"").replace(/\b(fc|cf|bc|bk|sc|club)\b/g,"").replace(/[^a-z0-9가-힣]/g,"");
 const okayTeams=g=>[g.home,g.away].every(t=>typeof t==="string"&&t.trim()&&!/^(미정|tbd|tba|unknown|-)$/i.test(t.trim()));
 export function fixtureId(g){
+ if(isNbaGame(g))return null;
  const start=Number(g.gameDateMs??new Date(g.gameDate).getTime());
  const sport=sportName(g.sport);
  return sport&&Number.isFinite(start)&&okayTeams(g)
@@ -131,10 +133,13 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now)
  if(!feed?.ok||!Array.isArray(feed.games))throw Error("official feed required");
  if(!Number.isFinite(observedAt)||observedAt>now||now-observedAt>5*MINUTE)
    throw Error("Never backdate a stale research feed");
- const existing=Array.isArray(state?.fixtures)?state.fixtures:[];
+ const migrated=purgeNbaResearchState(state,now);
+ state=migrated.state;
+ const eligibleGames=withoutNba(feed.games);
+ const existing=withoutNba(state?.fixtures);
  const byId=new Map(existing.filter(f=>f?.id&&Number.isFinite(f.startMs)).map(f=>[f.id,{...f,snapshots:[...(f.snapshots||[])]}]));
  let captured=0,examined=0,settled=0;
- for(const g of feed.games){
+ for(const g of eligibleGames){
    const id=fixtureId(g),start=Number(g.gameDateMs??new Date(g.gameDate).getTime());
    if(!id||start-now<10*MINUTE||start-now>7*DAY)continue;
    examined++;
@@ -159,7 +164,7 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now)
    }
    f.lastSeenAt=observedAt;
  }
- const records=Array.isArray(verifiedRecords)?verifiedRecords:[];
+ const records=withoutNba(verifiedRecords);
  for(const record of records){
    if(record?.verificationStatus!=="VERIFIED"||!Number.isFinite(Number(record?.verifiedAt))||
      Number(record.verifiedAt)>now||
@@ -191,7 +196,7 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now)
  // Start only from the first actual fresh nonempty provider observation.
  // Never backdate to PR creation or data already present in frozen PRE.
  const startedAt=Number.isFinite(priorPilot?.startedAt)?priorPilot.startedAt:
-   (feed.games.length?observedAt:null);
+   (eligibleGames.length?observedAt:null);
  const milestone=startedAt===null?0:Math.min(4,Math.max(0,Math.floor((now-startedAt)/(7*DAY))));
  const pilot=startedAt===null?null:{startedAt,lastReportedWeek:milestone};
  const stats={total:fixtures.length,captured,settled,examined,with2Snapshots:fixtures.filter(f=>f.snapshots.length>=2).length,
@@ -202,7 +207,7 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now)
  return {state:{...state,schema:SCHEMA,updatedAt:now,fixtures,pilot},stats};
 }
 export function publicEvidence(state,now=Date.now()){
- const upcoming=(state?.fixtures||[]).filter(f=>f.startMs>now&&f.startMs<now+7*DAY)
+ const upcoming=withoutNba(state?.fixtures).filter(f=>f.startMs>now&&f.startMs<now+7*DAY)
    .sort((a,b)=>a.startMs-b.startMs);
  const rows=upcoming.slice(0,150).map(f=>({
      id:f.id,sport:f.sport,league:f.league,home:f.home,away:f.away,

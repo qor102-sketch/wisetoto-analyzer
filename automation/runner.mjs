@@ -2,10 +2,15 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import {TRACKER_KEY,APPEND_KEY,STATE_FILE,getRecords,dueGames,dueVerifications,preserveFrozenRecords,auditChanges,sportCounts} from "./logic.mjs";
 import {liveFeed,loadFeed,saveFeed,validFeed} from "./feed.mjs";
+import {purgeNbaTrackerStorage} from "./nba-policy.mjs";
 
 const base=(process.env.WISETOTO_URL||"https://wisetoto-analyzer.vercel.app").replace(/\/+$/,"");
 await fs.mkdir(path.dirname(STATE_FILE),{recursive:true});
-const old=await fs.readFile(STATE_FILE,"utf8").then(JSON.parse).catch(()=>({localStorage:{},meta:{}}));
+const rawOld=await fs.readFile(STATE_FILE,"utf8").then(JSON.parse).catch(()=>({localStorage:{},meta:{}}));
+const cleansed=purgeNbaTrackerStorage(rawOld.localStorage??{});
+const old={...rawOld,localStorage:cleansed.storage};
+if(cleansed.changedKeys.length)console.log("NBA_LEGACY_TRACKER_PURGED "+JSON.stringify({
+ changedKeys:cleansed.changedKeys.length,preserveNonNba:true}));
 const previous=getRecords(old);
 const now=Date.now();
 const verifyOnly=process.argv.includes("--verify-only");
@@ -117,7 +122,8 @@ if(process.argv.includes("--preflight")){
       storage[APPEND_KEY]=JSON.stringify(oldAppend);
     }
     const report=auditChanges(previous,protectedRows);
-    await fs.writeFile(STATE_FILE,JSON.stringify({schema:"wisetoto-auto-v1",localStorage:storage,meta:{
+    const cleanedNewStorage=purgeNbaTrackerStorage(storage).storage;
+    await fs.writeFile(STATE_FILE,JSON.stringify({schema:"wisetoto-auto-v1",localStorage:cleanedNewStorage,meta:{
       ...old.meta,lastRunAt:Date.now(),lastBase:base,browserErrors:errors.slice(0,5)
     }},null,2));
     await fs.writeFile("automation-state/checkpoint-ready",new Date().toISOString()+"\n");

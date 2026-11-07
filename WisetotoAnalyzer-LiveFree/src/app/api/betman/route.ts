@@ -212,6 +212,17 @@ function getSport(row: AnyObj) {
   ) || null;
 }
 
+// Mirror the Node collector's NBA-only optout at the source route itself.
+// Other basketball competitions (KBL, EASL, WNBA) remain available.
+function isExcludedNba(game: AnyObj) {
+  if (getSport(game) !== "basketball") return false;
+  const league = text(game?.league).normalize("NFKC").toLowerCase()
+    .replace(/[^a-z0-9가-힣]/g, "");
+  return Boolean(league && league !== "wnba" &&
+    (league.startsWith("nba") || (league.endsWith("nba") && !league.endsWith("wnba")) ||
+      league.includes("미국프로농구") || league.includes("미프로농구")));
+}
+
 function getSportName(row: AnyObj) {
   const sport = getSport(row);
 
@@ -1125,7 +1136,7 @@ export async function GET(
     const games: AnyObj[] =
       groupSchedules(
         schedules
-      );
+      ).filter(game => !isExcludedNba(game));
 
     const now =
       Date.now();

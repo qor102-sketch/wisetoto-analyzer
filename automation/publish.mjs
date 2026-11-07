@@ -90,6 +90,8 @@ export function publishProjection(state){
   publishedAt:new Date().toISOString(),
   lastRunAt:state?.meta?.lastRunAt??null,
   source:"GitHub Actions 자동 LIVE TRACKER (수동 분석 기록과 별개)",
+  policy:{nbaExcluded:true,reason:"USER_DIRECTED_NO_NBA_COLLECTION_2026_11_07",
+    nonNbaFrozenPregamePreserved:true},
   counts:{
     total:records.length,pending:records.filter(r=>r.status==="PENDING").length,
     verified:records.filter(r=>r.status==="VERIFIED").length,

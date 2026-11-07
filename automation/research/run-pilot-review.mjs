@@ -5,12 +5,20 @@ import {pathToFileURL} from "node:url";
 import {publicEvidence} from "./evidence.mjs";
 import {buildPilotReport} from "./pilot-top1.mjs";
 import {buildCollectionFunnel} from "./pilot-collection.mjs";
+import {purgeNbaResearchState} from "../nba-policy.mjs";
 export async function writePilotReview({root="automation-state/",now=Date.now()}={}){
  let state;
  try{state=JSON.parse(await fs.readFile(root+"research-state.json","utf8"));}
  catch(e){if(e?.code==="ENOENT")return {status:"WAITING_FOR_FIRST_VALID_FEED"};throw e;}
  if(state.schema!=="wisetoto-market-evidence-v1"||!Array.isArray(state.fixtures))
    throw Error("PILOT_REVIEW_INVALID_RESEARCH_STATE");
+ const migrated=purgeNbaResearchState(state,now);
+ state=migrated.state;
+ if(migrated.removed){
+  // Even without a fresh feed, apply the deletion while keeping old pilot dates.
+  await fs.writeFile(root+"research-state.json.next",JSON.stringify(state)+"\n");
+  await fs.rename(root+"research-state.json.next",root+"research-state.json");
+ }
  const report=buildPilotReport(state,now);
  let ledger=null;
  try{ledger=JSON.parse(await fs.readFile(root+"collect-first-state.json","utf8"));}
@@ -32,7 +40,7 @@ export async function writePilotReview({root="automation-state/",now=Date.now()}
  // an unnecessary GitHub PUT when no fixture/result/lineup evidence changed.
  const withoutClock=v=>v?((({asOf,...rest})=>rest)(v)):null;
  const changedFunnel=JSON.stringify(withoutClock(previous?.collectionPipeline))!==JSON.stringify(withoutClock(funnel));
- if(changed||changedFunnel){
+ if(changed||changedFunnel||migrated.removed){
    await fs.writeFile(root+"research-public.json",
      JSON.stringify({...publicEvidence(state,now),collectionPipeline:funnel})+"\n");
  }
