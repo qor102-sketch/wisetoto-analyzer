@@ -1,7 +1,8 @@
 // Independent 28-day fixture-to-final funnel from the real collect-first ledger.
+import {withoutNba} from "../nba-policy.mjs";
 // Unlike market research, includes games without qualifying betting markets.
 const DAY=86400000;
-const SPORTS=["축구","농구","야구","배구"];
+const SPORTS=["축구","야구","배구"];
 const empty=()=>({registered:0,pregameWindow:0,pregameOdds:0,
  finalVerified:0,verifiedWithOdds:0,verifiedWithLineup:0,
  lineupConfirmed:0,lineupPartial:0,lineupUnsupported:0,
@@ -35,7 +36,7 @@ export function buildCollectionFunnel(ledger,startedAt,now=Date.now()){
   return {schema:"wisetoto-28day-collection-funnel-v1",status:"LEDGER_UNAVAILABLE",
     reason:"Collection ledger missing or incompatible: no inferred counts"};
  const end=startedAt+28*DAY,asOf=Math.min(now,end);
- const selected=ledger.records.filter(r=>Number.isFinite(r?.startMs)&&
+ const selected=withoutNba(ledger.records).filter(r=>Number.isFinite(r?.startMs)&&
     r.startMs>=startedAt&&r.startMs<end);
  const counts=empty(),bySport=Object.fromEntries(SPORTS.map(s=>[s,empty()]));
  const weeks=Array.from({length:4},(_,i)=>({week:i+1,...empty()}));
