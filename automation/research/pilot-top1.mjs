@@ -4,7 +4,7 @@
 import {isNbaGame,withoutNba} from "../nba-policy.mjs";
 export const PILOT_DAYS=28;
 const DAY=86400000;
-const SPORTS=["축구","야구","배구"];
+const SPORTS=["축구","농구","야구","배구"]; // KBL and other non-NBA basketball stay
 const safe=(v)=>Number.isFinite(v)?v:null;
 const round=(v,n=4)=>safe(v)===null?null:Number(v.toFixed(n));
 const validCandidate=f=>{
