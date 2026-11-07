@@ -12,12 +12,20 @@ import {officialKLeagueId,lookupOfficialKLeagueFinal} from "./kleague-official-f
 import {collectLineupSnapshots} from "./pregame-lineup.mjs";
 import {selectFinalAuditRows} from "./final-scan-plan.mjs";
 import {effectTotals,recordOperationalEffect} from "./operational-effect.mjs";
+import {purgeNbaCollectionState} from "../nba-policy.mjs";
 const dir="automation-state",file=dir+"/collect-first-state.json";
 await fs.mkdir(dir,{recursive:true});
 let state;
 try{state=JSON.parse(await fs.readFile(file,"utf8"))}
 catch(e){if(e?.code==="ENOENT")state={schema:SCHEMA,records:[]};else throw e;}
 if(state.schema!==SCHEMA)throw Error("ledger schema incompatible: refuse data loss");
+const nbaPolicy=purgeNbaCollectionState(state,Date.now());
+state=nbaPolicy.state;
+if(nbaPolicy.removed)console.log("NBA_COLLECTION_PURGE "+JSON.stringify({
+ removed:nbaPolicy.removed,remaining:state.records.length,
+ protectedOriginalPregame:true,policy:"NO_FUTURE_NBA_COLLECTION"
+}));
+
 const priorLedgerAt=state.updatedAt??null;
 const beforeTotals=effectTotals(state);
 const scanStartedAt=Date.now();
@@ -46,7 +54,7 @@ state=lineupScan.state;
 console.log("PREGAME_LINEUP_AUDIT "+JSON.stringify(lineupScan.summary));
 let sportsApiLimited=false,naverFailedRows=0,naverOutageSkipped=0,finalDeferred=0;
 const naverFailureGroups=new Map();
-const supportedNaver=new Set(["축구","농구","야구"]);
+const supportedNaver=new Set(["축구","농구","야구"]); // KBL and non-NBA basketball remain
 // One request per (sport, KST date, Naver category) per scan, not per match.
 const scheduleCache=new Map();
 const espnCache=new Map();
