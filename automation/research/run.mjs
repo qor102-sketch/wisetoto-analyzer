@@ -4,6 +4,7 @@ import {FEED_PATH,cachedFeed} from "../feed.mjs";
 import {STATE_FILE,getRecords} from "../logic.mjs";
 import {ingestEvidence,publicEvidence,SCHEMA} from "./evidence.mjs";
 import {scorePlausibility} from "../../WisetotoAnalyzer-LiveFree/src/lib/postmatch-guards.mjs";
+import {isNbaGame,purgeNbaResearchState} from "../nba-policy.mjs";
 const ROOT="automation-state/";
 const now=Date.now();
 let feed,observedAt;
@@ -18,6 +19,11 @@ if(feed){
  try{state=JSON.parse(await fs.readFile(ROOT+"research-state.json","utf8"))}
  catch(e){if(e?.code==="ENOENT")state={schema:SCHEMA,fixtures:[]};else throw e;}
  if(state.schema!==SCHEMA)throw Error("Research state schema mismatch: refuse to overwrite archive");
+ const migrated=purgeNbaResearchState(state,now);
+ state=migrated.state;
+ if(migrated.removed)console.log("NBA_RESEARCH_PURGE "+JSON.stringify({
+  removed:migrated.removed,nonNbaRetained:state.fixtures.length,
+  historicPilotClockUnchanged:true,retrospectiveReplacementBlocked:true}));
  let tracker;
  try{tracker=JSON.parse(await fs.readFile(STATE_FILE,"utf8"))}catch{tracker={localStorage:{}}}
  let collected=[];
@@ -25,7 +31,7 @@ if(feed){
    const ledger=JSON.parse(await fs.readFile(ROOT+"collect-first-state.json","utf8"));
    if(ledger.schema!=="wisetoto-collect-first-v1"||!Array.isArray(ledger.records))
      throw Error("collection schema incompatible");
-   collected=ledger.records.filter(r=>r.verdict==="VERIFIED"&&r.final&&
+   collected=ledger.records.filter(r=>!isNbaGame(r)&&r.verdict==="VERIFIED"&&r.final&&
      Number.isFinite(r.pregameCapturedAt)&&r.pregameCapturedAt<r.startMs&&
      r.verifiedAt>r.startMs&&r.verifiedAt<=now&&
      scorePlausibility(r.sport,r.final.homeScore,r.final.awayScore).ok)
@@ -39,7 +45,7 @@ if(feed){
  const result=ingestEvidence(state,feed,now,verifiedRecords,observedAt);
  console.log("RESEARCH_CONFIRMED_INPUT",JSON.stringify({tracker:getRecords(tracker).length,
    collectFirst:collected.length,excludedResultOnly:true}));
- if(result.stats.captured>0||result.stats.settled>0||result.stats.pilotMilestone){
+ if(result.stats.captured>0||result.stats.settled>0||result.stats.pilotMilestone||migrated.removed>0){
    await fs.writeFile(ROOT+"research-state.json",JSON.stringify(result.state)+"\n","utf8");
    await fs.writeFile(ROOT+"research-public.json",JSON.stringify(publicEvidence(result.state,now))+"\n","utf8");
    console.log("MARKET_EVIDENCE_SAVED "+JSON.stringify(result.stats));
