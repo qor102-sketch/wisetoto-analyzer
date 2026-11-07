@@ -1,3 +1,4 @@
+import {isNbaGame,withoutNba} from "./nba-policy.mjs";
 // Deterministic, read-only scheduling/audit helpers. Never tune live model values.
 export const TRACKER_KEY = "wisetoto_v13_8_1_live_tracker";
 export const APPEND_KEY = "wisetoto_v13_8_66_live_tracker_append_only";
@@ -13,13 +14,13 @@ export function sportCounts(games) {
   const counts=Object.fromEntries(SUPPORTED_SPORTS.map(s=>[s,0]));
   for(const g of Array.isArray(games)?games:[]) {
     const s=sportName(g?.sport);
-    if(s)counts[s]++;
+    if(s&&!isNbaGame(g))counts[s]++;
   }
   return counts;
 }
 export function eligibleAutoGame(game,now=Date.now()) {
   const start=Number(game?.gameDateMs??new Date(game?.gameDate).getTime());
-  if(!sportName(game?.sport) || !Number.isFinite(start) ||
+  if(!sportName(game?.sport) || isNbaGame(game) || !Number.isFinite(start) ||
      start-now<10*minute || start-now>180*minute)return false;
   // Never match an undefined real team to another match at the same kickoff.
   const names=[String(game?.home??"").trim(),String(game?.away??"").trim()];
@@ -33,7 +34,7 @@ const matchKey = (value) => String(value ?? "").toLowerCase().replace(/[\s._\-]/
 export const getRecords = (state) => {
   try {
     const v = JSON.parse(state?.localStorage?.[TRACKER_KEY] ?? "[]");
-    return Array.isArray(v) ? v : Array.isArray(v?.records) ? v.records : [];
+    return withoutNba(Array.isArray(v) ? v : Array.isArray(v?.records) ? v.records : []);
   } catch { return []; }
 };
 export function dueGames(games, records, now = Date.now()) {
@@ -48,7 +49,7 @@ export function dueGames(games, records, now = Date.now()) {
     Number(b.gameDateMs??new Date(b.gameDate).getTime()));
 }
 export function dueVerifications(records, now = Date.now()) {
-  return records.filter(r => r.verificationStatus === "PENDING" && Number(r.startMs) <= now - 2 * 60 * minute && Number(r.startMs) > now - 7 * 24 * 60 * minute);
+  return withoutNba(records).filter(r => r.verificationStatus === "PENDING" && Number(r.startMs) <= now - 2 * 60 * minute && Number(r.startMs) > now - 7 * 24 * 60 * minute);
 }
 function immutablePick(p) {
   return [p?.key, p?.market, p?.pick, p?.probability, p?.odds, p?.expectedValue, p?.marketProbability, p?.recommendationScore, p?.modelSnapshot, p?.marketSnapshot];
@@ -74,9 +75,9 @@ function freezeRecord(before, after) {
   return protectedRecord;
 }
 export function preserveFrozenRecords(before, after) {
-  const previous = new Map(before.map(r => [String(r.id), r]));
+  const previous = new Map(withoutNba(before).map(r => [String(r.id), r]));
   const combined = [];
-  for (const next of after) {
+  for (const next of withoutNba(after)) {
     const old = previous.get(String(next.id));
     combined.push(old ? freezeRecord(old, next) : next);
     previous.delete(String(next.id));
@@ -85,6 +86,7 @@ export function preserveFrozenRecords(before, after) {
   return [...combined, ...previous.values()].slice(0, 300);
 }
 export function auditChanges(before, after, now = Date.now()) {
+  before=withoutNba(before);after=withoutNba(after);
   const prior = new Map(before.map(r => [String(r.id), r]));
   const created = after.filter(r => !prior.has(String(r.id)));
   const verified = after.filter(r => r.verificationStatus === "VERIFIED" && prior.get(String(r.id))?.verificationStatus !== "VERIFIED");
