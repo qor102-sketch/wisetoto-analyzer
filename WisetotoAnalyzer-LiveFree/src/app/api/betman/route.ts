@@ -219,7 +219,7 @@ function isExcludedNba(game: AnyObj) {
   const league = text(game?.league).normalize("NFKC").toLowerCase()
     .replace(/[^a-z0-9가-힣]/g, "");
   return Boolean(league && league !== "wnba" &&
-    (league.startsWith("nba") || league.endsWith("nba") ||
+    (league.startsWith("nba") || (league.endsWith("nba") && !league.endsWith("wnba")) ||
       league.includes("미국프로농구") || league.includes("미프로농구")));
 }
 
