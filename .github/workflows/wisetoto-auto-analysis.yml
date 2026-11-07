@@ -246,7 +246,7 @@ jobs:
           done
       - name: Gate heavy prediction until collection/results training sample exists
         id: sample_gate
-        if: always()
+        if: always() && steps.nba_optout.outcome == 'success'
         env:
           PREGAME_DUE: ${{ steps.due.outputs.pregame_due }}
           VERIFY_DUE: ${{ steps.due.outputs.verify_due }}
@@ -332,7 +332,7 @@ jobs:
             echo "PILOT_REVIEW_ALREADY_CREATED #$existing — preserve manual review history"
           fi
       - name: Publish transparent scan health even if Betman is down
-        if: always()
+        if: always() && steps.nba_optout.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -369,11 +369,11 @@ jobs:
       - name: Generate public read-only dashboard projection
         # A browser timeout must NOT suppress publication of the last restored
         # immutable tracker. Exactly this suppressed 41 frozen rows on 2026-10-27.
-        if: always()
+        if: always() && steps.nba_optout.outcome == 'success'
         run: |
           if [ -s automation-state/state.json ]; then node automation/publish.mjs; fi
       - name: Publish site-readable history (no browser secrets)
-        if: always()
+        if: always() && steps.nba_optout.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
