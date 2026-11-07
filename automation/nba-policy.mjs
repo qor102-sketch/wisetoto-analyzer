@@ -8,7 +8,7 @@ export function isNbaGame(row){
  if(!["basketball","농구","bk","bb"].includes(sport))return false;
  const league=normalize(row?.league);
  return Boolean(league&&league!=="wnba"&&(
-   league.startsWith("nba")||league.endsWith("nba")||
+   league.startsWith("nba")||(league.endsWith("nba")&&!league.endsWith("wnba"))||
    league.includes("미국프로농구")||league.includes("미프로농구")
  ));
 }
