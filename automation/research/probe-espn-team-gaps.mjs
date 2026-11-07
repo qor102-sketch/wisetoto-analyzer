@@ -2,11 +2,12 @@
 // Never infer result from a single matched side or create new aliases.
 import fs from "node:fs/promises";
 import {finalFailureCategory} from "./data-quality-audit.mjs";
-import {espnLeague,espnScoreboardDates,espnTeamEq} from "./espn-fast-final.mjs";
+import {espnLeague,espnScoreboardDates,espnTeamEq,parseEspnFinal} from "./espn-fast-final.mjs";
+import {isNbaGame} from "../nba-policy.mjs";
 const state=JSON.parse(await fs.readFile(process.argv[2],"utf8"));
 if(!Array.isArray(state?.records))throw Error("persistent ledger missing");
 const now=Date.now(),DAY=86400000;
-const rows=state.records.filter(r=>r.verdict==="PENDING"&&
+const rows=state.records.filter(r=>!isNbaGame(r)&&r.verdict==="PENDING"&&
  Number.isFinite(r.startMs)&&r.startMs<now-DAY&&espnLeague(r)&&
  finalFailureCategory(r)==="ESPN_TEAM_IDENTITY_MISMATCH");
 const requests=[...new Set(rows.flatMap(r=>espnScoreboardDates(r).map(date=>
@@ -28,13 +29,16 @@ await Promise.all(Array.from({length:4},async()=>{
 }));
 const audits=[];
 for(const r of rows){
- const seen=new Set(),candidates=[];
+ const seen=new Set(),candidates=[],sourceFinalProofs=[];
  let inspected=0,errors=[];
  for(const date of espnScoreboardDates(r)){
   const p=cached.get(espnLeague(r)+"|"+date);
   if(!p){errors.push("NOT_PROBED_"+date);continue}
   if(!p.ok){errors.push(p.reason);continue}
   inspected++;
+  const sourceFinal=parseEspnFinal({ok:true,league:espnLeague(r),events:p.events},r,{now});
+  if(sourceFinal.ok)sourceFinalProofs.push({
+   id:sourceFinal.gameId,score:sourceFinal.result,source:sourceFinal.source});
   for(const e of p.events){
    const id=String(e?.id??""),at=Date.parse(String(e?.date??""));
    if(!/^\d+$/.test(id)||!Number.isFinite(at)||Math.abs(at-r.startMs)>120*60000)
@@ -51,9 +55,12 @@ for(const r of rows){
     score:h?.score!=null&&a?.score!=null?String(h.score)+":"+String(a.score):null});
   }
  }
+ const distinctFinalIds=new Set(sourceFinalProofs.map(p=>p.id));
+ const uniqueProof=distinctFinalIds.size===1?sourceFinalProofs[0]:null;
  const narrow=candidates.filter(c=>Math.abs(c.offsetMinutes)<=20);
  audits.push({league:r.league,home:r.home,away:r.away,
   start:new Date(r.startMs).toISOString(),sourceDaysInspected:inspected,
+  officialExactFinal:uniqueProof,sourceProofs:sourceFinalProofs.length,
   candidates:candidates.slice(0,8),oneCandidateWithin20m:narrow.length===1?
   {id:narrow[0].id,missingSide:narrow[0].matchedSide==="HOME_ONLY"?"AWAY":"HOME",
    sourceName:narrow[0].matchedSide==="HOME_ONLY"?narrow[0].awaySource:narrow[0].homeSource}:
@@ -64,5 +71,10 @@ console.log("ORIGINAL_ESPN_ONE_SIDE_TEAM_AUDIT "+JSON.stringify({
  ledgerRecords:state.records.length,overdueOneSided:rows.length,
  officialQueries:requests.length,queryCached:cached.size,
  uniqueNarrowCandidates:audits.filter(x=>x.oneCandidateWithin20m!==null).length,
+ independentlyVerified:audits.filter(x=>x.officialExactFinal!==null).length,
  details:audits
 }));
+if(rows.length&&audits.some(x=>!x.officialExactFinal)){
+ console.error("ESPN_EXACT_NON_NBA_FINAL_SOURCE_NOT_PROVEN");
+ process.exitCode=1;
+}
