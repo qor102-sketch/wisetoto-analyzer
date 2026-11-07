@@ -117,18 +117,16 @@ export default function AutomationDashboard(){
           <span>최종 점수 검증 {collection.operationalEffect.latest.totals.verified} (증가 {collection.operationalEffect.delta.verified>=0?"+":""}{collection.operationalEffect.delta.verified})</span>
           <span>시작 전 배당+결과 {collection.operationalEffect.latest.totals.verifiedWithPregameOdds} (증가 {collection.operationalEffect.delta.verifiedWithPregameOdds>=0?"+":""}{collection.operationalEffect.delta.verifiedWithPregameOdds})</span>
           <span>실제 선발 확정 {collection.operationalEffect.latest.totals.lineupConfirmed} (증가 {collection.operationalEffect.delta.lineupConfirmed>=0?"+":""}{collection.operationalEffect.delta.lineupConfirmed})</span>
-          <span>NBA 시작 전 5+5명 {collection.operationalEffect.latest.totals.nba5v5Confirmed} (증가 {collection.operationalEffect.delta.nba5v5Confirmed>=0?"+":""}{collection.operationalEffect.delta.nba5v5Confirmed})</span>
+
         </div>
         <div className="auto-explainer">
-          <strong>최신 스캔 실측</strong> · NBA 실제 조회 {collection.operationalEffect.latest.lineup.nbaAttempted}경기 / 5+5명 신규 확보 {collection.operationalEffect.latest.lineup.nba5v5Confirmed}경기 ·
-          30초 집중 재조회 {collection.operationalEffect.latest.lineup.nbaFocusedRechecks}회 (확보 {collection.operationalEffect.latest.lineup.nbaFocusedRecovered}회) ·
+          <strong>최신 스캔 실측</strong> · 경기 전 선발 조회 {collection.operationalEffect.latest.lineup.attempted}경기 / 신규 선발 확정 {collection.operationalEffect.latest.lineup.confirmed}경기 ·
           종료 결과 조회 {collection.operationalEffect.latest.final.checked}건 / 제공처 최종 확인 {collection.operationalEffect.latest.final.providerConfirmed}건 / 장부 검증 증가 {collection.operationalEffect.latest.final.newVerified}건 ·
           네이버 실패 조회 주소 {collection.operationalEffect.latest.final.naverUpstreamFailures}개 / 영향받은 경기 {collection.operationalEffect.latest.final.naverFailedRows??0}건 / 실제 조회 없이 보류 {collection.operationalEffect.latest.final.deferred??0}건 / 동일 그룹 회로 차단 {collection.operationalEffect.latest.final.naverCircuitSkipped}건.
         </div>
         <div className="auto-explainer">
-          <strong>NBA 전체 활성 경기 {collection.operationalEffect.current.activeNbaFixtures}건 중 실제 사전 조회 이력 {collection.operationalEffect.current.activeNbaAttempted}건</strong> ·
-          선발 미확인 사유 {Object.entries(collection.operationalEffect.current.nbaLineupReasons).slice(0,5).map(([k,v])=>k+" "+v+"건").join(" / ")||"이력 없음"} ·
-          최신 종료 조회 실패 분류 {Object.entries(collection.operationalEffect.latest.final.waitReasons).slice(0,5).map(([k,v])=>k+" "+v+"건").join(" / ")||"실패 없음"}.
+          <strong>최신 종료 조회 실패 분류</strong> ·
+          {Object.entries(collection.operationalEffect.latest.final.waitReasons).slice(0,5).map(([k,v])=>k+" "+v+"건").join(" / ")||"실패 없음"}.
         </div>
         <div className="auto-explainer">
           <strong>최근 ESPN 조회별 실패 이유</strong> ·
@@ -139,7 +137,7 @@ export default function AutomationDashboard(){
           <strong>최근 자동 실행 이력 ({collection.operationalEffect.historySize}회 보존, 최근 5회 표시)</strong>:
           {collection.operationalEffect.recentScans.slice(-5).reverse().map(scan=><div key={scan.id}>
             {date(scan.at)} KST · {scan.sourceFresh?"수집 정상":"수집 장애"} ·
-            경기 전 배당 증가 {scan.changes.pregameOdds} · NBA 5+5명 증가 {scan.changes.nba5v5Confirmed} ·
+            경기 전 배당 증가 {scan.changes.pregameOdds} ·
             종료 결과 확정 증가 {scan.changes.verified} · 종료 조회 {scan.final.checked}건
           </div>)}
         </div>
@@ -153,7 +151,7 @@ export default function AutomationDashboard(){
           <span>{collection.qualityAudit.overdue24h}경기 · 마지막 집계 {date(collection.qualityAudit.at)} KST</span></div>
         <div className="auto-explainer">
           <strong>독립 ESPN 지원 {collection.qualityAudit.byProvider.ESPN_SUPPORTED??0}건 / J.LEAGUE 공식 J2 지원 {collection.qualityAudit.byProvider.JLEAGUE_OFFICIAL_J2_SUPPORTED??0}건 / K리그 공식 결과 지원 {collection.qualityAudit.byProvider.KLEAGUE_OFFICIAL_SOURCE_SUPPORTED??0}건 / 기타 독립 리그 제공처 미확보 {collection.qualityAudit.byProvider.NO_INDEPENDENT_LEAGUE_SOURCE??0}건</strong> ·
-          NBA 시작 시각이 지난 경기 {collection.qualityAudit.nbaPast}건 (미래 {collection.qualityAudit.nbaFuture}건).
+          NBA 제외 정책 적용 · 나머지 종목만 수집 및 검증.
         </div>
         <div className="auto-explainer">
           <strong>장기 미확정 원인 (최근 실제 조회 오류 분류)</strong> ·
@@ -178,11 +176,8 @@ export default function AutomationDashboard(){
           <strong>지연 리그 상위</strong> ·
           {Object.entries(collection.qualityAudit.byLeague).map(([name,count])=>name+" "+count+"건").join(" / ")||"없음"}
         </div>
-        <div className="auto-explainer">
-          <strong>NBA 경기 전 선발 미확정 원인</strong> ·
-          {Object.entries(collection.qualityAudit.nbaPregame).map(([name,count])=>name+" "+count+"건").join(" / ")||"대상 없음"}
-        </div>
-        <div className="auto-explainer">미검증 경기는 경과 시간만으로 종료 확정하지 않아. 동일 제공처 장애의 반복 조회를 제한하더라도 ESPN의 실제 종료 증거와 경기 시작 전 선수 5+5명을 대신 만들어내지 않아.</div>
+
+        <div className="auto-explainer">미검증 경기는 경과 시간만으로 종료 확정하지 않아. 동일 제공처 장애의 반복 조회를 제한하더라도 ESPN의 실제 종료 증거와 검증되지 않은 경기 종료 결과를 대신 만들어내지 않아.</div>
       </div>}
       {collection.resultAudit&&<div className="auto-explainer">미검증 대기열 (활성 장부 기준) · 미래 경기 {collection.resultAudit.future}건 · 종목별 조회 가능 시점 전 {collection.resultAudit.awaitingLikelyFinish}건 · 종료 여부 확인 대상 {collection.resultAudit.dueNow}건 · 재조회 간격 대기 {collection.resultAudit.coolingDown}건 · 시작 후 6시간 이상 미확정 {collection.resultAudit.overdueSixHours}건 (24시간 이상 {collection.resultAudit.overdue24Hours}건) · 42일 재조회 범위 초과 {collection.resultAudit.outsideRetryHorizon}건. <strong>시각 기준 대상 분류는 실제 경기 종료 확인이 아니며, 독립 제공처의 FINAL 증거로만 VERIFIED 처리합니다.</strong></div>}
       {collection.source&&<div className="auto-explainer">
@@ -282,7 +277,7 @@ export default function AutomationDashboard(){
        {expanded&&<div className="auto-detail"><div className="auto-detail-stats">
         <div><span>{r.sport==="축구"?"축구 PRE 예상득점 λ":r.sport==="농구"?"농구 PRE 예상점수":"경기 전 예상점수"}</span><strong>{r.sport==="축구"?(r.pre?num(r.pre.expectedHome,2)+" : "+num(r.pre.expectedAway,2):"축구 PRE 예상득점 미저장"):r.sport==="농구"?(r.courtPre&&r.courtPre.expectedHome!==null&&r.courtPre.expectedAway!==null?num(r.courtPre.expectedHome,1)+" : "+num(r.courtPre.expectedAway,1):"과거 PRE 예상점수 미저장"):"종목별 PRE 점수 별도 미저장"}</strong></div>
         <div><span>최근 Form 홈 / 원정</span><strong>{r.sport==="축구"&&r.pre?String(r.pre.homeRecentSample??"—")+" / "+String(r.pre.awayRecentSample??"—"):r.sport==="농구"&&r.courtPre?String(r.courtPre.homeRecentSample??"—")+" / "+String(r.courtPre.awayRecentSample??"—"):"해당 PRE 표본 미저장"}</strong></div>
-        <div><span>{r.sport==="축구"?"선발 XI 검증":"선발 검증"}</span><strong>{r.sport==="농구"?"NBA 모델 별도 단계":r.lineup?.stage||"미확보"}</strong></div><div><span>결과 검증</span><strong>{stateText(r)}</strong></div>
+        <div><span>{r.sport==="축구"?"선발 XI 검증":"선발 검증"}</span><strong>{r.lineup?.stage||"미확보"}</strong></div><div><span>결과 검증</span><strong>{stateText(r)}</strong></div>
        </div>{r.warnings?.length>0&&<div className="auto-warning"><b>점검 신호</b>{r.warnings.map((w,i)=><p key={i}>· {w}</p>)}</div>}
        {r.status==="PENDING"&&r.startMs<Date.now()-2*60*60_000&&<p className="auto-audit-footer">결과 검증 상태: ${r.verifyWaitReason||"결과 조회 진행/미확인"} · 마지막 결과 조회 ${date(r.verifyLastCheckedAt)} KST. 공식 최종점수가 확인될 때까지 결과를 임의로 확정하지 않습니다.</p>}
        {p&&<div className="auto-top-metrics"><span>TOP1 확률 <b>{num(p.probability)}%</b></span><span>배당 <b>{num(p.odds,2)}</b></span><span>EV <b>{num(p.expectedValue)}%</b></span><span>TOP1 점수 <b>{num(p.score)}</b></span><span>정산 <b>{pickText(p)}</b></span></div>}
