@@ -162,3 +162,54 @@ test("NBA is blocked by all public source routes, while other league proxies rem
  assert.match(lineup,/"eng.1"/);
  assert.match(betman,/groupSchedules\(\s*schedules\s*\)\.filter\(game => !isExcludedNba\(game\)\)/);
 });
+
+test("actual restored-state migration purges NBA on disk and is idempotent without touching KBL PRE",async()=>{
+ const {mkdtemp,writeFile,readFile,rm}=await import("node:fs/promises");
+ const {tmpdir}=await import("node:os");
+ const {join}=await import("node:path");
+ const {spawnSync}=await import("node:child_process");
+ const dir=await mkdtemp(join(tmpdir(),"wisetoto-nba-delete-"));
+ const oldNBA={key:"old-nba",sport:"농구",league:"NBA",home:"Old",away:"Old2",
+  startMs:T-4*M,verdict:"VERIFIED",final:{homeScore:99,awayScore:93}};
+ const kept={...oldNBA,key:"kbl",league:"KBL",verdict:"PENDING",final:null,
+  pregameCapturedAt:T-60*M,odds:[{side:"win",odds:1.95}]};
+ const market={id:"nba-study",sport:"농구",league:"NBA",startMs:T-D,
+  frozenCandidate:{side:"win",asOf:T-2*D,shift:.5,odds:2,
+   marketProbability:.5},snapshots:[{at:T-2*D,market:{choices:[]}}]};
+ const study={...market,id:"kbl-study",league:"KBL",
+  frozenCandidate:{...market.frozenCandidate,shift:.1}};
+ const oldTrack={id:"nba",sport:"농구",league:"NBA",picks:[{odds:2}]};
+ const keepTrack={...oldTrack,id:"kbl",league:"KBL",picks:[{odds:1.85}]};
+ try{
+  await writeFile(join(dir,"collect-first-state.json"),JSON.stringify({
+   schema:COLLECT_SCHEMA,records:[oldNBA,kept],archiveCounts:{collected:0},
+   operationalEffect:{schema:"wisetoto-operational-effect-v1",history:[]}}));
+  await writeFile(join(dir,"research-state.json"),JSON.stringify({
+   schema:EVIDENCE_SCHEMA,fixtures:[market,study],pilot:{startedAt:T-5*D,lastReportedWeek:1}}));
+  await writeFile(join(dir,"state.json"),JSON.stringify({localStorage:{
+   [TRACKER_KEY]:JSON.stringify([oldTrack,keepTrack]),
+   [APPEND_KEY]:JSON.stringify([oldTrack,keepTrack])}}));
+  const script=new URL("./research/apply-nba-exclusion.mjs",import.meta.url);
+  const call=()=>spawnSync(process.execPath,[script.pathname],{encoding:"utf8",
+   env:{...process.env,WISETOTO_STATE_ROOT:dir+"/"},timeout:10000});
+  const first=call();
+  assert.equal(first.status,0,first.stderr);
+  assert.match(first.stdout,/NBA_USER_OPT_OUT_APPLIED/);
+  const ledger=JSON.parse(await readFile(join(dir,"collect-first-state.json"),"utf8"));
+  assert.deepEqual(ledger.records,[kept]);
+  assert.equal(ledger.operationalEffect,null);
+  const research=JSON.parse(await readFile(join(dir,"research-state.json"),"utf8"));
+  assert.deepEqual(research.fixtures,[study]);
+  assert.equal(research.pilot.startedAt,T-5*D);
+  assert.equal(research.pilot.nbaExcludedShadowDates.length,1);
+  const tracker=JSON.parse(await readFile(join(dir,"state.json"),"utf8"));
+  assert.deepEqual(JSON.parse(tracker.localStorage[TRACKER_KEY]),[keepTrack]);
+  assert.deepEqual(JSON.parse(tracker.localStorage[APPEND_KEY]),[keepTrack]);
+  const saved=[ledger,research,tracker].map(JSON.stringify);
+  const second=call();
+  assert.equal(second.status,0,second.stderr);
+  const again=await Promise.all(["collect-first-state.json","research-state.json","state.json"]
+   .map(async p=>JSON.stringify(JSON.parse(await readFile(join(dir,p),"utf8")))));
+  assert.deepEqual(again,saved);
+ }finally{await rm(dir,{recursive:true,force:true})}
+});
