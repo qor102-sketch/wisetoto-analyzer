@@ -1,7 +1,7 @@
 // Keyless, score-only ESPN scoreboard proxy for verified postmatch fallback.
 // ESPN is independently queried; we never infer a FINAL from a live score.
 const CODES:Record<string,[string,string]>={
- nba:["basketball","nba"],mlb:["baseball","mlb"],
+ mlb:["baseball","mlb"],
  "ita.1":["soccer","ita.1"],"eng.league_cup":["soccer","eng.league_cup"],
  "eng.1":["soccer","eng.1"],
  "eng.2":["soccer","eng.2"],"aus.1":["soccer","aus.1"],"jpn.1":["soccer","jpn.1"],"esp.1":["soccer","esp.1"],
