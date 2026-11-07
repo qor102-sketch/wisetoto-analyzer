@@ -1,15 +1,24 @@
 // Verified fresh Betman offer snapshot. Never reuse a stale match/odd.
 import fs from "node:fs/promises";
+import {isNbaGame} from "./nba-policy.mjs";
 export const FEED_PATH="automation-state/betman-feed.json";
 export const FEED_MAX_AGE_MS=5*60_000;
+export function excludeNbaFeed(p){
+ if(!p||!Array.isArray(p.games))return p;
+ const games=p.games.filter(g=>!isNbaGame(g));
+ if(games.length===p.games.length)return p;
+ return {...p,games,nbaExcluded:true,nbaExcludedCount:p.games.length-games.length,
+  originalGameCount:p.games.length};
+}
 export function validFeed(p){
- return !!p&&p.ok===true&&Array.isArray(p.games)&&p.games.length>0 &&
+ return !!p&&p.ok===true&&Array.isArray(p.games)&&(p.games.length>0||(p.nbaExcluded===true&&p.originalGameCount>0&&
+    p.nbaExcludedCount===p.originalGameCount)) &&
   p.games.every(g=>typeof g==="object"&&g!==null);
 }
 export function cachedFeed(value,now=Date.now()){
  if(!value||!Number.isFinite(value.fetchedAt)||value.fetchedAt>now||
     now-value.fetchedAt>FEED_MAX_AGE_MS||!validFeed(value.payload))return null;
- return value.payload;
+ return excludeNbaFeed(value.payload);
 }
 export async function liveFeed(base,{fetchFn=fetch,now=()=>Date.now(),sleep=ms=>new Promise(r=>setTimeout(r,ms)),retries=3}={}){
  const errors=[];
@@ -20,7 +29,7 @@ export async function liveFeed(base,{fetchFn=fetch,now=()=>Date.now(),sleep=ms=>
    if(!res.ok)throw Error("Betman HTTP "+res.status);
    const payload=await res.json();
    if(!validFeed(payload))throw Error("Betman returned empty or malformed offers");
-   return {payload,fetchedAt:now(),attempt,errors};
+   return {payload:excludeNbaFeed(payload),fetchedAt:now(),attempt,errors};
   }catch(e){
    errors.push(String(e).slice(0,200));
    if(attempt<retries)await sleep(attempt*3000);
@@ -33,5 +42,6 @@ export async function loadFeed(now=Date.now()){
 }
 export async function saveFeed(value){
  if(!validFeed(value?.payload))throw Error("Never cache an invalid feed");
- await fs.writeFile(FEED_PATH,JSON.stringify({fetchedAt:value.fetchedAt,payload:value.payload}));
+ const payload=excludeNbaFeed(value.payload);
+ await fs.writeFile(FEED_PATH,JSON.stringify({fetchedAt:value.fetchedAt,payload}));
 }
