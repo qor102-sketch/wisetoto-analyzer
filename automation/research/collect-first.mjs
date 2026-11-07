@@ -1,6 +1,7 @@
 // Collection-first ledger: every Betman fixture in the 30min-to-kickoff window.
 // Zero predictions. Results are added ONLY when a provider confirms final.
 import {sportName} from "../logic.mjs";
+import {isNbaGame,withoutNba} from "../nba-policy.mjs";
 import {scorePlausibility} from "../../WisetotoAnalyzer-LiveFree/src/lib/postmatch-guards.mjs";
 import {publicOperationalEffect} from "./operational-effect.mjs";
 import {diagnoseDataQuality} from "./data-quality-audit.mjs";
@@ -22,14 +23,16 @@ const sourceId=g=>{
 export function collect(state,feed,now=Date.now(),observedAt=now){
  if(!feed?.ok||!Array.isArray(feed.games)||!Number.isFinite(observedAt)||observedAt>now||
    now-observedAt>5*M)throw Error("fresh Betman feed required");
- const by=new Map((state?.records||[]).map(r=>[r.key,{...r}]));
+ const by=new Map(withoutNba(state?.records).map(r=>[r.key,{...r}]));
  const sinceLastScan=Number.isFinite(state?.lastFeedAt)?observedAt-state.lastFeedAt:null;
- const summary={listed:feed.games.length,window:0,new:0,revisited:0,
+ const eligibleGames=withoutNba(feed.games);
+ const summary={listed:eligibleGames.length,excludedNba:feed.games.length-eligibleGames.length,
+   window:0,new:0,revisited:0,
    discovered:0,resultOnlyDiscovered:0,pregameCaptured:0,
    missedWindow:0,missingIdentity:0,noOdds:0,watchlistMissing:0,
    sinceLastScanMs:sinceLastScan,delayedScan:sinceLastScan!==null&&sinceLastScan>20*M};
  const listedKeys=new Set();
- for(const game of feed.games){
+ for(const game of eligibleGames){
    const k=fixtureKey(game),t=Number(game.gameDateMs??Date.parse(game.gameDate));
    if(!k){summary.missingIdentity++;continue;}
    // Schedule metadata is stored as soon as the provider lists a fixture.
@@ -206,9 +209,9 @@ export function dueResults(state,now=Date.now(),limit=6){
      a.startMs-b.startMs).slice(0,limit);
 }
 export function projection(state,now=Date.now()){
- const records=(state.records||[]).map(({odds,latestOdds,...r})=>({...r,oddsCount:odds.length}))
+ const records=withoutNba(state.records).map(({odds,latestOdds,...r})=>({...r,oddsCount:odds.length}))
    .sort((a,b)=>b.startMs-a.startMs).slice(0,150);
- const all=state.records||[];
+ const all=withoutNba(state.records);
  return {schema:"wisetoto-collect-first-public-v1",generatedAt:new Date(now).toISOString(),
    resultAudit:finalAuditBacklog(state,now),
    qualityAudit:diagnoseDataQuality(state,now),
