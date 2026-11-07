@@ -149,3 +149,16 @@ test("research direct ingest never starts pilot on only-NBA feed but accepts gen
  assert.equal(kblOnly.state.fixtures[0].league,"KBL");
  assert.equal(publicEvidence(kblOnly.state,T).counts.future,1);
 });
+
+test("NBA is blocked by all public source routes, while other league proxies remain",async()=>{
+ const {readFile}=await import("node:fs/promises");
+ const scoreboard=await readFile(new URL("../WisetotoAnalyzer-LiveFree/src/app/api/espn/scoreboard/route.ts",import.meta.url),"utf8");
+ const lineup=await readFile(new URL("../WisetotoAnalyzer-LiveFree/src/app/api/espn/lineup/route.ts",import.meta.url),"utf8");
+ const betman=await readFile(new URL("../WisetotoAnalyzer-LiveFree/src/app/api/betman/route.ts",import.meta.url),"utf8");
+ assert.doesNotMatch(scoreboard,/nba:\["basketball","nba"\]/);
+ assert.doesNotMatch(lineup,/new Set\(\["nba",/);
+ assert.match(scoreboard,/"uefa.champions"/);
+ assert.match(scoreboard,/mlb:\["baseball","mlb"\]/);
+ assert.match(lineup,/"eng.1"/);
+ assert.match(betman,/groupSchedules\(\s*schedules\s*\)\.filter\(game => !isExcludedNba\(game\)\)/);
+});
