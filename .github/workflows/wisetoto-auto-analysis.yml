@@ -164,8 +164,13 @@ jobs:
               exit 1
               ;;
           esac
+      - name: Apply user-directed NBA deletion before collection and reports
+        id: nba_optout
+        if: steps.ledger_restore.outcome == 'success' && steps.evidence_restore.outcome == 'success'
+        run: node automation/research/apply-nba-exclusion.mjs
       - name: Due match and verification preflight
         id: due
+        if: steps.nba_optout.outcome == 'success'
         run: node automation/runner.mjs --preflight
       - name: Seed no-deploy config on automation-data branch
         # Vercel reads vercel.json FROM THE DATA BRANCH itself.
@@ -199,7 +204,7 @@ jobs:
           done
       - name: Capture 30-minute fixtures and reconcile verified results without browser
         id: ledger_capture
-        if: always() && steps.ledger_restore.outcome == 'success'
+        if: always() && steps.ledger_restore.outcome == 'success' && steps.nba_optout.outcome == 'success'
         env:
           WISETOTO_URL: https://wisetoto-analyzer.vercel.app
         run: node automation/research/run-collect-first.mjs
@@ -268,11 +273,11 @@ jobs:
           '
       - name: Collect longitudinal prekickoff evidence without Chromium
         # Independent of the browser but never start from failed archive restore.
-        if: always() && steps.evidence_restore.outcome == 'success' && steps.ledger_restore.outcome == 'success'
+        if: always() && steps.evidence_restore.outcome == 'success' && steps.ledger_restore.outcome == 'success' && steps.nba_optout.outcome == 'success'
         run: node automation/research/run.mjs
       - name: Evaluate weekly 28-day pilot, including feed outage days
         id: pilot_review
-        if: always() && steps.evidence_restore.outcome == 'success' && steps.ledger_restore.outcome == 'success'
+        if: always() && steps.evidence_restore.outcome == 'success' && steps.ledger_restore.outcome == 'success' && steps.nba_optout.outcome == 'success'
         run: node automation/research/run-pilot-review.mjs
       - name: Archive old study odds snapshots before rolling research file
         id: evidence_archive
