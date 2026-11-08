@@ -51,6 +51,8 @@ jobs:
         run: node automation/research/probe-kleague-backlog.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Audit original overdue ESPN one-sided team identities (read-only)
         run: node automation/research/probe-espn-team-gaps.mjs /tmp/wisetoto-readonly-current-ledger.json
+      - name: Audit all ESPN scoreboard coverage and Naver outage leagues (read-only)
+        run: node automation/research/probe-source-coverage-backlog.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Install app and browser
         run: |
           cd WisetotoAnalyzer-LiveFree && npm install --no-audit --no-fund
