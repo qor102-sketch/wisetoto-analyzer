@@ -53,6 +53,8 @@ jobs:
         run: node automation/research/probe-espn-team-gaps.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Audit all ESPN scoreboard coverage and Naver outage leagues (read-only)
         run: node automation/research/probe-source-coverage-backlog.mjs /tmp/wisetoto-readonly-current-ledger.json
+      - name: Probe KBO official postseason and regulation final evidence (read-only)
+        run: node automation/research/probe-kbo-official-source.mjs
       - name: Install app and browser
         run: |
           cd WisetotoAnalyzer-LiveFree && npm install --no-audit --no-fund
