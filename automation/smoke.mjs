@@ -1,5 +1,6 @@
 // PR smoke: exercise client automation bridge without firing a real prediction.
 import { chromium } from "playwright";
+import {isNbaGame} from "./nba-policy.mjs";
 const browser=await chromium.launch({headless:true});
 try{
  const page=await browser.newPage();
@@ -46,8 +47,17 @@ try{
  if(JSON.stringify(body).includes("modelSnapshot")||JSON.stringify(body).includes("localStorage"))
   throw Error("Dashboard leaked raw private tracker");
  const visible=body.data.records;
- if(visible.some(r=>r.sport==="농구"&&
-   /^(nba|미국프로농구|미프로농구)/i.test(String(r.league??"").replace(/\s+/g,""))))
+ // Use the same sport+league exclusion predicate as collection and the ledger.
+ // Guard whitespace/full-width league aliases and preserve non-NBA basketball.
+ for(const league of ["NBA","NBA Cup","N B A","ＮＢＡ","미국 프로농구","미국 프로 농구","미프로농구"]){
+  if(!isNbaGame({sport:"농구",league}))
+   throw Error("NBA opt-out regression: missed prohibited league "+league);
+ }
+ for(const league of ["KBL","WKBL","WNBA","미국여자프로농구 WNBA","EASL"]){
+  if(isNbaGame({sport:"basketball",league}))
+   throw Error("NBA opt-out regression: excluded permitted league "+league);
+ }
+ if(visible.some(isNbaGame))
   throw Error("NBA opt-out regression: prohibited basketball league in public results");
  if(visible.length<1)throw Error("No non-NBA published PRE records for dashboard smoke");
  console.log("DASHBOARD OK: non-NBA PRE records shown, NBA excluded, no raw model snapshots");
