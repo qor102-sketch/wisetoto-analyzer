@@ -92,18 +92,29 @@ const knownHomeById={
  "761918":"밴쿠버 화이트캡스FC","761913":"미네소타 유나이티드FC",
  "761905":"뉴욕 시티FC","761908":"인터 마이애미CF","761906":"토론토FC"
 };
-const missing=[...auditedIds].filter(id=>!confirmed.has(id));
+// Completed historical fixtures disappear from the PENDING-only audit by
+// design. Do NOT falsely label these as source contradictions: require their
+// immutable stored ESPN FINAL evidence and original official numeric ID.
+const stored=new Set(state.records.filter(r=>r.verdict==="VERIFIED"&&
+ r.resultSource==="ESPN"&&r.finalEvidence==="ESPN_SCOREBOARD_FINAL"&&
+ r.final&&Number.isSafeInteger(r.final.homeScore)&&
+ Number.isSafeInteger(r.final.awayScore)&&r.final.homeScore>=0&&r.final.awayScore>=0)
+ .map(r=>String(r.finalProviderGameId??"")));
+const persisted=[...auditedIds].filter(id=>stored.has(id));
+const missing=[...auditedIds].filter(id=>!confirmed.has(id)&&!stored.has(id));
 const deferred=missing.filter(id=>audits.some(a=>a.home===knownHomeById[id]&&
  a.fetchErrors.some(reason=>/^HTTP_50[24]|^NETWORK/.test(reason))));
 const unproven=missing.filter(id=>!deferred.includes(id));
 console.log("ESPN_15_OFFICIAL_FINAL_REGRESSION "+JSON.stringify({
  expected:auditedIds.size,verified:auditedIds.size-missing.length,
+ persistedVerified:persisted.length,livePendingSourceVerified:confirmed.size,
  deferredUpstreamOutage:deferred.length,unprovenIds:unproven,
  unresolvedOther:audits.filter(x=>!x.officialExactFinal).length
 }));
 // An HTTP 502 or timeout is NOT a mismatch. Never fabricate a FINAL; only
 // defer the read-only audit and rely on the prior 15 source-backed unit cases.
-// Genuine source responses that contradict the audited pair still fail CI.
+// Genuine source contradictions or missing previously audited evidence fail CI;
+// completed/VERIFIED records cannot remain in the pending-only sample.
 if(unproven.length){
  console.error("ESPN_AUDITED_15_FINAL_IDENTITY_CONTRADICTION: "+unproven.join(","));
  process.exitCode=1;
