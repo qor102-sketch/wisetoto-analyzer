@@ -48,7 +48,8 @@ test("newly observed aliases never mark a swapped, same-league wrong-side, ambig
  for(const p of audited){
   const f=fixture(p),now=f.startMs+4*3600000,e=event(p);
   const bad=[
-   {...e,competitors:[e.competitors[1],e.competitors[0]]},
+   {...e,competitors:[{...e.competitors[0],name:p[4]},
+    {...e.competitors[1],name:p[3]}]},
    {...e,id:"NO_EVENT_ID"},
    {...e,id:p[6]+"8",date:new Date(f.startMs+4*3600000).toISOString()},
    {...e,completed:false},
