@@ -5,7 +5,7 @@ import {scheduleUrls,kstDate} from "./naver-fast-final.mjs";
 const probeDate=Date.now()-24*3600000;
 const sources=[
  {sport:"축구",league:"잉글랜드 프리미어리그",home:"N/A",away:"N/A",startMs:probeDate},
- {sport:"농구",league:"NBA",home:"N/A",away:"N/A",startMs:probeDate},
+ {sport:"농구",league:"KBL",home:"N/A",away:"N/A",startMs:probeDate},
  {sport:"야구",league:"NPB",home:"N/A",away:"N/A",startMs:probeDate}
 ];
 for(const sport of sources){
