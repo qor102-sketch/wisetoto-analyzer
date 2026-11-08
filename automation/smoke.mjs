@@ -1,5 +1,6 @@
 // PR smoke: exercise client automation bridge without firing a real prediction.
 import { chromium } from "playwright";
+import {isNbaGame} from "./nba-policy.mjs";
 const browser=await chromium.launch({headless:true});
 try{
  const page=await browser.newPage();
@@ -36,28 +37,30 @@ try{
  // Dashboard is a separate read-only page and uses actual published records.
  await page.goto("http://127.0.0.1:3100/automation",{waitUntil:"domcontentloaded",timeout:90_000});
  await page.getByRole("heading",{name:"자동분석 결과"}).waitFor({timeout:30000});
- await page.getByText("Los Angeles Clippers",{exact:false}).first().waitFor({timeout:30000});
+ // Historical NBA records are deliberately deleted by the user's opt-out.
+ // The dashboard smoke must assert non-NBA evidence rather than require a
+ // deleted Clippers match or manufacture an NBA UI fixture.
  const response=await page.request.get("http://127.0.0.1:3100/api/automation/results");
  const body=await response.json();
- if(!response.ok()||!body.ok||body.data?.records?.length<3)throw Error("Dashboard API unavailable or first frozen PRE missing");
- if(JSON.stringify(body).includes("modelSnapshot")||JSON.stringify(body).includes("localStorage"))throw Error("Dashboard leaked raw private tracker");
- // Historical basketball PRE had no standalone expected points.
- await page.getByRole("button",{name:/Los Angeles Clippers.*Sacramento Kings/}).first().click();
- await page.getByText("농구 PRE 예상점수",{exact:true}).waitFor({timeout:30000});
- await page.getByText("과거 PRE 예상점수 미저장",{exact:true}).waitFor({timeout:30000});
- if(await page.getByText("축구 λ 없음",{exact:true}).count()) throw Error("Basketball still shows football lambda");
- // Future newly-frozen NBA rows will have their true court PRE projected.
- const future=structuredClone(body);
- const nba=future.data.records.find(r=>r.home==="Los Angeles Clippers"&&r.sport==="농구");
- if(!nba)throw Error("Clippers test fixture missing from public history");
- nba.courtPre={expectedHome:113.6,expectedAway:110.4,homeRecentSample:5,awayRecentSample:5,homeVenueSample:2,awayVenueSample:3};
- await page.route("**/api/automation/results",route=>route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(future)}));
- await page.reload({waitUntil:"domcontentloaded"});
- await page.getByText("Los Angeles Clippers",{exact:false}).first().waitFor({timeout:30000});
- await page.getByRole("button",{name:/Los Angeles Clippers.*Sacramento Kings/}).first().click();
- await page.getByText("113.6 : 110.4",{exact:true}).waitFor({timeout:30000});
- console.log("COURT PRE DISPLAY OK: legacy remains missing, new frozen NBA home/away score visible");
- console.log("DASHBOARD OK: history API + real published first 3 PRE visible, no raw model snapshots");
+ if(!response.ok()||!body.ok||!Array.isArray(body.data?.records))
+  throw Error("Dashboard API missing honest evidence records");
+ if(JSON.stringify(body).includes("modelSnapshot")||JSON.stringify(body).includes("localStorage"))
+  throw Error("Dashboard leaked raw private tracker");
+ const visible=body.data.records;
+ // Use the same sport+league exclusion predicate as collection and the ledger.
+ // Guard whitespace/full-width league aliases and preserve non-NBA basketball.
+ for(const league of ["NBA","NBA Cup","N B A","ＮＢＡ","미국 프로농구","미국 프로 농구","미프로농구"]){
+  if(!isNbaGame({sport:"농구",league}))
+   throw Error("NBA opt-out regression: missed prohibited league "+league);
+ }
+ for(const league of ["KBL","WKBL","WNBA","미국여자프로농구 WNBA","EASL"]){
+  if(isNbaGame({sport:"basketball",league}))
+   throw Error("NBA opt-out regression: excluded permitted league "+league);
+ }
+ if(visible.some(isNbaGame))
+  throw Error("NBA opt-out regression: prohibited basketball league in public results");
+ if(visible.length<1)throw Error("No non-NBA published PRE records for dashboard smoke");
+ console.log("DASHBOARD OK: non-NBA PRE records shown, NBA excluded, no raw model snapshots");
 
  // All-sports scan must not silently follow the default UI sport filter.
  // Feed four distinct real-looking offers, but DO NOT execute any prediction.

@@ -3,6 +3,7 @@
 import {espnLeague} from "./espn-fast-final.mjs";
 import {isJleagueJ2} from "./jleague-j2-final.mjs";
 import {officialKLeagueId} from "./kleague-official-final.mjs";
+import {isKboFixture} from "./kbo-official-final.mjs";
 const H=3600000;
 const top=(counts,limit=8)=>Object.fromEntries(Object.entries(counts)
  .sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,limit));
@@ -12,6 +13,12 @@ export function finalFailureCategory(row){
  const history=Array.isArray(row.resultErrors)?
   (row.resultErrors.at(-1)?.reasons??[]).join(" | "):"";
  const joined=reason+" | "+history;
+ if(/KBO_OFFICIAL:.*?SOURCE_(?:NETWORK|HTTP_50[24])/.test(joined))
+  return "KBO_OFFICIAL_SOURCE_OUTAGE";
+ if(/KBO_OFFICIAL:.*?EXACT_FIXTURE_NOT_FOUND/.test(joined))
+  return "KBO_OFFICIAL_IDENTITY_UNCONFIRMED";
+ if(/KBO_OFFICIAL:.*?FINAL_STATUS_UNCONFIRMED/.test(joined))
+  return "KBO_OFFICIAL_FINAL_UNCONFIRMED";
  if(/KLEAGUE_OFFICIAL:.*?SOURCE_(?:NETWORK|HTTP_50[24])/.test(joined))
   return "KLEAGUE_OFFICIAL_SOURCE_OUTAGE";
  if(/KLEAGUE_OFFICIAL:.*?(?:EXACT_FIXTURE_NOT_FOUND|AMBIGUOUS_FIXTURE)/.test(joined))
@@ -47,7 +54,7 @@ export function finalFailureCategory(row){
   return "NAVER_SOURCE_OUTAGE";
  if(/ESPN_FINAL_SCORE_MISSING|NAVER_FINAL_SCORE_MISSING/.test(joined))
   return "FINAL_SCORE_MISSING";
- if(!espnLeague(row)&&!isJleagueJ2(row)&&!officialKLeagueId(row)&&["축구","농구","야구"].includes(row.sport))
+ if(!espnLeague(row)&&!isJleagueJ2(row)&&!officialKLeagueId(row)&&!isKboFixture(row)&&["축구","농구","야구"].includes(row.sport))
   return "NO_INDEPENDENT_ESPN_LEAGUE";
  if(/WAITING_FOR_END/.test(reason))return "NO_FINAL_AUDIT_YET";
  return "OTHER_UNCONFIRMED";
@@ -106,7 +113,8 @@ export function diagnoseDataQuality(state,now=Date.now()){
    increment(byConcurrentFailure,"ESPN_UPSTREAM_50X");
   increment(byProvider,espnLeague(r)?"ESPN_SUPPORTED":isJleagueJ2(r)?
    "JLEAGUE_OFFICIAL_J2_SUPPORTED":officialKLeagueId(r)?
-   "KLEAGUE_OFFICIAL_SOURCE_SUPPORTED":"NO_INDEPENDENT_LEAGUE_SOURCE");
+   "KLEAGUE_OFFICIAL_SOURCE_SUPPORTED":isKboFixture(r)?
+   "KBO_OFFICIAL_SOURCE_SUPPORTED":"NO_INDEPENDENT_LEAGUE_SOURCE");
  }
  const nbaRows=rows.filter(r=>r.sport==="농구"&&espnLeague(r)==="nba");
  const nba={},nbaPast=nbaRows.filter(r=>r.startMs<=now);
