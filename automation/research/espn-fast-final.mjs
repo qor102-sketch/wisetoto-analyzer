@@ -107,6 +107,19 @@ const aliases=[
  ["말라가","malaga"],
  ["트루아ac","troyes"],
  ["르망fc","lemans"],
+ // Original 2026-11-08 GitHub CI official ESPN full-time source:
+ // 13 unique exact league, 0-minute kickoff and one independently matched side.
+ // Names below do NOT waive both-team, competition, unique event ID and FINAL.
+ ["루아얄위니옹생질루아즈","unionstgilloise"],
+ ["바이어04레버쿠젠","bayerleverkusen"],
+ ["gnk디나모자그레브","dinamozagreb"],
+ ["페렌츠바로시tc","ferencvaros"],
+ ["ac오모니아","omonianicosia"],
+ ["미트윌란","fcmidtjylland"],
+ ["스파르타프라하","spartaprague"],
+ ["카디프시티","cardiffcity"],
+ ["시애틀사운더스fc","seattlesoundersfc"],
+ ["뉴잉글랜드레벌루션","newenglandrevolution"],
  // Cross-checked with ESPN 2026-11-02 AFC Elite event 401912631,
  // Pakhtakor (home) vs Al Nassr (away), 13:45 UTC.
  ["파흐타코르","pakhtakor"],["s알나스르","알나스르","alnassr"],
@@ -142,7 +155,7 @@ const aliases=[
  ["브리스틀시티","bristolcity"],["렉섬","wrexham"],["셰필드유나이티드","sheffieldunited"],
  ["리즈유나이티드","leedsunited"],["웨스트브로미치앨비언","westbromwichalbion","westbrom"],
  ["퍼스글로리","perthglory"],["애들레이드유나이티드","adelaideunited"],
- ["멜버른빅토리","melbournevictory"],["센트럴코스트매리너스","centralcoastmariners"],
+ ["멜버른빅토리","melbournevictory"],["센트럴코스트매리너스","centralcoastmariners","centralcoastmarinersfc"],
  ["맥아서fc","macarthurfc"],["웨스턴시드니원더러스","westernsydneywanderers"],
  ["멜버른시티","melbournecity"],["시드니fc","sydneyfc"],
  ["브리즈번로어","brisbaneroarfc","brisbaneroar"],
