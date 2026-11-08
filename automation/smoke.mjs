@@ -47,7 +47,7 @@ try{
   throw Error("Dashboard leaked raw private tracker");
  const visible=body.data.records;
  if(visible.some(r=>r.sport==="농구"&&
-   /^(nba|미국프로농구|미프로농구)/i.test(String(r.league??"").replace(/\\s+/g,""))))
+   /^(nba|미국프로농구|미프로농구)/i.test(String(r.league??"").replace(/\s+/g,""))))
   throw Error("NBA opt-out regression: prohibited basketball league in public results");
  if(visible.length<1)throw Error("No non-NBA published PRE records for dashboard smoke");
  console.log("DASHBOARD OK: non-NBA PRE records shown, NBA excluded, no raw model snapshots");
