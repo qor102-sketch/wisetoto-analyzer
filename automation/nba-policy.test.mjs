@@ -31,6 +31,22 @@ test("NBA-only policy is league-and-sport exact, never deleting KBL/EASL/WNBA",(
  assert.equal(filtered.length,5);
  assert.equal(filtered.some(isNbaGame),false);
 });
+test("NBA opt-out normalizes spaces and full-width league names without excluding other basketball leagues",()=>{
+ const excluded=["NBA","NBA Cup","N B A","ＮＢＡ","미국 프로농구",
+  "미국 프로 농구","미국프로농구","미프로농구"];
+ for(const league of excluded){
+  assert.equal(isNbaGame({sport:"농구",league}),true,"must exclude "+league);
+  assert.equal(isNbaGame({sport:"basketball",league}),true,"must exclude "+league);
+ }
+ const allowed=["KBL","WKBL","WNBA","미국여자프로농구 WNBA","EASL","동아시아 슈퍼리그"];
+ for(const league of allowed){
+  assert.equal(isNbaGame({sport:"농구",league}),false,"must preserve "+league);
+ }
+ assert.equal(isNbaGame({sport:"축구",league:"NBA"}),false);
+ const rows=[...excluded.map(league=>({sport:"농구",league})),
+  ...allowed.map(league=>({sport:"농구",league}))];
+ assert.deepEqual(withoutNba(rows).map(x=>x.league),allowed);
+});
 test("all Betman cached/live readers enforce policy including legacy pre-filter snapshots",async()=>{
  const payload={ok:true,games:[nba,kbl,wnba,soccer]};
  const clean=excludeNbaFeed(payload);
