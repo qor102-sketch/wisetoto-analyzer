@@ -9,6 +9,7 @@ import {naverOutageGroup} from "./naver-outage-group.mjs";
 import {espnLeague,lookupEspnFinal} from "./espn-fast-final.mjs";
 import {isJleagueJ2,lookupJleagueJ2Final} from "./jleague-j2-final.mjs";
 import {officialKLeagueId,lookupOfficialKLeagueFinal} from "./kleague-official-final.mjs";
+import {isKboFixture,lookupOfficialKboFinal} from "./kbo-official-final.mjs";
 import {collectLineupSnapshots} from "./pregame-lineup.mjs";
 import {selectFinalAuditRows} from "./final-scan-plan.mjs";
 import {effectTotals,recordOperationalEffect} from "./operational-effect.mjs";
@@ -60,6 +61,7 @@ const scheduleCache=new Map();
 const espnCache=new Map();
 const jleagueCache=new Map();
 const kleagueCache=new Map();
+const officialKboCache=new Map();
 let finalChecked=0,finalConfirmed=0,finalWaitReasons={},confirmedBySource={};
 const espnFailureReasons={};
 async function requestFinal(url){
@@ -121,6 +123,14 @@ for(const r of finalQueue){
    const official=await lookupOfficialKLeagueFinal(r,{cache:kleagueCache,now:Date.now()});
    if(official.ok)confirmed=official;
    else reasons.push("KLEAGUE_OFFICIAL:"+String(official.waitReason).slice(0,145));
+ }
+ if(!confirmed&&isKboFixture(r)){
+   // Real KBO POST game list (official 2026 postseason). Only source
+   // GAME_RESULT_CK=1 + CANCEL_SC_ID=0 + exact sides/date/clock/ID + scores.
+   providerAttempted=true;
+   const official=await lookupOfficialKboFinal(r,{cache:officialKboCache,now:Date.now()});
+   if(official.ok)confirmed=official;
+   else reasons.push("KBO_OFFICIAL:"+String(official.waitReason).slice(0,145));
  }
  if(!confirmed&&supportedNaver.has(r.sport)){
    // A failed Naver football category must not silence NBA/KBL/baseball,
@@ -188,6 +198,7 @@ console.log("FAST_FINAL_AUDIT "+JSON.stringify({
  sharedScheduleQueries:scheduleCache.size,sharedEspnQueries:espnCache.size,
  sharedOfficialJ2Queries:jleagueCache.size,
  sharedOfficialKLeagueQueries:kleagueCache.size,
+ sharedOfficialKboQueries:officialKboCache.size,
  naverUpstreamFailures,naverFailedRows,naverOutageSkipped,
  naverCircuitGroups:Object.fromEntries(naverFailureGroups),waitReasons:finalWaitReasons,
  espnFailureReasons
