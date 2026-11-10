@@ -236,6 +236,9 @@ export function espnLeague(fixture){
  if(/독일분데스|bundesliga/.test(l))return "ger.1";
  if(/프랑스리그2|ligue2/.test(l))return "fra.2";
  if(/프랑스리그1|ligue1/.test(l))return "fra.1";
+ // ESPN independently publishes the Chinese Super League as chn.1.
+ // No team alias or score is inferred from the competition label alone.
+ if(/중국슈퍼리그|중국프로축구|chinesesuperleague|chinasuperleague/.test(l))return "chn.1";
  if(/미국메이저리그사커|mls|미국프로축구/.test(l))return "usa.1";
  if(/네덜란드2부|에이르스터디비시|eerste divisie|eerstedivisie/.test(l))return "ned.2";
  if(/네덜란드에레디비시|eredivisie/.test(l))return "ned.1";
