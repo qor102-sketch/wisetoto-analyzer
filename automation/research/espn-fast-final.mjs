@@ -202,6 +202,19 @@ const aliases=[
  // league, strict kickoff, regulation FINAL and score remain mandatory.
  ["rc랑스","랑스","lens"],
  ["감바오사카","gambaosaka"],
+ // Independently observed source-owned ESPN Chinese Super League scoreboards:
+ // read-only CI #2923, all 8 overdue 2026-11-08 07:30 UTC fixtures have
+ // unique distinct numeric event IDs, matching home/away and full-time status.
+ // Only source-backed Korean↔ESPN club labels; NEVER match on score/time alone.
+ ["다롄잉보","dalianyingbo"],["톈진진먼후","tianjinjinmentiger"],
+ ["베이징궈안","beijingguoan"],["충칭퉁량룽","chongqingtonglianglong"],
+ ["산둥타이산","shandongtaishan"],["청두룽청","chengdurongcheng"],
+ ["상하이선화","shanghaishenhuafc","shanghaishenhua"],
+ ["칭다오시하이안","qingdaowestcoast"],
+ ["상하이하이강","shanghaiportfc","shanghaiport"],["랴오닝톄런","liaoningtieren"],
+ ["윈난위쿤","yunnanyukun"],["우한싼전","wuhanthreetowns"],
+ ["저장fc","zhejiangprofessionalfc"],["허난fc","henan"],
+ ["칭다오하이뉴","qingdaohainiu"],["선전신펑청","shenzhenxinpengcheng"],
  ["뉴욕양키스","newyorkyankees"],["보스턴레드삭스","bostonredsox"],
  ["la다저스","로스앤젤레스다저스","losangelesdodgers"],["시카고컵스","chicagocubs"]
 ].map(group=>group.map(norm));
