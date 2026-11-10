@@ -196,6 +196,12 @@ const aliases=[
  ["엑셀시오르로테르담","excelsiorrotterdam"],["트벤테","twente"],
  ["텔스타","telstar"],["위트레흐트","utrecht"],
  ["pec즈볼러","peczwolle"],["ado덴하흐","adodenhaag"],
+ // Independently audited 2026-11-08 official ESPN FINAL events from
+ // read-only CI #2642: 401915305 Lens v Como and 401912614 Pohang v Gamba.
+ // These are identity aliases ONLY; unique official event, both sides,
+ // league, strict kickoff, regulation FINAL and score remain mandatory.
+ ["rc랑스","랑스","lens"],
+ ["감바오사카","gambaosaka"],
  ["뉴욕양키스","newyorkyankees"],["보스턴레드삭스","bostonredsox"],
  ["la다저스","로스앤젤레스다저스","losangelesdodgers"],["시카고컵스","chicagocubs"]
 ].map(group=>group.map(norm));
@@ -259,13 +265,20 @@ export function diagnoseEspnIdentity(payload,fixture,{league=espnLeague(fixture)
   return {ok:false,waitReason:"ESPN_LEAGUE_OR_FEED_UNCONFIRMED"};
  const valid=payload.events.filter(e=>e&&Number.isFinite(Date.parse(String(e.date??""))));
  const inTime=valid.filter(e=>Math.abs(Date.parse(String(e.date))-fixture.startMs)<=2*hours);
- const sourceSides=e=>({
-  home:e.competitors?.find(c=>c.homeAway==="home")?.name,
-  away:e.competitors?.find(c=>c.homeAway==="away")?.name
- });
+ // Both official source displayName and shortDisplayName refer to the
+ // SAME homeAway competitor in ONE ESPN event. Neither is a fixture proof
+ // alone; the opposite team, league, unique numeric ID and kickoff must match.
+ const sourceSides=e=>{
+  const c=Array.isArray(e.competitors)?e.competitors:[];
+  const home=c.find(x=>x.homeAway==="home");
+  const away=c.find(x=>x.homeAway==="away");
+  return {home:[home?.name,home?.shortName],
+    away:[away?.name,away?.shortName]};
+ };
+ const sideEq=(betman,source)=>source.some(name=>teamEq(betman,name));
  const matched=inTime.filter(e=>{
   const {home,away}=sourceSides(e);
-  return teamEq(fixture.home,home)&&teamEq(fixture.away,away);
+  return sideEq(fixture.home,home)&&sideEq(fixture.away,away);
  });
  const numeric=matched.filter(e=>/^\d+$/.test(String(e.id??"")));
  const exact=new Map();
@@ -282,15 +295,15 @@ export function diagnoseEspnIdentity(payload,fixture,{league=espnLeague(fixture)
  if(!payload.events.length)return {ok:false,waitReason:"ESPN_SCOREBOARD_EMPTY"};
  if(valid.some(e=>{
   const {home,away}=sourceSides(e);
-  return teamEq(fixture.home,home)&&teamEq(fixture.away,away);
+  return sideEq(fixture.home,home)&&sideEq(fixture.away,away);
  }))return {ok:false,waitReason:"ESPN_KICKOFF_MISMATCH"};
  if(inTime.some(e=>{
   const {home,away}=sourceSides(e);
-  return teamEq(fixture.home,away)&&teamEq(fixture.away,home);
+  return sideEq(fixture.home,away)&&sideEq(fixture.away,home);
  }))return {ok:false,waitReason:"ESPN_HOME_AWAY_REVERSED"};
- if(inTime.some(e=>teamEq(fixture.home,sourceSides(e).home)))
+ if(inTime.some(e=>sideEq(fixture.home,sourceSides(e).home)))
   return {ok:false,waitReason:"ESPN_AWAY_TEAM_NOT_MATCHED"};
- if(inTime.some(e=>teamEq(fixture.away,sourceSides(e).away)))
+ if(inTime.some(e=>sideEq(fixture.away,sourceSides(e).away)))
   return {ok:false,waitReason:"ESPN_HOME_TEAM_NOT_MATCHED"};
  if(!inTime.length)return {ok:false,waitReason:"ESPN_NO_EVENTS_NEAR_KICKOFF"};
  return {ok:false,waitReason:"ESPN_TEAMS_NOT_ON_SCOREBOARD"};
@@ -349,7 +362,12 @@ export async function lookupEspnFinal(fixture,{
  const league=espnLeague(fixture);
  if(!league)return {ok:false,waitReason:"ESPN_LEAGUE_UNSUPPORTED"};
  if(!base)return {ok:false,waitReason:"ESPN_PROXY_BASE_REQUIRED"};
- const dates=espnScoreboardDates(fixture);
+ // Primary ESPN competition-day buckets first. Only on failure inspect the
+ // third possible UTC/local day; discovery broadens but identity proof never
+ // broadens. Shared URL cache prevents duplicate cross-game requests.
+ const primary=espnScoreboardDates(fixture);
+ const dates=[...new Set([...primary,
+  ...[fixture.startMs-24*hours,fixture.startMs+24*hours].map(dateKey)])];
  const reasons=[];
  let kickoffAudit=null;
  for(const date of new Set(dates)){
