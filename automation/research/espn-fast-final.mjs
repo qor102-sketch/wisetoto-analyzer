@@ -215,6 +215,35 @@ const aliases=[
  ["윈난위쿤","yunnanyukun"],["우한싼전","wuhanthreetowns"],
  ["저장fc","zhejiangprofessionalfc"],["허난fc","henan"],
  ["칭다오하이뉴","qingdaohainiu"],["선전신펑청","shenzhenxinpengcheng"],
+ // Official ESPN read-only overdue audit (GitHub Actions #2926):
+ // 25 unique one-sided 2026-10-30..11-08 match candidates, exact
+ // competition + 0-minute kickoff + unique official completed event ID.
+ // Add only source-proven missing CLUB names. Still require exact other
+ // team, homeAway, 2h kickoff, numeric event ID and regulation FINAL.
+ ["ACF피오렌티나","Fiorentina"],
+ ["위트레흐트","FC Utrecht"],
+ ["비야레알","Villarreal"],
+ ["SC프라이부르크","SC Freiburg"],
+ ["스타드 브레스투아29","Brest"],
+ ["OGC니스","Nice"],
+ ["흐로닝언","FC Groningen"],
+ ["아탈란타BC","Atalanta"],
+ ["입스위치 타운","Ipswich Town"],
+ ["트벤테","FC Twente"],
+ ["제프 유나이티드","JEF United Ichihara-Chiba"],
+ ["FC마치다 젤비아","Machida Zelvia"],
+ ["파리 생제르맹","Paris Saint-Germain"],
+ ["엑셀시오르 로테르담","Excelsior"],
+ ["US사수올로","Sassuolo"],
+ ["오사수나","Osasuna"],
+ ["헐 시티","Hull City"],
+ ["FSV마인츠05","Mainz"],
+ ["엘버스베르크","SV Elversberg"],
+ ["가와사키 프론탈레","Kawasaki Frontale"],
+ ["요코하마 F마리노스","Yokohama F. Marinos"],
+ ["도쿄 베르디","Tokyo Verdy 1969"],
+ ["포트FC","Port FC"],
+ ["릴OSC","Lille"],
  ["뉴욕양키스","newyorkyankees"],["보스턴레드삭스","bostonredsox"],
  ["la다저스","로스앤젤레스다저스","losangelesdodgers"],["시카고컵스","chicagocubs"]
 ].map(group=>group.map(norm));
