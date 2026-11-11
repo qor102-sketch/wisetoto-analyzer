@@ -23,7 +23,7 @@ concurrency:
 jobs:
   smoke:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
@@ -55,6 +55,8 @@ jobs:
         run: node automation/research/probe-source-coverage-backlog.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Probe KBO official postseason and regulation final evidence (read-only)
         run: node automation/research/probe-kbo-official-source.mjs
+      - name: Audit independent Chinese Super League ESPN scoreboards (read-only)
+        run: node automation/research/probe-csl-official-source.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Install app and browser
         run: |
           cd WisetotoAnalyzer-LiveFree && npm install --no-audit --no-fund
@@ -79,7 +81,7 @@ jobs:
 
   auto-audit:
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4

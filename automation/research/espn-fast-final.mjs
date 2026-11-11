@@ -196,6 +196,54 @@ const aliases=[
  ["엑셀시오르로테르담","excelsiorrotterdam"],["트벤테","twente"],
  ["텔스타","telstar"],["위트레흐트","utrecht"],
  ["pec즈볼러","peczwolle"],["ado덴하흐","adodenhaag"],
+ // Independently audited 2026-11-08 official ESPN FINAL events from
+ // read-only CI #2642: 401915305 Lens v Como and 401912614 Pohang v Gamba.
+ // These are identity aliases ONLY; unique official event, both sides,
+ // league, strict kickoff, regulation FINAL and score remain mandatory.
+ ["rc랑스","랑스","lens"],
+ ["감바오사카","gambaosaka"],
+ // Independently observed source-owned ESPN Chinese Super League scoreboards:
+ // read-only CI #2923, all 8 overdue 2026-11-08 07:30 UTC fixtures have
+ // unique distinct numeric event IDs, matching home/away and full-time status.
+ // Only source-backed Korean↔ESPN club labels; NEVER match on score/time alone.
+ ["다롄잉보","dalianyingbo"],["톈진진먼후","tianjinjinmentiger"],
+ ["베이징궈안","beijingguoan"],["충칭퉁량룽","chongqingtonglianglong"],
+ ["산둥타이산","shandongtaishan"],["청두룽청","chengdurongcheng"],
+ ["상하이선화","shanghaishenhuafc","shanghaishenhua"],
+ ["칭다오시하이안","qingdaowestcoast"],
+ ["상하이하이강","shanghaiportfc","shanghaiport"],["랴오닝톄런","liaoningtieren"],
+ ["윈난위쿤","yunnanyukun"],["우한싼전","wuhanthreetowns"],
+ ["저장fc","zhejiangprofessionalfc"],["허난fc","henan"],
+ ["칭다오하이뉴","qingdaohainiu"],["선전신펑청","shenzhenxinpengcheng"],
+ // Official ESPN read-only overdue audit (GitHub Actions #2926):
+ // 25 unique one-sided 2026-10-30..11-08 match candidates, exact
+ // competition + 0-minute kickoff + unique official completed event ID.
+ // Add only source-proven missing CLUB names. Still require exact other
+ // team, homeAway, 2h kickoff, numeric event ID and regulation FINAL.
+ ["ACF피오렌티나","Fiorentina"],
+ ["위트레흐트","FC Utrecht"],
+ ["비야레알","Villarreal"],
+ ["SC프라이부르크","SC Freiburg"],
+ ["스타드 브레스투아29","Brest"],
+ ["OGC니스","Nice"],
+ ["흐로닝언","FC Groningen"],
+ ["아탈란타BC","Atalanta"],
+ ["입스위치 타운","Ipswich Town"],
+ ["트벤테","FC Twente"],
+ ["제프 유나이티드","JEF United Ichihara-Chiba"],
+ ["FC마치다 젤비아","Machida Zelvia"],
+ ["파리 생제르맹","Paris Saint-Germain"],
+ ["엑셀시오르 로테르담","Excelsior"],
+ ["US사수올로","Sassuolo"],
+ ["오사수나","Osasuna"],
+ ["헐 시티","Hull City"],
+ ["FSV마인츠05","Mainz"],
+ ["엘버스베르크","SV Elversberg"],
+ ["가와사키 프론탈레","Kawasaki Frontale"],
+ ["요코하마 F마리노스","Yokohama F. Marinos"],
+ ["도쿄 베르디","Tokyo Verdy 1969"],
+ ["포트FC","Port FC"],
+ ["릴OSC","Lille"],
  ["뉴욕양키스","newyorkyankees"],["보스턴레드삭스","bostonredsox"],
  ["la다저스","로스앤젤레스다저스","losangelesdodgers"],["시카고컵스","chicagocubs"]
 ].map(group=>group.map(norm));
@@ -230,6 +278,9 @@ export function espnLeague(fixture){
  if(/독일분데스|bundesliga/.test(l))return "ger.1";
  if(/프랑스리그2|ligue2/.test(l))return "fra.2";
  if(/프랑스리그1|ligue1/.test(l))return "fra.1";
+ // ESPN independently publishes the Chinese Super League as chn.1.
+ // No team alias or score is inferred from the competition label alone.
+ if(/중국슈퍼리그|중국프로축구|chinesesuperleague|chinasuperleague/.test(l))return "chn.1";
  if(/미국메이저리그사커|mls|미국프로축구/.test(l))return "usa.1";
  if(/네덜란드2부|에이르스터디비시|eerste divisie|eerstedivisie/.test(l))return "ned.2";
  if(/네덜란드에레디비시|eredivisie/.test(l))return "ned.1";
@@ -259,13 +310,20 @@ export function diagnoseEspnIdentity(payload,fixture,{league=espnLeague(fixture)
   return {ok:false,waitReason:"ESPN_LEAGUE_OR_FEED_UNCONFIRMED"};
  const valid=payload.events.filter(e=>e&&Number.isFinite(Date.parse(String(e.date??""))));
  const inTime=valid.filter(e=>Math.abs(Date.parse(String(e.date))-fixture.startMs)<=2*hours);
- const sourceSides=e=>({
-  home:e.competitors?.find(c=>c.homeAway==="home")?.name,
-  away:e.competitors?.find(c=>c.homeAway==="away")?.name
- });
+ // Both official source displayName and shortDisplayName refer to the
+ // SAME homeAway competitor in ONE ESPN event. Neither is a fixture proof
+ // alone; the opposite team, league, unique numeric ID and kickoff must match.
+ const sourceSides=e=>{
+  const c=Array.isArray(e.competitors)?e.competitors:[];
+  const home=c.find(x=>x.homeAway==="home");
+  const away=c.find(x=>x.homeAway==="away");
+  return {home:[home?.name,home?.shortName],
+    away:[away?.name,away?.shortName]};
+ };
+ const sideEq=(betman,source)=>source.some(name=>teamEq(betman,name));
  const matched=inTime.filter(e=>{
   const {home,away}=sourceSides(e);
-  return teamEq(fixture.home,home)&&teamEq(fixture.away,away);
+  return sideEq(fixture.home,home)&&sideEq(fixture.away,away);
  });
  const numeric=matched.filter(e=>/^\d+$/.test(String(e.id??"")));
  const exact=new Map();
@@ -282,15 +340,15 @@ export function diagnoseEspnIdentity(payload,fixture,{league=espnLeague(fixture)
  if(!payload.events.length)return {ok:false,waitReason:"ESPN_SCOREBOARD_EMPTY"};
  if(valid.some(e=>{
   const {home,away}=sourceSides(e);
-  return teamEq(fixture.home,home)&&teamEq(fixture.away,away);
+  return sideEq(fixture.home,home)&&sideEq(fixture.away,away);
  }))return {ok:false,waitReason:"ESPN_KICKOFF_MISMATCH"};
  if(inTime.some(e=>{
   const {home,away}=sourceSides(e);
-  return teamEq(fixture.home,away)&&teamEq(fixture.away,home);
+  return sideEq(fixture.home,away)&&sideEq(fixture.away,home);
  }))return {ok:false,waitReason:"ESPN_HOME_AWAY_REVERSED"};
- if(inTime.some(e=>teamEq(fixture.home,sourceSides(e).home)))
+ if(inTime.some(e=>sideEq(fixture.home,sourceSides(e).home)))
   return {ok:false,waitReason:"ESPN_AWAY_TEAM_NOT_MATCHED"};
- if(inTime.some(e=>teamEq(fixture.away,sourceSides(e).away)))
+ if(inTime.some(e=>sideEq(fixture.away,sourceSides(e).away)))
   return {ok:false,waitReason:"ESPN_HOME_TEAM_NOT_MATCHED"};
  if(!inTime.length)return {ok:false,waitReason:"ESPN_NO_EVENTS_NEAR_KICKOFF"};
  return {ok:false,waitReason:"ESPN_TEAMS_NOT_ON_SCOREBOARD"};
@@ -349,7 +407,12 @@ export async function lookupEspnFinal(fixture,{
  const league=espnLeague(fixture);
  if(!league)return {ok:false,waitReason:"ESPN_LEAGUE_UNSUPPORTED"};
  if(!base)return {ok:false,waitReason:"ESPN_PROXY_BASE_REQUIRED"};
- const dates=espnScoreboardDates(fixture);
+ // Primary ESPN competition-day buckets first. Only on failure inspect the
+ // third possible UTC/local day; discovery broadens but identity proof never
+ // broadens. Shared URL cache prevents duplicate cross-game requests.
+ const primary=espnScoreboardDates(fixture);
+ const dates=[...new Set([...primary,
+  ...[fixture.startMs-24*hours,fixture.startMs+24*hours].map(dateKey)])];
  const reasons=[];
  let kickoffAudit=null;
  for(const date of new Set(dates)){
