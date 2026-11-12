@@ -63,6 +63,25 @@ for(const [name,url] of sites){
   results.push(j);
  }catch(e){results.push({name,error:String(e).slice(0,120),ok:false})}
 }
+// Directly query the actual public completed-game route discovered in
+// KOVO's own JavaScript bundle. Never infer completion from a score.
+for(const path of ["/mains/games/schedules/ended","/mains/games/schedules"]){
+ try{
+  const u="https://user-api.kovo.co.kr"+path;
+  const res=await fetch(u,{cache:"no-store",signal:AbortSignal.timeout(8500),
+   headers:{accept:"application/json","X-Service-Name":"user"}});
+  const data=await res.json().catch(()=>null);
+  const root=data?.data??data;
+  const array=Array.isArray(root)?root:
+   Object.values(root??{}).find(x=>Array.isArray(x))??[];
+  results.push({name:"KOVO_API_"+path,http:res.status,ok:res.ok,
+   topKeys:Object.keys(data??{}).slice(0,20),
+   dataKeys:Object.keys(root??{}).slice(0,24),
+   count:array.length,sample:array.slice(0,6),
+   error:res.ok?null:JSON.stringify(data??{}).slice(0,250)});
+ }catch(e){results.push({name:"KOVO_API_"+path,ok:false,
+    error:String(e).slice(0,120)})}
+}
 console.log("DOMESTIC_OFFICIAL_SOURCE_SURVEY "+JSON.stringify({
  readOnly:true,scope:"WKBL_AND_KOVO_ONLY_NO_NBA",results,
  note:"SOURCE_FORMAT_HEALTH_ONLY_NOT_FINAL_PROOF"
