@@ -43,7 +43,7 @@ test("EASL rejects previews, wrong schedule ID, duplicate official event, wrong 
    [schedule(e)+schedule(e),recap(e)],
    [schedule(e),recap(e).replace(e.decisive,"won the game but final unconfirmed")],
    [schedule(e),recap(e).replace("GAME RECAP","GAME PREVIEW")],
-   [schedule(e),recap(e).replaceAll(e.officialHome,"Wrong Club")],
+   [schedule(e),recap(e).replace(new RegExp(e.officialHome,"gi"),"Wrong Club")],
    ["",recap(e)],
    [schedule(e),""]
   ];
