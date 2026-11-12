@@ -10,6 +10,7 @@ import {espnLeague,lookupEspnFinal} from "./espn-fast-final.mjs";
 import {isJleagueJ2,lookupJleagueJ2Final} from "./jleague-j2-final.mjs";
 import {officialKLeagueId,lookupOfficialKLeagueFinal} from "./kleague-official-final.mjs";
 import {isKboFixture,lookupOfficialKboFinal} from "./kbo-official-final.mjs";
+import {isOfficialKblFixture,lookupOfficialKblFinal} from "./kbl-official-final.mjs";
 import {collectLineupSnapshots} from "./pregame-lineup.mjs";
 import {selectFinalAuditRows} from "./final-scan-plan.mjs";
 import {effectTotals,recordOperationalEffect} from "./operational-effect.mjs";
@@ -62,6 +63,7 @@ const espnCache=new Map();
 const jleagueCache=new Map();
 const kleagueCache=new Map();
 const officialKboCache=new Map();
+const officialKblCache=new Map();
 let finalChecked=0,finalConfirmed=0,finalWaitReasons={},confirmedBySource={};
 const espnFailureReasons={};
 async function requestFinal(url){
@@ -132,6 +134,15 @@ for(const r of finalQueue){
    if(official.ok)confirmed=official;
    else reasons.push("KBO_OFFICIAL:"+String(official.waitReason).slice(0,145));
  }
+ if(!confirmed&&isOfficialKblFixture(r)){
+   // Official KBL scoreboard is independent of Naver. Strict unique KBL
+   // first-division fixture, official game key, seasonGrade, both clubs,
+   // kickoff, completed flag and basketball score are all mandatory.
+   providerAttempted=true;
+   const official=await lookupOfficialKblFinal(r,{cache:officialKblCache,now:Date.now()});
+   if(official.ok)confirmed=official;
+   else reasons.push("KBL_OFFICIAL:"+String(official.waitReason).slice(0,145));
+ }
  if(!confirmed&&supportedNaver.has(r.sport)){
    // A failed Naver football category must not silence NBA/KBL/baseball,
    // nor a different match day. Failed URLs are already cached per scan.
@@ -199,6 +210,7 @@ console.log("FAST_FINAL_AUDIT "+JSON.stringify({
  sharedOfficialJ2Queries:jleagueCache.size,
  sharedOfficialKLeagueQueries:kleagueCache.size,
  sharedOfficialKboQueries:officialKboCache.size,
+ sharedOfficialKblQueries:officialKblCache.size,
  naverUpstreamFailures,naverFailedRows,naverOutageSkipped,
  naverCircuitGroups:Object.fromEntries(naverFailureGroups),waitReasons:finalWaitReasons,
  espnFailureReasons
