@@ -47,9 +47,9 @@ test("EASL rejects previews, wrong schedule ID, duplicate official event, wrong 
    ["",recap(e)],
    [schedule(e),""]
   ];
-  for(const [sc,rc] of no)
+  for(const [mutation,[sc,rc]] of no.entries())
    assert.equal(parseOfficialEaslFinal(sc,rc,f,{now}).ok,false,
-    JSON.stringify({fixture:e.schedule,bad:sc.slice(0,100),rc:rc.slice(0,100)}));
+    JSON.stringify({fixture:e.schedule,mutation,bad:sc.slice(0,140),rc:rc.slice(0,230)}));
   assert.equal(parseOfficialEaslFinal(schedule(e),recap(e),f,
    {now:f.startMs+160*60000}).ok,false);
   assert.equal(parseOfficialEaslFinal(schedule(e),recap(e),
