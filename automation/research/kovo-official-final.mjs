@@ -64,6 +64,12 @@ export function parseOfficialKovoEnded(payload,fixture,{now=Date.now()}={}){
  if(ids.size!==1)return {ok:false,waitReason:ids.size?"KOVO_AMBIGUOUS_GAME":"KOVO_EXACT_GAME_NOT_FOUND"};
  const [gameId,g]=[...ids][0];
  if(now<fixture.startMs+150*60000)return {ok:false,waitReason:"KOVO_TOO_EARLY"};
+ if(g.cancelled===true||g.canceled===true||g.postponed===true||g.abandoned===true)
+  return {ok:false,waitReason:"KOVO_GAME_VOID"};
+ if(!/^\d+$/.test(String(g.homeTeam?.value??""))||
+   !/^\d+$/.test(String(g.awayTeam?.value??""))||
+   String(g.homeTeam?.value)===String(g.awayTeam?.value))
+  return {ok:false,waitReason:"KOVO_OFFICIAL_TEAM_CODES_MISSING"};
  // Ended-only official API plus provider's actual non-empty final endTime.
  if(!/^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(String(g.endTime??"")))
   return {ok:false,waitReason:"KOVO_END_TIME_MISSING"};
