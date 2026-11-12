@@ -11,6 +11,7 @@ import {isJleagueJ2,lookupJleagueJ2Final} from "./jleague-j2-final.mjs";
 import {officialKLeagueId,lookupOfficialKLeagueFinal} from "./kleague-official-final.mjs";
 import {isKboFixture,lookupOfficialKboFinal} from "./kbo-official-final.mjs";
 import {isOfficialKblFixture,lookupOfficialKblFinal} from "./kbl-official-final.mjs";
+import {isOfficialKovoFixture,lookupOfficialKovoFinal} from "./kovo-official-final.mjs";
 import {collectLineupSnapshots} from "./pregame-lineup.mjs";
 import {selectFinalAuditRows} from "./final-scan-plan.mjs";
 import {effectTotals,recordOperationalEffect} from "./operational-effect.mjs";
@@ -64,6 +65,7 @@ const jleagueCache=new Map();
 const kleagueCache=new Map();
 const officialKboCache=new Map();
 const officialKblCache=new Map();
+const officialKovoCache=new Map();
 let finalChecked=0,finalConfirmed=0,finalWaitReasons={},confirmedBySource={};
 const espnFailureReasons={};
 async function requestFinal(url){
@@ -167,6 +169,15 @@ for(const r of finalQueue){
      }
    }
  }
+ if(!confirmed&&isOfficialKovoFixture(r)){
+   // KOVO official ended-only match feed is fully independent of Naver.
+   // Require exact league/season/gender, both sides, source game identity,
+   // kickoff and genuine final set score; any mismatch stays PENDING.
+   providerAttempted=true;
+   const official=await lookupOfficialKovoFinal(r,{cache:officialKovoCache,now:Date.now()});
+   if(official.ok)confirmed=official;
+   else reasons.push("KOVO_OFFICIAL:"+String(official.waitReason).slice(0,145));
+ }
  if(!confirmed&&r.sport==="배구"){
    providerAttempted=true;
    // Independent schedule-exact volleyball lookup also works without SportsAPI IDs.
@@ -211,6 +222,7 @@ console.log("FAST_FINAL_AUDIT "+JSON.stringify({
  sharedOfficialKLeagueQueries:kleagueCache.size,
  sharedOfficialKboQueries:officialKboCache.size,
  sharedOfficialKblQueries:officialKblCache.size,
+ sharedOfficialKovoQueries:officialKovoCache.size,
  naverUpstreamFailures,naverFailedRows,naverOutageSkipped,
  naverCircuitGroups:Object.fromEntries(naverFailureGroups),waitReasons:finalWaitReasons,
  espnFailureReasons
