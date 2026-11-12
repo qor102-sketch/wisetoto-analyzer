@@ -12,7 +12,7 @@ import {officialKLeagueId,lookupOfficialKLeagueFinal} from "./kleague-official-f
 import {isKboFixture,lookupOfficialKboFinal} from "./kbo-official-final.mjs";
 import {isOfficialKblFixture,lookupOfficialKblFinal} from "./kbl-official-final.mjs";
 import {isOfficialKovoFixture,lookupOfficialKovoFinal} from "./kovo-official-final.mjs";
-import {isOfficialEaslFixture,lookupOfficialEaslFinal} from "./easl-official-final.mjs";
+import {hasAuditedOfficialEaslFixture,lookupOfficialEaslFinal} from "./easl-official-final.mjs";
 import {collectLineupSnapshots} from "./pregame-lineup.mjs";
 import {selectFinalAuditRows} from "./final-scan-plan.mjs";
 import {effectTotals,recordOperationalEffect} from "./operational-effect.mjs";
@@ -147,7 +147,7 @@ for(const r of finalQueue){
    if(official.ok)confirmed=official;
    else reasons.push("KBL_OFFICIAL:"+String(official.waitReason).slice(0,145));
  }
- if(!confirmed&&isOfficialEaslFixture(r)){
+ if(!confirmed&&hasAuditedOfficialEaslFixture(r)){
    // EASL official fixture-card identity PLUS decisive postmatch recap.
    // No schedule-only, partial scores, inferred clock, or previews accepted.
    providerAttempted=true;
