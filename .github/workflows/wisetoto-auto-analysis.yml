@@ -67,6 +67,8 @@ jobs:
         run: node automation/research/probe-wkbl-datalab-final.mjs
       - name: Inspect independent EASL official match recaps and actual ledger (read-only)
         run: node automation/research/probe-easl-official-source.mjs /tmp/wisetoto-readonly-current-ledger.json
+      - name: Audit exact EASL official event and decisive FINAL match proof (read-only)
+        run: node automation/research/probe-easl-official-final.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Audit independent Chinese Super League ESPN scoreboards (read-only)
         run: node automation/research/probe-csl-official-source.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Install app and browser
