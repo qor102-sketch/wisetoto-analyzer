@@ -12,6 +12,7 @@ import {officialKLeagueId,lookupOfficialKLeagueFinal} from "./kleague-official-f
 import {isKboFixture,lookupOfficialKboFinal} from "./kbo-official-final.mjs";
 import {isOfficialKblFixture,lookupOfficialKblFinal} from "./kbl-official-final.mjs";
 import {isOfficialKovoFixture,lookupOfficialKovoFinal} from "./kovo-official-final.mjs";
+import {isOfficialEaslFixture,lookupOfficialEaslFinal} from "./easl-official-final.mjs";
 import {collectLineupSnapshots} from "./pregame-lineup.mjs";
 import {selectFinalAuditRows} from "./final-scan-plan.mjs";
 import {effectTotals,recordOperationalEffect} from "./operational-effect.mjs";
@@ -66,6 +67,7 @@ const kleagueCache=new Map();
 const officialKboCache=new Map();
 const officialKblCache=new Map();
 const officialKovoCache=new Map();
+const officialEaslCache=new Map();
 let finalChecked=0,finalConfirmed=0,finalWaitReasons={},confirmedBySource={};
 const espnFailureReasons={};
 async function requestFinal(url){
@@ -145,6 +147,14 @@ for(const r of finalQueue){
    if(official.ok)confirmed=official;
    else reasons.push("KBL_OFFICIAL:"+String(official.waitReason).slice(0,145));
  }
+ if(!confirmed&&isOfficialEaslFixture(r)){
+   // EASL official fixture-card identity PLUS decisive postmatch recap.
+   // No schedule-only, partial scores, inferred clock, or previews accepted.
+   providerAttempted=true;
+   const official=await lookupOfficialEaslFinal(r,{cache:officialEaslCache,now:Date.now()});
+   if(official.ok)confirmed=official;
+   else reasons.push("EASL_OFFICIAL:"+String(official.waitReason).slice(0,145));
+ }
  if(!confirmed&&supportedNaver.has(r.sport)){
    // A failed Naver football category must not silence NBA/KBL/baseball,
    // nor a different match day. Failed URLs are already cached per scan.
@@ -223,6 +233,7 @@ console.log("FAST_FINAL_AUDIT "+JSON.stringify({
  sharedOfficialKboQueries:officialKboCache.size,
  sharedOfficialKblQueries:officialKblCache.size,
  sharedOfficialKovoQueries:officialKovoCache.size,
+ sharedOfficialEaslQueries:officialEaslCache.size,
  naverUpstreamFailures,naverFailedRows,naverOutageSkipped,
  naverCircuitGroups:Object.fromEntries(naverFailureGroups),waitReasons:finalWaitReasons,
  espnFailureReasons
