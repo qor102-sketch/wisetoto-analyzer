@@ -57,6 +57,8 @@ jobs:
         run: node automation/research/probe-kbo-official-source.mjs
       - name: Audit official KBL final match list against real overdue ledger (read-only)
         run: node automation/research/probe-kbl-official-source.mjs /tmp/wisetoto-readonly-current-ledger.json
+      - name: Audit official KOVO ended match results against real overdue ledger (read-only)
+        run: node automation/research/probe-kovo-official-source.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Inspect independent WKBL and KOVO official source formats (read-only)
         run: node automation/research/probe-other-domestic-official-sources.mjs
       - name: Audit independent Chinese Super League ESPN scoreboards (read-only)
