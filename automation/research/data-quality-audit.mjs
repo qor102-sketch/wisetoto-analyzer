@@ -4,6 +4,7 @@ import {espnLeague} from "./espn-fast-final.mjs";
 import {isJleagueJ2} from "./jleague-j2-final.mjs";
 import {officialKLeagueId} from "./kleague-official-final.mjs";
 import {isKboFixture} from "./kbo-official-final.mjs";
+import {isOfficialKblFixture} from "./kbl-official-final.mjs";
 const H=3600000;
 const top=(counts,limit=8)=>Object.fromEntries(Object.entries(counts)
  .sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,limit));
@@ -114,7 +115,8 @@ export function diagnoseDataQuality(state,now=Date.now()){
   increment(byProvider,espnLeague(r)?"ESPN_SUPPORTED":isJleagueJ2(r)?
    "JLEAGUE_OFFICIAL_J2_SUPPORTED":officialKLeagueId(r)?
    "KLEAGUE_OFFICIAL_SOURCE_SUPPORTED":isKboFixture(r)?
-   "KBO_OFFICIAL_SOURCE_SUPPORTED":"NO_INDEPENDENT_LEAGUE_SOURCE");
+   "KBO_OFFICIAL_SOURCE_SUPPORTED":isOfficialKblFixture(r)?
+   "KBL_OFFICIAL_SOURCE_SUPPORTED":"NO_INDEPENDENT_LEAGUE_SOURCE");
  }
  const nbaRows=rows.filter(r=>r.sport==="농구"&&espnLeague(r)==="nba");
  const nba={},nbaPast=nbaRows.filter(r=>r.startMs<=now);
