@@ -29,3 +29,15 @@ test("past fixture retry cooldown, future, already verified and time window are 
  const rows=selectFinalAuditRows({records:[current,future,verified,legit]},NOW,24);
  assert.deepEqual(rows.map(x=>x.key),["legit"]);
 });
+
+test("reserves four independently verifiable KBL games without starving ESPN or healthy domestic audit",()=>{
+ const soccer=Array.from({length:42},(_,i)=>fixture("espn"+i,"잉글랜드 챔피언십"));
+ const kbl=Array.from({length:10},(_,i)=>fixture("kbl"+i,"KBL","농구"));
+ const others=Array.from({length:25},(_,i)=>fixture("dom"+i,"K리그3"));
+ const rows=selectFinalAuditRows({records:[...soccer,...others,...kbl]},NOW,24);
+ assert.equal(rows.length,24);
+ assert.equal(rows.filter(x=>x.key.startsWith("kbl")).length,4);
+ assert.equal(rows.filter(x=>x.key.startsWith("espn")).length,12);
+ assert.equal(rows.filter(x=>x.key.startsWith("dom")).length,8);
+ assert.equal(new Set(rows.map(x=>x.key)).size,24);
+});
