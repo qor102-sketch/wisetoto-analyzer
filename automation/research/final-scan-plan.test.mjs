@@ -41,3 +41,17 @@ test("reserves four independently verifiable KBL games without starving ESPN or 
  assert.equal(rows.filter(x=>x.key.startsWith("dom")).length,8);
  assert.equal(new Set(rows.map(x=>x.key)).size,24);
 });
+
+test("limits independent KBL and KOVO domestic priority to four and two provider slots",()=>{
+ const espn=Array.from({length:35},(_,i)=>fixture("espn"+i,"잉글랜드 챔피언십"));
+ const kbl=Array.from({length:10},(_,i)=>fixture("kbl"+i,"KBL","농구"));
+ const kovo=Array.from({length:8},(_,i)=>fixture("kovo"+i,i%2?"KOVO 남자":"KOVO 여자","배구"));
+ const other=Array.from({length:25},(_,i)=>fixture("dom"+i,"K리그3"));
+ const rows=selectFinalAuditRows({records:[...espn,...kbl,...kovo,...other]},NOW,24);
+ assert.equal(rows.length,24);
+ assert.equal(rows.filter(r=>r.key.startsWith("kbl")).length,4);
+ assert.equal(rows.filter(r=>r.key.startsWith("kovo")).length,2);
+ assert.equal(rows.filter(r=>r.key.startsWith("espn")).length,10);
+ assert.equal(rows.filter(r=>r.key.startsWith("dom")).length,8);
+ assert.equal(new Set(rows.map(r=>r.key)).size,24);
+});
