@@ -48,7 +48,7 @@ const entries=[
   home:"타오위안 파우이안 파일러츠",away:"류큐 골든킹스",
   officialHome:"Taoyuan Pauian Pilots",officialAway:"Ryukyu Golden Kings",
   schedule:"taoyuanpauianpilotsvsryukyugoldenkings-oct282026071000pm",
-  recap:"Ryukyu Golden Kings emerged victorious on the road, winning in impressive fashion over the Taoyuan Pauian Pilots, 103-97",
+  decisive:"Ryukyu Golden Kings emerged victorious on the road, winning in impressive fashion over the Taoyuan Pauian Pilots, 103-97",
   recapSlug:"game-recap-ryukyu-golden-kings-shine-bright-over-taoyuan-pauian-pilots-in-first-win-of-easl-season",
   homeScore:97,awayScore:103}
 ];
@@ -86,6 +86,8 @@ const proofSchedule=(html,entry)=>{
  return blocks.length===1;
 };
 const proofRecap=(html,entry)=>{
+ // Empty/missing decisive text MUST NOT be an always-true substring.
+ if(!entry.decisive||normalize(entry.decisive).length<24)return false;
  if(typeof html!=="string"||html.length<100)return false;
  // A preview can mention a recap of a different game. Only this
  // exact official page TITLE declaring a GAME RECAP is valid.
