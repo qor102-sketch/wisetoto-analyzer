@@ -47,9 +47,13 @@ try{
  schedule={ok:r.ok,http:r.status,length:html.length,
   fixtureMarkers:fixtureRows.slice(0,25).map(f=>{
    const utc=new Date(f.startMs).toISOString().slice(0,16);
+   const pos=html.indexOf(utc);
+   const chunk=pos<0?"":html.slice(Math.max(0,pos-1800),pos+3000);
    return {at:utc,occurrences:html.split(utc).length-1,
-    nearby:html.includes(utc)?html.slice(Math.max(0,html.indexOf(utc)-400),
-     html.indexOf(utc)+400).replace(/<[^>]+>/g," ").replace(/\s+/g," ").slice(0,450):null};
+    nearText:chunk.replace(/<svg[^>]*>[\s\S]*?<\/svg>/gi," ")
+     .replace(/<[^>]+>/g," ").replace(/\s+/g," ").slice(0,1200),
+    nearbyLinks:[...chunk.matchAll(/href=["']([^"']+)["']/g)].slice(-16)
+     .map(m=>m[1]).filter(x=>x.includes("/schedules/"))};
   })};
 }catch(e){schedule={ok:false,error:String(e).slice(0,120)}}
 console.log("EASL_OFFICIAL_SOURCE_AUDIT "+JSON.stringify({readOnly:true,excludedNba:true,
