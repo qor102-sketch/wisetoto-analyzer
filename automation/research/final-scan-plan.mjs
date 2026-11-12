@@ -6,6 +6,7 @@ import {isJleagueJ2} from "./jleague-j2-final.mjs";
 import {officialKLeagueId} from "./kleague-official-final.mjs";
 import {isKboFixture} from "./kbo-official-final.mjs";
 import {naverOutageGroup} from "./naver-outage-group.mjs";
+import {isOfficialKblFixture} from "./kbl-official-final.mjs";
 const H=3600000;
 
 // Network-down source groups are sampled with two distinct fixtures per
@@ -13,7 +14,7 @@ const H=3600000;
 // Healthy group throughput is unchanged and ESPN-supported fixtures never
 // inherit a Naver-only outage cap.
 export function isNaverOnlyOutage(r){
- if(espnLeague(r)||isJleagueJ2(r)||officialKLeagueId(r)||isKboFixture(r)||!["축구","농구","야구"].includes(r.sport))return false;
+ if(espnLeague(r)||isJleagueJ2(r)||officialKLeagueId(r)||isKboFixture(r)||isOfficialKblFixture(r)||!["축구","농구","야구"].includes(r.sport))return false;
  const reason=String(r.checkReason??"");
  const errors=Array.isArray(r.resultErrors)?r.resultErrors.at(-1)?.reasons??[]:[];
  return /NAVER_CIRCUIT_OPEN|NAVER_(?:FAST|DIRECT|SCHEDULE).*?(?:NETWORK|HTTP_50[24]|TIMEOUT)|NAVER_PROVIDER_NETWORK/.test(
@@ -50,9 +51,9 @@ export function interleaveRecentAndBacklog(rows,now){
 export function selectFinalAuditRows(state,now=Date.now(),limit=24){
  if(!Number.isInteger(limit)||limit<=0)return [];
  const pool=dueResults(state,now,Number.MAX_SAFE_INTEGER);
- const supported=interleaveRecentAndBacklog(pool.filter(row=>Boolean(espnLeague(row))||isJleagueJ2(row)||Boolean(officialKLeagueId(row))||isKboFixture(row)),now);
+ const supported=interleaveRecentAndBacklog(pool.filter(row=>Boolean(espnLeague(row))||isJleagueJ2(row)||Boolean(officialKLeagueId(row))||isKboFixture(row)||isOfficialKblFixture(row)),now);
  const others=interleaveRecentAndBacklog(
-  limitFailingNaverGroups(pool.filter(row=>!espnLeague(row)&&!isJleagueJ2(row)&&!officialKLeagueId(row)&&!isKboFixture(row))),now);
+  limitFailingNaverGroups(pool.filter(row=>!espnLeague(row)&&!isJleagueJ2(row)&&!officialKLeagueId(row)&&!isKboFixture(row)&&!isOfficialKblFixture(row))),now);
  // Preserve provider-independent ESPN quota and healthy Naver-only access.
  const espnQuota=Math.floor(limit*2/3);
  const otherQuota=limit-espnQuota;
