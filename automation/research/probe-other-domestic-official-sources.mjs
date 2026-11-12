@@ -38,8 +38,17 @@ for(const [name,url] of sites){
      const code=await (await fetch(u,{signal:AbortSignal.timeout(4500)})).text();
      const hits=[...code.matchAll(/user-api\.kovo\.co\.kr/gi)].slice(0,3)
       .map(m=>code.slice(Math.max(0,m.index-90),m.index+220).slice(0,310));
-     if(hits.length)sources.push({asset:u.pathname.slice(0,150),
-      hits:hits.map(s=>s.replace(/\s+/g," "))});
+     // Expose bounded literal route names only, never JS source bundles,
+     // auth headers or cookies. This is discovery, NOT final evidence.
+     const paths=[...new Set([...code.matchAll(/["'`]+(\/[a-zA-Z0-9_?=&%:;\/-]{4,150})["'`]+/g)]
+       .map(x=>x[1]).filter(x=>/game|match|sched|season|round|volley|league|record|result/i.test(x)))].slice(0,45);
+     const context=words=>words.map(word=>{
+      const at=code.toLowerCase().indexOf(word);
+      return at<0?null:{word,part:code.slice(Math.max(0,at-45),at+170).replace(/\s+/g," ")};
+     }).filter(Boolean).slice(0,7);
+     if(hits.length||paths.length)sources.push({asset:u.pathname.slice(0,150),
+      hits:hits.map(s=>s.replace(/\s+/g," ")),
+      routeSamples:paths,context:context(["/games/","/game/","/match/","/schedule/","/game-schedule","/records/"])});
     }catch{}
    }
    j.officialApiScriptEvidence=sources;
