@@ -63,6 +63,8 @@ jobs:
         run: node automation/research/probe-kovo-extended-source.mjs
       - name: Inspect independent WKBL and KOVO official source formats (read-only)
         run: node automation/research/probe-other-domestic-official-sources.mjs
+      - name: Inspect actual WKBL DataLab final-status fields (read-only)
+        run: node automation/research/probe-wkbl-datalab-final.mjs
       - name: Audit independent Chinese Super League ESPN scoreboards (read-only)
         run: node automation/research/probe-csl-official-source.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Install app and browser
