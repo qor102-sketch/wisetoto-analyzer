@@ -109,3 +109,27 @@ test("one shared official ended API is reused across men/women and Naver circuit
  assert.equal(bad.ok,false);
  assert.match(bad.waitReason,/KOVO_OFFICIAL_HTTP_502/);
 });
+
+test("audited KOVO team code recovers a finished match outside limited global recent-window",async()=>{
+ const game=events[0],f=fixture(game),cache=new Map(),urls=[];
+ const fetchFn=async url=>{
+  urls.push(url);
+  const onlyLatest=(!new URL(url).searchParams.has("tcode"));
+  return {ok:true,status:200,json:async()=>feed(onlyLatest?[row(events[2])]:[row(game)])};
+ };
+ const evidence=await lookupOfficialKovoFinal(f,{fetchFn,cache,now:f.startMs+4*O});
+ assert.equal(evidence.ok,true,evidence.waitReason);
+ assert.equal(evidence.gameId,"023:201:MALE:17");
+ assert.deepEqual(urls,[
+  "https://user-api.kovo.co.kr/mains/games/schedules/ended",
+  "https://user-api.kovo.co.kr/mains/games/schedules/ended?tcode=1002"
+ ]);
+ const repeated=await lookupOfficialKovoFinal(f,{fetchFn,cache,now:f.startMs+4*O});
+ assert.equal(repeated.ok,true);
+ assert.equal(urls.length,2,"both official URL results reused across rows");
+ const unrelated=await lookupOfficialKovoFinal(f,{
+  now:f.startMs+4*O,
+  fetchFn:async()=>({ok:true,status:200,json:async()=>feed([row(events[2])])})
+ });
+ assert.equal(unrelated.ok,false,"team filter may not infer a match from an unrelated event");
+});
