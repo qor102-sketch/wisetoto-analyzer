@@ -87,7 +87,10 @@ const proofSchedule=(html,entry)=>{
 };
 const proofRecap=(html,entry)=>{
  if(typeof html!=="string"||html.length<100)return false;
- if(!/game recap/i.test(html)||!/EASL/i.test(html))return false;
+ // A preview can mention a recap of a different game. Only this
+ // exact official page TITLE declaring a GAME RECAP is valid.
+ const title=(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]??"").replace(/<[^>]*>/g," ");
+ if(!/\bgame\s+recap\b/i.test(title)||!/EASL/i.test(title))return false;
  const text=decorate(html).replace(/<[^>]*>/g," ").replace(/&nbsp;|&#160;/gi," ")
   .replace(/&amp;/gi,"&").replace(/&ndash;|&#8211;/gi,"-");
  const where=text.toLowerCase().indexOf("what happened");
