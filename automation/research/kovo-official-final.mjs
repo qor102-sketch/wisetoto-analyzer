@@ -24,6 +24,20 @@ const same=(fixtureName,officialName)=>{
  const x=norm(fixtureName),y=norm(officialName);
  return Boolean(x&&y&&(x===y||aliases.some(a=>a.includes(x)&&a.includes(y))));
 };
+// Provider-owned club codes confirmed from live official KOVO team lists
+// and the /ended? tcode source audit (#3231). The code verifies the two
+// sides independently of potentially ambiguous team display names.
+const officialCodes=new Map([
+ ["우리카드","1009"],["대한항공","1001"],["삼성화재","1002"],
+ ["한국전력","1006"],["현대캐피탈","1005"],["kb손해보험","1004"],
+ ["ok저축은행","1008"],["soop","2008"],["ibk기업은행","2006"],
+ ["한국도로공사","2002"],["흥국생명","2004"],["정관장","2003"],
+ ["현대건설","2001"],["gs칼텍스","2005"]
+].map(([n,id])=>[norm(n),id]));
+const clubCode=name=>{
+ const x=norm(name),sameAlias=aliases.find(group=>group.includes(x));
+ return officialCodes.get(sameAlias?.[0]??x)??null;
+};
 const KST=9*3600000,H=3600000;
 export const isOfficialKovoFixture=r=>r?.sport==="배구"&&
  /^(?:KOVO 남자|KOVO 여자)$/.test(String(r?.league??"").trim());
@@ -50,6 +64,8 @@ export function parseOfficialKovoEnded(payload,fixture,{now=Date.now()}={}){
   String(g.league?.value)==="201"&&
   String(g.season?.name??"").includes(seasonFor(fixture))&&
   same(fixture.home,g.homeTeam?.name)&&same(fixture.away,g.awayTeam?.name)&&
+  String(g.homeTeam?.value??"")===clubCode(fixture.home)&&
+  String(g.awayTeam?.value??"")===clubCode(fixture.away)&&
   Number.isFinite(sourceTimeMs(g))&&
   Math.abs(sourceTimeMs(g)-fixture.startMs)<=2*H);
  const ids=new Map();
@@ -89,17 +105,35 @@ export async function lookupOfficialKovoFinal(fixture,{
 }={}){
  if(!isOfficialKovoFixture(fixture))
   return {ok:false,waitReason:"KOVO_LEAGUE_UNSUPPORTED"};
- let data=cache.get(API);
- if(!data){
-  try{
-   const res=await fetchFn(API,{cache:"no-store",signal:AbortSignal.timeout(timeoutMs),
-    headers:{accept:"application/json","X-Service-Name":"user"}});
-   const body=res.ok?await res.json().catch(()=>null):null;
-   data=res.ok&&Array.isArray(body?.payload)?{ok:true,payload:body}:
-    {ok:false,reason:"KOVO_OFFICIAL_HTTP_"+res.status+(res.ok?":BAD_PAYLOAD":"")};
-  }catch(e){data={ok:false,reason:"KOVO_OFFICIAL_NETWORK:"+String(e).slice(0,90)}}
-  cache.set(API,data);
+ const homeCode=clubCode(fixture.home);
+ // The official global /ended feed exposes only a small recent window.
+ // Its own tcode-filtered endpoint independently proves older team games.
+ // Only source-audited KOVO club codes may be queried. Never infer FINAL
+ // from the URL, a team alone, or a kickoff clock.
+ const urls=homeCode?[API,API+"?"+new URLSearchParams({tcode:homeCode})]:[API];
+ const errors=[];
+ for(const url of urls){
+  let data=cache.get(url);
+  if(!data){
+   try{
+    const res=await fetchFn(url,{cache:"no-store",
+     signal:AbortSignal.timeout(timeoutMs),
+     headers:{accept:"application/json","X-Service-Name":"user"}});
+    const body=res.ok?await res.json().catch(()=>null):null;
+    data=res.ok&&Array.isArray(body?.payload)?{ok:true,payload:body}:
+     {ok:false,reason:"KOVO_OFFICIAL_HTTP_"+res.status+(res.ok?":BAD_PAYLOAD":"")};
+   }catch(e){data={ok:false,reason:"KOVO_OFFICIAL_NETWORK:"+String(e).slice(0,90)}}
+   cache.set(url,data);
+  }
+  if(!data.ok){errors.push(data.reason);continue;}
+  const result=parseOfficialKovoEnded(data.payload,fixture,{now});
+  if(result.ok)return {...result,providerErrors:errors};
+  errors.push(result.waitReason);
+  // Any uniquely identified but unproven or conflicting event must remain
+  // pending rather than being rescued by a second interpretation.
+  if(result.waitReason!=="KOVO_EXACT_GAME_NOT_FOUND")
+   return {...result,providerErrors:errors};
  }
- if(!data.ok)return {ok:false,waitReason:data.reason};
- return parseOfficialKovoEnded(data.payload,fixture,{now});
+ return {ok:false,waitReason:errors.join(" | ").slice(0,180)||
+  "KOVO_OFFICIAL_SOURCE_UNAVAILABLE",providerErrors:errors};
 }
