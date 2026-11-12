@@ -62,6 +62,7 @@ const exactEntry=fixture=>{
   Math.abs(fixture.startMs-Date.parse(e.at))<=5*60000);
  return found.length===1?found[0]:null;
 };
+export const hasAuditedOfficialEaslFixture=r=>Boolean(exactEntry(r));
 const decorate=s=>String(s??"").replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi," ")
  .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi," ")
  .replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/gi," ")
