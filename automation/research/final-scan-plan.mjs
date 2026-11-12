@@ -57,10 +57,17 @@ export function selectFinalAuditRows(state,now=Date.now(),limit=24){
  // Preserve provider-independent ESPN quota and healthy Naver-only access.
  const espnQuota=Math.floor(limit*2/3);
  const otherQuota=limit-espnQuota;
- const selected=[...supported.slice(0,espnQuota),...others.slice(0,otherQuota)];
+ // KBL has a now-proven independent provider, but the 52 ESPN backlog
+ // entries are often older. Reserve at most four supported slots per scan
+ // for official KBL so age-sorted ESPN rows cannot indefinitely starve it.
+ // Remaining ESPN and other official providers still have 12+ slots.
+ const kbl=supported.filter(isOfficialKblFixture);
+ const remainder=supported.filter(r=>!isOfficialKblFixture(r));
+ const prioritized=[...kbl.slice(0,4),...remainder,...kbl.slice(4)];
+ const selected=[...prioritized.slice(0,espnQuota),...others.slice(0,otherQuota)];
  if(selected.length<limit){
   const picked=new Set(selected.map(r=>r.key));
-  const extra=[...supported.slice(espnQuota),...others.slice(otherQuota)]
+  const extra=[...prioritized.slice(espnQuota),...others.slice(otherQuota)]
    .filter(r=>!picked.has(r.key));
   selected.push(...extra.slice(0,limit-selected.length));
  }
