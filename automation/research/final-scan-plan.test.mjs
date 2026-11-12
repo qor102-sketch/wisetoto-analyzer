@@ -55,3 +55,23 @@ test("limits independent KBL and KOVO domestic priority to four and two provider
  assert.equal(rows.filter(r=>r.key.startsWith("dom")).length,8);
  assert.equal(new Set(rows.map(r=>r.key)).size,24);
 });
+
+test("two official EASL slots are independent of KBL/KOVO/ESPN and NBA never reappears",async()=>{
+ const {easlOfficialEntries}=await import("./easl-official-final.mjs");
+ const soccer=Array.from({length:35},(_,i)=>fixture("espn"+i,"잉글랜드 챔피언십"));
+ const kbl=Array.from({length:10},(_,i)=>fixture("kbl"+i,"KBL","농구"));
+ const kovo=Array.from({length:8},(_,i)=>fixture("kovo"+i,i%2?"KOVO 남자":"KOVO 여자","배구"));
+ const easl=easlOfficialEntries.map((e,i)=>({
+  ...fixture("easl"+i,"동아시아 슈퍼리그","농구"),
+  home:e.home,away:e.away,startMs:Date.parse(e.at),lastResultCheckAt:0}));
+ const other=Array.from({length:25},(_,i)=>fixture("dom"+i,"K리그3"));
+ const selected=selectFinalAuditRows({records:[...soccer,...kbl,...kovo,...easl,...other]},
+  Date.parse("2026-11-12T05:00:00Z"),24);
+ assert.equal(selected.length,24);
+ assert.equal(selected.filter(x=>x.key.startsWith("kbl")).length,4);
+ assert.equal(selected.filter(x=>x.key.startsWith("kovo")).length,2);
+ assert.equal(selected.filter(x=>x.key.startsWith("easl")).length,2);
+ assert.equal(selected.filter(x=>x.key.startsWith("espn")).length,8);
+ assert.equal(selected.filter(x=>x.key.startsWith("dom")).length,8);
+ assert.equal(selected.some(x=>x.league==="NBA"),false);
+});
