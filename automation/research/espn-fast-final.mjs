@@ -244,6 +244,18 @@ const aliases=[
  ["도쿄 베르디","Tokyo Verdy 1969"],
  ["포트FC","Port FC"],
  ["릴OSC","Lille"],
+ // Source-audited 2026-11-12 PR CI #3208: 10 previously PENDING
+ // ESPN matches, official completed numeric event ID and exact 0-min start.
+ // Each name is source-observed; never infer a final without both sides.
+ ["스타드렌","staderennais"],
+ ["파포스fc","pafos"],
+ ["카이라트알마티","kairatalmaty"],
+ ["fk보되글림트","bodoglimt"],
+ ["데포르티보아코루냐","deportivo"],
+ ["로리앙","lorient"],
+ ["아비스파후쿠오카","avispafukuoka"],
+ ["아우크스부르크","fcaugsburg"],
+ ["르아브르ac","lehavreac"],
  ["뉴욕양키스","newyorkyankees"],["보스턴레드삭스","bostonredsox"],
  ["la다저스","로스앤젤레스다저스","losangelesdodgers"],["시카고컵스","chicagocubs"]
 ].map(group=>group.map(norm));
