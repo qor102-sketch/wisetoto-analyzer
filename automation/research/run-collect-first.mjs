@@ -10,6 +10,9 @@ import {espnLeague,lookupEspnFinal} from "./espn-fast-final.mjs";
 import {isJleagueJ2,lookupJleagueJ2Final} from "./jleague-j2-final.mjs";
 import {officialKLeagueId,lookupOfficialKLeagueFinal} from "./kleague-official-final.mjs";
 import {isKboFixture,lookupOfficialKboFinal} from "./kbo-official-final.mjs";
+import {isOfficialKblFixture,lookupOfficialKblFinal} from "./kbl-official-final.mjs";
+import {isOfficialKovoFixture,lookupOfficialKovoFinal} from "./kovo-official-final.mjs";
+import {hasAuditedOfficialEaslFixture,lookupOfficialEaslFinal} from "./easl-official-final.mjs";
 import {collectLineupSnapshots} from "./pregame-lineup.mjs";
 import {selectFinalAuditRows} from "./final-scan-plan.mjs";
 import {effectTotals,recordOperationalEffect} from "./operational-effect.mjs";
@@ -62,6 +65,9 @@ const espnCache=new Map();
 const jleagueCache=new Map();
 const kleagueCache=new Map();
 const officialKboCache=new Map();
+const officialKblCache=new Map();
+const officialKovoCache=new Map();
+const officialEaslCache=new Map();
 let finalChecked=0,finalConfirmed=0,finalWaitReasons={},confirmedBySource={};
 const espnFailureReasons={};
 async function requestFinal(url){
@@ -132,6 +138,23 @@ for(const r of finalQueue){
    if(official.ok)confirmed=official;
    else reasons.push("KBO_OFFICIAL:"+String(official.waitReason).slice(0,145));
  }
+ if(!confirmed&&isOfficialKblFixture(r)){
+   // Official KBL scoreboard is independent of Naver. Strict unique KBL
+   // first-division fixture, official game key, seasonGrade, both clubs,
+   // kickoff, completed flag and basketball score are all mandatory.
+   providerAttempted=true;
+   const official=await lookupOfficialKblFinal(r,{cache:officialKblCache,now:Date.now()});
+   if(official.ok)confirmed=official;
+   else reasons.push("KBL_OFFICIAL:"+String(official.waitReason).slice(0,145));
+ }
+ if(!confirmed&&hasAuditedOfficialEaslFixture(r)){
+   // EASL official fixture-card identity PLUS decisive postmatch recap.
+   // No schedule-only, partial scores, inferred clock, or previews accepted.
+   providerAttempted=true;
+   const official=await lookupOfficialEaslFinal(r,{cache:officialEaslCache,now:Date.now()});
+   if(official.ok)confirmed=official;
+   else reasons.push("EASL_OFFICIAL:"+String(official.waitReason).slice(0,145));
+ }
  if(!confirmed&&supportedNaver.has(r.sport)){
    // A failed Naver football category must not silence NBA/KBL/baseball,
    // nor a different match day. Failed URLs are already cached per scan.
@@ -155,6 +178,15 @@ for(const r of finalQueue){
        }
      }
    }
+ }
+ if(!confirmed&&isOfficialKovoFixture(r)){
+   // KOVO official ended-only match feed is fully independent of Naver.
+   // Require exact league/season/gender, both sides, source game identity,
+   // kickoff and genuine final set score; any mismatch stays PENDING.
+   providerAttempted=true;
+   const official=await lookupOfficialKovoFinal(r,{cache:officialKovoCache,now:Date.now()});
+   if(official.ok)confirmed=official;
+   else reasons.push("KOVO_OFFICIAL:"+String(official.waitReason).slice(0,145));
  }
  if(!confirmed&&r.sport==="배구"){
    providerAttempted=true;
@@ -199,6 +231,9 @@ console.log("FAST_FINAL_AUDIT "+JSON.stringify({
  sharedOfficialJ2Queries:jleagueCache.size,
  sharedOfficialKLeagueQueries:kleagueCache.size,
  sharedOfficialKboQueries:officialKboCache.size,
+ sharedOfficialKblQueries:officialKblCache.size,
+ sharedOfficialKovoQueries:officialKovoCache.size,
+ sharedOfficialEaslQueries:officialEaslCache.size,
  naverUpstreamFailures,naverFailedRows,naverOutageSkipped,
  naverCircuitGroups:Object.fromEntries(naverFailureGroups),waitReasons:finalWaitReasons,
  espnFailureReasons
