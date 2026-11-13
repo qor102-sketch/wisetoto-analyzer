@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {jleagueCupAuditedFixtures,isJleagueCupFixture,hasAuditedJleagueCupFixture,
  officialJleagueCupUrl,isJleagueCupExtraTimeUnsettleable,parseJleagueCupFinal,lookupOfficialJleagueCupFinal}
  from "./jleague-cup-final.mjs";
-import {mergeProviderFinal} from "./collect-first.mjs";
+import {mergeProviderFinal,settlement,fixtureKey} from "./collect-first.mjs";
 const f=e=>({key:"cup-"+e.id,sport:"축구",league:"일본 리그컵",
  home:e.home,away:e.away,startMs:Date.parse(e.date+"T"+e.time+":00+09:00"),
  verdict:"PENDING",odds:[{source:"PRE",frozen:true}],pregameCapturedAt:
@@ -92,4 +92,19 @@ test("official per-fixture URL shares cache and refuses network/HTTP failure",as
   fetchFn:async()=>({ok:false,status:503}),now:Date.now()});
  assert.equal(fails.ok,false);
  assert.match(fails.waitReason,/HTTP_503/);
+});
+
+test("known AET display never becomes a regulation VERIFIED via a generic finished tracker",()=>{
+ const startMs=Date.parse("2026-10-28T19:00:00+09:00"),now=startMs+5*3600000;
+ const row={key:fixtureKey({sport:"축구",home:"나고야 그램퍼스",
+  away:"우라와 레드",gameDateMs:startMs}),sport:"축구",league:"일본 리그컵",
+  home:"나고야 그램퍼스",away:"우라와 레드",startMs,
+  verdict:"PENDING",odds:[{source:"immutable PRE"}],pregameCapturedAt:startMs-600000};
+ const tracker=[{sport:"축구",home:row.home,away:row.away,
+  startMs,verificationStatus:"VERIFIED",verifiedAt:now,
+  result:{homeScore:1,awayScore:2}}];
+ const out=settlement({records:[row]},tracker,now);
+ assert.equal(out.settled,0);
+ assert.equal(out.state.records[0].verdict,"PENDING");
+ assert.deepEqual(out.state.records[0].odds,row.odds);
 });
