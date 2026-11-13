@@ -261,6 +261,8 @@ const aliases=[
  // Team alias ONLY. Both sides / league / clock / final must remain strict.
  ["rcd에스파뇰","espanyol"],
  ["rb라이프치히","rbleipzig"],
+ // Source-audited Schalke v Leipzig ESPN event 401884747 (2026-10-31 14:30 UTC)
+ ["샬케04","schalke04"],
  ["v바렌나가사키","vvarennagasaki"],
  ["올림피아코스","olympiacos"],
  ["뉴욕양키스","newyorkyankees"],["보스턴레드삭스","bostonredsox"],
