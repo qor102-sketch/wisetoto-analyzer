@@ -3,7 +3,7 @@
 import {dueResults} from "./collect-first.mjs";
 import {espnLeague} from "./espn-fast-final.mjs";
 import {isJleagueJ2} from "./jleague-j2-final.mjs";
-import {hasAuditedJleagueCupFixture} from "./jleague-cup-final.mjs";
+import {hasAuditedJleagueCupFixture,isJleagueCupExtraTimeUnsettleable} from "./jleague-cup-final.mjs";
 import {officialKLeagueId} from "./kleague-official-final.mjs";
 import {isKboFixture} from "./kbo-official-final.mjs";
 import {naverOutageGroup} from "./naver-outage-group.mjs";
@@ -53,7 +53,10 @@ export function interleaveRecentAndBacklog(rows,now){
 }
 export function selectFinalAuditRows(state,now=Date.now(),limit=24){
  if(!Number.isInteger(limit)||limit<=0)return [];
- const pool=dueResults(state,now,Number.MAX_SAFE_INTEGER);
+ // Explicitly source-observed AET: keep PENDING rather than waste an
+ // official-source/Naver slot or accept a generic post-extra-time score.
+ const pool=dueResults(state,now,Number.MAX_SAFE_INTEGER)
+  .filter(r=>!isJleagueCupExtraTimeUnsettleable(r));
  const supported=interleaveRecentAndBacklog(pool.filter(row=>Boolean(espnLeague(row))||isJleagueJ2(row)||hasAuditedJleagueCupFixture(row)||Boolean(officialKLeagueId(row))||isKboFixture(row)||isOfficialKblFixture(row)||isOfficialKovoFixture(row)||hasAuditedOfficialEaslFixture(row)),now);
  const others=interleaveRecentAndBacklog(
   limitFailingNaverGroups(pool.filter(row=>!espnLeague(row)&&!isJleagueJ2(row)&&!hasAuditedJleagueCupFixture(row)&&!officialKLeagueId(row)&&!isKboFixture(row)&&!isOfficialKblFixture(row)&&!isOfficialKovoFixture(row)&&!hasAuditedOfficialEaslFixture(row))),now);
