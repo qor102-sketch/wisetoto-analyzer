@@ -263,6 +263,8 @@ const aliases=[
  ["rb라이프치히","rbleipzig"],
  // Source-audited Schalke v Leipzig ESPN event 401884747 (2026-10-31 14:30 UTC)
  ["샬케04","schalke04"],
+ // ESPN full-time 401884742: Hoffenheim 2-1 Schalke, 2026-11-08 18:30 UTC
+ ["tsg1899호펜하임","tsghoffenheim"],
  ["v바렌나가사키","vvarennagasaki"],
  ["올림피아코스","olympiacos"],
  ["뉴욕양키스","newyorkyankees"],["보스턴레드삭스","bostonredsox"],
