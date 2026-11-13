@@ -87,9 +87,13 @@ test("official Levain Cup gets two dedicated postmatch slots while ESPN retains 
   home:e.home,away:e.away,lastResultCheckAt:0}));
  const others=Array.from({length:25},(_,i)=>({
   ...fixture("dom"+i,"K리그3"),startMs:now-7*3600000}));
- const rows=selectFinalAuditRows({records:[...soccer,...cup,...others]},now,24);
+ const aet={...fixture("nagoya-aet","일본 리그컵"),
+  home:"나고야 그램퍼스",away:"우라와 레드",
+  startMs:Date.parse("2026-10-28T19:00:00+09:00"),lastResultCheckAt:0};
+ const rows=selectFinalAuditRows({records:[...soccer,...cup,...others,aet]},now,24);
  assert.equal(rows.length,24);
  assert.equal(rows.filter(r=>r.key.startsWith("cup")).length,2);
+ assert.equal(rows.some(r=>r.key==="nagoya-aet"),false,"AET excluded without 90-minute source");
  assert.equal(rows.filter(r=>r.key.startsWith("espn")).length,14);
  assert.equal(rows.filter(r=>r.key.startsWith("dom")).length,8);
  assert.equal(new Set(rows.map(r=>r.key)).size,24);
