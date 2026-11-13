@@ -9,6 +9,7 @@ import {naverOutageGroup} from "./naver-outage-group.mjs";
 import {espnLeague,lookupEspnFinal} from "./espn-fast-final.mjs";
 import {isJleagueJ2,lookupJleagueJ2Final} from "./jleague-j2-final.mjs";
 import {hasAuditedJleagueCupFixture,isJleagueCupExtraTimeUnsettleable,lookupOfficialJleagueCupFinal} from "./jleague-cup-final.mjs";
+import {hasAuditedWkblFixture,lookupWkblDualFinal} from "./wkbl-dual-final.mjs";
 import {officialKLeagueId,lookupOfficialKLeagueFinal} from "./kleague-official-final.mjs";
 import {isKboFixture,lookupOfficialKboFinal} from "./kbo-official-final.mjs";
 import {isOfficialKblFixture,lookupOfficialKblFinal} from "./kbl-official-final.mjs";
@@ -65,6 +66,7 @@ const scheduleCache=new Map();
 const espnCache=new Map();
 const jleagueCache=new Map();
 const officialJleagueCupCache=new Map();
+const wkblDualCache=new Map();
 const kleagueCache=new Map();
 const officialKboCache=new Map();
 const officialKblCache=new Map();
@@ -178,6 +180,15 @@ for(const r of finalQueue){
    if(official.ok)confirmed=official;
    else reasons.push("EASL_OFFICIAL:"+String(official.waitReason).slice(0,145));
  }
+ if(!confirmed&&hasAuditedWkblFixture(r)){
+   // Official WKBL's DataLab page has no explicit ended-status field,
+   // so ONLY accept it jointly with a trusted postmatch Yonhap final
+   // report, exact teams, date, venue, 4-quarter totals and source IDs.
+   providerAttempted=true;
+   const official=await lookupWkblDualFinal(r,{cache:wkblDualCache,now:Date.now()});
+   if(official.ok)confirmed=official;
+   else reasons.push("WKBL_DUAL_SOURCE:"+String(official.waitReason).slice(0,145));
+ }
  if(!confirmed&&supportedNaver.has(r.sport)){
    // A failed Naver football category must not silence NBA/KBL/baseball,
    // nor a different match day. Failed URLs are already cached per scan.
@@ -258,6 +269,7 @@ console.log("FAST_FINAL_AUDIT "+JSON.stringify({
  sharedOfficialKovoQueries:officialKovoCache.size,
  sharedOfficialEaslQueries:officialEaslCache.size,
  sharedOfficialJleagueCupQueries:officialJleagueCupCache.size,
+ sharedOfficialWkblAndPressQueries:wkblDualCache.size,
  naverUpstreamFailures,naverFailedRows,naverOutageSkipped,
  naverCircuitGroups:Object.fromEntries(naverFailureGroups),waitReasons:finalWaitReasons,
  espnFailureReasons
