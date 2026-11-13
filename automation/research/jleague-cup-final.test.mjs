@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {jleagueCupAuditedFixtures,isJleagueCupFixture,hasAuditedJleagueCupFixture,
- officialJleagueCupUrl,parseJleagueCupFinal,lookupOfficialJleagueCupFinal}
+ officialJleagueCupUrl,isJleagueCupExtraTimeUnsettleable,parseJleagueCupFinal,lookupOfficialJleagueCupFinal}
  from "./jleague-cup-final.mjs";
 import {mergeProviderFinal} from "./collect-first.mjs";
 const f=e=>({key:"cup-"+e.id,sport:"축구",league:"일본 리그컵",
@@ -42,6 +42,8 @@ test("no extra time Nagoya/Urawa 1-2 AET, no NBA, no guessing on a different fix
  const original=jleagueCupAuditedFixtures[0],row=f(original);
  const et={...row,startMs:Date.parse("2026-10-28T10:00:00Z"),
   home:"나고야 그램퍼스",away:"우라와 레드"};
+ assert.equal(isJleagueCupExtraTimeUnsettleable(et),true);
+ assert.equal(isJleagueCupExtraTimeUnsettleable(row),false);
  assert.equal(hasAuditedJleagueCupFixture(et),false);
  assert.equal(officialJleagueCupUrl(et),null);
  assert.equal(parseJleagueCupFinal(markup(original),et).ok,false);
