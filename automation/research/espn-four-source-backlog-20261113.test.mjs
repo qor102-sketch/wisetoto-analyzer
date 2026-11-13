@@ -26,7 +26,7 @@ const event=x=>({id:x[6],date:x[3],completed:true,statusName:"STATUS_FULL_TIME",
 const feed=(x,events=[event(x)])=>({ok:true,league:espnLeague(fixture(x)),events});
 test("five source-audited ESPN finals match original ledger, preserve immutable PRE",()=>{
  assert.equal(cases.length,5);
- assert.equal(new Set(cases.map(x=>x[6])).size,4);
+ assert.equal(new Set(cases.map(x=>x[6])).size,5);
  for(const x of cases){
   const row=fixture(x),now=row.startMs+5*3600000;
   const proof=parseEspnFinal(feed(x),row,{now});
