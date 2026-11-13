@@ -75,3 +75,22 @@ test("two official EASL slots are independent of KBL/KOVO/ESPN and NBA never rea
  assert.equal(selected.filter(x=>x.key.startsWith("dom")).length,8);
  assert.equal(selected.some(x=>x.league==="NBA"),false);
 });
+
+test("official Levain Cup gets two dedicated postmatch slots while ESPN retains its own source lane",async()=>{
+ const {jleagueCupAuditedFixtures}=await import("./jleague-cup-final.mjs");
+ const now=Date.parse("2026-11-13T09:00:00Z");
+ const soccer=Array.from({length:32},(_,i)=>({
+  ...fixture("espn"+i,"잉글랜드 챔피언십"),startMs:now-7*3600000}));
+ const cup=jleagueCupAuditedFixtures.map((e,i)=>({
+  ...fixture("cup"+i,"일본 리그컵"),
+  startMs:Date.parse(e.date+"T"+e.time+":00+09:00"),
+  home:e.home,away:e.away,lastResultCheckAt:0}));
+ const others=Array.from({length:25},(_,i)=>({
+  ...fixture("dom"+i,"K리그3"),startMs:now-7*3600000}));
+ const rows=selectFinalAuditRows({records:[...soccer,...cup,...others]},now,24);
+ assert.equal(rows.length,24);
+ assert.equal(rows.filter(r=>r.key.startsWith("cup")).length,2);
+ assert.equal(rows.filter(r=>r.key.startsWith("espn")).length,14);
+ assert.equal(rows.filter(r=>r.key.startsWith("dom")).length,8);
+ assert.equal(new Set(rows.map(r=>r.key)).size,24);
+});
