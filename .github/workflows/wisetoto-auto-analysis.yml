@@ -36,8 +36,6 @@ jobs:
         run: node automation/research/probe-naver-fast-final.mjs
       - name: Probe official J.League J2 format (read-only, no result mutations)
         run: node automation/research/probe-jleague-j2.mjs
-      - name: Inspect original pending J.League Cup matches against four official full-time pages (read-only)
-        run: node automation/research/probe-jleague-cup-official-source.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Probe ESPN AFC Champions League Two scoreboards (read-only)
         run: node automation/research/probe-espn-afc-cup.mjs
       - name: Probe official K League JSON structure (read-only)
@@ -55,6 +53,8 @@ jobs:
         run: node automation/research/probe-espn-team-gaps.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Audit all ESPN scoreboard coverage and Naver outage leagues (read-only)
         run: node automation/research/probe-source-coverage-backlog.mjs /tmp/wisetoto-readonly-current-ledger.json
+      - name: Inspect original pending J.League Cup matches against four official full-time pages (read-only)
+        run: node automation/research/probe-jleague-cup-official-source.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Probe KBO official postseason and regulation final evidence (read-only)
         run: node automation/research/probe-kbo-official-source.mjs
       - name: Audit official KBL final match list against real overdue ledger (read-only)
