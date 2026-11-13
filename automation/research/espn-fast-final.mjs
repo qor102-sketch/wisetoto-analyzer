@@ -265,6 +265,8 @@ const aliases=[
  ["샬케04","schalke04"],
  // ESPN full-time 401884742: Hoffenheim 2-1 Schalke, 2026-11-08 18:30 UTC
  ["tsg1899호펜하임","tsghoffenheim"],
+ // ESPN FULL_TIME 401884748, Werder Bremen 2-0 Hoffenheim, 2026-10-31 14:30 UTC
+ ["베르더브레멘","werderbremen"],
  ["v바렌나가사키","vvarennagasaki"],
  ["올림피아코스","olympiacos"],
  ["뉴욕양키스","newyorkyankees"],["보스턴레드삭스","bostonredsox"],
