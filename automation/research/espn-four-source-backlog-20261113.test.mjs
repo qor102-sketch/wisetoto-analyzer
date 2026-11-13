@@ -6,6 +6,8 @@ import {mergeProviderFinal} from "./collect-first.mjs";
 // 2026-11-13 read-only CI: unique numeric IDs, exact 0m kickoff,
 // both homeAway sides, explicit STATUS_FULL_TIME and real scores.
 const cases=[
+ ["독일 분데스리가","TSG1899 호펜하임","샬케04",
+  "2026-11-08T18:30:00.000Z","TSG Hoffenheim","Schalke 04","401884742",2,1],
  ["독일 분데스리가","샬케04","RB라이프치히",
   "2026-10-31T14:30:00.000Z","Schalke 04","RB Leipzig","401884747",0,2],
  ["스페인 라리가","RCD에스파뇰","데포르티보 아코루냐",
@@ -24,9 +26,9 @@ const event=x=>({id:x[6],date:x[3],completed:true,statusName:"STATUS_FULL_TIME",
  competitors:[{homeAway:"home",name:x[4],score:String(x[7])},
   {homeAway:"away",name:x[5],score:String(x[8])}]});
 const feed=(x,events=[event(x)])=>({ok:true,league:espnLeague(fixture(x)),events});
-test("five source-audited ESPN finals match original ledger, preserve immutable PRE",()=>{
- assert.equal(cases.length,5);
- assert.equal(new Set(cases.map(x=>x[6])).size,5);
+test("six source-audited ESPN finals match original ledger, preserve immutable PRE",()=>{
+ assert.equal(cases.length,6);
+ assert.equal(new Set(cases.map(x=>x[6])).size,6);
  for(const x of cases){
   const row=fixture(x),now=row.startMs+5*3600000;
   const proof=parseEspnFinal(feed(x),row,{now});
