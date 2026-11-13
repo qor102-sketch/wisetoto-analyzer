@@ -3,6 +3,7 @@
 import {espnLeague} from "./espn-fast-final.mjs";
 import {isJleagueJ2} from "./jleague-j2-final.mjs";
 import {hasAuditedJleagueCupFixture} from "./jleague-cup-final.mjs";
+import {hasAuditedWkblFixture} from "./wkbl-dual-final.mjs";
 import {officialKLeagueId} from "./kleague-official-final.mjs";
 import {isKboFixture} from "./kbo-official-final.mjs";
 import {isOfficialKblFixture} from "./kbl-official-final.mjs";
@@ -115,7 +116,8 @@ export function diagnoseDataQuality(state,now=Date.now()){
    increment(byConcurrentFailure,"NAVER_NETWORK_OR_50X");
   if(/ESPN_.*?(?:PROXY_HTTP_50[24]|PROXY_NETWORK)/.test(evidence))
    increment(byConcurrentFailure,"ESPN_UPSTREAM_50X");
-  increment(byProvider,espnLeague(r)?"ESPN_SUPPORTED":hasAuditedJleagueCupFixture(r)?
+  increment(byProvider,espnLeague(r)?"ESPN_SUPPORTED":hasAuditedWkblFixture(r)?
+   "WKBL_OFFICIAL_PLUS_TRUSTED_WIRE_SUPPORTED":hasAuditedJleagueCupFixture(r)?
    "JLEAGUE_OFFICIAL_CUP_SUPPORTED":isJleagueJ2(r)?
    "JLEAGUE_OFFICIAL_J2_SUPPORTED":officialKLeagueId(r)?
    "KLEAGUE_OFFICIAL_SOURCE_SUPPORTED":isKboFixture(r)?
