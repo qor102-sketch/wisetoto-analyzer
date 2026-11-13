@@ -8,6 +8,7 @@ import {lookupNaverScheduleFinal} from "./naver-fast-final.mjs";
 import {naverOutageGroup} from "./naver-outage-group.mjs";
 import {espnLeague,lookupEspnFinal} from "./espn-fast-final.mjs";
 import {isJleagueJ2,lookupJleagueJ2Final} from "./jleague-j2-final.mjs";
+import {hasAuditedJleagueCupFixture,lookupOfficialJleagueCupFinal} from "./jleague-cup-final.mjs";
 import {officialKLeagueId,lookupOfficialKLeagueFinal} from "./kleague-official-final.mjs";
 import {isKboFixture,lookupOfficialKboFinal} from "./kbo-official-final.mjs";
 import {isOfficialKblFixture,lookupOfficialKblFinal} from "./kbl-official-final.mjs";
@@ -63,6 +64,7 @@ const supportedNaver=new Set(["축구","농구","야구"]); // KBL and non-NBA b
 const scheduleCache=new Map();
 const espnCache=new Map();
 const jleagueCache=new Map();
+const officialJleagueCupCache=new Map();
 const kleagueCache=new Map();
 const officialKboCache=new Map();
 const officialKblCache=new Map();
@@ -113,6 +115,16 @@ for(const r of finalQueue){
      }
      if(Array.isArray(candidate.providerErrors))reasons.push(...candidate.providerErrors);
    }
+ }
+ if(!confirmed&&hasAuditedJleagueCupFixture(r)){
+   // Official Japanese Levain Cup match-detail page, never Naver;
+   // narrow original-ledger fixture identity and NUMERIC source match ID.
+   // No AET/PK score may masquerade as 90-minute betting result.
+   providerAttempted=true;
+   const official=await lookupOfficialJleagueCupFinal(r,{
+    cache:officialJleagueCupCache,now:Date.now()});
+   if(official.ok)confirmed=official;
+   else reasons.push("JLEAGUE_CUP:"+String(official.waitReason).slice(0,140));
  }
  if(!confirmed&&isJleagueJ2(r)){
    // Official J.LEAGUE match list only; one bounded network read per JST
@@ -234,6 +246,7 @@ console.log("FAST_FINAL_AUDIT "+JSON.stringify({
  sharedOfficialKblQueries:officialKblCache.size,
  sharedOfficialKovoQueries:officialKovoCache.size,
  sharedOfficialEaslQueries:officialEaslCache.size,
+ sharedOfficialJleagueCupQueries:officialJleagueCupCache.size,
  naverUpstreamFailures,naverFailedRows,naverOutageSkipped,
  naverCircuitGroups:Object.fromEntries(naverFailureGroups),waitReasons:finalWaitReasons,
  espnFailureReasons
