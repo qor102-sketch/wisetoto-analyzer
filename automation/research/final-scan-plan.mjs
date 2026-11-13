@@ -4,6 +4,7 @@ import {dueResults} from "./collect-first.mjs";
 import {espnLeague} from "./espn-fast-final.mjs";
 import {isJleagueJ2} from "./jleague-j2-final.mjs";
 import {hasAuditedJleagueCupFixture,isJleagueCupExtraTimeUnsettleable} from "./jleague-cup-final.mjs";
+import {hasAuditedWkblFixture} from "./wkbl-dual-final.mjs";
 import {officialKLeagueId} from "./kleague-official-final.mjs";
 import {isKboFixture} from "./kbo-official-final.mjs";
 import {naverOutageGroup} from "./naver-outage-group.mjs";
@@ -17,7 +18,7 @@ const H=3600000;
 // Healthy group throughput is unchanged and ESPN-supported fixtures never
 // inherit a Naver-only outage cap.
 export function isNaverOnlyOutage(r){
- if(espnLeague(r)||isJleagueJ2(r)||hasAuditedJleagueCupFixture(r)||officialKLeagueId(r)||isKboFixture(r)||isOfficialKblFixture(r)||isOfficialKovoFixture(r)||hasAuditedOfficialEaslFixture(r)||!["축구","농구","야구"].includes(r.sport))return false;
+ if(espnLeague(r)||isJleagueJ2(r)||hasAuditedJleagueCupFixture(r)||hasAuditedWkblFixture(r)||officialKLeagueId(r)||isKboFixture(r)||isOfficialKblFixture(r)||isOfficialKovoFixture(r)||hasAuditedOfficialEaslFixture(r)||!["축구","농구","야구"].includes(r.sport))return false;
  const reason=String(r.checkReason??"");
  const errors=Array.isArray(r.resultErrors)?r.resultErrors.at(-1)?.reasons??[]:[];
  return /NAVER_CIRCUIT_OPEN|NAVER_(?:FAST|DIRECT|SCHEDULE).*?(?:NETWORK|HTTP_50[24]|TIMEOUT)|NAVER_PROVIDER_NETWORK/.test(
@@ -57,9 +58,9 @@ export function selectFinalAuditRows(state,now=Date.now(),limit=24){
  // official-source/Naver slot or accept a generic post-extra-time score.
  const pool=dueResults(state,now,Number.MAX_SAFE_INTEGER)
   .filter(r=>!isJleagueCupExtraTimeUnsettleable(r));
- const supported=interleaveRecentAndBacklog(pool.filter(row=>Boolean(espnLeague(row))||isJleagueJ2(row)||hasAuditedJleagueCupFixture(row)||Boolean(officialKLeagueId(row))||isKboFixture(row)||isOfficialKblFixture(row)||isOfficialKovoFixture(row)||hasAuditedOfficialEaslFixture(row)),now);
+ const supported=interleaveRecentAndBacklog(pool.filter(row=>Boolean(espnLeague(row))||isJleagueJ2(row)||hasAuditedJleagueCupFixture(row)||hasAuditedWkblFixture(row)||Boolean(officialKLeagueId(row))||isKboFixture(row)||isOfficialKblFixture(row)||isOfficialKovoFixture(row)||hasAuditedOfficialEaslFixture(row)),now);
  const others=interleaveRecentAndBacklog(
-  limitFailingNaverGroups(pool.filter(row=>!espnLeague(row)&&!isJleagueJ2(row)&&!hasAuditedJleagueCupFixture(row)&&!officialKLeagueId(row)&&!isKboFixture(row)&&!isOfficialKblFixture(row)&&!isOfficialKovoFixture(row)&&!hasAuditedOfficialEaslFixture(row))),now);
+  limitFailingNaverGroups(pool.filter(row=>!espnLeague(row)&&!isJleagueJ2(row)&&!hasAuditedJleagueCupFixture(row)&&!hasAuditedWkblFixture(row)&&!officialKLeagueId(row)&&!isKboFixture(row)&&!isOfficialKblFixture(row)&&!isOfficialKovoFixture(row)&&!hasAuditedOfficialEaslFixture(row))),now);
  // Preserve provider-independent ESPN quota and healthy Naver-only access.
  const espnQuota=Math.floor(limit*2/3);
  const otherQuota=limit-espnQuota;
@@ -71,15 +72,17 @@ export function selectFinalAuditRows(state,now=Date.now(),limit=24){
  const kovo=supported.filter(isOfficialKovoFixture);
  const easl=supported.filter(hasAuditedOfficialEaslFixture);
  const cup=supported.filter(hasAuditedJleagueCupFixture);
+ const wkbl=supported.filter(hasAuditedWkblFixture);
  const remainder=supported.filter(r=>!isOfficialKblFixture(r)&&
   !isOfficialKovoFixture(r)&&!hasAuditedOfficialEaslFixture(r)&&
-  !hasAuditedJleagueCupFixture(r));
- // Reserve up to two audited J.League Cup official matches per 24-row
- // scan. Old J.League Cup Naver outages do not consume Naver-only slots.
- // All quotas are bounded; ESPN receives remaining supported capacity.
- const prioritized=[...cup.slice(0,2),...kbl.slice(0,4),
-  ...kovo.slice(0,2),...easl.slice(0,2),...remainder,
-  ...cup.slice(2),...kbl.slice(4),...kovo.slice(2),...easl.slice(2)];
+  !hasAuditedJleagueCupFixture(r)&&!hasAuditedWkblFixture(r));
+ // Two source-audited WKBL dual-source slots and two Levain Cup slots
+ // sit outside Naver's outage circuit. All quotas remain bounded;
+ // ESPN gets leftover independent supported capacity, no NBA.
+ const prioritized=[...cup.slice(0,2),...wkbl.slice(0,2),
+  ...kbl.slice(0,4),...kovo.slice(0,2),...easl.slice(0,2),...remainder,
+  ...cup.slice(2),...wkbl.slice(2),...kbl.slice(4),
+  ...kovo.slice(2),...easl.slice(2)];
  const selected=[...prioritized.slice(0,espnQuota),...others.slice(0,otherQuota)];
  if(selected.length<limit){
   const picked=new Set(selected.map(r=>r.key));
