@@ -12,27 +12,27 @@ const escaped=s=>String(s).replace(/[.*+?^$()|[\]{}\\]/g,"\\$&");
 const fixtures=[
  {id:"04701004",date:"2026-11-06",time:"19:00",home:"하나은행",away:"KB 스타즈",
   wkHome:"하나은행",wkAway:"KB스타즈",venue:"부천체육관",wireVenue:"부천체육관",
-  wireWinner:"KB",wireLoser:"하나은행",homeScore:69,awayScore:74,
+  wireWinner:"KB",wireLoser:"하나은행",winnerSide:"away",homeScore:69,awayScore:74,
   wireId:"AKR20261106185500007"},
  {id:"04701005",date:"2026-11-07",time:"14:00",home:"BNK 썸",away:"신한은행 에스버드",
   wkHome:"BNK 썸",wkAway:"신한은행",venue:"부산사직실내체육관",wireVenue:"부산 사직체육관",
-  wireWinner:"신한은행",wireLoser:"BNK",homeScore:59,awayScore:68,
+  wireWinner:"신한은행",wireLoser:"BNK",winnerSide:"away",homeScore:59,awayScore:68,
   wireId:"AKR20261107038200007"},
  {id:"04701006",date:"2026-11-07",time:"16:00",home:"우리은행 우리WON",away:"삼성생명 블루밍스",
   wkHome:"우리은행",wkAway:"삼성생명",venue:"아산이순신체육관",wireVenue:"아산이순신체육관",
-  wireWinner:"우리은행",wireLoser:"삼성생명",homeScore:65,awayScore:54,
+  wireWinner:"우리은행",wireLoser:"삼성생명",winnerSide:"home",homeScore:65,awayScore:54,
   wireId:"AKR20261107046500007"},
  {id:"04701007",date:"2026-11-08",time:"16:00",home:"BNK 썸",away:"하나은행",
   wkHome:"BNK 썸",wkAway:"하나은행",venue:"부산사직실내체육관",wireVenue:"부산 사직체육관",
-  wireWinner:"BNK",wireLoser:"하나은행",homeScore:73,awayScore:65,
+  wireWinner:"BNK",wireLoser:"하나은행",winnerSide:"home",homeScore:73,awayScore:65,
   wireId:"AKR20261108044600007"},
  {id:"04701008",date:"2026-11-09",time:"19:01",home:"KB 스타즈",away:"우리은행 우리WON",
   wkHome:"KB스타즈",wkAway:"우리은행",venue:"청주체육관",wireVenue:"청주체육관",
-  wireWinner:"우리은행",wireLoser:"KB",homeScore:51,awayScore:57,
+  wireWinner:"우리은행",wireLoser:"KB",winnerSide:"away",homeScore:51,awayScore:57,
   wireId:"AKR20261109156800007"},
  {id:"04701009",date:"2026-11-11",time:"19:00",home:"신한은행 에스버드",away:"삼성생명 블루밍스",
   wkHome:"신한은행",wkAway:"삼성생명",venue:"인천도원체육관",wireVenue:"인천 도원체육관",
-  wireWinner:"삼성생명",wireLoser:"신한은행",homeScore:51,awayScore:54,
+  wireWinner:"삼성생명",wireLoser:"신한은행",winnerSide:"away",homeScore:51,awayScore:54,
   wireId:"AKR20261111178100007"}
 ];
 export const auditedWkblGames=fixtures.map(x=>Object.freeze({...x}));
@@ -91,9 +91,8 @@ function parseWire(html,e,fixture){
   return {ok:false,reason:"WKBL_WIRE_DOCUMENT_MISSING"};
  const title=(html.match(/<title[^>]*>([^<]{15,300})<\/title>/i)?.[1]??"").trim();
  const h=e.homeScore,a=e.awayScore;
- const winnerScore=norm(e.wireWinner)===norm(e.wkHome)?h:a;
+ const winnerScore=e.winnerSide==="home"?h:a;
  const loserScore=winnerScore===h?a:h;
- const exactTitle="[여자농구 "+e.wireVenue.replace(/\s.*$/,"").replace("사직체육관","부산")+"전적]";
  // Headline MUST declare a completed game with the exact source-confirmed
  // winner and loser, never a preview or 1st-quarter scoreboard.
  const parts=title.match(/^\[여자농구 [^\]]{1,20}전적\]\s+(.+?)\s+(\d{1,3})-(\d{1,3})\s+(.+?)\s*\|\s*연합뉴스$/);
