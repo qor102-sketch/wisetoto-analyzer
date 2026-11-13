@@ -98,3 +98,28 @@ test("official Levain Cup gets two dedicated postmatch slots while ESPN retains 
  assert.equal(rows.filter(r=>r.key.startsWith("dom")).length,8);
  assert.equal(new Set(rows.map(r=>r.key)).size,24);
 });
+
+test("two audited WKBL dual-proof retries and two official Cup retries do not exhaust ESPN or domestic lanes",async()=>{
+ const {auditedWkblGames}=await import("./wkbl-dual-final.mjs");
+ const {jleagueCupAuditedFixtures}=await import("./jleague-cup-final.mjs");
+ const now=Date.parse("2026-11-13T13:00:00.000Z");
+ const wkb=auditedWkblGames.map((e,i)=>({
+  ...fixture("wkbl"+i,"WKBL","농구"),
+  home:e.home,away:e.away,startMs:Date.parse(e.date+"T"+e.time+":00+09:00"),
+  lastResultCheckAt:0,
+  checkReason:"NAVER_FAST:NAVER_DIRECT_NETWORK:TimeoutError"}));
+ const cup=jleagueCupAuditedFixtures.map((e,i)=>({
+  ...fixture("cup"+i,"일본 리그컵"),
+  home:e.home,away:e.away,startMs:Date.parse(e.date+"T"+e.time+":00+09:00"),
+  lastResultCheckAt:0}));
+ const espn=Array.from({length:30},(_,i)=>fixture("espn"+i,"잉글랜드 챔피언십"));
+ const naver=Array.from({length:25},(_,i)=>fixture("dom"+i,"네덜란드 FA컵"));
+ const rows=selectFinalAuditRows({records:[...espn,...naver,...cup,...wkb]},now,24);
+ assert.equal(rows.length,24);
+ assert.equal(rows.filter(x=>x.key.startsWith("wkbl")).length,2);
+ assert.equal(rows.filter(x=>x.key.startsWith("cup")).length,2);
+ assert.equal(rows.filter(x=>x.key.startsWith("espn")).length,12);
+ assert.equal(rows.filter(x=>x.key.startsWith("dom")).length,8);
+ assert.equal(new Set(rows.map(x=>x.key)).size,24);
+ assert.equal(rows.some(x=>x.league==="NBA"),false);
+});
