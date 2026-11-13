@@ -36,6 +36,13 @@ const entryFor=r=>{
   Math.abs(r.startMs-Date.parse(x.date+"T"+x.time+":00+09:00"))<=20*MIN);
  return matched.length===1?matched[0]:null;
 };
+// 2026-10-28 Nagoya 1-2 Urawa is explicitly marked 延長 (after
+// extra time) by J.LEAGUE. No audited regulation score has been obtained.
+// Do NOT let a generic finished score from Naver masquerade as regulation.
+export const isJleagueCupExtraTimeUnsettleable=r=>isJleagueCupFixture(r)&&
+ norm(r.home)===norm("나고야 그램퍼스")&&norm(r.away)===norm("우라와 레드")&&
+ Number.isFinite(r.startMs)&&
+ Math.abs(r.startMs-Date.parse("2026-10-28T19:00:00+09:00"))<=20*MIN;
 export const hasAuditedJleagueCupFixture=r=>Boolean(entryFor(r));
 export const officialJleagueCupUrl=r=>{
  const e=entryFor(r);
