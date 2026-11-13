@@ -71,6 +71,8 @@ jobs:
         run: node automation/research/probe-wkbl-datalab-final.mjs
       - name: Audit six original overdue WKBL official plus wire-postmatch source pairs (read-only)
         run: node automation/research/probe-wkbl-dual-source-final.mjs /tmp/wisetoto-readonly-current-ledger.json
+      - name: Confirm all original overdue WKBL matches by independent official and trusted postgame final (read-only)
+        run: node automation/research/probe-wkbl-dual-final-coverage.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Inspect independent EASL official match recaps and actual ledger (read-only)
         run: node automation/research/probe-easl-official-source.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Audit exact EASL official event and decisive FINAL match proof (read-only)
