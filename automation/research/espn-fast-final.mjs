@@ -267,6 +267,8 @@ const aliases=[
  ["tsg1899호펜하임","tsghoffenheim"],
  // ESPN FULL_TIME 401884748, Werder Bremen 2-0 Hoffenheim, 2026-10-31 14:30 UTC
  ["베르더브레멘","werderbremen"],
+ // 2026-11-07 ESPN 401884743, VfB Stuttgart 1-0 Werder Bremen, exact kickoff
+ ["vfb슈투트가르트","vfbstuttgart"],
  ["v바렌나가사키","vvarennagasaki"],
  ["올림피아코스","olympiacos"],
  ["뉴욕양키스","newyorkyankees"],["보스턴레드삭스","bostonredsox"],
