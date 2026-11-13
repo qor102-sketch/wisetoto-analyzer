@@ -8,7 +8,7 @@ import {lookupNaverScheduleFinal} from "./naver-fast-final.mjs";
 import {naverOutageGroup} from "./naver-outage-group.mjs";
 import {espnLeague,lookupEspnFinal} from "./espn-fast-final.mjs";
 import {isJleagueJ2,lookupJleagueJ2Final} from "./jleague-j2-final.mjs";
-import {hasAuditedJleagueCupFixture,lookupOfficialJleagueCupFinal} from "./jleague-cup-final.mjs";
+import {hasAuditedJleagueCupFixture,isJleagueCupExtraTimeUnsettleable,lookupOfficialJleagueCupFinal} from "./jleague-cup-final.mjs";
 import {officialKLeagueId,lookupOfficialKLeagueFinal} from "./kleague-official-final.mjs";
 import {isKboFixture,lookupOfficialKboFinal} from "./kbo-official-final.mjs";
 import {isOfficialKblFixture,lookupOfficialKblFinal} from "./kbl-official-final.mjs";
@@ -83,6 +83,17 @@ console.log("FINAL_BACKLOG_BEFORE "+JSON.stringify({...finalAuditBacklog(state,D
  selectedBySport:Object.fromEntries(["축구","농구","야구","배구"].map(s=>[s,finalQueue.filter(r=>r.sport===s).length]))}));
 for(const r of finalQueue){
  let confirmed=null,reasons=[],providerAttempted=false;
+ if(isJleagueCupExtraTimeUnsettleable(r)){
+  // AET 1-2 is not Betman's regulation 90-minute 1X2 result.
+  // No provider (including a generic Naver "final") may overwrite it.
+  finalDeferred++;
+  finalWaitReasons.JLEAGUE_CUP_AET_REGULATION_UNCONFIRMED=
+   (finalWaitReasons.JLEAGUE_CUP_AET_REGULATION_UNCONFIRMED??0)+1;
+  state=deferFinalWithoutProvider(state,r.key,
+   "JLEAGUE_CUP_AET_REGULATION_UNCONFIRMED",Date.now());
+  continue;
+ }
+
  if(sportsApiLimited&&r.fixtureId!==null)reasons.push("SPORTSAPI_RATE_LIMIT");
  // A provider ID from the Betman row may give an exact match. When that
  // endpoint fails, a separately matched Naver result can still rescue it.
