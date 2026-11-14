@@ -75,3 +75,51 @@ test("two official EASL slots are independent of KBL/KOVO/ESPN and NBA never rea
  assert.equal(selected.filter(x=>x.key.startsWith("dom")).length,8);
  assert.equal(selected.some(x=>x.league==="NBA"),false);
 });
+
+test("official Levain Cup gets two dedicated postmatch slots while ESPN retains its own source lane",async()=>{
+ const {jleagueCupAuditedFixtures}=await import("./jleague-cup-final.mjs");
+ const now=Date.parse("2026-11-13T09:00:00Z");
+ const soccer=Array.from({length:32},(_,i)=>({
+  ...fixture("espn"+i,"잉글랜드 챔피언십"),startMs:now-7*3600000}));
+ const cup=jleagueCupAuditedFixtures.map((e,i)=>({
+  ...fixture("cup"+i,"일본 리그컵"),
+  startMs:Date.parse(e.date+"T"+e.time+":00+09:00"),
+  home:e.home,away:e.away,lastResultCheckAt:0}));
+ const others=Array.from({length:25},(_,i)=>({
+  ...fixture("dom"+i,"K리그3"),startMs:now-7*3600000}));
+ const aet={...fixture("nagoya-aet","일본 리그컵"),
+  home:"나고야 그램퍼스",away:"우라와 레드",
+  startMs:Date.parse("2026-10-28T19:00:00+09:00"),lastResultCheckAt:0};
+ const rows=selectFinalAuditRows({records:[...soccer,...cup,...others,aet]},now,24);
+ assert.equal(rows.length,24);
+ assert.equal(rows.filter(r=>r.key.startsWith("cup")).length,2);
+ assert.equal(rows.some(r=>r.key==="nagoya-aet"),false,"AET excluded without 90-minute source");
+ assert.equal(rows.filter(r=>r.key.startsWith("espn")).length,14);
+ assert.equal(rows.filter(r=>r.key.startsWith("dom")).length,8);
+ assert.equal(new Set(rows.map(r=>r.key)).size,24);
+});
+
+test("two audited WKBL dual-proof retries and two official Cup retries do not exhaust ESPN or domestic lanes",async()=>{
+ const {auditedWkblGames}=await import("./wkbl-dual-final.mjs");
+ const {jleagueCupAuditedFixtures}=await import("./jleague-cup-final.mjs");
+ const now=Date.parse("2026-11-13T13:00:00.000Z");
+ const wkb=auditedWkblGames.map((e,i)=>({
+  ...fixture("wkbl"+i,"WKBL","농구"),
+  home:e.home,away:e.away,startMs:Date.parse(e.date+"T"+e.time+":00+09:00"),
+  lastResultCheckAt:0,
+  checkReason:"NAVER_FAST:NAVER_DIRECT_NETWORK:TimeoutError"}));
+ const cup=jleagueCupAuditedFixtures.map((e,i)=>({
+  ...fixture("cup"+i,"일본 리그컵"),
+  home:e.home,away:e.away,startMs:Date.parse(e.date+"T"+e.time+":00+09:00"),
+  lastResultCheckAt:0}));
+ const espn=Array.from({length:30},(_,i)=>fixture("espn"+i,"잉글랜드 챔피언십"));
+ const naver=Array.from({length:25},(_,i)=>fixture("dom"+i,"네덜란드 FA컵"));
+ const rows=selectFinalAuditRows({records:[...espn,...naver,...cup,...wkb]},now,24);
+ assert.equal(rows.length,24);
+ assert.equal(rows.filter(x=>x.key.startsWith("wkbl")).length,2);
+ assert.equal(rows.filter(x=>x.key.startsWith("cup")).length,2);
+ assert.equal(rows.filter(x=>x.key.startsWith("espn")).length,12);
+ assert.equal(rows.filter(x=>x.key.startsWith("dom")).length,8);
+ assert.equal(new Set(rows.map(x=>x.key)).size,24);
+ assert.equal(rows.some(x=>x.league==="NBA"),false);
+});

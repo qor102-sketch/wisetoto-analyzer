@@ -53,6 +53,10 @@ jobs:
         run: node automation/research/probe-espn-team-gaps.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Audit all ESPN scoreboard coverage and Naver outage leagues (read-only)
         run: node automation/research/probe-source-coverage-backlog.mjs /tmp/wisetoto-readonly-current-ledger.json
+      - name: Inspect original pending J.League Cup matches against four official full-time pages (read-only)
+        run: node automation/research/probe-jleague-cup-official-source.mjs /tmp/wisetoto-readonly-current-ledger.json
+      - name: Audit exact J.League Cup regulation finals against all original overdue fixtures (read-only)
+        run: node automation/research/probe-jleague-cup-official-finals.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Probe KBO official postseason and regulation final evidence (read-only)
         run: node automation/research/probe-kbo-official-source.mjs
       - name: Audit official KBL final match list against real overdue ledger (read-only)
@@ -65,6 +69,10 @@ jobs:
         run: node automation/research/probe-other-domestic-official-sources.mjs
       - name: Inspect actual WKBL DataLab final-status fields (read-only)
         run: node automation/research/probe-wkbl-datalab-final.mjs
+      - name: Audit six original overdue WKBL official plus wire-postmatch source pairs (read-only)
+        run: node automation/research/probe-wkbl-dual-source-final.mjs /tmp/wisetoto-readonly-current-ledger.json
+      - name: Confirm all original overdue WKBL matches by independent official and trusted postgame final (read-only)
+        run: node automation/research/probe-wkbl-dual-final-coverage.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Inspect independent EASL official match recaps and actual ledger (read-only)
         run: node automation/research/probe-easl-official-source.mjs /tmp/wisetoto-readonly-current-ledger.json
       - name: Audit exact EASL official event and decisive FINAL match proof (read-only)

@@ -8,6 +8,8 @@ import {lookupNaverScheduleFinal} from "./naver-fast-final.mjs";
 import {naverOutageGroup} from "./naver-outage-group.mjs";
 import {espnLeague,lookupEspnFinal} from "./espn-fast-final.mjs";
 import {isJleagueJ2,lookupJleagueJ2Final} from "./jleague-j2-final.mjs";
+import {hasAuditedJleagueCupFixture,isJleagueCupExtraTimeUnsettleable,lookupOfficialJleagueCupFinal} from "./jleague-cup-final.mjs";
+import {hasAuditedWkblFixture,lookupWkblDualFinal} from "./wkbl-dual-final.mjs";
 import {officialKLeagueId,lookupOfficialKLeagueFinal} from "./kleague-official-final.mjs";
 import {isKboFixture,lookupOfficialKboFinal} from "./kbo-official-final.mjs";
 import {isOfficialKblFixture,lookupOfficialKblFinal} from "./kbl-official-final.mjs";
@@ -63,6 +65,8 @@ const supportedNaver=new Set(["축구","농구","야구"]); // KBL and non-NBA b
 const scheduleCache=new Map();
 const espnCache=new Map();
 const jleagueCache=new Map();
+const officialJleagueCupCache=new Map();
+const wkblDualCache=new Map();
 const kleagueCache=new Map();
 const officialKboCache=new Map();
 const officialKblCache=new Map();
@@ -81,6 +85,17 @@ console.log("FINAL_BACKLOG_BEFORE "+JSON.stringify({...finalAuditBacklog(state,D
  selectedBySport:Object.fromEntries(["축구","농구","야구","배구"].map(s=>[s,finalQueue.filter(r=>r.sport===s).length]))}));
 for(const r of finalQueue){
  let confirmed=null,reasons=[],providerAttempted=false;
+ if(isJleagueCupExtraTimeUnsettleable(r)){
+  // AET 1-2 is not Betman's regulation 90-minute 1X2 result.
+  // No provider (including a generic Naver "final") may overwrite it.
+  finalDeferred++;
+  finalWaitReasons.JLEAGUE_CUP_AET_REGULATION_UNCONFIRMED=
+   (finalWaitReasons.JLEAGUE_CUP_AET_REGULATION_UNCONFIRMED??0)+1;
+  state=deferFinalWithoutProvider(state,r.key,
+   "JLEAGUE_CUP_AET_REGULATION_UNCONFIRMED",Date.now());
+  continue;
+ }
+
  if(sportsApiLimited&&r.fixtureId!==null)reasons.push("SPORTSAPI_RATE_LIMIT");
  // A provider ID from the Betman row may give an exact match. When that
  // endpoint fails, a separately matched Naver result can still rescue it.
@@ -113,6 +128,16 @@ for(const r of finalQueue){
      }
      if(Array.isArray(candidate.providerErrors))reasons.push(...candidate.providerErrors);
    }
+ }
+ if(!confirmed&&hasAuditedJleagueCupFixture(r)){
+   // Official Japanese Levain Cup match-detail page, never Naver;
+   // narrow original-ledger fixture identity and NUMERIC source match ID.
+   // No AET/PK score may masquerade as 90-minute betting result.
+   providerAttempted=true;
+   const official=await lookupOfficialJleagueCupFinal(r,{
+    cache:officialJleagueCupCache,now:Date.now()});
+   if(official.ok)confirmed=official;
+   else reasons.push("JLEAGUE_CUP:"+String(official.waitReason).slice(0,140));
  }
  if(!confirmed&&isJleagueJ2(r)){
    // Official J.LEAGUE match list only; one bounded network read per JST
@@ -154,6 +179,15 @@ for(const r of finalQueue){
    const official=await lookupOfficialEaslFinal(r,{cache:officialEaslCache,now:Date.now()});
    if(official.ok)confirmed=official;
    else reasons.push("EASL_OFFICIAL:"+String(official.waitReason).slice(0,145));
+ }
+ if(!confirmed&&hasAuditedWkblFixture(r)){
+   // Official WKBL's DataLab page has no explicit ended-status field,
+   // so ONLY accept it jointly with a trusted postmatch Yonhap final
+   // report, exact teams, date, venue, 4-quarter totals and source IDs.
+   providerAttempted=true;
+   const official=await lookupWkblDualFinal(r,{cache:wkblDualCache,now:Date.now()});
+   if(official.ok)confirmed=official;
+   else reasons.push("WKBL_DUAL_SOURCE:"+String(official.waitReason).slice(0,145));
  }
  if(!confirmed&&supportedNaver.has(r.sport)){
    // A failed Naver football category must not silence NBA/KBL/baseball,
@@ -234,6 +268,8 @@ console.log("FAST_FINAL_AUDIT "+JSON.stringify({
  sharedOfficialKblQueries:officialKblCache.size,
  sharedOfficialKovoQueries:officialKovoCache.size,
  sharedOfficialEaslQueries:officialEaslCache.size,
+ sharedOfficialJleagueCupQueries:officialJleagueCupCache.size,
+ sharedOfficialWkblAndPressQueries:wkblDualCache.size,
  naverUpstreamFailures,naverFailedRows,naverOutageSkipped,
  naverCircuitGroups:Object.fromEntries(naverFailureGroups),waitReasons:finalWaitReasons,
  espnFailureReasons

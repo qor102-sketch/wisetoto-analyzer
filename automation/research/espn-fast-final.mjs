@@ -256,6 +256,21 @@ const aliases=[
  ["아비스파후쿠오카","avispafukuoka"],
  ["아우크스부르크","fcaugsburg"],
  ["르아브르ac","lehavreac"],
+ // Four further unique, numeric, ESPN STATUS_FULL_TIME events at exact
+ // source kickoffs from original 2026-11-13 source backlog audit.
+ // Team alias ONLY. Both sides / league / clock / final must remain strict.
+ ["rcd에스파뇰","espanyol"],
+ ["rb라이프치히","rbleipzig"],
+ // Source-audited Schalke v Leipzig ESPN event 401884747 (2026-10-31 14:30 UTC)
+ ["샬케04","schalke04"],
+ // ESPN full-time 401884742: Hoffenheim 2-1 Schalke, 2026-11-08 18:30 UTC
+ ["tsg1899호펜하임","tsghoffenheim"],
+ // ESPN FULL_TIME 401884748, Werder Bremen 2-0 Hoffenheim, 2026-10-31 14:30 UTC
+ ["베르더브레멘","werderbremen"],
+ // 2026-11-07 ESPN 401884743, VfB Stuttgart 1-0 Werder Bremen, exact kickoff
+ ["vfb슈투트가르트","vfbstuttgart"],
+ ["v바렌나가사키","vvarennagasaki"],
+ ["올림피아코스","olympiacos"],
  ["뉴욕양키스","newyorkyankees"],["보스턴레드삭스","bostonredsox"],
  ["la다저스","로스앤젤레스다저스","losangelesdodgers"],["시카고컵스","chicagocubs"]
 ].map(group=>group.map(norm));

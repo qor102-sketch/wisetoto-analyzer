@@ -5,6 +5,7 @@ import {isNbaGame,withoutNba} from "../nba-policy.mjs";
 import {scorePlausibility} from "../../WisetotoAnalyzer-LiveFree/src/lib/postmatch-guards.mjs";
 import {publicOperationalEffect} from "./operational-effect.mjs";
 import {diagnoseDataQuality} from "./data-quality-audit.mjs";
+import {isJleagueCupExtraTimeUnsettleable} from "./jleague-cup-final.mjs";
 const M=60000,D=86400000;
 export const SCHEMA="wisetoto-collect-first-v1";
 const key=v=>String(v??"").normalize("NFKC").toLowerCase().replace(/[^가-힣a-z0-9]/g,"");
@@ -110,6 +111,9 @@ export function settlement(state,tracker=[],now=Date.now()){
  let settled=0;
  for(const r of rows){
    if(r.verdict!=="PENDING")continue;
+   // Source-observed AET result is not independent 90-minute regulation proof.
+   // A generic tracker VERIFIED with a 1-2 AET score cannot rescue this row.
+   if(isJleagueCupExtraTimeUnsettleable(r))continue;
    const found=index.get(r.key);
    if(!found)continue;
    if(!scorePlausibility(r.sport,found.result.homeScore,found.result.awayScore).ok)continue;
@@ -134,7 +138,7 @@ export function mergeProviderFinal(state,fixtureKeyValue,payload,now=Date.now())
    r.checkReason="INVALID_SPORT_SCORE";
  }else{
    r.verdict="VERIFIED";r.final={homeScore:Number(payload.result.homeScore),awayScore:Number(payload.result.awayScore)};
-   r.resultSource=["SPORTSAPI","NAVER","ESPN","JLEAGUE","KLEAGUE","KBO","KBL","KOVO","EASL"].includes(payload.source)
+   r.resultSource=["SPORTSAPI","NAVER","ESPN","JLEAGUE","KLEAGUE","KBO","KBL","KOVO","EASL","WKBL"].includes(payload.source)
      ?payload.source:"VERIFIED_FINAL_PROVIDER";r.verifiedAt=now;r.checkReason=null;
    // Immutable source identity/proof for postpilot audit. Betman numeric
    // fixtureId is a separate namespace; never replace it with a Naver ID.
