@@ -4,5 +4,46 @@
     "deploymentEnabled": {
       "automation-data": false
     }
-  }
+  },
+  "rewrites": [
+    {
+      "source": "/public-data/automation-history.json",
+      "destination": "https://raw.githubusercontent.com/qor102-sketch/wisetoto-analyzer/automation-data/automation-history.json"
+    },
+    {
+      "source": "/public-data/automation-health.json",
+      "destination": "https://raw.githubusercontent.com/qor102-sketch/wisetoto-analyzer/automation-data/automation-health.json"
+    },
+    {
+      "source": "/public-data/collect-first-public.json",
+      "destination": "https://raw.githubusercontent.com/qor102-sketch/wisetoto-analyzer/automation-data/collect-first-public.json"
+    },
+    {
+      "source": "/public-data/research-public.json",
+      "destination": "https://raw.githubusercontent.com/qor102-sketch/wisetoto-analyzer/automation-data/research-public.json"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/public-data/:path*",
+      "headers": [
+        {
+          "key": "x-vercel-enable-rewrite-caching",
+          "value": "1"
+        },
+        {
+          "key": "Vercel-CDN-Cache-Control",
+          "value": "max-age=90, stale-while-revalidate=90"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=45"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        }
+      ]
+    }
+  ]
 }
