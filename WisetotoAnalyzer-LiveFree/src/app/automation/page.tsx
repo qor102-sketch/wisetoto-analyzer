@@ -1,6 +1,7 @@
 "use client";
 import {useEffect,useMemo,useState} from "react";
 import "./dashboard.css";
+import {loadPublicProjection} from "./public-data-client.mjs";
 type Pick={key:string;market:string;pick:string;probability:number|null;odds:number|null;expectedValue:number|null;edge:number|null;grade:string;score:number|null;resultStatus:string;actualLabel:string|null;resultNote:string|null};
 type Match={id:string;sport:string;league:string;home:string;away:string;startMs:number;capturedAt:number;status:string;verifiedAt:number|null;decision:string;result:{homeScore:number|null;awayScore:number|null;source:string}|null;pre:{expectedHome:number|null;expectedAway:number|null;homeRecentSample:number|null;awayRecentSample:number|null;homeVenueSample:number|null;awayVenueSample:number|null}|null;courtPre:{expectedHome:number|null;expectedAway:number|null;homeRecentSample:number|null;awayRecentSample:number|null;homeVenueSample:number|null;awayVenueSample:number|null}|null;lineup:{stage:string;capturedAt:number|null}|null;top1:Pick|null;markets:Pick[];warnings:string[];verifyWaitReason?:string|null;verifyLastCheckedAt?:number|null};
 type ScanHealth={schema:string;scannedAt:string;expectedIntervalMinutes:number;sourceOk:boolean;sourceError:string|null;feedSports:Record<string,number>;eligibleForPregame:number;awaitingPostmatch:number;feedOrigin:string};
@@ -54,21 +55,41 @@ export default function AutomationDashboard(){
  const [collection,setCollection]=useState<CollectedLedger|null>(null);
  const [collectionError,setCollectionError]=useState("");
  const [error,setError]=useState("");
+ const [edgeNotice,setEdgeNotice]=useState("");
  const [filter,setFilter]=useState("all");
  const [sport,setSport]=useState("all");
  const [query,setQuery]=useState("");
  const [open,setOpen]=useState<string|null>(null);
- async function reload(){setLoading(true);setError("");try{const res=await fetch("/api/automation/results",{cache:"no-store"});const json=await res.json();if(!res.ok||!json.ok||!Array.isArray(json.data?.records))throw Error(json.error||"기록이 없습니다.");setData(json.data);}catch(e){setError(e instanceof Error?e.message:"데이터 연결 오류");}finally{setLoading(false);}}
+ async function reload(){
+  setLoading(true);setError("");
+  try{
+   // Browser -> Vercel CDN rewrite -> public GitHub projection:
+   // no Next.js function or mutation of the immutable PRE/TOP1 ledger.
+   const [history,health]=await Promise.all([
+    loadPublicProjection<History>("history"),
+    loadPublicProjection<ScanHealth>("health").catch(()=>null)
+   ]);
+   setData({...history.data,scanHealth:health?.data??history.data.scanHealth??null});
+   setEdgeNotice(history.transport==="legacy"
+    ?"공개 데이터 CDN 연결 문제로 임시 서버 대체 경로를 사용하고 있습니다.":"");
+  }catch(e){setError(e instanceof Error?e.message:"데이터 연결 오류");}
+  finally{setLoading(false);}
+ }
  useEffect(()=>{void reload();},[]);
- useEffect(()=>{let alive=true;void fetch("/api/automation/collection",{cache:"no-store"})
-   .then(async r=>{const v=await r.json();if(!r.ok||!v?.ok)throw Error(v?.error||"수집 API 조회 실패");return v;})
-   .then(v=>{if(alive){setCollection(v.data as CollectedLedger);setCollectionError("");}})
-   .catch(e=>{if(alive)setCollectionError(e instanceof Error?e.message:"수집 API 연결 실패");});
-   return ()=>{alive=false;};},[]);
- useEffect(()=>{let alive=true;void fetch("/api/automation/research",{cache:"no-store"})
-   .then(async r=>{if(!r.ok)throw Error("research archive not yet published");return r.json();})
-   .then(json=>{if(alive&&json?.ok&&Array.isArray(json?.data?.records))setEvidence(json.data as ResearchEvidence);})
-   .catch(()=>{});return ()=>{alive=false;};},[]);
+ useEffect(()=>{
+  let alive=true;
+  void loadPublicProjection<CollectedLedger>("collection")
+   .then(v=>{if(alive){setCollection(v.data);setCollectionError("");}})
+   .catch(e=>{if(alive)setCollectionError(e instanceof Error?e.message:"수집 데이터 조회 실패");});
+  return ()=>{alive=false;};
+ },[]);
+ useEffect(()=>{
+  let alive=true;
+  void loadPublicProjection<ResearchEvidence>("research")
+   .then(v=>{if(alive)setEvidence(v.data);})
+   .catch(()=>{});
+  return ()=>{alive=false;};
+ },[]);
  const records=data?.records||[];
  const sports=useMemo(()=>Array.from(new Set(records.map(r=>r.sport))),[data]);
  const visible=useMemo(()=>records.filter(r=>(sport==="all"||r.sport===sport)&&
@@ -82,6 +103,7 @@ export default function AutomationDashboard(){
     <aside className="auto-explainer">이 화면은 <strong>GitHub Actions 자동 LIVE TRACKER</strong> 기록입니다. 브라우저에서 수동으로 분석한 기록과는 별도로 저장되며, 사후 검증으로 기존 λ·확률·TOP1을 변경하지 않습니다.</aside>
   </header>
   {error&&<div className="auto-error" role="alert">{error} <button onClick={()=>void reload()}>재시도</button></div>}
+  {edgeNotice&&<div className="auto-error" role="status">{edgeNotice}</div>}
   {data&&<><div className="auto-meta"><span><i/> 마지막 자동실행 {date(data.lastRunAt)} KST</span><span>공개 이력 갱신 {new Date(data.publishedAt).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</span><a target="_blank" rel="noopener noreferrer" href="https://github.com/qor102-sketch/wisetoto-analyzer/actions/workflows/wisetoto-auto-analysis.yml">실행 로그 ↗</a></div>
    <section className="auto-scan-health" aria-label="최근 자동 경기검색 상태">
     {data.scanHealth?(()=>{

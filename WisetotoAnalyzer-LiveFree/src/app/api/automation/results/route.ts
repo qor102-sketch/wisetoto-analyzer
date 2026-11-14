@@ -11,7 +11,7 @@ export async function GET() {
   try {
     // GitHub raw CDN can serve an old branch snapshot after Actions publishes.
     // A per-request query key ensures refresh immediately follows branch updates.
-    const sourceUrl = SOURCE + "?refresh=" + Date.now();
+    const sourceUrl = SOURCE + "?refresh=" + Math.floor(Date.now()/120000);
     const res = await fetch(sourceUrl, {
       cache: "no-store",
       headers: { Accept: "application/json" },
@@ -34,7 +34,7 @@ export async function GET() {
     }
     let scanHealth: Record<string, unknown> | null = null;
     try {
-      const healthUrl = "https://raw.githubusercontent.com/qor102-sketch/wisetoto-analyzer/automation-data/automation-health.json?refresh=" + Date.now();
+      const healthUrl = "https://raw.githubusercontent.com/qor102-sketch/wisetoto-analyzer/automation-data/automation-health.json?refresh=" + Math.floor(Date.now()/120000);
       const healthRes = await fetch(healthUrl, {
         cache:"no-store",headers:{Accept:"application/json"},signal:AbortSignal.timeout(8000)
       });
@@ -48,7 +48,7 @@ export async function GET() {
       // Legacy dashboards remain readable if the health file is not published yet.
     }
     return NextResponse.json({ ok: true, data: { ...(data as Record<string,unknown>), scanHealth } }, {
-      headers: { "Cache-Control": "no-store, max-age=0" }
+      headers: { "Cache-Control": "public, max-age=45, s-maxage=90, stale-while-revalidate=90" }
     });
   } catch {
     return NextResponse.json(
