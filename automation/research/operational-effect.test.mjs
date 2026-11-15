@@ -209,3 +209,22 @@ test("late 5+5 source response during focused recheck cannot inflate recovered c
  assert.equal(out.state.records[0].lineup.status,"UNAVAILABLE");
  assert.equal(out.state.records[0].lineup.capturedAt,undefined);
 });
+
+
+test("public scan effect reports source circuit savings without exposing frozen picks",()=>{
+ const before={schema:"wisetoto-collect-first-v1",records:[]};
+ const measured=recordOperationalEffect({...before,lastFeedOk:true},{
+  ...context(before),
+  lineupSummary:{attempted:1,confirmed:0,naverFailures:1,
+   naverSkipped:8,naverPersistentSkipped:7,naverRecoveryProbes:1,
+   reasonCounts:{LINEUP_HTTP_502:1}}
+ });
+ const effect=publicOperationalEffect(measured);
+ assert.equal(effect.latest.lineup.naverFailures,1);
+ assert.equal(effect.latest.lineup.naverSkipped,8);
+ assert.equal(effect.latest.lineup.naverPersistentSkipped,7);
+ assert.equal(effect.latest.lineup.naverRecoveryProbes,1);
+ assert.equal(effect.latest.lineup.confirmed,0);
+ assert.equal(effect.latest.totals.verified,0);
+ assert.equal(JSON.stringify(effect).includes("homeStarter"),false);
+});
