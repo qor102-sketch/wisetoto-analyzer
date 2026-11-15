@@ -1,3 +1,10 @@
+import { boundedLineupFetch as fetch, withLineupBudget } from "./request-budget.mjs";
+
+// Runtime cap is deliberately below Vercel Hobby's 300s Fluid default.
+// The cooperative 40s request deadline leaves a 10s platform margin.
+export const runtime = "nodejs";
+export const maxDuration = 50;
+
 // DEPLOY_MARKER_V13_12_27_EUROPE_FORM_LEAGUE_VALIDATION_20261013
 // OOS source correction only: reject non-league historical scores for EPL/Serie A/Ligue 1; never rewrite frozen PRE.
 // DEPLOY_MARKER_V13_12_26_J2_SHONAN_NIIGATA_OFFICIAL_20261011
@@ -4326,7 +4333,7 @@ function normalizeKboStarter(value: any, fallbackName: any) {
   };
 }
 
-export async function GET(request: Request) {
+async function handleLineupRequest(request: Request) {
   try {
     const url = new URL(request.url);
     const home = url.searchParams.get("home") ?? "";
@@ -5021,4 +5028,11 @@ export async function GET(request: Request) {
   } catch (error: any) {
     return Response.json({ ok: false, error: error?.message || "네이버 당일 라인업 수집 중 오류" }, { status: 500 });
   }
+}
+
+
+// Keep existing fixture, source identity and evidence processing intact.
+// All fetches above use the request-scoped upstream abort signals.
+export async function GET(request: Request) {
+  return withLineupBudget(() => handleLineupRequest(request), { signal: request.signal });
 }
