@@ -80,8 +80,10 @@ export function recordNaverLineupAttempt(state, group, reason, at) {
     const before = entries[group];
     const consecutive = before && at - before.lastFailureAt <= NAVER_LINEUP_FAILURE_WINDOW_MS
       ? before.failures : 0;
-    const failures = Math.min(3, consecutive + 1);
     const previouslyOpen = Boolean(before && before.retryAt > 0 && before.failures >= 2);
+    // A failed half-open probe reopens the circuit even if the original
+    // failure was over the 30-minute consecutive-failure window ago.
+    const failures = Math.min(3, Math.max(previouslyOpen ? 2 : 1, consecutive + 1));
     entries[group] = {
       failures,
       retryAt: failures >= 2 || previouslyOpen ? at + NAVER_LINEUP_RECOVERY_MS : 0,
