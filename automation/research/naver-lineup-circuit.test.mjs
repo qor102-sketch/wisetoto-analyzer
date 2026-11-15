@@ -156,3 +156,27 @@ test("corrupt/future/expired persistent state cannot lock out lineups forever",(
   assert.deepEqual(restoreNaverLineupCircuit(valid,T+25*60*M).groups,{});
   assert.equal(naverLineupProbeGate(restored,"football:kfootball",T,T+10*M,new Set()).allow,true);
 });
+
+
+test("ESPN football lookup continues while that Naver provider category is cooling down",async()=>{
+  let circuit=restoreNaverLineupCircuit(null,T);
+  circuit=recordNaverLineupAttempt(circuit,"football:wfootball","LINEUP_HTTP_502",T);
+  circuit=recordNaverLineupAttempt(circuit,"football:wfootball","LINEUP_NETWORK:timeout",T+M);
+  const row=mkRow("epl",{league:"잉글랜드 프리미어리그",startMs:T+45*M});
+  const urls=[];
+  const result=await collectLineupSnapshots({records:[row],naverLineupCircuit:circuit},{
+    now:()=>T+10*M,
+    fetcher:async url=>{
+      urls.push(url);
+      return {ok:false,status:503,json:async()=>({ok:false})};
+    },
+  });
+  assert.ok(urls.some(u=>u.includes("/api/espn/scoreboard?")),
+    "the independent ESPN path must still be attempted");
+  assert.ok(urls.every(u=>!u.includes("/api/naver/lineup?")),
+    "an open Naver circuit must suppress only Naver, never ESPN");
+  assert.equal(result.summary.naverPersistentSkipped,1);
+  assert.match(result.state.records[0].lineup.lastError,/ESPN_/);
+  assert.equal(result.state.records[0].verdict,"PENDING");
+  assert.equal(result.state.records[0].startMs,T+45*M);
+});
