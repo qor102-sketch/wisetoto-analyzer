@@ -104,6 +104,10 @@ export function recordOperationalEffect(state,{
    nba5v5Confirmed:n(lineupSummary.nbaConfirmed),
    nbaFocusedRechecks:n(lineupSummary.nbaFocusedRechecks),
    nbaFocusedRecovered:n(lineupSummary.nbaFocusedRecovered),
+   naverFailures:n(lineupSummary.naverFailures),
+   naverSkipped:n(lineupSummary.naverSkipped),
+   naverPersistentSkipped:n(lineupSummary.naverPersistentSkipped),
+   naverRecoveryProbes:n(lineupSummary.naverRecoveryProbes),
    reasons:smallCounts(lineupSummary.reasonCounts)
   },
   final:{

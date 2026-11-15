@@ -1,4 +1,8 @@
 import {espnLineupLeague,lookupEspnPregameXi} from "./espn-pregame-lineup.mjs";
+import {
+ naverLineupCircuitGroup,restoreNaverLineupCircuit,naverLineupProbeGate,
+ recordNaverLineupAttempt,isNaverLineupTransientFailure
+} from "./naver-lineup-circuit.mjs";
 // Read-only independent pre-kickoff Naver lineup audit for the collect-first
 // ledger. Never use post-kickoff lineups as PRE, invent names or alter frozen PRE.
 // The Naver route already resolves exact fixtures; recheck time and identity.
@@ -160,8 +164,13 @@ async function lookupNaverPregame(r,{base,fetcher,now,timeoutMs=11000}){
   const res=await fetcher(base.replace(/\/+$/,"")+"/api/naver/lineup?"+params,{
    cache:"no-store",signal:AbortSignal.timeout(timeoutMs)});
   const data=typeof res.json==="function"?await res.json().catch(()=>null):null;
-  return res.ok?lineupEvidence(r,data,now()):
-   {status:"UNAVAILABLE",reason:"LINEUP_HTTP_"+res.status};
+  if(res.ok)return lineupEvidence(r,data,now());
+  // Do not mislabel all-failed network attempts as an exact fixture mismatch.
+  const attempts=data?.debug?.resolver?.attempts;
+  const allNetworkFailures=Array.isArray(attempts)&&attempts.length>0&&
+   attempts.every(x=>x?.status==null||x.status===0);
+  return {status:"UNAVAILABLE",reason:allNetworkFailures?
+   "LINEUP_UPSTREAM_UNAVAILABLE":"LINEUP_HTTP_"+res.status};
  }catch(e){return {status:"UNAVAILABLE",reason:"LINEUP_NETWORK:"+String(e).slice(0,90)};}
 }
 export async function collectLineupSnapshots(state,{
@@ -171,6 +180,9 @@ export async function collectLineupSnapshots(state,{
  let next=state,attempted=0,confirmed=0,partial=0,unavailable=0,unsupported=0;
  const espnCache=new Map(),reasons={};
  let naverFailures=0,naverSkipped=0,naverFallbacks=0;
+ let naverPersistentSkipped=0,naverRecoveryProbes=0;
+ let naverCircuit=restoreNaverLineupCircuit(state.naverLineupCircuit,now());
+ const recoveryProbed=new Set();
  let nbaFocusedRechecks=0,nbaFocusedRecovered=0;
  let nbaAttempted=0,nbaConfirmed=0;
  const selected=pregameLineupCandidates(state,now(),limit);
@@ -197,17 +209,26 @@ export async function collectLineupSnapshots(state,{
   }
   if((!viaEspn||(observation.status==="UNAVAILABLE"&&r.sport==="축구"&&
        r.startMs-now()<=75*60000))&&r.sport!=="배구"&&r.sport!=="농구"){
-   if(naverFailures>=2){
-    // Skip, don't store a false attempt or overwrite genuine PRE evidence.
+   const group=naverLineupCircuitGroup(r);
+   const gate=naverLineupProbeGate(naverCircuit,group,now(),r.startMs,recoveryProbed);
+   if(naverFailures>=2||!gate.allow){
+    // Do not record a fake provider attempt or overwrite genuine PRE evidence.
     naverSkipped++;
+    if(!gate.allow)naverPersistentSkipped++;
     if(!viaEspn)continue;
    }else{
+    if(gate.probe){
+     recoveryProbed.add(group);
+     naverRecoveryProbes++;
+    }
     if(viaEspn)naverFallbacks++;
     const independent=await lookupNaverPregame(r,{base,fetcher,now});
+    naverCircuit=recordNaverLineupAttempt(naverCircuit,group,independent.reason,now());
+    if(!isNaverLineupTransientFailure(independent.reason))recoveryProbed.delete(group);
     if(!viaEspn||independent.status==="CONFIRMED"||independent.status==="PARTIAL")
      observation=independent;
-    if(/LINEUP_NETWORK|LINEUP_HTTP_50[24]/.test(independent.reason??""))
-      naverFailures++;
+    if(isNaverLineupTransientFailure(independent.reason))
+     naverFailures++;
    }
   }
   if(!observation)
@@ -233,7 +254,10 @@ export async function collectLineupSnapshots(state,{
   else if(observation.status==="UNSUPPORTED")unsupported++;
   else unavailable++;
  }
- return {state:next,summary:{attempted,confirmed,partial,unavailable,unsupported,
+ return {state:{...next,naverLineupCircuit:naverCircuit},
+  summary:{attempted,confirmed,partial,unavailable,unsupported,
   sharedEspnScoreboards:espnCache.size,naverFailures,naverSkipped,naverFallbacks,
+  naverPersistentSkipped,naverRecoveryProbes,
+  naverCircuitGroups:naverCircuit.groups,
   nbaFocusedRechecks,nbaFocusedRecovered,nbaPrioritySelected,nbaAttempted,nbaConfirmed,reasonCounts:reasons}};
 }
