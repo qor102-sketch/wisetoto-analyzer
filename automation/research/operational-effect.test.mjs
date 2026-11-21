@@ -228,3 +228,24 @@ test("public scan effect reports source circuit savings without exposing frozen 
  assert.equal(effect.latest.totals.verified,0);
  assert.equal(JSON.stringify(effect).includes("homeStarter"),false);
 });
+
+
+test("public scan report proves official/API fallback and Naver-off without secrets",()=>{
+ const state={schema:"wisetoto-collect-first-v1",records:[],lastFeedOk:true};
+ const ctx=context(state);
+ ctx.lineupSummary={attempted:3,confirmed:2,naverDisabled:true,
+  officialJleagueAttempted:2,officialJleagueConfirmed:1,
+  apiFootballAttempted:1,apiFootballConfirmed:1};
+ ctx.finalSummary={checked:3,confirmed:1,naverDisabled:true,
+  apiFootball:{requests:3,failures:1,quotaBlocked:4,enabled:true,remaining:57}};
+ const effect=publicOperationalEffect(recordOperationalEffect(state,ctx));
+ assert.equal(effect.latest.lineup.naverDisabled,true);
+ assert.equal(effect.latest.lineup.officialJleagueAttempted,2);
+ assert.equal(effect.latest.lineup.officialJleagueConfirmed,1);
+ assert.equal(effect.latest.lineup.apiFootballConfirmed,1);
+ assert.equal(effect.latest.final.apiFootballRequests,3);
+ assert.equal(effect.latest.final.apiFootballFailures,1);
+ assert.equal(effect.latest.final.apiFootballQuotaBlocked,4);
+ assert.equal(effect.latest.final.naverDisabled,true);
+ assert.equal(JSON.stringify(effect).includes("API_FOOTBALL_KEY"),false);
+});
