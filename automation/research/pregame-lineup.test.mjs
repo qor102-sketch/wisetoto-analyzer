@@ -178,3 +178,78 @@ test("legacy NBA unsupported flag is retired by genuine fresh ESPN failure, neve
  assert.equal(after.summary.attempted,0);
  assert.equal(after.state.records[0].lineup.status,"UNSUPPORTED");
 });
+
+
+test("Naver-free scheduled scan never invokes /api/naver/lineup and invents no PRE",async()=>{
+ const fixture={...row("축구",T+25*M,"no-naver"),league:"unknown league"};
+ let calls=0;
+ const result=await collectLineupSnapshots({records:[fixture]},{
+  now:()=>T,naverEnabled:false,
+  fetcher:async()=>{calls++;throw Error("Naver MUST stay disabled")}
+ });
+ assert.equal(calls,0);
+ assert.equal(result.summary.naverDisabled,true);
+ assert.equal(result.summary.naverFailures,0);
+ assert.equal(result.summary.naverSkipped,0);
+ assert.equal(result.summary.attempted,0);
+ assert.equal(result.state.records[0].lineup,undefined);
+ assert.equal(result.state.records[0].pregameCapturedAt,T);
+});
+test("independent ESPN source is still queried with Naver disabled",async()=>{
+ const kickoff=T+25*M;
+ const fixture={...row("축구",kickoff,"epl"),league:"잉글랜드 프리미어리그"};
+ const hits=[];
+ const out=await collectLineupSnapshots({records:[fixture]},{
+  now:()=>T,naverEnabled:false,base:"https://example.org",
+  fetcher:async(url)=>{
+   hits.push(url);
+   return {ok:false,status:503,json:async()=>({ok:false})};
+  }
+ });
+ assert.ok(hits.some(x=>x.includes("/api/espn/scoreboard?")));
+ assert.ok(hits.every(x=>!x.includes("/api/naver/")));
+ assert.equal(out.summary.naverDisabled,true);
+ assert.equal(out.state.records[0].lineup.status,"UNAVAILABLE");
+ assert.equal(out.state.records[0].pregameCapturedAt,T);
+});
+
+
+test("enabled optional API never queries an unsupported league or writes fake PRE",async()=>{
+ const {createApiFootballSession}=await import("./api-football-free.mjs");
+ let apiCalls=0,proxyCalls=0;
+ const api=createApiFootballSession({
+  apiKey:"synthetic-test-key-unused",
+  now:()=>T,fetchFn:async()=>{apiCalls++;throw Error("unexpected API request")}
+ });
+ const fixture={...row("축구",T+25*M,"unsupported"),league:"국제친선경기"};
+ const result=await collectLineupSnapshots({records:[fixture]},{
+  now:()=>T,naverEnabled:false,apiFootballSession:api,
+  fetcher:async()=>{proxyCalls++;throw Error("unexpected Naver proxy")}
+ });
+ assert.equal(apiCalls,0);assert.equal(proxyCalls,0);
+ assert.equal(result.summary.apiFootballAttempted,0);
+ assert.equal(result.summary.attempted,0);
+ assert.equal(result.state.records[0].lineup,undefined);
+});
+
+
+test("newly supported J1/J2 and API-Football leagues reopen legacy UNSUPPORTED only before kickoff",()=>{
+ const legacy=(id,league,start=T+25*M)=>({
+  ...row("축구",start,id),league,
+  lineup:{status:"UNSUPPORTED",reason:"NO_VERIFIED_PREGAME_LINEUP_PROVIDER",
+   lastAttemptAt:T-20*M,attempts:2}
+ });
+ const j1=legacy("j1-retry","일본 J1리그");
+ const j2=legacy("j2-retry","일본 J2리그");
+ const epl=legacy("epl-retry","잉글랜드 프리미어리그");
+ const unknown=legacy("unknown-unsupported","국제친선경기");
+ const after=legacy("already-started","일본 J1리그",T-M);
+ const confirmed={...legacy("confirmed","일본 J1리그"),
+  lineup:{status:"CONFIRMED",capturedAt:T-21*M}};
+ const selected=pregameLineupCandidates({
+  records:[j1,j2,epl,unknown,after,confirmed]},T,12).map(x=>x.key);
+ assert.deepEqual(new Set(selected),new Set(["j1-retry","j2-retry","epl-retry"]));
+ const cooling={...j2,lineup:{...j2.lineup,lastAttemptAt:T-M}};
+ assert.equal(pregameLineupCandidates({records:[cooling]},T).length,0,
+  "New provider does not bypass the prior retry cooldown");
+});

@@ -31,11 +31,11 @@ jobs:
         with:
           node-version: "24"
       - name: Run immutable-record unit tests
-        run: node --test automation/*.test.mjs automation/repair/*.test.mjs automation/research/*.test.mjs
-      - name: Probe real lightweight Naver schedule without secrets or mutations
-        run: node automation/research/probe-naver-fast-final.mjs
+        run: node --test --test-concurrency=1 automation/*.test.mjs automation/repair/*.test.mjs automation/research/*.test.mjs
       - name: Probe official J.League J2 format (read-only, no result mutations)
         run: node automation/research/probe-jleague-j2.mjs
+      - name: Probe official J1/J2 pregame lineup page format (read-only, no PRE mutations)
+        run: node automation/research/probe-jleague-official-lineup.mjs
       - name: Probe ESPN AFC Champions League Two scoreboards (read-only)
         run: node automation/research/probe-espn-afc-cup.mjs
       - name: Probe official K League JSON structure (read-only)
@@ -235,6 +235,10 @@ jobs:
         if: always() && steps.ledger_restore.outcome == 'success' && steps.nba_optout.outcome == 'success'
         env:
           WISETOTO_URL: https://wisetoto-analyzer.vercel.app
+          # Optional free API token; never echo it or expose it to Vercel.
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          # Zero Naver fixture/lineup calls from the automated collector.
+          NAVER_PROVIDER_MODE: disabled
         run: node automation/research/run-collect-first.mjs
       - name: Archive old fixtures before trimming active ledger
         id: collection_archive

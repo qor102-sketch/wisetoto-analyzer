@@ -140,7 +140,8 @@ test("real Node collector preserves a past fixture and settles Naver after Sport
   const port=srv.address().port;
   const result=await new Promise((resolve,reject)=>{
    const child=spawn(process.execPath,[new URL("./run-collect-first.mjs",import.meta.url).pathname],{
-     cwd:root,env:{...process.env,NODE_ENV:"test",WISETOTO_URL:"http://127.0.0.1:"+port}});
+     cwd:root,env:{...process.env,NODE_ENV:"test",WISETOTO_URL:"http://127.0.0.1:"+port,
+      NAVER_PROVIDER_MODE:"enabled"}});
    let stdout="",stderr="";
    child.stdout.on("data",d=>stdout+=d);child.stderr.on("data",d=>stderr+=d);
    child.on("error",reject);
@@ -163,6 +164,56 @@ test("real Node collector preserves a past fixture and settles Naver after Sport
   assert.equal(state.records[0].pregameCapturedAt,null);
   assert.equal(publicData.counts.verifiedWithPregame,0);
   assert.equal(publicData.source.ok,true);
+ }finally{await new Promise(resolve=>srv.close(()=>resolve()));await rm(root,{recursive:true,force:true});}
+});
+
+test("real scheduled collector with Naver disabled never calls Naver or verifies an unknown result",async()=>{
+ const {mkdtemp,mkdir,writeFile,readFile,rm}=await import("node:fs/promises");
+ const {tmpdir}=await import("node:os");
+ const {join}=await import("node:path");
+ const {spawn}=await import("node:child_process");
+ const {createServer}=await import("node:http");
+ const root=await mkdtemp(join(tmpdir(),"wisetoto-no-naver-"));
+ const now=Date.now();
+ const game={sport:"soccer",league:"TEST",home:"Home FC",away:"Away FC",
+   gameDateMs:now-3*3600000,fixtureId:1357,markets:[]};
+ const calls=[];
+ const srv=createServer((req,res)=>{
+  calls.push(req.url);
+  res.setHeader("Content-Type","application/json");
+  res.statusCode=req.url.startsWith("/api/fixture/result")?429:200;
+  res.end(req.url.startsWith("/api/naver/")?
+   JSON.stringify({ok:true,gameId:"FAKE",finalConfirmed:true,final:{homeScore:2,awayScore:1}}):
+   JSON.stringify({ok:false,error:"unavailable"}));
+ });
+ try{
+  await mkdir(join(root,"automation-state"));
+  await writeFile(join(root,"automation-state/betman-feed.json"),
+   JSON.stringify({fetchedAt:now,payload:{ok:true,games:[game]}}));
+  await new Promise(resolve=>srv.listen(0,"127.0.0.1",resolve));
+  const port=srv.address().port;
+  const result=await new Promise((resolve,reject)=>{
+   const child=spawn(process.execPath,[new URL("./run-collect-first.mjs",import.meta.url).pathname],{
+    cwd:root,env:{...process.env,NODE_ENV:"test",
+     WISETOTO_URL:"http://127.0.0.1:"+port,
+     NAVER_PROVIDER_MODE:"disabled",API_FOOTBALL_KEY:""}});
+   let stdout="",stderr="";
+   child.stdout.on("data",d=>stdout+=d);child.stderr.on("data",d=>stderr+=d);
+   child.on("error",reject);child.on("close",code=>resolve({code,stdout,stderr}));
+  });
+  assert.equal(result.code,0,result.stderr);
+  assert.equal(calls.filter(x=>x.startsWith("/api/fixture/result")).length,1);
+  assert.ok(calls.every(x=>!x.startsWith("/api/naver/")));
+  const state=JSON.parse(await readFile(join(root,"automation-state/collect-first-state.json"),"utf8"));
+  const publicData=JSON.parse(await readFile(join(root,"automation-state/collect-first-public.json"),"utf8"));
+  assert.equal(state.records[0].verdict,"PENDING","fake endpoint must not certify FINAL");
+  assert.equal(state.records[0].final,null);
+  assert.equal(state.records[0].pregameCapturedAt,null);
+  assert.equal(state.apiFootballQuota.requests,0);
+  assert.equal(publicData.operationalEffect.latest.final.naverDisabled,true);
+  assert.equal(publicData.operationalEffect.latest.lineup.naverDisabled,true);
+  assert.equal(publicData.counts.verified,0);
+  assert.match(result.stdout,/"naverDisabled":true/);
  }finally{await new Promise(resolve=>srv.close(()=>resolve()));await rm(root,{recursive:true,force:true});}
 });
 

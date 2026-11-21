@@ -16,6 +16,7 @@ import {isOfficialKblFixture,lookupOfficialKblFinal} from "./kbl-official-final.
 import {isOfficialKovoFixture,lookupOfficialKovoFinal} from "./kovo-official-final.mjs";
 import {hasAuditedOfficialEaslFixture,lookupOfficialEaslFinal} from "./easl-official-final.mjs";
 import {collectLineupSnapshots} from "./pregame-lineup.mjs";
+import {createApiFootballSession,apiFootballCompetition} from "./api-football-free.mjs";
 import {selectFinalAuditRows} from "./final-scan-plan.mjs";
 import {effectTotals,recordOperationalEffect} from "./operational-effect.mjs";
 import {purgeNbaCollectionState} from "../nba-policy.mjs";
@@ -55,7 +56,14 @@ console.log("COLLECT_FIRST_TRACKER_VERIFIED "+verified.settled);
 const base=(process.env.WISETOTO_URL||"https://wisetoto-analyzer.vercel.app").replace(/\/+$/,"");
 // PRE is time-critical: attempt genuine pre-kickoff XI BEFORE slow, overdue
 // postmatch providers. A Naver 502/timeout must not waste the XI window.
-const lineupScan=await collectLineupSnapshots(state,{base,limit:12});
+// Naver is NOT consulted by automated PRE/final collection. Restoring the
+// old provider requires an explicit opt-in; no cross-provider data is invented.
+const naverEnabled=process.env.NAVER_PROVIDER_MODE==="enabled";
+const apiFootball=createApiFootballSession({
+ apiKey:process.env.API_FOOTBALL_KEY??"",rawQuota:state.apiFootballQuota
+});
+const lineupScan=await collectLineupSnapshots(state,{
+ base,limit:12,naverEnabled,apiFootballSession:apiFootball});
 state=lineupScan.state;
 console.log("PREGAME_LINEUP_AUDIT "+JSON.stringify(lineupScan.summary));
 let sportsApiLimited=false,naverFailedRows=0,naverOutageSkipped=0,finalDeferred=0;
@@ -189,7 +197,18 @@ for(const r of finalQueue){
    if(official.ok)confirmed=official;
    else reasons.push("WKBL_DUAL_SOURCE:"+String(official.waitReason).slice(0,145));
  }
- if(!confirmed&&supportedNaver.has(r.sport)){
+ // Only exact source-confirmed FT is accepted, never a scoreboard preview.
+ // The key is optional and quota state persists in the same restored ledger.
+ if(!confirmed&&apiFootball.enabled&&apiFootballCompetition(r)){
+   const independent=await apiFootball.lookupFinal(r);
+   if(independent.ok){confirmed=independent;providerAttempted=true;}
+   else if(!/API_FOOTBALL_(?:RETRY_COOLDOWN|LOCAL_QUOTA_BLOCK)/.test(
+     String(independent.waitReason))){
+    providerAttempted=true;
+    reasons.push("API_FOOTBALL:"+String(independent.waitReason).slice(0,110));
+   }
+ }
+ if(!confirmed&&naverEnabled&&supportedNaver.has(r.sport)){
    // A failed Naver football category must not silence NBA/KBL/baseball,
    // nor a different match day. Failed URLs are already cached per scan.
    const group=naverOutageGroup(r);
@@ -222,7 +241,7 @@ for(const r of finalQueue){
    if(official.ok)confirmed=official;
    else reasons.push("KOVO_OFFICIAL:"+String(official.waitReason).slice(0,145));
  }
- if(!confirmed&&r.sport==="배구"){
+ if(!confirmed&&naverEnabled&&r.sport==="배구"){
    providerAttempted=true;
    // Independent schedule-exact volleyball lookup also works without SportsAPI IDs.
    const final=await lookupVolleyballFinal(r);
@@ -271,7 +290,8 @@ console.log("FAST_FINAL_AUDIT "+JSON.stringify({
  sharedOfficialJleagueCupQueries:officialJleagueCupCache.size,
  sharedOfficialWkblAndPressQueries:wkblDualCache.size,
  naverUpstreamFailures,naverFailedRows,naverOutageSkipped,
- naverCircuitGroups:Object.fromEntries(naverFailureGroups),waitReasons:finalWaitReasons,
+ naverCircuitGroups:Object.fromEntries(naverFailureGroups),naverDisabled:!naverEnabled,
+ apiFootball:apiFootball.summary(),waitReasons:finalWaitReasons,
  espnFailureReasons
 }));
 // A measured transition compares the restored ledger before this scan with
@@ -288,12 +308,14 @@ state=recordOperationalEffect(state,{
    finalQueue.filter(r=>r.sport===s).length])),
   confirmedBySource,waitReasons:finalWaitReasons,espnFailureReasons,
   naverUpstreamFailures,naverFailedRows,
-  naverOutageSkipped,finalDeferred}
+  naverOutageSkipped,finalDeferred,naverDisabled:!naverEnabled,
+  apiFootball:apiFootball.summary()}
 });
 console.log("OPERATIONAL_EFFECT "+JSON.stringify({
  baseline:state.operationalEffect.baseline,latest:state.operationalEffect.latest,
  delta:state.operationalEffect.delta,regressions:state.operationalEffect.regressions
 }));
+state={...state,apiFootballQuota:apiFootball.quota()};
 await fs.writeFile(file,JSON.stringify(state)+"\n");
 await fs.writeFile(dir+"/collect-first-public.json",JSON.stringify(projection(state,Date.now()))+"\n");
 console.log("COLLECT_FIRST_STORED "+JSON.stringify({fresh,counts:projection(state).counts}));

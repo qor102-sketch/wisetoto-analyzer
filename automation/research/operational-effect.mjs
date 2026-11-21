@@ -108,6 +108,11 @@ export function recordOperationalEffect(state,{
    naverSkipped:n(lineupSummary.naverSkipped),
    naverPersistentSkipped:n(lineupSummary.naverPersistentSkipped),
    naverRecoveryProbes:n(lineupSummary.naverRecoveryProbes),
+   naverDisabled:lineupSummary.naverDisabled===true,
+   officialJleagueAttempted:n(lineupSummary.officialJleagueAttempted),
+   officialJleagueConfirmed:n(lineupSummary.officialJleagueConfirmed),
+   apiFootballAttempted:n(lineupSummary.apiFootballAttempted),
+   apiFootballConfirmed:n(lineupSummary.apiFootballConfirmed),
    reasons:smallCounts(lineupSummary.reasonCounts)
   },
   final:{
@@ -121,7 +126,11 @@ export function recordOperationalEffect(state,{
    naverUpstreamFailures:n(finalSummary.naverUpstreamFailures),
    naverFailedRows:n(finalSummary.naverFailedRows),
    deferred:n(finalSummary.finalDeferred),
-   naverCircuitSkipped:n(finalSummary.naverOutageSkipped)
+   naverCircuitSkipped:n(finalSummary.naverOutageSkipped),
+   naverDisabled:finalSummary.naverDisabled===true,
+   apiFootballRequests:n(finalSummary.apiFootball?.requests),
+   apiFootballFailures:n(finalSummary.apiFootball?.failures),
+   apiFootballQuotaBlocked:n(finalSummary.apiFootball?.quotaBlocked)
   },
   changes:effectDelta(totals,beforeTotals),
   totals
