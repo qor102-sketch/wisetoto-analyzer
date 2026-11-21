@@ -140,7 +140,8 @@ test("real Node collector preserves a past fixture and settles Naver after Sport
   const port=srv.address().port;
   const result=await new Promise((resolve,reject)=>{
    const child=spawn(process.execPath,[new URL("./run-collect-first.mjs",import.meta.url).pathname],{
-     cwd:root,env:{...process.env,NODE_ENV:"test",WISETOTO_URL:"http://127.0.0.1:"+port}});
+     cwd:root,env:{...process.env,NODE_ENV:"test",WISETOTO_URL:"http://127.0.0.1:"+port,
+      NAVER_PROVIDER_MODE:"enabled"}});
    let stdout="",stderr="";
    child.stdout.on("data",d=>stdout+=d);child.stderr.on("data",d=>stderr+=d);
    child.on("error",reject);
