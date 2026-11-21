@@ -294,6 +294,10 @@ console.log("FAST_FINAL_AUDIT "+JSON.stringify({
  apiFootball:apiFootball.summary(),waitReasons:finalWaitReasons,
  espnFailureReasons
 }));
+// Bounded, key-free examples of why the provider's own fixture rows did
+// not pass the Betman match identity and FT/lineup gates. Never log raw JSON,
+// API keys, URLs, request headers or even one unbounded provider response.
+console.log("API_FOOTBALL_MATCH_DIAGNOSTICS "+JSON.stringify(apiFootball.diagnostics()));
 // A measured transition compares the restored ledger before this scan with
 // the saved AFTER state, using only independently accepted observations.
 state=recordOperationalEffect(state,{
