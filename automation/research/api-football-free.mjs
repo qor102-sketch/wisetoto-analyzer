@@ -4,6 +4,7 @@
 import {espnLeague,espnTeamEq} from "./espn-fast-final.mjs";
 import {jleagueLineupDivision} from "./jleague-official-lineup.mjs";
 import {scorePlausibility} from "../../WisetotoAnalyzer-LiveFree/src/lib/postmatch-guards.mjs";
+import {diagnoseApiFootballFixture,safeApiFootballDetail,API_FOOTBALL_DIAGNOSTIC_LIMIT} from "./api-football-diagnostics.mjs";
 const API="https://v3.football.api-sports.io";
 const M=60_000,DAY=86400000,MAX_DAILY=60;
 const norm=x=>String(x??"").normalize("NFKC").toLowerCase().replace(/[^a-z0-9가-힣]/g,"");
@@ -48,38 +49,30 @@ const matchLeague=(f,key)=>{
  return true;
 };
 export function exactApiFootballFixture(payload,row){
- const league=apiFootballCompetition(row);
- if(!league||!Array.isArray(payload?.response)||
-    payload.response.length>1500)return {ok:false,reason:"API_FOOTBALL_FIXTURE_RESPONSE_INVALID"};
- const matches=new Map();
- for(const f of payload.response){
-  if(!matchLeague(f,league))continue;
-  const id=String(f?.fixture?.id??"");
-  if(!/^[1-9]\d+$/.test(id))continue;
-  const start=Date.parse(String(f?.fixture?.date??""));
-  if(!Number.isFinite(start)||Math.abs(start-row.startMs)>45*M)continue;
-  if(!same(row.home,f.teams?.home?.name)||!same(row.away,f.teams?.away?.name))continue;
-  if(!Number.isSafeInteger(f?.teams?.home?.id)||!Number.isSafeInteger(f?.teams?.away?.id)||
-     f.teams.home.id===f.teams.away.id)continue;
-  if(matches.has(id))return {ok:false,reason:"API_FOOTBALL_DUPLICATE_FIXTURE"};
-  matches.set(id,f);
- }
- if(matches.size!==1)return {ok:false,reason:matches.size?
-  "API_FOOTBALL_AMBIGUOUS_FIXTURE":"API_FOOTBALL_EXACT_FIXTURE_UNAVAILABLE"};
- return {ok:true,gameId:matches.keys().next().value,game:matches.values().next().value};
+ return diagnoseApiFootballFixture(payload,row,{
+  competitionKey:apiFootballCompetition(row),knownLeagues,teamEq:same
+ });
 }
 export function parseApiFootballFinal(payload,row){
  const x=exactApiFootballFixture(payload,row);
- if(!x.ok)return {ok:false,waitReason:x.reason};
+ if(!x.ok)return {ok:false,waitReason:x.reason,diagnostic:x.diagnostic};
  const f=x.game;
  // AET and PEN are not 90-minute soccer markets; only explicit FT counts.
  if(String(f.fixture?.status?.short)!=="FT")
-  return {ok:false,waitReason:"API_FOOTBALL_NOT_REGULATION_FINAL"};
+  return {ok:false,waitReason:"API_FOOTBALL_NOT_REGULATION_FINAL",
+   diagnostic:{stage:"STATUS",candidate:{
+    league:f.league?.name,country:f.league?.country,
+    home:f.teams?.home?.name,away:f.teams?.away?.name,
+    status:f.fixture?.status?.short,id:f.fixture?.id
+   },kickoffDeltaMinutes:Math.round((Date.parse(f.fixture?.date)-row.startMs)/M)}};
  const h=f.score?.fulltime?.home,a=f.score?.fulltime?.away;
  if(!Number.isSafeInteger(h)||!Number.isSafeInteger(a)||
     h!==f.goals?.home||a!==f.goals?.away||
     !scorePlausibility("축구",h,a).ok)
-  return {ok:false,waitReason:"API_FOOTBALL_FINAL_SCORE_UNCONFIRMED"};
+  return {ok:false,waitReason:"API_FOOTBALL_FINAL_SCORE_UNCONFIRMED",
+   diagnostic:{stage:"SCORE",candidate:{league:f.league?.name,
+    country:f.league?.country,home:f.teams?.home?.name,
+    away:f.teams?.away?.name,status:f.fixture?.status?.short,id:f.fixture?.id}}};
  return {ok:true,finalConfirmed:true,source:"API_FOOTBALL",
   sourceEvidence:"API_FOOTBALL_EXACT_FT",gameId:x.gameId,
   result:{homeScore:h,awayScore:a}};
@@ -113,6 +106,16 @@ export function createApiFootballSession({
 }={}){
  let quota=apiFootballQuota(rawQuota,now());
  let calls=0,failures=0,quotaBlocked=0,quotaRequests=0;
+ const diagnosticReasons={},diagnosticSamples=[];
+ function observe(result,row,kind){
+  if(result.ok||result.status==="CONFIRMED")return result;
+  const code=String(result.waitReason??result.reason??"API_FOOTBALL_UNKNOWN");
+  const safe=safeApiFootballDetail(code,kind,result.diagnostic,row);
+  diagnosticReasons[safe.reason]=(diagnosticReasons[safe.reason]??0)+1;
+  if(diagnosticSamples.length<API_FOOTBALL_DIAGNOSTIC_LIMIT)
+   diagnosticSamples.push(safe);
+  return result;
+ }
  const cache=new Map();
  const enabled=Boolean(apiKey&&String(apiKey).trim().length>=12);
  async function ask(kind,id,query,interval){
@@ -158,22 +161,31 @@ export function createApiFootballSession({
  }
  async function lookupFinal(row){
   const exact=await discover(row);
-  if(!exact.ok)return {ok:false,waitReason:exact.reason};
+  if(!exact.ok)return observe({ok:false,waitReason:exact.reason,
+   diagnostic:exact.diagnostic},row,"FINAL");
   // The day response is reused once per scan: independent fixture evidence.
   const date=new Date(row.startMs).toISOString().slice(0,10);
-  return parseApiFootballFinal(cache.get("/fixtures:day-"+date)?.payload,row);
+  return observe(parseApiFootballFinal(cache.get("/fixtures:day-"+date)?.payload,row),row,"FINAL");
  }
  async function lookupPregame(row){
-  if(now()>=row.startMs)return {status:"REJECTED",reason:"AFTER_KICKOFF_NOT_PREGAME"};
+  if(now()>=row.startMs)return observe({status:"REJECTED",
+   reason:"API_FOOTBALL_AFTER_KICKOFF_NOT_PREGAME",
+   diagnostic:{stage:"STATUS"}},row,"PRE");
   const exact=await discover(row);
-  if(!exact.ok)return {status:"UNAVAILABLE",reason:exact.reason};
+  if(!exact.ok)return observe({status:"UNAVAILABLE",reason:exact.reason,
+   diagnostic:exact.diagnostic},row,"PRE");
   const p=await ask("/fixtures/lineups",exact.gameId,{fixture:exact.gameId},15*M);
-  if(!p.ok)return {status:"UNAVAILABLE",reason:p.reason};
-  return parseApiFootballPregameLineup(p.payload,exact,row,now());
+  if(!p.ok)return observe({status:"UNAVAILABLE",reason:p.reason,
+   diagnostic:{stage:"SOURCE"}},row,"PRE");
+  return observe(parseApiFootballPregameLineup(p.payload,exact,row,now()),row,"PRE");
  }
  return {
   enabled,lookupFinal,lookupPregame,
   quota:()=>JSON.parse(JSON.stringify(quota)),
-  summary:()=>({enabled,requests:quotaRequests,failures,quotaBlocked,remaining:MAX_DAILY-quota.requests})
+  summary:()=>({enabled,requests:quotaRequests,failures,quotaBlocked,remaining:MAX_DAILY-quota.requests,
+   diagnosticReasons:{...diagnosticReasons},diagnosed:Object.values(diagnosticReasons).reduce((a,b)=>a+b,0)}),
+  diagnostics:()=>({schema:"wisetoto-api-football-diagnostics-v1",
+   diagnosed:Object.values(diagnosticReasons).reduce((a,b)=>a+b,0),
+   reasonCounts:{...diagnosticReasons},samples:diagnosticSamples.slice()})
  };
 }

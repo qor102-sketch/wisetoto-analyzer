@@ -249,3 +249,35 @@ test("public scan report proves official/API fallback and Naver-off without secr
  assert.equal(effect.latest.final.naverDisabled,true);
  assert.equal(JSON.stringify(effect).includes("API_FOOTBALL_KEY"),false);
 });
+
+
+test("only bounded API-Football failure categories are exposed in public scan; no team names or secrets",()=>{
+ const state={schema:"wisetoto-collect-first-v1",records:[],lastFeedOk:true};
+ const ctx=context(state);
+ ctx.finalSummary={checked:5,confirmed:0,
+  apiFootball:{enabled:true,requests:3,failures:1,quotaBlocked:0,diagnosed:8,
+   diagnosticReasons:{
+    API_FOOTBALL_HOME_TEAM_MISMATCH:3,
+    API_FOOTBALL_LEAGUE_MISMATCH:2,
+    API_FOOTBALL_KICKOFF_MISMATCH:1,
+    API_FOOTBALL_NOT_REGULATION_FINAL:1,
+    API_FOOTBALL_NETWORK:1
+   }},
+  waitReasons:{API_FOOTBALL:8}};
+ const o=publicOperationalEffect(recordOperationalEffect(state,ctx));
+ assert.equal(o.latest.final.apiFootballRequests,3);
+ assert.equal(o.latest.final.apiFootballFailures,1);
+ assert.equal(o.latest.final.apiFootballDiagnosed,8);
+ assert.deepEqual(o.latest.final.apiFootballReasonCounts,{
+  API_FOOTBALL_HOME_TEAM_MISMATCH:3,
+  API_FOOTBALL_LEAGUE_MISMATCH:2,
+  API_FOOTBALL_KICKOFF_MISMATCH:1,
+  API_FOOTBALL_NETWORK:1,
+  API_FOOTBALL_NOT_REGULATION_FINAL:1
+ });
+ const serialized=JSON.stringify(o);
+ assert.ok(!serialized.includes("Liverpool"));
+ assert.ok(!serialized.includes("Arsenal"));
+ assert.ok(!serialized.includes("API_FOOTBALL_KEY"));
+ assert.ok(!serialized.includes("x-apisports-key"));
+});
