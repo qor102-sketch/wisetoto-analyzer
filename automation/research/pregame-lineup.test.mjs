@@ -212,3 +212,22 @@ test("independent ESPN source is still queried with Naver disabled",async()=>{
  assert.equal(out.state.records[0].lineup.status,"UNAVAILABLE");
  assert.equal(out.state.records[0].pregameCapturedAt,T);
 });
+
+
+test("enabled optional API never queries an unsupported league or writes fake PRE",async()=>{
+ const {createApiFootballSession}=await import("./api-football-free.mjs");
+ let apiCalls=0,proxyCalls=0;
+ const api=createApiFootballSession({
+  apiKey:"synthetic-test-key-unused",
+  now:()=>T,fetchFn:async()=>{apiCalls++;throw Error("unexpected API request")}
+ });
+ const fixture={...row("축구",T+25*M,"unsupported"),league:"국제친선경기"};
+ const result=await collectLineupSnapshots({records:[fixture]},{
+  now:()=>T,naverEnabled:false,apiFootballSession:api,
+  fetcher:async()=>{proxyCalls++;throw Error("unexpected Naver proxy")}
+ });
+ assert.equal(apiCalls,0);assert.equal(proxyCalls,0);
+ assert.equal(result.summary.apiFootballAttempted,0);
+ assert.equal(result.summary.attempted,0);
+ assert.equal(result.state.records[0].lineup,undefined);
+});
