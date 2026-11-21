@@ -255,8 +255,12 @@ export async function collectLineupSnapshots(state,{
      naverFailures++;
    }
   }
-  if(!observation)
+  if(!observation){
+   // A disabled provider is not a real attempt. Preserve all existing
+   // observations rather than fabricating a source read on unsupported games.
+   if(!naverEnabled&&["축구","야구"].includes(r.sport))continue;
    observation={status:"UNSUPPORTED",reason:"NO_VERIFIED_PREGAME_LINEUP_PROVIDER"};
+  }
   const at=now();
   next=mergeLineupEvidence(next,r.key,observation,at);
   // "Recovered" means a genuine saved PRE 5+5, not a partial source reply
