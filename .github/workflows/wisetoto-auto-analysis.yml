@@ -32,8 +32,6 @@ jobs:
           node-version: "24"
       - name: Run immutable-record unit tests
         run: node --test automation/*.test.mjs automation/repair/*.test.mjs automation/research/*.test.mjs
-      - name: Probe real lightweight Naver schedule without secrets or mutations
-        run: node automation/research/probe-naver-fast-final.mjs
       - name: Probe official J.League J2 format (read-only, no result mutations)
         run: node automation/research/probe-jleague-j2.mjs
       - name: Probe official J1/J2 pregame lineup page format (read-only, no PRE mutations)
