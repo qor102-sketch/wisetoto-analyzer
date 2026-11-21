@@ -120,3 +120,21 @@ test("cached retries cannot deplete quota on repeated scans",async()=>{
  assert.equal(x.ok,false);assert.equal(x.waitReason,"API_FOOTBALL_RETRY_COOLDOWN");
  assert.equal(next.quota().requests,1);
 });
+
+
+test("verified API-Football result retains actual provider provenance and Betman ID",async()=>{
+ const {mergeProviderFinal}=await import("./collect-first.mjs");
+ const before={schema:"wisetoto-collect-first-v1",records:[{
+  ...row,fixtureId:12345,verdict:"PENDING",
+  pregameCapturedAt:T-20*M,lineup:null,final:null
+ }]};
+ const candidate=parseApiFootballFinal(fixtures(),row);
+ const result=mergeProviderFinal(before,row.key,candidate,T+3*3600000);
+ assert.equal(result.records[0].verdict,"VERIFIED");
+ assert.equal(result.records[0].resultSource,"API_FOOTBALL");
+ assert.equal(result.records[0].finalEvidence,"API_FOOTBALL_EXACT_FT");
+ assert.equal(result.records[0].finalProviderGameId,"71234");
+ assert.equal(result.records[0].fixtureId,12345,"provider ID cannot overwrite Betman ID");
+ assert.equal(result.records[0].pregameCapturedAt,T-20*M);
+ assert.equal(before.records[0].verdict,"PENDING");
+});
