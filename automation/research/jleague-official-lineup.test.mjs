@@ -30,6 +30,12 @@ test("explicit J1/J2 labels only, never domestic/cup/no-Korean league",()=>{
  assert.match(jleagueLineupScheduleUrl(fixture()),/\/en\/j1\/match\/search-list\//);
  assert.match(jleagueLineupScheduleUrl(fixture("일본 J2리그")),/\/en\/j2\/match\/search-list\//);
 });
+test("previously audited J2 Korean/English team aliases remain valid in official PRE resolver",async()=>{
+ const {jleagueOfficialTeamEq}=await import("./jleague-j2-final.mjs");
+ assert.equal(jleagueOfficialTeamEq("반포레고후","Ventforet Kofu"),true);
+ assert.equal(jleagueOfficialTeamEq("주빌로이와타","Jubilo Iwata"),true);
+ assert.equal(jleagueOfficialTeamEq("반포레고후","Jubilo Iwata"),false);
+});
 test("official daily list proves match ID, teams, kickoff and source URL",()=>{
  const x=resolveJleagueOfficialLineup(matchDay(),fixture());
  assert.equal(x.ok,true,JSON.stringify(x));
