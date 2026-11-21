@@ -51,7 +51,8 @@ export function pregameLineupCandidates(state,now=Date.now(),limit=4){
    // Historical NBA UNSUPPORTED was recorded before ESPN match-specific
    // starters were added. It is not a permanent verdict on *future* games.
    // This only re-opens strict pre-tipoff ESPN queries, never old PRE.
-   (r.lineup?.status!=="UNSUPPORTED"||espnLineupLeague(r)==="nba")
+   (r.lineup?.status!=="UNSUPPORTED"||espnLineupLeague(r)==="nba"||
+      Boolean(jleagueLineupDivision(r))||Boolean(apiFootballCompetition(r)))
    &&(!Number.isFinite(r.lineup?.lastAttemptAt)
      ||now-r.lineup.lastAttemptAt>=lineupRetryIntervalMs(r,now)))
   .sort((a,b)=>{
