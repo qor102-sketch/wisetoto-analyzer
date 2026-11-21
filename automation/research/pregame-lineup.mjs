@@ -1,4 +1,5 @@
 import {espnLineupLeague,lookupEspnPregameXi} from "./espn-pregame-lineup.mjs";
+import {jleagueLineupDivision,lookupOfficialJleaguePregame} from "./jleague-official-lineup.mjs";
 import {
  naverLineupCircuitGroup,restoreNaverLineupCircuit,naverLineupProbeGate,
  recordNaverLineupAttempt,isNaverLineupTransientFailure
@@ -175,7 +176,8 @@ async function lookupNaverPregame(r,{base,fetcher,now,timeoutMs=11000}){
 }
 export async function collectLineupSnapshots(state,{
  now=()=>Date.now(),base="https://wisetoto-analyzer.vercel.app",fetcher=fetch,limit=8,
- sleepFn=ms=>new Promise(resolve=>setTimeout(resolve,ms))
+ sleepFn=ms=>new Promise(resolve=>setTimeout(resolve,ms)),
+ naverEnabled=true,apiFootballSession=null
 }={}){
  let next=state,attempted=0,confirmed=0,partial=0,unavailable=0,unsupported=0;
  const espnCache=new Map(),reasons={};
@@ -183,6 +185,9 @@ export async function collectLineupSnapshots(state,{
  let naverPersistentSkipped=0,naverRecoveryProbes=0;
  let naverCircuit=restoreNaverLineupCircuit(state.naverLineupCircuit,now());
  const recoveryProbed=new Set();
+ let officialJleagueAttempted=0,officialJleagueConfirmed=0;
+ let apiFootballAttempted=0,apiFootballConfirmed=0;
+ const jleagueCache=new Map();
  let nbaFocusedRechecks=0,nbaFocusedRecovered=0;
  let nbaAttempted=0,nbaConfirmed=0;
  const selected=pregameLineupCandidates(state,now(),limit);
@@ -190,7 +195,15 @@ export async function collectLineupSnapshots(state,{
  for(const r of selected){
   let observation,focusedRetried=false;
   const viaEspn=Boolean(espnLineupLeague(r));
-  if(viaEspn){
+  // Official J1/J2 XI is checked first near kickoff and is independent of
+  // Naver/ESPN. The official day list proves fixture identity and kickoff.
+  if(jleagueLineupDivision(r)&&r.startMs-now()<=75*60000){
+   officialJleagueAttempted++;
+   observation=await lookupOfficialJleaguePregame(r,{
+    fetchFn:fetcher,now,cache:jleagueCache});
+   if(observation.status==="CONFIRMED")officialJleagueConfirmed++;
+  }
+  if(viaEspn&&observation?.status!=="CONFIRMED"){
    observation=await lookupEspnPregameXi(r,{now:now(),base,fetchFn:fetcher,cache:espnCache});
    // ESPN's actual 5+5 may be announced shortly before NBA tipoff. Make at
    // most two focused, fresh SUMMARY rechecks across the entire scan; the
@@ -207,7 +220,18 @@ export async function collectLineupSnapshots(state,{
     }else observation={status:"REJECTED",reason:"AFTER_KICKOFF_NOT_PREGAME"};
    }
   }
-  if((!viaEspn||(observation.status==="UNAVAILABLE"&&r.sport==="축구"&&
+  if(r.sport==="축구"&&observation?.status!=="CONFIRMED"&&
+      apiFootballSession?.enabled&&r.startMs-now()<=75*60000&&now()<r.startMs){
+   apiFootballAttempted++;
+   const fallback=await apiFootballSession.lookupPregame(r);
+   if(fallback.status==="CONFIRMED"){
+    observation=fallback;
+    apiFootballConfirmed++;
+   }else if(!observation)observation=fallback;
+  }
+  // Opt-in legacy Naver path, disabled by the production collector.
+  if(naverEnabled&&observation?.status!=="CONFIRMED"&&
+    (!viaEspn||(observation?.status==="UNAVAILABLE"&&r.sport==="축구"&&
        r.startMs-now()<=75*60000))&&r.sport!=="배구"&&r.sport!=="농구"){
    const group=naverLineupCircuitGroup(r);
    const gate=naverLineupProbeGate(naverCircuit,group,now(),r.startMs,recoveryProbed);
@@ -257,6 +281,8 @@ export async function collectLineupSnapshots(state,{
  return {state:{...next,naverLineupCircuit:naverCircuit},
   summary:{attempted,confirmed,partial,unavailable,unsupported,
   sharedEspnScoreboards:espnCache.size,naverFailures,naverSkipped,naverFallbacks,
+  naverDisabled:!naverEnabled,officialJleagueAttempted,officialJleagueConfirmed,
+  apiFootballAttempted,apiFootballConfirmed,
   naverPersistentSkipped,naverRecoveryProbes,
   naverCircuitGroups:naverCircuit.groups,
   nbaFocusedRechecks,nbaFocusedRecovered,nbaPrioritySelected,nbaAttempted,nbaConfirmed,reasonCounts:reasons}};
