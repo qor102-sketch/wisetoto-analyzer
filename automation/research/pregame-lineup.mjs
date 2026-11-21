@@ -1,5 +1,6 @@
 import {espnLineupLeague,lookupEspnPregameXi} from "./espn-pregame-lineup.mjs";
 import {jleagueLineupDivision,lookupOfficialJleaguePregame} from "./jleague-official-lineup.mjs";
+import {apiFootballCompetition} from "./api-football-free.mjs";
 import {
  naverLineupCircuitGroup,restoreNaverLineupCircuit,naverLineupProbeGate,
  recordNaverLineupAttempt,isNaverLineupTransientFailure
@@ -220,7 +221,7 @@ export async function collectLineupSnapshots(state,{
     }else observation={status:"REJECTED",reason:"AFTER_KICKOFF_NOT_PREGAME"};
    }
   }
-  if(r.sport==="축구"&&observation?.status!=="CONFIRMED"&&
+  if(apiFootballCompetition(r)&&observation?.status!=="CONFIRMED"&&
       apiFootballSession?.enabled&&r.startMs-now()<=75*60000&&now()<r.startMs){
    apiFootballAttempted++;
    const fallback=await apiFootballSession.lookupPregame(r);
