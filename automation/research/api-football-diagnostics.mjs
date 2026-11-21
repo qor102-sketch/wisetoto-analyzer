@@ -9,12 +9,19 @@ const delta=(a,b)=>Math.round((a-b)/M);
 const text=v=>String(v??"").normalize("NFKC")
  .replace(/[^\p{L}\p{N} .&/'()\-]/gu," ").replace(/\s+/g," ").trim().slice(0,52);
 const smallNum=v=>Number.isFinite(v)?Math.max(-1440,Math.min(1440,Math.round(v))):null;
-export const safeApiFootballDetail=(reason,kind,diagnostic,row)=>({
+export const safeApiFootballDetail=(reason,kind,diagnostic,row)=>{
+ const raw=String(reason??"");
+ const code=raw.split(":")[0];
+ const safeCode=/^API_FOOTBALL_[A-Z0-9_]+$/.test(code)?code.slice(0,80):
+  "API_FOOTBALL_UNKNOWN";
+ const inferred=/NETWORK|HTTP_/.test(safeCode)?"NETWORK":
+  /QUOTA|COOLDOWN/.test(safeCode)?"QUOTA":
+  /LINEUP|STARTXI|PLAYER/.test(safeCode)?"LINEUP":"SOURCE";
+ return {
  kind:kind==="PRE"?"PRE":"FINAL",
- reason:/^API_FOOTBALL_[A-Z0-9_]+$/.test(String(reason))?String(reason).slice(0,80):
-  "API_FOOTBALL_UNKNOWN",
+ reason:safeCode,
  stage:/^(SOURCE|LEAGUE|KICKOFF|TEAMS|IDENTITY|STATUS|SCORE|LINEUP|QUOTA|NETWORK|MATCHED)$/.test(
-  String(diagnostic?.stage))?diagnostic.stage:"SOURCE",
+  String(diagnostic?.stage))?diagnostic.stage:inferred,
  expected:{
   league:text(row?.league),home:text(row?.home),away:text(row?.away)
  },
@@ -29,7 +36,8 @@ export const safeApiFootballDetail=(reason,kind,diagnostic,row)=>({
  kickoffDeltaMinutes:smallNum(diagnostic?.kickoffDeltaMinutes),
  leagueCandidates:Math.min(1_500,Math.max(0,Number(diagnostic?.leagueCandidates)||0)),
  timeCandidates:Math.min(1_500,Math.max(0,Number(diagnostic?.timeCandidates)||0))
-});
+ };
+};
 const sample=f=>({
  league:f?.league?.name,country:f?.league?.country,
  home:f?.teams?.home?.name,away:f?.teams?.away?.name,
