@@ -178,3 +178,37 @@ test("legacy NBA unsupported flag is retired by genuine fresh ESPN failure, neve
  assert.equal(after.summary.attempted,0);
  assert.equal(after.state.records[0].lineup.status,"UNSUPPORTED");
 });
+
+
+test("Naver-free scheduled scan never invokes /api/naver/lineup and invents no PRE",async()=>{
+ const fixture={...row("축구",T+25*M,"no-naver"),league:"unknown league"};
+ let calls=0;
+ const result=await collectLineupSnapshots({records:[fixture]},{
+  now:()=>T,naverEnabled:false,
+  fetcher:async()=>{calls++;throw Error("Naver MUST stay disabled")}
+ });
+ assert.equal(calls,0);
+ assert.equal(result.summary.naverDisabled,true);
+ assert.equal(result.summary.naverFailures,0);
+ assert.equal(result.summary.naverSkipped,0);
+ assert.equal(result.summary.attempted,0);
+ assert.equal(result.state.records[0].lineup,undefined);
+ assert.equal(result.state.records[0].pregameCapturedAt,T);
+});
+test("independent ESPN source is still queried with Naver disabled",async()=>{
+ const kickoff=T+25*M;
+ const fixture={...row("축구",kickoff,"epl"),league:"잉글랜드 프리미어리그"};
+ const hits=[];
+ const out=await collectLineupSnapshots({records:[fixture]},{
+  now:()=>T,naverEnabled:false,base:"https://example.org",
+  fetcher:async(url)=>{
+   hits.push(url);
+   return {ok:false,status:503,json:async()=>({ok:false})};
+  }
+ });
+ assert.ok(hits.some(x=>x.includes("/api/espn/scoreboard?")));
+ assert.ok(hits.every(x=>!x.includes("/api/naver/")));
+ assert.equal(out.summary.naverDisabled,true);
+ assert.equal(out.state.records[0].lineup.status,"UNAVAILABLE");
+ assert.equal(out.state.records[0].pregameCapturedAt,T);
+});
