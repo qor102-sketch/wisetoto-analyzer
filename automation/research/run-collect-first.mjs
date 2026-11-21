@@ -16,7 +16,7 @@ import {isOfficialKblFixture,lookupOfficialKblFinal} from "./kbl-official-final.
 import {isOfficialKovoFixture,lookupOfficialKovoFinal} from "./kovo-official-final.mjs";
 import {hasAuditedOfficialEaslFixture,lookupOfficialEaslFinal} from "./easl-official-final.mjs";
 import {collectLineupSnapshots} from "./pregame-lineup.mjs";
-import {createApiFootballSession} from "./api-football-free.mjs";
+import {createApiFootballSession,apiFootballCompetition} from "./api-football-free.mjs";
 import {selectFinalAuditRows} from "./final-scan-plan.mjs";
 import {effectTotals,recordOperationalEffect} from "./operational-effect.mjs";
 import {purgeNbaCollectionState} from "../nba-policy.mjs";
@@ -199,7 +199,7 @@ for(const r of finalQueue){
  }
  // Only exact source-confirmed FT is accepted, never a scoreboard preview.
  // The key is optional and quota state persists in the same restored ledger.
- if(!confirmed&&apiFootball.enabled&&r.sport==="축구"){
+ if(!confirmed&&apiFootball.enabled&&apiFootballCompetition(r)){
    const independent=await apiFootball.lookupFinal(r);
    if(independent.ok){confirmed=independent;providerAttempted=true;}
    else if(!/API_FOOTBALL_(?:RETRY_COOLDOWN|LOCAL_QUOTA_BLOCK)/.test(
