@@ -36,7 +36,7 @@ for(const url of urls){
 
 // Verify J1 day-list discovery independently of the lineup-page markup.
 // Historical final page is read-only format evidence, never historical PRE.
-const t=Date.parse("2026-11-07T06:00:00Z");
+const t=Date.parse("2026-11-07T07:00:00Z"); // official 16:00 JST KO
 const sample={sport:"축구",league:"일본 J1리그",home:"가시와레이솔",
  away:"가와사키프론탈레",startMs:t};
 const scheduleUrl=jleagueLineupScheduleUrl(sample);
