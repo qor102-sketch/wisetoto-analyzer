@@ -308,7 +308,8 @@ state=recordOperationalEffect(state,{
    finalQueue.filter(r=>r.sport===s).length])),
   confirmedBySource,waitReasons:finalWaitReasons,espnFailureReasons,
   naverUpstreamFailures,naverFailedRows,
-  naverOutageSkipped,finalDeferred}
+  naverOutageSkipped,finalDeferred,naverDisabled:!naverEnabled,
+  apiFootball:apiFootball.summary()}
 });
 console.log("OPERATIONAL_EFFECT "+JSON.stringify({
  baseline:state.operationalEffect.baseline,latest:state.operationalEffect.latest,
