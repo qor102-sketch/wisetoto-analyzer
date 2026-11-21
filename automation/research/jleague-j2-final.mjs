@@ -31,6 +31,7 @@ const same=(a,b)=>{
  const x=norm(a),y=norm(b);
  return Boolean(x&&y&&(x===y||teams.some(group=>group.includes(x)&&group.includes(y))));
 };
+export {same as jleagueOfficialTeamEq};
 export const jstDate=ms=>new Date(ms+JST).toISOString().slice(0,10);
 export function officialJ2ListUrl(fixture){
  if(!isJleagueJ2(fixture)||!Number.isFinite(fixture.startMs))return null;
