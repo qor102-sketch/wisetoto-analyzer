@@ -130,7 +130,9 @@ export function recordOperationalEffect(state,{
    naverDisabled:finalSummary.naverDisabled===true,
    apiFootballRequests:n(finalSummary.apiFootball?.requests),
    apiFootballFailures:n(finalSummary.apiFootball?.failures),
-   apiFootballQuotaBlocked:n(finalSummary.apiFootball?.quotaBlocked)
+   apiFootballQuotaBlocked:n(finalSummary.apiFootball?.quotaBlocked),
+   apiFootballDiagnosed:n(finalSummary.apiFootball?.diagnosed),
+   apiFootballReasonCounts:smallCounts(finalSummary.apiFootball?.diagnosticReasons)
   },
   changes:effectDelta(totals,beforeTotals),
   totals
