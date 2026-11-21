@@ -1,7 +1,7 @@
 // Independently verified J1/J2 official pre-kickoff XI.
 // Discover source match IDs from the J.LEAGUE official daily list. Never
 // extrapolate a match URL from a Betman date/team, or backfill post-kickoff PRE.
-import {officialJ2ListUrl,officialJ2Matches,jstDate} from "./jleague-j2-final.mjs";
+import {officialJ2ListUrl,officialJ2Matches,jstDate,jleagueOfficialTeamEq} from "./jleague-j2-final.mjs";
 import {espnTeamEq} from "./espn-fast-final.mjs";
 const M=60_000;
 const normal=v=>String(v??"").normalize("NFKC").toLowerCase().replace(/[^a-z0-9가-힣一-龯ぁ-んァ-ヶ]/g,"");
@@ -20,7 +20,8 @@ const aliases=[
 function teamEq(a,b){
  const x=normal(a),y=normal(b);
  if(!x||!y)return false;
- return x===y||espnTeamEq(a,b)||aliases.some(g=>g.includes(x)&&g.includes(y));
+ return x===y||espnTeamEq(a,b)||jleagueOfficialTeamEq(a,b)||
+  aliases.some(g=>g.includes(x)&&g.includes(y));
 }
 export function jleagueLineupDivision(row){
  if(row?.sport!=="축구")return null;
