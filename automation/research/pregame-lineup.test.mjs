@@ -231,3 +231,25 @@ test("enabled optional API never queries an unsupported league or writes fake PR
  assert.equal(result.summary.attempted,0);
  assert.equal(result.state.records[0].lineup,undefined);
 });
+
+
+test("newly supported J1/J2 and API-Football leagues reopen legacy UNSUPPORTED only before kickoff",()=>{
+ const legacy=(id,league,start=T+25*M)=>({
+  ...row("축구",start,id),league,
+  lineup:{status:"UNSUPPORTED",reason:"NO_VERIFIED_PREGAME_LINEUP_PROVIDER",
+   lastAttemptAt:T-20*M,attempts:2}
+ });
+ const j1=legacy("j1-retry","일본 J1리그");
+ const j2=legacy("j2-retry","일본 J2리그");
+ const epl=legacy("epl-retry","잉글랜드 프리미어리그");
+ const unknown=legacy("unknown-unsupported","국제친선경기");
+ const after=legacy("already-started","일본 J1리그",T-M);
+ const confirmed={...legacy("confirmed","일본 J1리그"),
+  lineup:{status:"CONFIRMED",capturedAt:T-21*M}};
+ const selected=pregameLineupCandidates({
+  records:[j1,j2,epl,unknown,after,confirmed]},T,12).map(x=>x.key);
+ assert.deepEqual(new Set(selected),new Set(["j1-retry","j2-retry","epl-retry"]));
+ const cooling={...j2,lineup:{...j2.lineup,lastAttemptAt:T-M}};
+ assert.equal(pregameLineupCandidates({records:[cooling]},T).length,0,
+  "New provider does not bypass the prior retry cooldown");
+});
