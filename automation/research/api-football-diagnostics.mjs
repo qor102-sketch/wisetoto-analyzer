@@ -70,19 +70,21 @@ export function diagnoseApiFootballFixture(payload,row,{competitionKey,knownLeag
  const valid=payload.response.filter(f=>Number.isFinite(validMs(f?.fixture?.date)));
  const league=valid.filter(goodLeague);
  if(league.length===0){
-  // The nearest same-time card is only diagnostic evidence; NEVER auto-switch
-  // to its competition or use its score.
-  const nearby=valid.filter(f=>Math.abs(validMs(f.fixture.date)-row.startMs)<=120*M);
-  const nearest=closest(nearby,row);
-  return bad(nearby.length?"API_FOOTBALL_LEAGUE_MISMATCH":"API_FOOTBALL_LEAGUE_NOT_FOUND",
-   "LEAGUE",nearest,row,{timeCandidates:nearby.length});
+  // A same-time *unrelated* fixture cannot prove a league-label mismatch.
+  // Classify a label mismatch only if BOTH original teams also match.
+  const nearSameTeams=valid.filter(f=>
+   Math.abs(validMs(f.fixture.date)-row.startMs)<=120*M&&
+   teamEq(row.home,f.teams?.home?.name)&&teamEq(row.away,f.teams?.away?.name));
+  return bad(nearSameTeams.length?"API_FOOTBALL_LEAGUE_MISMATCH":
+   "API_FOOTBALL_LEAGUE_NOT_FOUND","LEAGUE",closest(nearSameTeams,row),row,
+   {timeCandidates:nearSameTeams.length});
  }
  const timed=league.filter(f=>Math.abs(validMs(f.fixture.date)-row.startMs)<=45*M);
  if(timed.length===0){
   const sameTeams=league.filter(f=>
    teamEq(row.home,f.teams?.home?.name)&&teamEq(row.away,f.teams?.away?.name));
-  const nearest=closest(sameTeams.length?sameTeams:league,row);
-  return bad("API_FOOTBALL_KICKOFF_MISMATCH","KICKOFF",nearest,row,
+  return bad(sameTeams.length?"API_FOOTBALL_KICKOFF_MISMATCH":
+   "API_FOOTBALL_NO_KICKOFF_CANDIDATE","KICKOFF",closest(sameTeams,row),row,
    {leagueCandidates:league.length});
  }
  const matched=timed.filter(f=>teamEq(row.home,f.teams?.home?.name)&&
