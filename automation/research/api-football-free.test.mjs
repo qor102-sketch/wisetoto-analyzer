@@ -98,9 +98,12 @@ test("persisted daily quota limits calls to 60, resets on UTC day change",async(
  const first=await s.lookupFinal(row);
  assert.equal(first.ok,true);
  assert.equal(s.quota().requests,60);
- const different={...row,key:"different",startMs:T+24*M};
- const after=await s.lookupFinal(different);
- assert.equal(after.ok,false);assert.equal(calls,1);
+ // The fixture day is cached inside the scan; a different call to
+ // /fixtures/lineups must be refused once the 60th request was spent.
+ const after=await s.lookupPregame(row);
+ assert.equal(after.status,"UNAVAILABLE");
+ assert.equal(after.reason,"API_FOOTBALL_LOCAL_QUOTA_BLOCK");
+ assert.equal(calls,1);
  assert.equal(s.summary().quotaBlocked,1);
  const old=apiFootballQuota(s.quota(),T+24*3600000);
  assert.equal(old.requests,0);
