@@ -235,6 +235,10 @@ jobs:
         if: always() && steps.ledger_restore.outcome == 'success' && steps.nba_optout.outcome == 'success'
         env:
           WISETOTO_URL: https://wisetoto-analyzer.vercel.app
+          # Optional free API token; never echo it or expose it to Vercel.
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          # Zero Naver fixture/lineup calls from the automated collector.
+          NAVER_PROVIDER_MODE: disabled
         run: node automation/research/run-collect-first.mjs
       - name: Archive old fixtures before trimming active ledger
         id: collection_archive
