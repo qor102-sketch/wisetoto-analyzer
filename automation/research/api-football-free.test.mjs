@@ -138,3 +138,78 @@ test("verified API-Football result retains actual provider provenance and Betman
  assert.equal(result.records[0].pregameCapturedAt,T-20*M);
  assert.equal(before.records[0].verdict,"PENDING");
 });
+
+
+test("HTTP 200 with errors.plan or errors.access is a rejected provider result, not HTTP success",async()=>{
+ const {apiFootballResponseFailure}=await import("./api-football-free.mjs");
+ assert.equal(apiFootballResponseFailure(200,{response:[],errors:{plan:"Restricted access"}}),
+  "API_FOOTBALL_PLAN_RESTRICTED");
+ assert.equal(apiFootballResponseFailure(200,{response:[],errors:{access:"Denied"}}),
+  "API_FOOTBALL_ACCESS_RESTRICTED");
+ assert.equal(apiFootballResponseFailure(200,{response:[],errors:{requests:"Too many"}}),
+  "API_FOOTBALL_REMOTE_QUOTA");
+ assert.equal(apiFootballResponseFailure(200,{response:[],errors:{date:"invalid"}}),
+  "API_FOOTBALL_INVALID_PARAMETERS");
+ assert.equal(apiFootballResponseFailure(200,{response:[],errors:{mystery:"unknown"}}),
+  "API_FOOTBALL_PROVIDER_REJECTED");
+ assert.equal(apiFootballResponseFailure(200,{response:[],errors:[]}),null);
+ assert.equal(apiFootballResponseFailure(200,{response:[],errors:{}}),null);
+ assert.equal(apiFootballResponseFailure(200,{errors:{}}),
+  "API_FOOTBALL_RESPONSE_SCHEMA");
+ assert.equal(apiFootballResponseFailure(429,null),"API_FOOTBALL_HTTP_429");
+});
+test("free plan errors trigger 24h global circuit without using additional requests, across UTC midnight",async()=>{
+ let clock=T-5*60_000;
+ let calls=0;
+ const session=createApiFootballSession({apiKey:key,now:()=>clock,fetchFn:async()=>{
+  calls++;
+  return {ok:true,status:200,json:async()=>({
+   errors:{plan:"Synthetic free account season access denied"},
+   response:[],results:0})};
+ }});
+ const first=await session.lookupFinal(row);
+ assert.equal(first.ok,false);
+ assert.equal(first.waitReason,"API_FOOTBALL_PLAN_RESTRICTED");
+ assert.equal(calls,1);
+ assert.equal(session.quota().requests,1);
+ assert.equal(session.quota().accessBlockReason,"API_FOOTBALL_PLAN_RESTRICTED");
+ const second=await session.lookupFinal({...row,startMs:T+24*60*60_000});
+ assert.equal(second.waitReason,"API_FOOTBALL_PROVIDER_ACCESS_COOLDOWN");
+ assert.equal(calls,1);
+ assert.equal(session.summary().accessSkipped,1);
+ const raw=session.quota();
+ clock=Date.parse("2026-11-22T00:03:00Z");
+ const restored=createApiFootballSession({apiKey:key,now:()=>clock,
+  rawQuota:raw,fetchFn:async()=>{throw Error("must respect provider access lock")}});
+ const third=await restored.lookupFinal({...row,startMs:T+24*60*60_000});
+ assert.equal(third.waitReason,"API_FOOTBALL_PROVIDER_ACCESS_COOLDOWN");
+ assert.equal(restored.summary().requests,0);
+ assert.equal(restored.quota().requests,0,"day quota rotates without dropping access lock");
+ assert.ok(restored.quota().accessBlockedUntil>clock);
+ clock=raw.accessBlockedUntil+1;
+ const after=createApiFootballSession({apiKey:key,now:()=>clock,rawQuota:raw,
+  fetchFn:async()=>({ok:true,status:200,json:async()=>({response:[],errors:[]})})});
+ assert.equal(after.quota().accessBlockedUntil,null);
+ const resumed=await after.lookupFinal({...row,startMs:clock-4*3600000});
+ assert.equal(resumed.ok,false,"a response without a Betman match is not a final");
+ assert.equal(after.summary().requests,1);
+});
+test("access errors from current date also prevent 60 futile paid-by-quota retries",async()=>{
+ let calls=0;
+ const session=createApiFootballSession({apiKey:key,now:()=>T,
+  fetchFn:async()=>{calls++;return {ok:true,status:200,
+   json:async()=>({errors:{access:"Synthetic provider account access disabled"},
+    response:[]})};}});
+ const r1=await session.lookupFinal(row);
+ const r2=await session.lookupFinal({...row,startMs:T+24*60*60_000});
+ assert.equal(r1.waitReason,"API_FOOTBALL_ACCESS_RESTRICTED");
+ assert.equal(r2.waitReason,"API_FOOTBALL_PROVIDER_ACCESS_COOLDOWN");
+ assert.equal(calls,1);
+ assert.equal(session.quota().requests,1);
+ assert.equal(session.summary().failures,1);
+ assert.equal(session.summary().diagnosticReasons.API_FOOTBALL_ACCESS_RESTRICTED,1);
+ assert.equal(session.summary().diagnosticReasons.API_FOOTBALL_PROVIDER_ACCESS_COOLDOWN,1);
+ const log=JSON.stringify(session.diagnostics())+JSON.stringify(session.quota());
+ assert.ok(!log.includes(key));
+ assert.ok(!log.includes("Synthetic"));
+});

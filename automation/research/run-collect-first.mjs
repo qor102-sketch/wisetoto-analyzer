@@ -88,7 +88,7 @@ async function requestFinal(url){
  try{payload=await response.json()}catch{payload={ok:false,error:"MALFORMED_PROVIDER_RESPONSE"}}
  return {status:response.status,payload};
 }
-const finalQueue=selectFinalAuditRows(state,Date.now(),24);
+const finalQueue=selectFinalAuditRows(state,Date.now(),24,{naverEnabled});
 console.log("FINAL_BACKLOG_BEFORE "+JSON.stringify({...finalAuditBacklog(state,Date.now()),selected:finalQueue.length,
  selectedBySport:Object.fromEntries(["축구","농구","야구","배구"].map(s=>[s,finalQueue.filter(r=>r.sport===s).length]))}));
 for(const r of finalQueue){
@@ -202,7 +202,7 @@ for(const r of finalQueue){
  if(!confirmed&&apiFootball.enabled&&apiFootballCompetition(r)){
    const independent=await apiFootball.lookupFinal(r);
    if(independent.ok){confirmed=independent;providerAttempted=true;}
-   else if(!/API_FOOTBALL_(?:RETRY_COOLDOWN|LOCAL_QUOTA_BLOCK)/.test(
+   else if(!/API_FOOTBALL_(?:RETRY_COOLDOWN|LOCAL_QUOTA_BLOCK|PROVIDER_ACCESS_COOLDOWN)/.test(
      String(independent.waitReason))){
     providerAttempted=true;
     reasons.push("API_FOOTBALL:"+String(independent.waitReason).slice(0,110));

@@ -202,7 +202,8 @@ test("real scheduled collector with Naver disabled never calls Naver or verifies
    child.on("error",reject);child.on("close",code=>resolve({code,stdout,stderr}));
   });
   assert.equal(result.code,0,result.stderr);
-  assert.equal(calls.filter(x=>x.startsWith("/api/fixture/result")).length,1);
+  assert.equal(calls.filter(x=>x.startsWith("/api/fixture/result")).length,0,
+    "unserviceable games must not waste official result-provider slots");
   assert.ok(calls.every(x=>!x.startsWith("/api/naver/")));
   const state=JSON.parse(await readFile(join(root,"automation-state/collect-first-state.json"),"utf8"));
   const publicData=JSON.parse(await readFile(join(root,"automation-state/collect-first-public.json"),"utf8"));

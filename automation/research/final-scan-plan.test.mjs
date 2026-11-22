@@ -123,3 +123,36 @@ test("two audited WKBL dual-proof retries and two official Cup retries do not ex
  assert.equal(new Set(rows.map(x=>x.key)).size,24);
  assert.equal(rows.some(x=>x.league==="NBA"),false);
 });
+
+
+test("Naver-free scans reallocate eight unsupported slots to 24 genuine independent-source retries",()=>{
+ const espn=Array.from({length:30},(_,i)=>fixture("espn-retry-"+i,"잉글랜드 챔피언십"));
+ const unsupported=Array.from({length:40},(_,i)=>fixture("naver-only-"+i,"K리그3"));
+ const rows=selectFinalAuditRows({records:[...unsupported,...espn]},NOW,24,{naverEnabled:false});
+ assert.equal(rows.length,24);
+ assert.equal(rows.filter(x=>x.key.startsWith("espn-retry-")).length,24);
+ assert.equal(rows.filter(x=>x.key.startsWith("naver-only-")).length,0);
+ assert.equal(new Set(rows.map(x=>x.key)).size,24);
+});
+test("Naver-free scheduling still honors source-specific official KBL/KOVO lanes and no fabricated finals",()=>{
+ const espn=Array.from({length:30},(_,i)=>fixture("espn-"+i,"잉글랜드 챔피언십"));
+ const kbl=Array.from({length:9},(_,i)=>fixture("kbl-"+i,"KBL","농구"));
+ const kovo=Array.from({length:6},(_,i)=>fixture("kovo-"+i,"KOVO 여자","배구"));
+ const noProof=Array.from({length:40},(_,i)=>fixture("unsup-"+i,"K리그3"));
+ const rows=selectFinalAuditRows({records:[...noProof,...kbl,...espn,...kovo]},
+  NOW,24,{naverEnabled:false});
+ assert.equal(rows.length,24);
+ assert.equal(rows.filter(r=>r.key.startsWith("kbl-")).length,4);
+ assert.equal(rows.filter(r=>r.key.startsWith("kovo-")).length,2);
+ assert.equal(rows.filter(r=>r.key.startsWith("espn-")).length,18);
+ assert.equal(rows.filter(r=>r.key.startsWith("unsup-")).length,0);
+ assert.ok(rows.every(r=>r.verdict==="PENDING"));
+});
+test("legacy Naver-enabled queue is unchanged so recovery can be explicitly opted into",()=>{
+ const espn=Array.from({length:35},(_,i)=>fixture("espn-"+i,"잉글랜드 챔피언십"));
+ const dom=Array.from({length:20},(_,i)=>fixture("only-"+i,"K리그3"));
+ const a=selectFinalAuditRows({records:[...espn,...dom]},NOW,24);
+ const b=selectFinalAuditRows({records:[...espn,...dom]},NOW,24,{naverEnabled:true});
+ assert.deepEqual(a.map(r=>r.key),b.map(r=>r.key));
+ assert.equal(b.filter(r=>r.key.startsWith("only-")).length,8);
+});

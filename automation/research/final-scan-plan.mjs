@@ -52,7 +52,7 @@ export function interleaveRecentAndBacklog(rows,now){
  }
  return merged;
 }
-export function selectFinalAuditRows(state,now=Date.now(),limit=24){
+export function selectFinalAuditRows(state,now=Date.now(),limit=24,{naverEnabled=true}={}){
  if(!Number.isInteger(limit)||limit<=0)return [];
  // Explicitly source-observed AET: keep PENDING rather than waste an
  // official-source/Naver slot or accept a generic post-extra-time score.
@@ -83,6 +83,10 @@ export function selectFinalAuditRows(state,now=Date.now(),limit=24){
   ...kbl.slice(0,4),...kovo.slice(0,2),...easl.slice(0,2),...remainder,
   ...cup.slice(2),...wkbl.slice(2),...kbl.slice(4),
   ...kovo.slice(2),...easl.slice(2)];
+ // Production is Naver-free: do not waste eight audit slots selecting
+ // unsupported Naver-only records. Reallocate them to verifiable independent
+ // providers; unverified records stay PENDING with their original evidence.
+ if(!naverEnabled)return prioritized.slice(0,limit);
  const selected=[...prioritized.slice(0,espnQuota),...others.slice(0,otherQuota)];
  if(selected.length<limit){
   const picked=new Set(selected.map(r=>r.key));
