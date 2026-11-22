@@ -199,6 +199,19 @@ export function buildAccuracyShadowReport(state,now=Date.now()){
   observedFixtures:fixtures.length,eligibleFrozen:eligible.length,
   eligibleGraded:eligible.filter(f=>finishedFixture(f,now)).length,
   strategies:perStrategy,bySport,
+  upcomingSelections:eligible.filter(f=>f.startMs>now&&f.startMs<=now+7*DAY)
+   .sort((a,b)=>a.startMs-b.startMs||fixtureKey(a).localeCompare(fixtureKey(b)))
+   .slice(0,8).map(f=>({
+    id:fixtureKey(f),sport:f.sport,league:String(f.league??"").slice(0,90),
+    home:String(f.home??"").slice(0,70),away:String(f.away??"").slice(0,70),
+    startMs:f.startMs,
+    strategies:Object.fromEntries(STRATEGIES.map(k=>{
+     const p=f.accuracyShadowV1.strategies?.[k];
+     return [k,p?{status:p.status,side:p.side,asOf:p.asOf,
+      odds:p.odds,pForecast:p.pForecast,shift:p.shift}:{
+       status:"NO_PICK",reason:"NOT_QUALIFIED_PREKICKOFF"}];
+    }))
+   })),
   canPromote:false,
   whyNotPromoted:"Require >=100 new same-period graded predictions, time-ordered market comparison and independent review; official TOP1 remains unchanged"
  };
