@@ -1,0 +1,47 @@
+name: One-shot free-plan date access verification
+on:
+  push:
+    branches: [fix/api-football-free-plan-and-backlog-20261122]
+    paths: [".github/workflows/api-football-one-shot-plan-probe.yml"]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    env:
+      API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+    steps:
+      - name: Safely compare response schemas for current and past fixture dates
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          const key=String(process.env.API_FOOTBALL_KEY??"");
+          if(key.length<12){console.error("PROBE {status:'MISSING_SECRET'}");process.exit(1);}
+          for(const date of ["2026-11-20","2024-11-20"]){
+            try{
+              const u="https://v3.football.api-sports.io/fixtures?"+
+                new URLSearchParams({date,timezone:"UTC"});
+              const r=await fetch(u,{headers:{"x-apisports-key":key,accept:"application/json"},
+                signal:AbortSignal.timeout(9000)});
+              const p=await r.json();
+              const errors=p?.errors;
+              const entries=(errors&&typeof errors==="object"&&!Array.isArray(errors))?
+                Object.entries(errors):[];
+              const keys=entries.map(([k])=>k).filter(k=>/^[a-z]{1,24}$/i.test(k));
+              const messages=entries.map(([,v])=>String(v??"")).join(" ").toLowerCase();
+              let cause=entries.length===0?"NONE":
+                /free|plan|subscription|season|access/.test(messages)||keys.includes("plan")?
+                  "PLAN_OR_SEASON_RESTRICTED":
+                /limit|quota|requests|too many/.test(messages)?"RATE_LIMIT":
+                /param|invalid|date/.test(messages)?"PARAM_INVALID":"OTHER_API_ERROR";
+              console.log("API_FOOTBALL_FREE_PLAN_PROBE "+JSON.stringify({
+                date,http:r.status,hasResponseArray:Array.isArray(p?.response),
+                fixtures:Array.isArray(p?.response)?p.response.length:null,
+                errorsKeys:keys,cause,hasResultsField:typeof p?.results==="number",
+                results:p?.results??null
+              }));
+            }catch(e){console.log("API_FOOTBALL_FREE_PLAN_PROBE "+
+              JSON.stringify({date,cause:"NETWORK",type:e?.name||"ERROR"}));}
+          }
+          NODE
