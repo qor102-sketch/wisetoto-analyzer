@@ -14,9 +14,24 @@ type PilotReport={status:string;startedAt:number|null;endsAt:number|null;complet
  walkForward?:{decisions:number;marketBrier:number|null;modelBrier:number|null;improved:boolean};
  weeks?:Array<{week:number;complete:boolean;observed:number;frozen:number;metrics:PilotMetric}>;
  proposals?:string[];shadowHistory?:Array<{date:string;id:string;sport:string;home:string;away:string;side:string;odds:number;result:string}>};
+type AccuracyShadowMetric={picks:number;graded:number;hits:number;hitRate:number|null;hitCI90:[number,number]|null;
+ unitROI:number|null;selectionCoverage:number|null;binaryBrier:number|null;marketBinaryBrier:number|null;
+ binaryLogLoss:number|null;marketBinaryLogLoss:number|null;pairedBaseGraded:number;pairedBaseROI:number|null;
+ forecastsGraded:number;forecastBinaryBrier:number|null;forecastMarketBinaryBrier:number|null};
+type AccuracyShadowReport={status:string;startedAt:number|null;endsAt:number|null;
+ observedFixtures?:number;eligibleFrozen?:number;eligibleGraded?:number;
+ strategies?:Record<string,AccuracyShadowMetric>;bySport?:Record<string,Record<string,AccuracyShadowMetric>>;
+ upcomingSelections?:Array<{id:string;sport:string;league:string;home:string;away:string;startMs:number;
+  strategies:Record<string,{status:string;side?:string;asOf?:number;odds?:number;shift?:number}>}>;
+ canPromote?:boolean;note?:string};
+const accuracyStrategyLabels:Record<string,string>={
+ BASE_2P:"A · 기존 2%p",STRONG_4P:"B · 강한 이동 4%p",
+ SELECTIVE_4P:"D · 낮은 수수료·고신뢰 선별",
+ BLEND_80_20:"C1 · 시장 80% 보정",BLEND_60_40:"C2 · 시장 60% 보정"
+};
 type CollectionFunnelCount={registered:number;pregameWindow:number;pregameOdds:number;finalVerified:number;verifiedWithOdds:number;verifiedWithLineup:number;lineupConfirmed:number;lineupPartial:number;lineupUnsupported:number;overduePending:number;resultOnly:number;captureWarnings:number};
 type CollectionFunnel={status:string;startedAt?:number;endsAt?:number;counts?:CollectionFunnelCount;bySport?:Record<string,CollectionFunnelCount>};
-type ResearchEvidence={generatedAt:string;counts:{future:number;observed:number;researchTop1:number;insufficient:number};records:EvidenceRow[];collectionPipeline?:CollectionFunnel;
+type ResearchEvidence={generatedAt:string;counts:{future:number;observed:number;researchTop1:number;insufficient:number};records:EvidenceRow[];collectionPipeline?:CollectionFunnel;accuracyShadow?:AccuracyShadowReport;
  pilot?:PilotReport;pilotTop1?:{id:string;sport:string;league:string;home:string;away:string;startMs:number;side:string;label:string;odds:number;marketProbability:number;shift:number;observedAt:number;grade:string;note:string}|null};
 type CollectedRow={key:string;sport:string;league:string;home:string;away:string;startMs:number;firstSeenAt:number;pregameCapturedAt:number|null;firstOddsAt?:number|null;latestOddsAt?:number|null;seenCount:number;oddsCount:number;resultChecks?:number;resultErrors?:Array<{at:number;reasons:string[]}>;captureIssue?:string|null;verdict:string;final:{homeScore:number;awayScore:number}|null;checkReason:string|null;lineup?:{status:string;source?:string;capturedAt?:number;homeCount?:number;awayCount?:number;homeStarter?:string|null;awayStarter?:string|null;reason?:string;lastAttemptAt?:number;lastError?:string;attempts?:number}};
 type EffectTotals={collected:number;pregameCaptured:number;pregameOdds:number;verified:number;
@@ -260,6 +275,44 @@ export default function AutomationDashboard(){
       {evidence.pilot.weeks&&<div className="scan-metrics">
         {evidence.pilot.weeks.map(w=><span key={w.week}>{w.week}주 {w.complete?"완료":"진행 중"} · 사전 후보 {w.frozen} · 검증 {w.metrics.decisions}</span>)}
       </div>}
+    </div>}
+    {evidence?.accuracyShadow&&<div className="scan-health-box" style={{marginBottom:14}}>
+      <div className="scan-head"><strong>다음 28일 · 경기 선별 적중률 개선 그림자 실험</strong>
+        <span>{evidence.accuracyShadow.status==="SCHEDULED"?"원본 28일 검증 종료 후 자동 시작":
+         evidence.accuracyShadow.status==="COLLECTING"?"경기 시작 전 독립 전략 고정·추적 중":
+         evidence.accuracyShadow.status==="REVIEW_READY"?"28일 새 코호트 보고서 검토 단계":"실험 기준일 대기"}</span></div>
+      <p>연구 기간 {date(evidence.accuracyShadow.startedAt)} ~ {date(evidence.accuracyShadow.endsAt)} KST · 기존 공식 PRE/TOP1과 독립 · 실전 추천이 아닌 시간순 실험</p>
+      <div className="scan-metrics">
+        <span>사전 확정한 비교 경기 {evidence.accuracyShadow.eligibleFrozen??0}</span>
+        <span>결과 검증된 비교 경기 {evidence.accuracyShadow.eligibleGraded??0}</span>
+        <span>공식 TOP1 자동 변경 없음</span>
+      </div>
+      <div className="auto-table-scroll"><table><thead><tr>
+        <th>그림자 전략</th><th>경기 선택 / 결과 확인</th><th>적중률</th><th>단위 ROI</th>
+        <th>선택 비율</th><th>이진 Brier (시장 비교)</th><th>동일 경기 기존 ROI</th>
+      </tr></thead><tbody>
+      {Object.entries(evidence.accuracyShadow.strategies??{}).map(([id,m])=><tr key={id}>
+        <td>{accuracyStrategyLabels[id]??id}</td>
+        <td>{m.picks} / {m.graded}</td>
+        <td>{m.hitRate==null?"미검증":(m.hitRate*100).toFixed(1)+"%"}</td>
+        <td>{m.unitROI==null?"미검증":(m.unitROI*100).toFixed(1)+"%"}</td>
+        <td>{m.selectionCoverage==null?"표본 대기":(m.selectionCoverage*100).toFixed(1)+"%"}</td>
+        <td>{m.binaryBrier==null?"표본 대기":m.binaryBrier.toFixed(3)+" ("+(m.marketBinaryBrier==null?"—":m.marketBinaryBrier.toFixed(3))+")"}</td>
+        <td>{m.pairedBaseROI==null?"표본 대기":(m.pairedBaseROI*100).toFixed(1)+"%"}</td>
+      </tr>)}
+      </tbody></table></div>
+      {(evidence.accuracyShadow.upcomingSelections?.length??0)>0&&<div className="auto-table-scroll">
+        <strong>앞으로 시작할 그림자 관찰 · 사전 잠금된 기록만 표시</strong>
+        <table><thead><tr><th>경기</th><th>기존 A</th><th>강한 신호 B</th><th>신뢰도 선별 D</th></tr></thead><tbody>
+        {evidence.accuracyShadow.upcomingSelections?.map(f=><tr key={f.id}>
+          <td>{f.sport} · {f.home} vs {f.away} · {date(f.startMs)} KST</td>
+          <td>{f.strategies.BASE_2P?.status==="PICK"?"사전 관찰":"NO_PICK"}</td>
+          <td>{f.strategies.STRONG_4P?.status==="PICK"?"사전 관찰":"NO_PICK"}</td>
+          <td>{f.strategies.SELECTIVE_4P?.status==="PICK"?"선별 관찰":"NO_PICK"}</td>
+        </tr>)}</tbody></table>
+      </div>}
+      <p>적중률만으로 전략을 승격하지 않습니다. 동일 경기의 기존 전략과 ROI·선택 건수·확률 오차를 함께 비교하며, 예상 적중률 상승이나 수익을 보장하지 않습니다.</p>
+      {evidence.accuracyShadow.status==="SCHEDULED"&&<p>현재는 예약 상태입니다. 이전 28일 검증의 경기·승부 결과를 소급해서 새 전략 성적으로 기록하지 않습니다.</p>}
     </div>}
     {evidence?.pilotTop1&&<div className="scan-health-box" style={{marginBottom:14}}>
       <div className="scan-head"><strong>4주 이후 미래 경기 연구 TOP1 · {evidence.pilotTop1.grade==="EXPLORATORY_TOP1"?"탐색적 후보":"연구 후보"}</strong>
