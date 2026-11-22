@@ -7,6 +7,29 @@ import {scorePlausibility} from "../../WisetotoAnalyzer-LiveFree/src/lib/postmat
 import {diagnoseApiFootballFixture,safeApiFootballDetail,API_FOOTBALL_DIAGNOSTIC_LIMIT} from "./api-football-diagnostics.mjs";
 const API="https://v3.football.api-sports.io";
 const M=60_000,DAY=86400000,MAX_DAILY=60;
+const ACCESS_BLOCK_MS=24*60*60*1000;
+// API-Sports returns HTTP 200 for many provider-declared account errors.
+// Do not log the raw 'errors' object: it may contain private account detail.
+export function apiFootballResponseFailure(status,payload){
+ if(!Number.isSafeInteger(status)||status<200||status>=300)
+  return "API_FOOTBALL_HTTP_"+(Number.isSafeInteger(status)?status:"UNKNOWN");
+ if(!payload||typeof payload!=="object")
+  return "API_FOOTBALL_RESPONSE_SCHEMA";
+ const errors=payload.errors;
+ const keys=errors&&typeof errors==="object"?Object.keys(errors):[];
+ if(keys.length){
+  const lower=keys.map(k=>k.toLowerCase());
+  if(lower.includes("plan"))return "API_FOOTBALL_PLAN_RESTRICTED";
+  if(lower.includes("access"))return "API_FOOTBALL_ACCESS_RESTRICTED";
+  if(lower.some(k=>/limit|request|quota/.test(k)))
+   return "API_FOOTBALL_REMOTE_QUOTA";
+  if(lower.some(k=>/param|date|season|timezone/.test(k)))
+   return "API_FOOTBALL_INVALID_PARAMETERS";
+  return "API_FOOTBALL_PROVIDER_REJECTED";
+ }
+ if(!Array.isArray(payload.response))return "API_FOOTBALL_RESPONSE_SCHEMA";
+ return null;
+}
 const norm=x=>String(x??"").normalize("NFKC").toLowerCase().replace(/[^a-z0-9가-힣]/g,"");
 const knownLeagues={
  "eng.1":["premierleague","england"],"eng.2":["championship","england"],
@@ -27,10 +50,19 @@ export function apiFootballCompetition(row){
 }
 export function apiFootballQuota(raw,now=Date.now()){
  const day=new Date(now).toISOString().slice(0,10);
- const clean={schema:"wisetoto-api-football-free-v1",day,requests:0,lastAt:{}};
- if(raw?.schema!==clean.schema||raw.day!==day||
-   !Number.isSafeInteger(raw.requests)||raw.requests<0||raw.requests>MAX_DAILY)
-  return clean;
+ const clean={schema:"wisetoto-api-football-free-v1",day,requests:0,lastAt:{},
+  accessBlockedUntil:null,accessBlockReason:null};
+ if(raw?.schema!==clean.schema)return clean;
+ // Access-plan blocks survive midnight; daily request counters do not.
+ if(Number.isFinite(raw.accessBlockedUntil)&&raw.accessBlockedUntil>now&&
+    raw.accessBlockedUntil<=now+3*DAY){
+  clean.accessBlockedUntil=raw.accessBlockedUntil;
+  clean.accessBlockReason=["API_FOOTBALL_PLAN_RESTRICTED",
+   "API_FOOTBALL_ACCESS_RESTRICTED"].includes(raw.accessBlockReason)?
+   raw.accessBlockReason:"API_FOOTBALL_ACCESS_RESTRICTED";
+ }
+ if(raw.day!==day||!Number.isSafeInteger(raw.requests)||
+    raw.requests<0||raw.requests>MAX_DAILY)return clean;
  clean.requests=raw.requests;
  const old=raw.lastAt;
  if(old&&typeof old==="object"&&!Array.isArray(old)){
@@ -105,7 +137,7 @@ export function createApiFootballSession({
  apiKey="",rawQuota=null,now=Date.now,fetchFn=fetch,maxPerScan=3
 }={}){
  let quota=apiFootballQuota(rawQuota,now());
- let calls=0,failures=0,quotaBlocked=0,quotaRequests=0;
+ let calls=0,failures=0,quotaBlocked=0,quotaRequests=0,accessSkipped=0;
  const diagnosticReasons={},diagnosticSamples=[];
  function observe(result,row,kind){
   if(result.ok||result.status==="CONFIRMED")return result;
@@ -124,6 +156,10 @@ export function createApiFootballSession({
   const cacheKey=kind+":"+id;
   if(cache.has(cacheKey))return cache.get(cacheKey);
   if(!enabled)return {ok:false,reason:"API_FOOTBALL_KEY_NOT_CONFIGURED"};
+  if(Number.isFinite(quota.accessBlockedUntil)&&quota.accessBlockedUntil>at){
+   accessSkipped++;
+   return {ok:false,reason:"API_FOOTBALL_PROVIDER_ACCESS_COOLDOWN"};
+  }
   if(quota.requests>=MAX_DAILY||calls>=maxPerScan){
    quotaBlocked++;return {ok:false,reason:"API_FOOTBALL_LOCAL_QUOTA_BLOCK"};
   }
@@ -141,10 +177,16 @@ export function createApiFootballSession({
     signal:AbortSignal.timeout(7000),
     headers:{"x-apisports-key":apiKey,accept:"application/json"}});
    const payload=res.ok?await res.json():null;
-   result=res.ok&&Array.isArray(payload?.response)&&
-      !(payload.errors&&Object.keys(payload.errors).length)?
-     {ok:true,payload}:{ok:false,reason:"API_FOOTBALL_HTTP_"+res.status};
-   if(!result.ok)failures++;
+   const reason=apiFootballResponseFailure(res.status,payload);
+   result=!reason?{ok:true,payload}:{ok:false,reason};
+   if(reason){
+    failures++;
+    if(["API_FOOTBALL_PLAN_RESTRICTED",
+        "API_FOOTBALL_ACCESS_RESTRICTED"].includes(reason)){
+     quota.accessBlockedUntil=at+ACCESS_BLOCK_MS;
+     quota.accessBlockReason=reason;
+    }
+   }
   }catch(e){
    failures++;
    result={ok:false,reason:"API_FOOTBALL_NETWORK:"+String(e?.name??"ERROR").slice(0,40)};
@@ -182,8 +224,11 @@ export function createApiFootballSession({
  return {
   enabled,lookupFinal,lookupPregame,
   quota:()=>JSON.parse(JSON.stringify(quota)),
-  summary:()=>({enabled,requests:quotaRequests,failures,quotaBlocked,remaining:MAX_DAILY-quota.requests,
-   diagnosticReasons:{...diagnosticReasons},diagnosed:Object.values(diagnosticReasons).reduce((a,b)=>a+b,0)}),
+  summary:()=>({enabled,requests:quotaRequests,failures,quotaBlocked,
+   remaining:MAX_DAILY-quota.requests,accessSkipped,
+   accessBlockedUntil:quota.accessBlockedUntil,accessBlockReason:quota.accessBlockReason,
+   diagnosticReasons:{...diagnosticReasons},
+   diagnosed:Object.values(diagnosticReasons).reduce((a,b)=>a+b,0)}),
   diagnostics:()=>({schema:"wisetoto-api-football-diagnostics-v1",
    diagnosed:Object.values(diagnosticReasons).reduce((a,b)=>a+b,0),
    reasonCounts:{...diagnosticReasons},samples:diagnosticSamples.slice()})
