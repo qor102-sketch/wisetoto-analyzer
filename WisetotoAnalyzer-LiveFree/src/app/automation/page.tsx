@@ -21,6 +21,8 @@ type AccuracyShadowMetric={picks:number;graded:number;hits:number;hitRate:number
 type AccuracyShadowReport={status:string;startedAt:number|null;endsAt:number|null;
  observedFixtures?:number;eligibleFrozen?:number;eligibleGraded?:number;
  strategies?:Record<string,AccuracyShadowMetric>;bySport?:Record<string,Record<string,AccuracyShadowMetric>>;
+ upcomingSelections?:Array<{id:string;sport:string;league:string;home:string;away:string;startMs:number;
+  strategies:Record<string,{status:string;side?:string;asOf?:number;odds?:number;shift?:number}>}>;
  canPromote?:boolean;note?:string};
 const accuracyStrategyLabels:Record<string,string>={
  BASE_2P:"A · 기존 2%p",STRONG_4P:"B · 강한 이동 4%p",
@@ -299,6 +301,16 @@ export default function AutomationDashboard(){
         <td>{m.pairedBaseROI==null?"표본 대기":(m.pairedBaseROI*100).toFixed(1)+"%"}</td>
       </tr>)}
       </tbody></table></div>
+      {(evidence.accuracyShadow.upcomingSelections?.length??0)>0&&<div className="auto-table-scroll">
+        <strong>앞으로 시작할 그림자 관찰 · 사전 잠금된 기록만 표시</strong>
+        <table><thead><tr><th>경기</th><th>기존 A</th><th>강한 신호 B</th><th>신뢰도 선별 D</th></tr></thead><tbody>
+        {evidence.accuracyShadow.upcomingSelections?.map(f=><tr key={f.id}>
+          <td>{f.sport} · {f.home} vs {f.away} · {date(f.startMs)} KST</td>
+          <td>{f.strategies.BASE_2P?.status==="PICK"?"사전 관찰":"NO_PICK"}</td>
+          <td>{f.strategies.STRONG_4P?.status==="PICK"?"사전 관찰":"NO_PICK"}</td>
+          <td>{f.strategies.SELECTIVE_4P?.status==="PICK"?"선별 관찰":"NO_PICK"}</td>
+        </tr>)}</tbody></table>
+      </div>}
       <p>적중률만으로 전략을 승격하지 않습니다. 동일 경기의 기존 전략과 ROI·선택 건수·확률 오차를 함께 비교하며, 예상 적중률 상승이나 수익을 보장하지 않습니다.</p>
       {evidence.accuracyShadow.status==="SCHEDULED"&&<p>현재는 예약 상태입니다. 이전 28일 검증의 경기·승부 결과를 소급해서 새 전략 성적으로 기록하지 않습니다.</p>}
     </div>}
