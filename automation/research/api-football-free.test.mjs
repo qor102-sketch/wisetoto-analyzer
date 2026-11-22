@@ -173,12 +173,12 @@ test("free plan errors trigger 24h global circuit without using additional reque
  assert.equal(calls,1);
  assert.equal(session.quota().requests,1);
  assert.equal(session.quota().accessBlockReason,"API_FOOTBALL_PLAN_RESTRICTED");
- const second=await session.lookupFinal({...row,startMs:T-50*60_000});
+ const second=await session.lookupFinal({...row,startMs:T+24*60*60_000});
  assert.equal(second.waitReason,"API_FOOTBALL_PROVIDER_ACCESS_COOLDOWN");
  assert.equal(calls,1);
  assert.equal(session.summary().accessSkipped,1);
  const raw=session.quota();
- clock+=2*60*60_000;
+ clock=Date.parse("2026-11-22T00:03:00Z");
  const restored=createApiFootballSession({apiKey:key,now:()=>clock,
   rawQuota:raw,fetchFn:async()=>{throw Error("must respect provider access lock")}});
  const third=await restored.lookupFinal({...row,startMs:T+24*60*60_000});
@@ -201,7 +201,7 @@ test("access errors from current date also prevent 60 futile paid-by-quota retri
    json:async()=>({errors:{access:"Synthetic provider account access disabled"},
     response:[]})};}});
  const r1=await session.lookupFinal(row);
- const r2=await session.lookupFinal({...row,startMs:T+24*60_000});
+ const r2=await session.lookupFinal({...row,startMs:T+24*60*60_000});
  assert.equal(r1.waitReason,"API_FOOTBALL_ACCESS_RESTRICTED");
  assert.equal(r2.waitReason,"API_FOOTBALL_PROVIDER_ACCESS_COOLDOWN");
  assert.equal(calls,1);
