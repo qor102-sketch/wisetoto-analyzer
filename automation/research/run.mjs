@@ -26,11 +26,12 @@ if(feed){
   historicPilotClockUnchanged:true,retrospectiveReplacementBlocked:true}));
  let tracker;
  try{tracker=JSON.parse(await fs.readFile(STATE_FILE,"utf8"))}catch{tracker={localStorage:{}}}
- let collected=[];
+ let collected=[],collectionRecords=[];
  try{
    const ledger=JSON.parse(await fs.readFile(ROOT+"collect-first-state.json","utf8"));
    if(ledger.schema!=="wisetoto-collect-first-v1"||!Array.isArray(ledger.records))
      throw Error("collection schema incompatible");
+   collectionRecords=ledger.records;
    collected=ledger.records.filter(r=>!isNbaGame(r)&&r.verdict==="VERIFIED"&&r.final&&
      Number.isFinite(r.pregameCapturedAt)&&r.pregameCapturedAt<r.startMs&&
      r.verifiedAt>r.startMs&&r.verifiedAt<=now&&
@@ -42,10 +43,10 @@ if(feed){
          source:"COLLECT_FIRST_"+String(r.resultSource??"UNKNOWN")}}));
  }catch(e){if(e?.code!=="ENOENT")throw e;}
  const verifiedRecords=[...getRecords(tracker),...collected];
- const result=ingestEvidence(state,feed,now,verifiedRecords,observedAt);
+ const result=ingestEvidence(state,feed,now,verifiedRecords,observedAt,collectionRecords);
  console.log("RESEARCH_CONFIRMED_INPUT",JSON.stringify({tracker:getRecords(tracker).length,
    collectFirst:collected.length,excludedResultOnly:true}));
- if(result.stats.captured>0||result.stats.settled>0||result.stats.shadowLocked>0||result.stats.pilotMilestone||migrated.removed>0){
+ if(result.stats.captured>0||result.stats.settled>0||result.stats.shadowLocked>0||result.stats.sportShadowLocked>0||result.stats.pilotMilestone||migrated.removed>0){
    await fs.writeFile(ROOT+"research-state.json",JSON.stringify(result.state)+"\n","utf8");
    await fs.writeFile(ROOT+"research-public.json",JSON.stringify(publicEvidence(result.state,now))+"\n","utf8");
    console.log("MARKET_EVIDENCE_SAVED "+JSON.stringify(result.stats));
