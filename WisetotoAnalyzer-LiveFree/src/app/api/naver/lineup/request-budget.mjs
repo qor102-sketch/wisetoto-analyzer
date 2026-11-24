@@ -34,15 +34,15 @@ export async function withLineupBudget(handler, { budgetMs = LINEUP_BUDGET_MS, s
   if (signal?.aborted) onClientAbort();
   else signal?.addEventListener("abort", onClientAbort, { once: true });
 
-  const deadline = Date.now() + budgetMs;
+  const deadline = performance.now() + budgetMs;
   const timer = setTimeout(() => controller.abort(timeoutError()), budgetMs);
   try {
     return await requestBudget.run({ deadline, signal: controller.signal }, async () => {
       try {
         const response = await handler();
-        return controller.signal.aborted ? budgetExceededResponse() : response;
+        return controller.signal.aborted || performance.now() >= deadline ? budgetExceededResponse() : response;
       } catch (error) {
-        if (controller.signal.aborted) return budgetExceededResponse();
+        if (controller.signal.aborted || performance.now() >= deadline) return budgetExceededResponse();
         throw error;
       }
     });
@@ -56,15 +56,19 @@ export async function withLineupBudget(handler, { budgetMs = LINEUP_BUDGET_MS, s
 // It also respects narrower pre-existing source-specific abort signals.
 export function boundedLineupFetch(input, init = {}) {
   const budget = requestBudget.getStore();
-  const remainingMs = budget ? budget.deadline - Date.now() : UPSTREAM_TIMEOUT_MS;
+  const remainingMs = budget ? budget.deadline - performance.now() : UPSTREAM_TIMEOUT_MS;
   if (budget?.signal.aborted || remainingMs <= 0) {
     return Promise.reject(timeoutError());
   }
   if (init?.signal?.aborted) {
     return Promise.reject(init.signal.reason ?? timeoutError());
   }
-  const callDeadline = AbortSignal.timeout(Math.max(1, Math.min(UPSTREAM_TIMEOUT_MS, remainingMs)));
-  const signals = [callDeadline];
+  // If the overall deadline is sooner, use its single controller. A second
+  // rounded timer can fire first and let a caught timeout masquerade as success.
+  const signals = [];
+  if (!budget || remainingMs > UPSTREAM_TIMEOUT_MS) {
+    signals.push(AbortSignal.timeout(UPSTREAM_TIMEOUT_MS));
+  }
   if (budget) signals.push(budget.signal);
   if (init?.signal) signals.push(init.signal);
 
