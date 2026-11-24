@@ -4,6 +4,7 @@ import {sportName} from "../logic.mjs";
 import {isNbaGame,withoutNba,purgeNbaResearchState} from "../nba-policy.mjs";
 import {buildPilotReport,selectPostPilotTop1} from "./pilot-top1.mjs";
 import {lockAccuracyShadow,buildAccuracyShadowReport} from "./accuracy-shadow.mjs";
+import {lockSportShadows,buildSportShadowReport} from "./sport-shadow.mjs";
 export const SCHEMA="wisetoto-market-evidence-v1";
 const MINUTE=60_000,HOUR=60*MINUTE,DAY=24*HOUR;
 const MAX_SNAPSHOTS=24;
@@ -130,7 +131,7 @@ export function decideEvidence(fixture,fixtures,now){
    return {...observed,stage:"RESEARCH_TOP1",reason:"선행 검증표본과 보수적 +EV 기준 충족 (실험)",calibration:conf};
  return {...observed,reason:"보수적 EV 기준 미충족 — 관찰 후보만 표시",calibration:conf};
 }
-export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now){
+export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now,collectionRecords=[]){
  if(!feed?.ok||!Array.isArray(feed.games))throw Error("official feed required");
  if(!Number.isFinite(observedAt)||observedAt>now||now-observedAt>5*MINUTE)
    throw Error("Never backdate a stale research feed");
@@ -140,12 +141,14 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now)
  const existing=withoutNba(state?.fixtures);
  const byId=new Map(existing.filter(f=>f?.id&&Number.isFinite(f.startMs)).map(f=>[f.id,{...f,snapshots:[...(f.snapshots||[])]}]));
  let captured=0,examined=0,settled=0;
+ const currentMarkets=new Map();
  for(const g of eligibleGames){
    const id=fixtureId(g),start=Number(g.gameDateMs??new Date(g.gameDate).getTime());
    if(!id||start-now<10*MINUTE||start-now>7*DAY)continue;
    examined++;
    const market=normalizeMoneyline(g);
    if(!market)continue;
+   currentMarkets.set(id,market);
    const sport=sportName(g.sport);
    let f=byId.get(id);
    if(!f){
@@ -202,7 +205,8 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now)
  const pilot=startedAt===null?null:{...priorPilot,startedAt,lastReportedWeek:milestone};
  let shadowLocked=0;
  for(const f of fixtures)if(lockAccuracyShadow(f,fixtures,pilot,now,observedAt))shadowLocked++;
- const stats={total:fixtures.length,captured,settled,examined,shadowLocked,with2Snapshots:fixtures.filter(f=>f.snapshots.length>=2).length,
+ const sportShadowLocked=lockSportShadows(fixtures,currentMarkets,collectionRecords,pilot,now,observedAt);
+ const stats={total:fixtures.length,captured,settled,examined,shadowLocked,sportShadowLocked,with2Snapshots:fixtures.filter(f=>f.snapshots.length>=2).length,
    observed:fixtures.filter(f=>f.startMs>now&&f.lastEvidence?.top1).length,
    researchTop1:fixtures.filter(f=>f.startMs>now&&f.lastEvidence?.stage==="RESEARCH_TOP1").length,
    verified:fixtures.filter(f=>f.truth&&!f.truth.untrained).length,
@@ -223,6 +227,7 @@ export function publicEvidence(state,now=Date.now()){
    disclaimer:"4주 연구 그림자 TOP1과 기존 frozen PRE 및 공식 TOP1은 별개. 소표본 성과는 수익 보장이 아님.",
    pilot:buildPilotReport(state,now),pilotTop1:selectPostPilotTop1(state,now),
    accuracyShadow:buildAccuracyShadowReport(state,now),
+   sportShadow:buildSportShadowReport(state,now),
    counts:{future:upcoming.length,observed:upcoming.filter(r=>r.lastEvidence?.top1).length,
      researchTop1:upcoming.filter(r=>r.lastEvidence?.stage==="RESEARCH_TOP1").length,
      insufficient:upcoming.filter(r=>r.lastEvidence?.stage!=="RESEARCH_TOP1").length},records:rows};
