@@ -3,6 +3,7 @@
 import {sportName} from "../logic.mjs";
 import {isNbaGame,withoutNba,purgeNbaResearchState} from "../nba-policy.mjs";
 import {buildPilotReport,selectPostPilotTop1} from "./pilot-top1.mjs";
+import {lockAccuracyShadow,buildAccuracyShadowReport} from "./accuracy-shadow.mjs";
 export const SCHEMA="wisetoto-market-evidence-v1";
 const MINUTE=60_000,HOUR=60*MINUTE,DAY=24*HOUR;
 const MAX_SNAPSHOTS=24;
@@ -198,8 +199,10 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now)
  const startedAt=Number.isFinite(priorPilot?.startedAt)?priorPilot.startedAt:
    (eligibleGames.length?observedAt:null);
  const milestone=startedAt===null?0:Math.min(4,Math.max(0,Math.floor((now-startedAt)/(7*DAY))));
- const pilot=startedAt===null?null:{startedAt,lastReportedWeek:milestone};
- const stats={total:fixtures.length,captured,settled,examined,with2Snapshots:fixtures.filter(f=>f.snapshots.length>=2).length,
+ const pilot=startedAt===null?null:{...priorPilot,startedAt,lastReportedWeek:milestone};
+ let shadowLocked=0;
+ for(const f of fixtures)if(lockAccuracyShadow(f,fixtures,pilot,now,observedAt))shadowLocked++;
+ const stats={total:fixtures.length,captured,settled,examined,shadowLocked,with2Snapshots:fixtures.filter(f=>f.snapshots.length>=2).length,
    observed:fixtures.filter(f=>f.startMs>now&&f.lastEvidence?.top1).length,
    researchTop1:fixtures.filter(f=>f.startMs>now&&f.lastEvidence?.stage==="RESEARCH_TOP1").length,
    verified:fixtures.filter(f=>f.truth&&!f.truth.untrained).length,
@@ -219,6 +222,7 @@ export function publicEvidence(state,now=Date.now()){
  return {schema:"wisetoto-public-evidence-v1",generatedAt:new Date(now).toISOString(),
    disclaimer:"4주 연구 그림자 TOP1과 기존 frozen PRE 및 공식 TOP1은 별개. 소표본 성과는 수익 보장이 아님.",
    pilot:buildPilotReport(state,now),pilotTop1:selectPostPilotTop1(state,now),
+   accuracyShadow:buildAccuracyShadowReport(state,now),
    counts:{future:upcoming.length,observed:upcoming.filter(r=>r.lastEvidence?.top1).length,
      researchTop1:upcoming.filter(r=>r.lastEvidence?.stage==="RESEARCH_TOP1").length,
      insufficient:upcoming.filter(r=>r.lastEvidence?.stage!=="RESEARCH_TOP1").length},records:rows};
