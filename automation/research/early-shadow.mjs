@@ -19,7 +19,7 @@ export function leagueRatings(rows){
   const delta=new Map();
   for(const r of ordered.slice(i,j)){
    const h=norm(r.home),a=norm(r.away),rh=ratings.get(h)??1500,ra=ratings.get(a)??1500;
-   const p=1/(1+10**((ra-rh)/400)),y=r.final.homeScore>r.final.awayScore?1:r.final.homeScore<r.final.awayScore?0:.5;
+   const p=1/(1+10**((ra-rh)/400)),y=Number(r.final.homeScore)>Number(r.final.awayScore)?1:Number(r.final.homeScore)<Number(r.final.awayScore)?0:.5;
    const d=20*(y-p);delta.set(h,(delta.get(h)??0)+d);delta.set(a,(delta.get(a)??0)-d);
    n.set(h,(n.get(h)??0)+1);n.set(a,(n.get(a)??0)+1);
   }
