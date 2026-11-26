@@ -46,7 +46,7 @@ if(feed){
  const result=ingestEvidence(state,feed,now,verifiedRecords,observedAt,collectionRecords);
  console.log("RESEARCH_CONFIRMED_INPUT",JSON.stringify({tracker:getRecords(tracker).length,
    collectFirst:collected.length,excludedResultOnly:true}));
- if(result.stats.captured>0||result.stats.settled>0||result.stats.shadowLocked>0||result.stats.sportShadowLocked>0||result.stats.pilotMilestone||migrated.removed>0){
+ if(result.stats.captured>0||result.stats.settled>0||result.stats.shadowLocked>0||result.stats.sportShadowLocked>0||result.stats.coverageV4Locked>0||result.stats.coverageV4Activated||result.stats.pilotMilestone||migrated.removed>0){
    await fs.writeFile(ROOT+"research-state.json",JSON.stringify(result.state)+"\n","utf8");
    await fs.writeFile(ROOT+"research-public.json",JSON.stringify(publicEvidence(result.state,now))+"\n","utf8");
    console.log("MARKET_EVIDENCE_SAVED "+JSON.stringify(result.stats));
