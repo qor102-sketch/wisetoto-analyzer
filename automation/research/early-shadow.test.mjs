@@ -1,0 +1,30 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {earlyDecision,leagueRatings,lockEarly,earlyReport} from "./early-shadow.mjs";
+import {indexHistory} from "./coverage-shadow.mjs";
+const M=60000,D=86400000,now=Date.parse("2026-11-26T04:00:00Z"),pilot={startedAt:now-29*D};
+const f={id:"f",sport:"축구",league:"L",home:"H",away:"A",startMs:now+75*M,firstSeenAt:now-D};
+const market={choices:[{side:"win",p:.65,odds:1.4},{side:"draw",p:.2,odds:4.5},{side:"lose",p:.15,odds:6}]};
+const hist=Array.from({length:10},(_,i)=>({sport:"축구",league:"L",home:"H",away:"A",startMs:now-(i+1)*D,verifiedAt:now-(i+1)*D+M,verdict:"VERIFIED",resultSource:"TEST",final:{homeScore:3,awayScore:0}}));
+test("strict early deadline, stale feed, no backfill and missing lineup not invented",()=>{
+ const index=indexHistory(hist,now),r=leagueRatings(hist);
+ const c=earlyDecision(f,market,index,r,now,now,now,pilot);
+ assert.equal(c.leadMinutes,75);assert.equal(c.lineup.status,"UNKNOWN");assert.ok(c.mix);
+ assert.equal(earlyDecision({...f,startMs:now+59*M},market,index,r,now,now,now,pilot),null);
+ assert.equal(earlyDecision({...f,startMs:now+64*M},market,index,r,now,now,now,pilot),null);
+ assert.equal(earlyDecision(f,market,index,r,now,now-6*M,now-M*10,pilot),null);
+ assert.equal(earlyDecision(f,market,index,r,now,now,now+1,pilot),null);
+});
+test("Elo only uses verified as-of history, immutable early record, deadline misses explicit",()=>{
+ const x={...f,sportShadowV3:{old:true},coverageShadowV4:{old:true}},late={...f,id:"late",startMs:now+50*M};
+ const marketMap=new Map([["f",market],["late",market]]);
+ assert.equal(lockEarly([x,late],marketMap,hist,pilot,now,now,now),1);
+ const saved=JSON.stringify(x.earlyShadowV1);
+ assert.equal(lockEarly([x,late],marketMap,hist,pilot,now,now+M,now+M),0);
+ assert.equal(JSON.stringify(x.earlyShadowV1),saved);assert.deepEqual(x.sportShadowV3,{old:true});
+ const report=earlyReport({pilot,coverageV4StartedAt:now-30*M,fixtures:[x,late]},now);
+ assert.equal(report.locked,1);assert.equal(report.knownDeadlineMissed,1);
+ assert.equal(report.upcoming.find(r=>r.id==="late").status,"DEADLINE_MISSED_NO_PICK");
+ const index=indexHistory(hist.map(r=>({...r,verifiedAt:now+1})),now);
+ assert.equal(earlyDecision(f,market,index,leagueRatings([]),now,now,now,pilot).raw,null);
+});
