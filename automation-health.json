@@ -1,6 +1,6 @@
 {
   "schema": "wisetoto-auto-scan-health-v1",
-  "scannedAt": "2026-11-28T03:50:02.566Z",
+  "scannedAt": "2026-11-28T04:00:01.798Z",
   "expectedIntervalMinutes": 10,
   "sourceOk": true,
   "sourceError": null,
@@ -10,12 +10,12 @@
     "야구": 0,
     "배구": 6
   },
-  "eligibleForPregame": 11,
+  "eligibleForPregame": 14,
   "eligibleBySport": {
-    "축구": 9,
-    "농구": 1,
+    "축구": 10,
+    "농구": 2,
     "야구": 0,
-    "배구": 1
+    "배구": 2
   },
   "awaitingPostmatch": 0,
   "feedOrigin": "fresh-fetch-attempt-1",
