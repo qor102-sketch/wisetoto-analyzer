@@ -7,6 +7,7 @@ import {lockAccuracyShadow,buildAccuracyShadowReport} from "./accuracy-shadow.mj
 import {lockSportShadows,buildSportShadowReport} from "./sport-shadow.mjs";
 import {activateV4,lockV4,coverageReport} from "./coverage-shadow.mjs";
 import {lockEarly,earlyReport} from "./early-shadow.mjs";
+import {activateAdvanced,lockAdvanced,advancedReport} from "./early-advanced.mjs";
 export const SCHEMA="wisetoto-market-evidence-v1";
 const MINUTE=60_000,HOUR=60*MINUTE,DAY=24*HOUR;
 const MAX_SNAPSHOTS=24;
@@ -212,12 +213,15 @@ export function ingestEvidence(state,feed,now,verifiedRecords=[],observedAt=now,
  const coverageV4Activated=coverageV4StartedAt!==null&&coverageV4StartedAt!==state.coverageV4StartedAt;
  const coverageV4Locked=lockV4(fixtures,currentMarkets,collectionRecords,pilot,coverageV4StartedAt,now,observedAt);
  const earlyShadowLocked=lockEarly(fixtures,currentMarkets,collectionRecords,pilot,coverageV4StartedAt,now,observedAt);
- const stats={total:fixtures.length,captured,settled,examined,shadowLocked,sportShadowLocked,coverageV4Activated,coverageV4Locked,earlyShadowLocked,with2Snapshots:fixtures.filter(f=>f.snapshots.length>=2).length,
+ const advancedStartedAt=activateAdvanced(state,pilot,now);
+ const advancedActivated=advancedStartedAt!==null&&advancedStartedAt!==state.advancedStartedAt;
+ const advancedLocked=lockAdvanced(fixtures,currentMarkets,collectionRecords,pilot,advancedStartedAt,now,observedAt);
+ const stats={total:fixtures.length,captured,settled,examined,shadowLocked,sportShadowLocked,coverageV4Activated,coverageV4Locked,earlyShadowLocked,advancedActivated,advancedLocked,with2Snapshots:fixtures.filter(f=>f.snapshots.length>=2).length,
    observed:fixtures.filter(f=>f.startMs>now&&f.lastEvidence?.top1).length,
    researchTop1:fixtures.filter(f=>f.startMs>now&&f.lastEvidence?.stage==="RESEARCH_TOP1").length,
    verified:fixtures.filter(f=>f.truth&&!f.truth.untrained).length,
    pilotMilestone:startedAt!==null&&(!priorPilot||priorPilot.lastReportedWeek!==milestone)};
- return {state:{...state,schema:SCHEMA,updatedAt:now,fixtures,pilot,coverageV4StartedAt},stats};
+ return {state:{...state,schema:SCHEMA,updatedAt:now,fixtures,pilot,coverageV4StartedAt,advancedStartedAt},stats};
 }
 export function publicEvidence(state,now=Date.now()){
  const upcoming=withoutNba(state?.fixtures).filter(f=>f.startMs>now&&f.startMs<now+7*DAY)
@@ -236,6 +240,7 @@ export function publicEvidence(state,now=Date.now()){
    sportShadow:buildSportShadowReport(state,now),
    coverageShadow:coverageReport(state,now),
    earlyShadow:earlyReport(state,now),
+   advancedEarly:advancedReport(state,now),
    counts:{future:upcoming.length,observed:upcoming.filter(r=>r.lastEvidence?.top1).length,
      researchTop1:upcoming.filter(r=>r.lastEvidence?.stage==="RESEARCH_TOP1").length,
      insufficient:upcoming.filter(r=>r.lastEvidence?.stage!=="RESEARCH_TOP1").length},records:rows};

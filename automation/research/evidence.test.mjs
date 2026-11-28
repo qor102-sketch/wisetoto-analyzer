@@ -195,3 +195,28 @@ test("runner trains only pregame-captured collect-first finals, excluding result
   assert.match(out.stdout,/excludedResultOnly/);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+
+test("advanced T60 research activates only on actual fresh scan and remains independent of legacy decisions",()=>{
+ const now=Date.parse("2026-11-28T05:00:00Z"),D=86400000;
+ const g=betman("soccer",now+75*MIN,[2.15,3,2.85],"축구 승무패");
+ const prior={...init,pilot:{startedAt:now-30*D,lastReportedWeek:4},coverageV4StartedAt:now-D};
+ const h=Array.from({length:12},(_,i)=>({sport:"축구",league:"test",home:g.home,away:g.away,
+  startMs:now-(i+1)*D,verifiedAt:now-(i+1)*D+MIN,verdict:"VERIFIED",resultSource:"TEST",final:{homeScore:2,awayScore:0}}));
+ const before=ingestEvidence(prior,feed([g]),now,[],now-MIN,h);
+ assert.equal(before.stats.advancedActivated,true);
+ assert.equal(before.stats.advancedLocked,0);
+ const fresh=ingestEvidence(before.state,feed([g]),now+MIN,[],now+MIN,h);
+ assert.equal(fresh.stats.advancedLocked,1);
+ const f=fresh.state.fixtures[0];
+ assert.ok(f.earlyShadowV1);
+ assert.ok(f.advancedEarlyV2.raw);
+ assert.equal(f.advancedEarlyV2.leadMinutes,74);
+ const old=JSON.stringify(f.earlyShadowV1),saved=JSON.stringify(f.advancedEarlyV2);
+ const repeat=ingestEvidence(fresh.state,feed([g]),now+2*MIN,[],now+2*MIN,h);
+ assert.equal(repeat.stats.advancedLocked,0);
+ assert.equal(JSON.stringify(repeat.state.fixtures[0].earlyShadowV1),old);
+ assert.equal(JSON.stringify(repeat.state.fixtures[0].advancedEarlyV2),saved);
+ assert.equal(publicEvidence(repeat.state,now+2*MIN).advancedEarly.locked,1);
+ assert.equal(publicEvidence(repeat.state,now+2*MIN).advancedEarly.officialChanged,false);
+});
